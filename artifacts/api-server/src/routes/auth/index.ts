@@ -12,7 +12,7 @@ const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || "daytabs-dev-secret-change-in-production";
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
-const CORE_APP_URL = process.env.CORE_APP_URL || "/";
+const CORE_APP_URL = process.env.CORE_APP_URL || "/panel/";
 
 // Email config — set these env vars to enable real email delivery
 const SMTP_HOST = process.env.SMTP_HOST || "smtp.gmail.com";
