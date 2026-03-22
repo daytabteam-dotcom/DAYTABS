@@ -1,6 +1,6 @@
-import React, { useState } from "react";
+import React, { useState, useRef, useCallback } from "react";
 import { SubtitlesResult, ExportRequestResolution, ExportRequestAudioVoice } from "@workspace/api-client-react";
-import { Mic, Download, Settings2, Loader2, CheckCircle2, Volume2 } from "lucide-react";
+import { Mic, Download, Settings2, Loader2, CheckCircle2, Volume2, Play, Square } from "lucide-react";
 import { motion } from "framer-motion";
 import { useExportVideo } from "@/hooks/use-analysis";
 import { useToast } from "@/hooks/use-toast";
@@ -30,6 +30,60 @@ export function SubtitlesTab({ jobId, data, replaceAudio }: SubtitlesTabProps) {
   const [includeSubs, setIncludeSubs] = useState(true);
   const [audioVoice, setAudioVoice] = useState<ExportRequestAudioVoice>("alloy");
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
+
+  const [playingVoice, setPlayingVoice] = useState<string | null>(null);
+  const [loadingVoice, setLoadingVoice] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  const stopCurrentAudio = useCallback(() => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.src = "";
+      audioRef.current = null;
+    }
+    setPlayingVoice(null);
+  }, []);
+
+  const handlePlayPreview = useCallback(
+    (e: React.MouseEvent, voiceId: string) => {
+      e.stopPropagation();
+
+      if (playingVoice === voiceId) {
+        stopCurrentAudio();
+        return;
+      }
+
+      stopCurrentAudio();
+      setLoadingVoice(voiceId);
+
+      const audio = new Audio(`/api/analysis/voice-preview/${voiceId}`);
+      audioRef.current = audio;
+
+      audio.addEventListener("canplaythrough", () => {
+        setLoadingVoice(null);
+        setPlayingVoice(voiceId);
+        audio.play().catch(() => {
+          setPlayingVoice(null);
+          setLoadingVoice(null);
+        });
+      });
+
+      audio.addEventListener("ended", () => {
+        setPlayingVoice(null);
+        audioRef.current = null;
+      });
+
+      audio.addEventListener("error", () => {
+        setLoadingVoice(null);
+        setPlayingVoice(null);
+        audioRef.current = null;
+        toast({ variant: "destructive", title: "Could not load voice sample" });
+      });
+
+      audio.load();
+    },
+    [playingVoice, stopCurrentAudio, toast],
+  );
 
   const handleExport = () => {
     exportMutation.mutate(
@@ -160,22 +214,55 @@ export function SubtitlesTab({ jobId, data, replaceAudio }: SubtitlesTabProps) {
                   AI Speaker Voice
                 </label>
               </div>
+              <p className="text-xs text-muted-foreground mb-3">
+                Click <Play className="w-3 h-3 inline" /> to hear a sample
+              </p>
               <div className="grid grid-cols-2 gap-2">
-                {VOICES.map((v) => (
-                  <button
-                    key={v.id}
-                    onClick={() => setAudioVoice(v.id)}
-                    className={`
-                      px-3 py-2.5 rounded-xl text-left transition-all duration-200 border
-                      ${audioVoice === v.id
-                        ? 'bg-primary/20 border-primary text-white shadow-sm shadow-primary/20'
-                        : 'bg-secondary/40 border-transparent text-muted-foreground hover:bg-secondary/70 hover:text-white'}
-                    `}
-                  >
-                    <div className="text-sm font-semibold">{v.label}</div>
-                    <div className="text-xs opacity-70 mt-0.5">{v.description}</div>
-                  </button>
-                ))}
+                {VOICES.map((v) => {
+                  const isSelected = audioVoice === v.id;
+                  const isLoading = loadingVoice === v.id;
+                  const isPlaying = playingVoice === v.id;
+                  return (
+                    <button
+                      key={v.id}
+                      onClick={() => setAudioVoice(v.id)}
+                      className={`
+                        px-3 py-2.5 rounded-xl text-left transition-all duration-200 border relative
+                        ${isSelected
+                          ? 'bg-primary/20 border-primary text-white shadow-sm shadow-primary/20'
+                          : 'bg-secondary/40 border-transparent text-muted-foreground hover:bg-secondary/70 hover:text-white'}
+                      `}
+                    >
+                      <div className="flex items-center justify-between gap-1">
+                        <div className="text-sm font-semibold truncate">{v.label}</div>
+                        <button
+                          onClick={(e) => handlePlayPreview(e, v.id)}
+                          disabled={isLoading}
+                          title={isPlaying ? "Stop preview" : "Play preview"}
+                          className={`
+                            shrink-0 flex items-center justify-center w-6 h-6 rounded-full transition-all duration-150
+                            ${isPlaying
+                              ? 'bg-primary text-white shadow-sm shadow-primary/40'
+                              : isLoading
+                              ? 'bg-primary/30 text-primary'
+                              : isSelected
+                              ? 'bg-primary/30 text-primary hover:bg-primary hover:text-white'
+                              : 'bg-white/10 text-white/50 hover:bg-primary/40 hover:text-white'}
+                          `}
+                        >
+                          {isLoading ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : isPlaying ? (
+                            <Square className="w-3 h-3 fill-current" />
+                          ) : (
+                            <Play className="w-3 h-3 fill-current" />
+                          )}
+                        </button>
+                      </div>
+                      <div className="text-xs opacity-70 mt-0.5">{v.description}</div>
+                    </button>
+                  );
+                })}
               </div>
             </div>
           )}

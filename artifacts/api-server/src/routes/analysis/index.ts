@@ -23,6 +23,40 @@ const execAsync = promisify(exec);
 
 const router: IRouter = Router();
 
+const voiceSampleCache = new Map<string, Buffer>();
+
+const VOICE_SAMPLE_TEXT: Record<string, string> = {
+  alloy:   "Hi there! I'm Alloy — balanced, neutral, and versatile. I'm great for narration, explainers, and professional content.",
+  echo:    "Hello, I'm Echo. I have a soft, measured delivery that works beautifully for intimate storytelling and documentary-style content.",
+  fable:   "Hey! I'm Fable. I bring warmth and expressiveness to every word — perfect for bringing characters and stories to life.",
+  onyx:    "I'm Onyx. Deep, rich, and authoritative. I command attention and lend credibility to serious, impactful content.",
+  nova:    "Hi! I'm Nova! Bright, energetic, and full of enthusiasm. I'll make your content pop and keep audiences engaged!",
+  shimmer: "Hello! I'm Shimmer — clear, friendly, and approachable. I'm ideal for tutorials, how-tos, and educational content.",
+};
+
+router.get("/voice-preview/:voice", async (req, res) => {
+  const { voice } = req.params;
+  const validVoices = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"];
+  if (!validVoices.includes(voice)) {
+    res.status(400).json({ error: "Invalid voice" });
+    return;
+  }
+  try {
+    if (!voiceSampleCache.has(voice)) {
+      const sampleText = VOICE_SAMPLE_TEXT[voice];
+      const buffer = await textToSpeech(sampleText, voice as "alloy" | "echo" | "fable" | "onyx" | "nova" | "shimmer", "mp3");
+      voiceSampleCache.set(voice, buffer);
+    }
+    const buffer = voiceSampleCache.get(voice)!;
+    res.setHeader("Content-Type", "audio/mpeg");
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.send(buffer);
+  } catch (err) {
+    req.log.error({ err, voice }, "Voice preview generation failed");
+    res.status(500).json({ error: "Failed to generate voice sample" });
+  }
+});
+
 const uploadDir = path.join(os.tmpdir(), "daytabs-uploads");
 
 const storage = multer.diskStorage({
