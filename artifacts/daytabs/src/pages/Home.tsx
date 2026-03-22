@@ -9,6 +9,7 @@ import { AlertCircle } from "lucide-react";
 export default function Home() {
   const { toast } = useToast();
   const [jobId, setJobId] = useState<string | null>(null);
+  const [replaceAudio, setReplaceAudio] = useState(false);
 
   const uploadMutation = useUploadVideoWithFile();
   const { data: statusData, error: statusError } = useAnalysisPolling(jobId);
@@ -17,6 +18,7 @@ export default function Home() {
   const { data: resultsData, isLoading: isLoadingResults } = useAnalysisResults(jobId, isComplete);
 
   const handleUpload = (file: File, options: any) => {
+    setReplaceAudio(!!options.replaceAudio);
     uploadMutation.mutate({ file, options }, {
       onSuccess: (data) => {
         setJobId(data.jobId);
@@ -118,7 +120,7 @@ export default function Home() {
           </div>
         )}
 
-        {showResults && <ResultsContainer data={resultsData} />}
+        {showResults && <ResultsContainer data={resultsData} replaceAudio={replaceAudio} />}
       </main>
     </div>
   );

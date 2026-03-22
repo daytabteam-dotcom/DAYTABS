@@ -146,10 +146,13 @@ export const ExportRequestResolution = {
   "4k": "4k",
 } as const;
 
+export type ExportRequestAudioVoice = "alloy" | "echo" | "fable" | "onyx" | "nova" | "shimmer";
+
 export interface ExportRequest {
   resolution: ExportRequestResolution;
   removeFillerWords?: boolean;
   includeSubtitles?: boolean;
+  audioVoice?: ExportRequestAudioVoice;
 }
 
 export interface ExportResponse {

@@ -11,7 +11,7 @@ import { analysisJobsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { runAnalysisPipeline } from "./pipeline";
 import { openai } from "@workspace/integrations-openai-ai-server";
-import { cloneVoiceFromAudio, generateTtsWithVoice, deleteClonedVoice } from "../../lib/elevenLabsVoiceClone";
+import { textToSpeech } from "@workspace/integrations-openai-ai-server/audio";
 import {
   GetAnalysisStatusParams,
   GetAnalysisResultParams,
@@ -227,30 +227,12 @@ router.post("/:jobId/export", async (req, res) => {
           req.log.warn({ err }, "Translation failed, using original text for TTS");
         }
 
-        req.log.info({ jobId: params.jobId }, "Generating TTS audio with voice cloning");
+        const chosenVoice = (body.audioVoice as "alloy" | "echo" | "fable" | "onyx" | "nova" | "shimmer") || "alloy";
+        req.log.info({ jobId: params.jobId, voice: chosenVoice }, "Generating TTS audio");
         const ttsPath = path.join(exportDir, `tts_${exportId}.mp3`);
-        let clonedVoiceId: string | null = null;
 
         try {
-          const audioPath = j.audioPath;
-          if (audioPath) {
-            try {
-              await fs.access(audioPath);
-              clonedVoiceId = await cloneVoiceFromAudio(audioPath, `daytabs_${params.jobId.slice(0, 8)}`);
-              req.log.info({ voiceId: clonedVoiceId }, "Voice cloned from original audio");
-            } catch (cloneErr) {
-              req.log.warn({ cloneErr }, "Voice cloning failed, will use standard TTS voice");
-            }
-          }
-
-          let ttsBuffer: Buffer;
-          if (clonedVoiceId) {
-            ttsBuffer = await generateTtsWithVoice(textForTts, clonedVoiceId);
-          } else {
-            const { textToSpeech } = await import("@workspace/integrations-openai-ai-server/audio");
-            ttsBuffer = await textToSpeech(textForTts, "alloy", "mp3");
-          }
-
+          const ttsBuffer = await textToSpeech(textForTts, chosenVoice, "mp3");
           await fs.writeFile(ttsPath, ttsBuffer);
 
           const scaledPath = path.join(exportDir, `scaled_${exportId}.mp4`);
@@ -260,18 +242,11 @@ router.post("/:jobId/export", async (req, res) => {
           await fs.unlink(scaledPath).catch(() => {});
           await fs.unlink(ttsPath).catch(() => {});
 
-          if (clonedVoiceId) {
-            deleteClonedVoice(clonedVoiceId).catch(() => {});
-          }
-
           res.json({ downloadUrl: `/api/analysis/download/${outputFilename}`, filename: outputFilename });
           return;
         } catch (err) {
           req.log.warn({ err }, "Audio replacement failed, falling back to standard export");
           await fs.unlink(ttsPath).catch(() => {});
-          if (clonedVoiceId) {
-            deleteClonedVoice(clonedVoiceId).catch(() => {});
-          }
         }
       }
     }

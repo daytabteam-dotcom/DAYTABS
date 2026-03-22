@@ -8,6 +8,7 @@ import { SubtitlesTab } from "./SubtitlesTab";
 
 interface ResultsContainerProps {
   data: AnalysisResult;
+  replaceAudio?: boolean;
 }
 
 const TABS = [
@@ -17,7 +18,7 @@ const TABS = [
   { id: "subtitles", label: "Subtitles", icon: Mic }
 ];
 
-export function ResultsContainer({ data }: ResultsContainerProps) {
+export function ResultsContainer({ data, replaceAudio }: ResultsContainerProps) {
   const [activeTab, setActiveTab] = useState("quality");
 
   return (
@@ -53,7 +54,7 @@ export function ResultsContainer({ data }: ResultsContainerProps) {
         {activeTab === "quality" && <QualityTab data={data.quality} />}
         {activeTab === "content" && <ContentTab data={data.content} />}
         {activeTab === "seo" && <SeoTab data={data.seo} />}
-        {activeTab === "subtitles" && <SubtitlesTab jobId={data.jobId} data={data.subtitles} />}
+        {activeTab === "subtitles" && <SubtitlesTab jobId={data.jobId} data={data.subtitles} replaceAudio={replaceAudio} />}
       </div>
     </div>
   );

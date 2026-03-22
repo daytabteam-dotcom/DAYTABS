@@ -275,6 +275,7 @@ export const ExportVideoBody = zod.object({
   includeSubtitles: zod
     .boolean()
     .default(exportVideoBodyIncludeSubtitlesDefault),
+  audioVoice: zod.enum(["alloy", "echo", "fable", "onyx", "nova", "shimmer"]).optional(),
 });
 
 export const ExportVideoResponse = zod.object({
