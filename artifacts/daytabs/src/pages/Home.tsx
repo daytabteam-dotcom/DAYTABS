@@ -65,13 +65,13 @@ export default function Home() {
       <header className="w-full border-b border-white/5 bg-background/50 backdrop-blur-xl sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
           <div className="flex items-center gap-3 cursor-pointer" onClick={handleReset}>
-            <img src={`${import.meta.env.BASE_URL}images/logo.png`} alt="DayTabs" className="w-10 h-10 object-contain drop-shadow-[0_0_15px_rgba(124,58,237,0.5)]" />
+            <img src={`${import.meta.env.BASE_URL}images/logo.jpg`} alt="DayTabs" className="w-10 h-10 object-contain rounded-lg drop-shadow-[0_0_15px_rgba(124,58,237,0.5)]" />
             <span className="text-2xl font-display font-bold tracking-tight text-white">Day<span className="text-primary">Tabs</span></span>
           </div>
           {jobId && (
             <button 
               onClick={handleReset}
-              className="text-sm font-semibold text-muted-foreground hover:text-white transition-colors"
+              className="px-5 py-2.5 text-sm font-semibold rounded-xl bg-primary hover:bg-primary/80 text-white shadow-lg shadow-primary/30 transition-all hover:-translate-y-0.5 active:translate-y-0"
             >
               Analyze New Video
             </button>
@@ -90,7 +90,7 @@ export default function Home() {
 
         {showProgress && statusData && (
           <ProgressIndicator 
-            currentStep={statusData.currentStep} 
+            currentStep={statusData.status}
             progress={statusData.progress} 
           />
         )}
