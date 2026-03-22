@@ -251,17 +251,74 @@ router.post("/:jobId/export", async (req, res) => {
           vocabularyStyle?: string; catchphrases?: string[]; emotionalRange?: string;
         } | null;
 
-        // Speaker speech rate used to fine-tune TTS pre-speed adjustment
-        const speakerWpm = sp?.speechRateWpm && sp.speechRateWpm > 0 ? sp.speechRateWpm : null;
-
         const segmentFiles: string[] = [];
 
         try {
           if (segments.length > 0) {
             // ── Per-segment timestamp-aware dubbing ─────────────────────────
 
-            // 1. Batch-translate with duration hints for natural length matching
-            let translatedTexts: string[] = segments.map((s) => s.text);
+            // ── Helper: duration-adaptive translation for a single segment ──
+            const adaptForDuration = async (
+              originalText: string,
+              targetDurS: number,
+              hint?: "shorter" | "longer"
+            ): Promise<string> => {
+              const hintLine = hint === "shorter"
+                ? "The previous attempt was too long. Use shorter, simpler phrasing — fewer words."
+                : hint === "longer"
+                ? "The previous attempt was too short. Expand slightly with natural phrasing."
+                : "";
+              const resp = await openai.chat.completions.create({
+                model: "gpt-4o-mini",
+                messages: [
+                  {
+                    role: "system",
+                    content: `You are a professional dubbing adapter. Translate the given text to ${targetLanguage}, then adapt it so it can be spoken naturally in approximately ${targetDurS.toFixed(1)} seconds at a comfortable pace.
+Rules:
+- Preserve meaning, not exact wording
+- SHORT slot (≤2s): use brief, punchy phrasing
+- LONG slot (≥5s): allow fuller, more descriptive phrasing
+- Keep it conversational, as a human would naturally say it
+${hintLine}
+Return ONLY the adapted translation, nothing else.`,
+                  },
+                  { role: "user", content: originalText },
+                ],
+                max_completion_tokens: 200,
+              });
+              return resp.choices[0]?.message?.content?.trim() || originalText;
+            };
+
+            // ── Helper: generate TTS and measure duration ───────────────────
+            const generateSegmentTts = async (
+              text: string,
+              outPath: string
+            ): Promise<number> => {
+              const buf = await textToSpeechFast(text, chosenVoice);
+              await fs.writeFile(outPath, buf);
+              const { stdout } = await execAsync(
+                `ffprobe -v quiet -show_entries format=duration -of csv=p=0 "${outPath}"`
+              );
+              return parseFloat(stdout.trim()) || 0;
+            };
+
+            // ── Helper: add 150ms natural trailing silence ──────────────────
+            const addTrailingSilence = async (filePath: string, exportId: string, i: number): Promise<string> => {
+              const silentPath = path.join(exportDir, `seg_sil_${exportId}_${i}.mp3`);
+              await execAsync(
+                `ffmpeg -i "${filePath}" -af "apad=pad_dur=0.15" "${silentPath}" -y`
+              );
+              await fs.unlink(filePath).catch(() => {});
+              return silentPath;
+            };
+
+            req.log.info({ jobId: params.jobId, segmentCount: segments.length }, "Generating per-segment TTS (parallel)");
+
+            interface SegmentAudio { filePath: string; startMs: number; targetDurS: number; actualDurS: number; }
+            const segmentAudios: (SegmentAudio | null)[] = new Array(segments.length).fill(null);
+
+            // 1. Duration-adaptive translation (batch, with per-segment duration hints)
+            let adaptedTexts: string[] = segments.map((s) => s.text);
             try {
               const batchPrompt = segments
                 .map((s, i) => `[${i}] (${(s.end - s.start).toFixed(1)}s) ${s.text}`)
@@ -271,102 +328,75 @@ router.post("/:jobId/export", async (req, res) => {
                 messages: [
                   {
                     role: "system",
-                    content: `You are a professional dubbing translator. Translate each numbered segment to ${targetLanguage}.
+                    content: `You are a professional dubbing adapter. For each numbered segment, translate to ${targetLanguage} and adapt the phrasing so it fits naturally within the duration shown in parentheses.
 Rules:
-- Keep translations natural and conversational — not literal
-- Match the duration shown in parentheses: keep translated text roughly the same spoken length
-- Return ONLY the translations in the exact same [N] format, one per line, no extra text`,
+- Preserve meaning, not exact words
+- SHORT slot (≤2s): use brief, punchy phrasing
+- LONG slot (≥5s): allow fuller, more descriptive phrasing
+- Keep it conversational and human-sounding
+- Return ONLY the adapted translations in [N] format, one per line, no extra text`,
                   },
                   { role: "user", content: batchPrompt },
                 ],
                 max_completion_tokens: 4000,
               });
-              const transText = transResp.choices[0]?.message?.content || "";
               const parsed: Record<number, string> = {};
-              for (const line of transText.split("\n")) {
+              for (const line of (transResp.choices[0]?.message?.content || "").split("\n")) {
                 const m = line.match(/^\[(\d+)\]\s*(.+)/);
                 if (m) parsed[parseInt(m[1])] = m[2].trim();
               }
-              translatedTexts = segments.map((s, i) => parsed[i] || s.text);
+              adaptedTexts = segments.map((s, i) => parsed[i] || s.text);
             } catch (err) {
               req.log.warn({ err }, "Batch translation failed, using original text");
             }
 
-            req.log.info({ jobId: params.jobId, segmentCount: segments.length }, "Generating per-segment TTS (parallel)");
-
-            interface SegmentAudio { filePath: string; startMs: number; targetDurS: number; actualDurS: number; }
-            const segmentAudios: (SegmentAudio | null)[] = new Array(segments.length).fill(null);
-
-            // Estimate natural TTS duration from word count
-            // Default ~150 WPM ≈ 2.5 words/sec; use speaker's WPM if available
-            const wordsPerSec = (speakerWpm || 150) / 60;
-            const estimateNaturalDur = (text: string) => text.trim().split(/\s+/).length / wordsPerSec;
-
-            // 2. Generate TTS in parallel batches of 5, with pre-adjusted speed
+            // 2. Generate TTS per segment (parallel batches of 5) + validate + 1 retry
             const BATCH = 5;
+            const TOLERANCE = 0.10; // ±10% is acceptable
             for (let b = 0; b < segments.length; b += BATCH) {
               const batch = segments.slice(b, b + BATCH);
               await Promise.all(batch.map(async (seg, batchIdx) => {
                 const i = b + batchIdx;
-                const text = translatedTexts[i]?.trim() || seg.text.trim();
+                let text = adaptedTexts[i]?.trim() || seg.text.trim();
                 if (!text) return;
 
                 const startMs = Math.round(seg.start * 1000);
                 const targetDurS = Math.max(seg.end - seg.start, 0.3);
-
-                // Pre-adjust TTS speed so generated audio is close to target duration
-                // This avoids heavy post-processing which sounds robotic
-                const naturalDurS = estimateNaturalDur(text);
-                const desiredRatio = naturalDurS / targetDurS;
-                // Cap between 0.85x (slightly slower) and 1.1x (10% faster max at generation)
-                const ttsSpeed = Math.min(Math.max(desiredRatio, 0.85), 1.1);
-
-                const ttsBuffer = await textToSpeechFast(text, chosenVoice, ttsSpeed);
-
                 const segPath = path.join(exportDir, `seg_${exportId}_${i}.mp3`);
-                await fs.writeFile(segPath, ttsBuffer);
                 segmentFiles.push(segPath);
 
-                const { stdout: probOut } = await execAsync(
-                  `ffprobe -v quiet -show_entries format=duration -of csv=p=0 "${segPath}"`
-                );
-                const actualDurS = parseFloat(probOut.trim()) || targetDurS;
+                let actualDurS = await generateSegmentTts(text, segPath);
 
-                segmentAudios[i] = { filePath: segPath, startMs, targetDurS, actualDurS };
-                req.log.info({ i, startMs, targetDurS, actualDurS, ttsSpeed: ttsSpeed.toFixed(2) }, "Segment TTS done");
+                // Validate: if off by more than 10%, re-adapt text once and regenerate
+                if (actualDurS > 0) {
+                  const ratio = actualDurS / targetDurS;
+                  if (ratio > 1 + TOLERANCE || ratio < 1 - TOLERANCE) {
+                    const hint = ratio > 1 ? "shorter" : "longer";
+                    req.log.info({ i, targetDurS, actualDurS, hint }, "Segment duration off — re-adapting");
+                    try {
+                      text = await adaptForDuration(seg.text, targetDurS, hint);
+                      actualDurS = await generateSegmentTts(text, segPath);
+                    } catch (retryErr) {
+                      req.log.warn({ retryErr, i }, "Retry adaptation failed, keeping original");
+                    }
+                  }
+                }
+
+                // Add 150ms natural trailing silence (prevents abrupt cutoff)
+                const finalPath = await addTrailingSilence(segPath, exportId, i);
+                // Update segmentFiles to the new path so cleanup works
+                const origIdx = segmentFiles.indexOf(segPath);
+                if (origIdx !== -1) segmentFiles[origIdx] = finalPath;
+
+                segmentAudios[i] = { filePath: finalPath, startMs, targetDurS, actualDurS };
+                req.log.info({ i, startMs, targetDurS, actualDurS: actualDurS.toFixed(2) }, "Segment ready");
               }));
             }
 
             const validSegments = segmentAudios.filter((s): s is SegmentAudio => s !== null);
 
-            // 3. Per-segment: apply minimal atempo (max 1.15x) or pad with silence
-            //    Process each segment file in-place before building the timeline
-            const MAX_ATEMPO = 1.15;
-            await Promise.all(validSegments.map(async (s, i) => {
-              const ratio = s.actualDurS / s.targetDurS;
-
-              if (ratio > 1.02) {
-                // Audio is too long — speed up slightly (max 1.15x)
-                const atempo = Math.min(ratio, MAX_ATEMPO).toFixed(4);
-                const adjustedPath = path.join(exportDir, `seg_adj_${exportId}_${i}.mp3`);
-                await execAsync(`ffmpeg -i "${s.filePath}" -filter:a "atempo=${atempo}" "${adjustedPath}" -y`);
-                await fs.unlink(s.filePath).catch(() => {});
-                s.filePath = adjustedPath;
-                s.actualDurS = s.actualDurS / parseFloat(atempo);
-              } else if (ratio < 0.95) {
-                // Audio is too short — pad end with silence to fill the slot
-                const padDurS = (s.targetDurS - s.actualDurS).toFixed(3);
-                const paddedPath = path.join(exportDir, `seg_pad_${exportId}_${i}.mp3`);
-                await execAsync(
-                  `ffmpeg -i "${s.filePath}" -af "apad=pad_dur=${padDurS}" -t ${s.targetDurS.toFixed(3)} "${paddedPath}" -y`
-                );
-                await fs.unlink(s.filePath).catch(() => {});
-                s.filePath = paddedPath;
-                s.actualDurS = s.targetDurS;
-              }
-            }));
-
-            // 4. Build timeline: adelay each segment to its original start time, then amix
+            // 3. Build timeline: place each segment at its EXACT original start time
+            //    No atempo, no speed modification — pure timeline placement
             const inputArgs = validSegments.map((s) => `-i "${s.filePath}"`).join(" ");
             const filterParts = validSegments.map((s, i) =>
               `[${i}:a]adelay=${s.startMs}|${s.startMs}[a${i}]`

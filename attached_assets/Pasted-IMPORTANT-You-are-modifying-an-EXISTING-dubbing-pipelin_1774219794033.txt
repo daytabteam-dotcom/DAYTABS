@@ -1,0 +1,129 @@
+IMPORTANT:
+You are modifying an EXISTING dubbing pipeline.
+DO NOT rebuild anything. DO NOT change architecture.
+
+ONLY update how timing and TTS are handled.
+
+--------------------------------------------------
+
+🎯 GOAL:
+
+1. Perfect sync WITHOUT speeding up or slowing down audio
+2. More human-like dubbing
+3. Natural timing based on original speech
+
+--------------------------------------------------
+
+⚠️ REMOVE OLD LOGIC:
+
+- REMOVE any playback speed adjustments (no ffmpeg atempo)
+- DO NOT stretch or compress audio
+
+--------------------------------------------------
+
+### 1. KEEP PHRASE-LEVEL SEGMENTATION
+
+- Use short phrases (1–3 seconds)
+- Based on pauses/punctuation
+
+Each segment:
+{
+  "text": "...",
+  "start": X,
+  "end": Y,
+  "duration": Y - X
+}
+
+--------------------------------------------------
+
+### 2. ADAPT TRANSLATION TO FIT TIME (CRITICAL)
+
+Instead of direct translation:
+
+For EACH segment:
+
+- Rewrite the translated text so it NATURALLY fits within the target duration
+
+Guidelines:
+- If original duration is SHORT:
+   → use shorter, simpler phrasing
+- If duration is LONG:
+   → allow more descriptive phrasing
+
+- Preserve meaning, NOT exact wording
+- Keep it conversational and natural
+
+Example:
+Original: "This is actually very important for your growth"
+Short duration:
+→ "This really matters"
+
+--------------------------------------------------
+
+### 3. ADD DURATION-AWARE PROMPTING
+
+When generating TTS:
+
+Pass duration as instruction:
+
+"Speak this naturally in approximately [X] seconds. Keep a conversational tone, natural pauses, and human-like rhythm."
+
+Also include:
+- tone
+- energy
+- speaking style
+
+--------------------------------------------------
+
+### 4. VALIDATE GENERATED AUDIO LENGTH
+
+After generating TTS:
+
+- Measure generated audio duration
+
+IF duration is slightly off (±10%):
+   → Accept it
+
+IF TOO LONG:
+   → Regenerate with shorter phrasing
+
+IF TOO SHORT:
+   → Regenerate with slightly expanded phrasing
+
+DO NOT modify audio speed
+
+--------------------------------------------------
+
+### 5. TIMELINE-BASED PLACEMENT (CRITICAL)
+
+- Place each audio segment at EXACT original start time
+- Use absolute timeline positioning (NOT sequential merging)
+
+This prevents drift.
+
+--------------------------------------------------
+
+### 6. ADD NATURAL SILENCE
+
+- Add small silence (100–200ms) at end of segments if needed
+- Do NOT overfill gaps
+
+--------------------------------------------------
+
+### 7. KEEP EVERYTHING ELSE UNCHANGED
+
+- Do NOT change UI
+- Do NOT change APIs
+- Do NOT break current pipeline
+- Only improve dubbing logic
+
+--------------------------------------------------
+
+🎯 FINAL RESULT:
+
+- Audio perfectly aligned with original timing
+- No robotic speed artifacts
+- Natural, human-like dubbing
+- Translation adapted to fit speech rhythm
+
+--------------------------------------------------
