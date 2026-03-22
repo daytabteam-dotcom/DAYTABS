@@ -393,28 +393,49 @@ Rules:
               }));
             }
 
-            const validSegments = segmentAudios.filter((s): s is SegmentAudio => s !== null);
+            // Sort by start time (ascending) before assembling timeline
+            const validSegments = (segmentAudios.filter((s): s is SegmentAudio => s !== null))
+              .sort((a, b) => a.startMs - b.startMs);
 
-            // 3. Build timeline: place each segment at its EXACT original start time
-            //    No atempo, no speed modification — pure timeline placement
+            // 3. Overlap collision guard — trim any segment that bleeds into the next one
+            for (let si = 0; si < validSegments.length - 1; si++) {
+              const cur = validSegments[si];
+              const next = validSegments[si + 1];
+              const curEndMs = cur.startMs + Math.round(cur.actualDurS * 1000);
+              if (curEndMs > next.startMs) {
+                const maxDurS = Math.max((next.startMs - cur.startMs) / 1000, 0.05);
+                const trimmedPath = path.join(exportDir, `seg_trim_${exportId}_${si}.mp3`);
+                await execAsync(`ffmpeg -i "${cur.filePath}" -t ${maxDurS.toFixed(3)} "${trimmedPath}" -y`);
+                await fs.unlink(cur.filePath).catch(() => {});
+                cur.filePath = trimmedPath;
+                cur.actualDurS = maxDurS;
+                req.log.info({ si, maxDurS }, "Segment trimmed to prevent overlap");
+              }
+            }
+
+            // 4. Build timeline: adelay every segment to its EXACT original start time, then amix
             const inputArgs = validSegments.map((s) => `-i "${s.filePath}"`).join(" ");
             const filterParts = validSegments.map((s, i) =>
               `[${i}:a]adelay=${s.startMs}|${s.startMs}[a${i}]`
             );
             const mixIn = validSegments.map((_, i) => `[a${i}]`).join("");
-            const filterComplex = `${filterParts.join(";")};${mixIn}amix=inputs=${validSegments.length}:duration=longest:normalize=0[out]`;
+            const filterComplex = `${filterParts.join(";")};${mixIn}amix=inputs=${validSegments.length}:duration=longest:normalize=0[aout]`;
 
-            const dubbedPath = path.join(exportDir, `dubbed_${exportId}.mp3`);
-            await execAsync(`ffmpeg ${inputArgs} -filter_complex "${filterComplex}" -map "[out]" "${dubbedPath}" -y`);
+            const dubbedPath = path.join(exportDir, `dubbed_${exportId}.aac`);
+            await execAsync(`ffmpeg ${inputArgs} -filter_complex "${filterComplex}" -map "[aout]" -c:a aac -b:a 192k "${dubbedPath}" -y`);
 
-            // Cleanup all segment files (original + any adjusted/padded versions)
+            // Cleanup all segment files (original + any trimmed versions)
             for (const s of validSegments) await fs.unlink(s.filePath).catch(() => {});
 
-            // 4. Scale video (ultrafast) then merge dubbed audio
-            const scaledPath = path.join(exportDir, `scaled_${exportId}.mp4`);
-            await execAsync(`ffmpeg -i "${originalVideoPath}" -vf "scale=${scale}" -c:v libx264 -preset ultrafast -crf 23 -threads 0 -an "${scaledPath}" -y`);
-            await execAsync(`ffmpeg -i "${scaledPath}" -i "${dubbedPath}" -map 0:v -map 1:a -c:v copy -c:a aac -threads 0 -shortest "${outputPath}" -y`);
-            await fs.unlink(scaledPath).catch(() => {});
+            // 5. Single-pass final merge: scale video + swap audio — NO intermediate file
+            //    Scale requires re-encode; we do it once and copy audio stream directly.
+            await execAsync(
+              `ffmpeg -i "${originalVideoPath}" -i "${dubbedPath}" ` +
+              `-filter_complex "[0:v]scale=${scale}[vout]" ` +
+              `-map "[vout]" -map 1:a ` +
+              `-c:v libx264 -preset ultrafast -crf 23 -threads 0 ` +
+              `-c:a copy -shortest "${outputPath}" -y`
+            );
             await fs.unlink(dubbedPath).catch(() => {});
 
             res.json({ downloadUrl: `/api/analysis/download/${outputFilename}`, filename: outputFilename });
@@ -440,10 +461,14 @@ Rules:
             const ttsPath = path.join(exportDir, `tts_${exportId}.mp3`);
             await fs.writeFile(ttsPath, ttsBuffer);
 
-            const scaledPath = path.join(exportDir, `scaled_${exportId}.mp4`);
-            await execAsync(`ffmpeg -i "${originalVideoPath}" -vf "scale=${scale}" -c:v libx264 -an "${scaledPath}" -y`);
-            await execAsync(`ffmpeg -i "${scaledPath}" -i "${ttsPath}" -map 0:v -map 1:a -c:v copy -c:a aac -shortest "${outputPath}" -y`);
-            await fs.unlink(scaledPath).catch(() => {});
+            // Single-pass: scale video + replace audio stream
+            await execAsync(
+              `ffmpeg -i "${originalVideoPath}" -i "${ttsPath}" ` +
+              `-filter_complex "[0:v]scale=${scale}[vout]" ` +
+              `-map "[vout]" -map 1:a ` +
+              `-c:v libx264 -preset ultrafast -crf 23 -threads 0 ` +
+              `-c:a aac -b:a 192k -shortest "${outputPath}" -y`
+            );
             await fs.unlink(ttsPath).catch(() => {});
 
             res.json({ downloadUrl: `/api/analysis/download/${outputFilename}`, filename: outputFilename });

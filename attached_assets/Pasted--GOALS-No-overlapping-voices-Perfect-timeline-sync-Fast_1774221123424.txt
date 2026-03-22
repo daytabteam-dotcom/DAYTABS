@@ -1,0 +1,135 @@
+🎯 GOALS:
+
+- No overlapping voices
+- Perfect timeline sync
+- Fast export
+
+--------------------------------------------------
+
+### 1. FIX AUDIO OVERLAP (CRITICAL)
+
+Current issue:
+Audio clips are overlapping or starting incorrectly.
+
+FIX:
+
+- DO NOT concatenate audio sequentially
+- DO NOT rely on previous clip end time
+
+Instead:
+➡️ Use ABSOLUTE TIMESTAMPS
+
+Each segment MUST be placed at:
+   start_time = original start timestamp
+
+--------------------------------------------------
+
+### 2. USE FFMPEG "adelay" FOR POSITIONING
+
+For each audio segment:
+
+- Delay it using:
+   adelay=start_time_in_ms
+
+Example:
+- start = 2.5s → delay = 2500ms
+
+--------------------------------------------------
+
+### 3. MIX ALL AUDIO TRACKS PROPERLY
+
+- After delaying each segment:
+   Use amix to combine them
+
+Example concept:
+
+[seg1_delayed][seg2_delayed][seg3_delayed]
+→ amix=inputs=3
+
+IMPORTANT:
+- Set:
+   duration=longest
+- Ensure NO clipping
+
+--------------------------------------------------
+
+### 4. PREVENT OVERLAP COLLISIONS
+
+Before placing segments:
+
+IF two segments overlap:
+   - Trim the second segment start
+   OR
+   - slightly shift it forward (max 100ms)
+
+Ensure:
+- Only ONE voice at a time
+
+--------------------------------------------------
+
+### 5. FIX SYNC ACCURACY
+
+- ALWAYS trust original timestamps
+- NEVER accumulate time based on generated audio
+
+Each segment must:
+   start EXACTLY at original start
+
+--------------------------------------------------
+
+### 6. SPEED UP RENDERING (BIG IMPROVEMENT)
+
+Current issue:
+Video rendering is too slow
+
+FIX:
+
+- DO NOT re-encode video
+- Use:
+
+   -c:v copy
+
+- Only process audio
+
+FINAL MERGE:
+
+ffmpeg:
+- input original video
+- input dubbed audio
+- replace audio stream only
+
+--------------------------------------------------
+
+### 7. FINAL MERGE COMMAND (IMPORTANT)
+
+- Combine:
+   original video (unchanged)
+   + new dubbed audio
+
+Use:
+
+- map video from original
+- map audio from generated
+
+NO re-encoding video
+
+--------------------------------------------------
+
+### 8. KEEP PIPELINE SAME
+
+- Keep transcription
+- Keep translation
+- Keep TTS
+
+ONLY fix:
+- audio assembly
+- ffmpeg usage
+
+--------------------------------------------------
+
+🎯 RESULT:
+
+- No overlapping speech
+- Perfect sync
+- Fast rendering (10x faster)
+- Clean audio output
