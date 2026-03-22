@@ -11,7 +11,7 @@ import { analysisJobsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { runAnalysisPipeline } from "./pipeline";
 import { openai } from "@workspace/integrations-openai-ai-server";
-import { textToSpeech } from "@workspace/integrations-openai-ai-server/audio";
+import { textToSpeech, textToSpeechFast } from "@workspace/integrations-openai-ai-server/audio";
 import {
   GetAnalysisStatusParams,
   GetAnalysisResultParams,
@@ -292,50 +292,39 @@ router.post("/:jobId/export", async (req, res) => {
               req.log.warn({ err }, "Batch translation failed, using original text");
             }
 
-            req.log.info({ jobId: params.jobId, segmentCount: segments.length }, "Generating per-segment TTS");
+            req.log.info({ jobId: params.jobId, segmentCount: segments.length }, "Generating per-segment TTS (parallel)");
 
             interface SegmentAudio { filePath: string; startMs: number; targetDurS: number; actualDurS: number; }
-            const segmentAudios: SegmentAudio[] = [];
+            const segmentAudios: (SegmentAudio | null)[] = new Array(segments.length).fill(null);
 
-            // 2. Generate TTS for each segment individually
-            for (let i = 0; i < segments.length; i++) {
-              const seg = segments[i];
-              const text = translatedTexts[i]?.trim() || seg.text.trim();
-              if (!text) continue;
+            // 2. Generate TTS in parallel batches of 5
+            const BATCH = 5;
+            for (let b = 0; b < segments.length; b += BATCH) {
+              const batch = segments.slice(b, b + BATCH);
+              await Promise.all(batch.map(async (seg, batchIdx) => {
+                const i = b + batchIdx;
+                const text = translatedTexts[i]?.trim() || seg.text.trim();
+                if (!text) return;
 
-              const startMs = Math.round(seg.start * 1000);
-              const targetDurS = Math.max(seg.end - seg.start, 0.1);
+                const startMs = Math.round(seg.start * 1000);
+                const targetDurS = Math.max(seg.end - seg.start, 0.1);
 
-              let ttsBuffer: Buffer;
-              try {
-                const ttsResp = await openai.chat.completions.create({
-                  model: "gpt-audio",
-                  modalities: ["text", "audio"],
-                  audio: { voice: chosenVoice, format: "mp3" },
-                  messages: [
-                    { role: "system", content: styleSystemPrompt },
-                    { role: "user", content: text },
-                  ],
-                } as Parameters<typeof openai.chat.completions.create>[0]);
-                const audioData = (ttsResp.choices[0]?.message as unknown as { audio?: { data?: string } })?.audio?.data ?? "";
-                ttsBuffer = Buffer.from(audioData, "base64");
-              } catch {
-                ttsBuffer = await textToSpeech(text, chosenVoice, "mp3");
-              }
+                const ttsBuffer = await textToSpeechFast(text, chosenVoice);
 
-              const segPath = path.join(exportDir, `seg_${exportId}_${i}.mp3`);
-              await fs.writeFile(segPath, ttsBuffer);
-              segmentFiles.push(segPath);
+                const segPath = path.join(exportDir, `seg_${exportId}_${i}.mp3`);
+                await fs.writeFile(segPath, ttsBuffer);
+                segmentFiles.push(segPath);
 
-              // Measure actual TTS duration
-              const { stdout: probOut } = await execAsync(
-                `ffprobe -v quiet -show_entries format=duration -of csv=p=0 "${segPath}"`
-              );
-              const actualDurS = parseFloat(probOut.trim()) || targetDurS;
+                const { stdout: probOut } = await execAsync(
+                  `ffprobe -v quiet -show_entries format=duration -of csv=p=0 "${segPath}"`
+                );
+                const actualDurS = parseFloat(probOut.trim()) || targetDurS;
 
-              segmentAudios.push({ filePath: segPath, startMs, targetDurS, actualDurS });
-              req.log.info({ i, startMs, targetDurS, actualDurS }, "Segment TTS generated");
+                segmentAudios[i] = { filePath: segPath, startMs, targetDurS, actualDurS };
+              }));
             }
+
+            const validSegments = segmentAudios.filter((s): s is SegmentAudio => s !== null);
 
             // 3. Build ffmpeg filter_complex: atempo + adelay + amix
             const buildAtempoChain = (ratio: number): string => {
@@ -346,14 +335,14 @@ router.post("/:jobId/export", async (req, res) => {
               return `atempo=${half.toFixed(4)},atempo=${half.toFixed(4)},`;
             };
 
-            const inputArgs = segmentAudios.map((s) => `-i "${s.filePath}"`).join(" ");
-            const filterParts = segmentAudios.map((s, i) => {
+            const inputArgs = validSegments.map((s) => `-i "${s.filePath}"`).join(" ");
+            const filterParts = validSegments.map((s, i) => {
               const ratio = s.actualDurS / s.targetDurS;
               const atempoChain = ratio > 1.05 ? buildAtempoChain(ratio) : "";
               return `[${i}:a]${atempoChain}adelay=${s.startMs}|${s.startMs}[a${i}]`;
             });
-            const mixIn = segmentAudios.map((_, i) => `[a${i}]`).join("");
-            const filterComplex = `${filterParts.join(";")};${mixIn}amix=inputs=${segmentAudios.length}:duration=longest:normalize=0[out]`;
+            const mixIn = validSegments.map((_, i) => `[a${i}]`).join("");
+            const filterComplex = `${filterParts.join(";")};${mixIn}amix=inputs=${validSegments.length}:duration=longest:normalize=0[out]`;
 
             const dubbedPath = path.join(exportDir, `dubbed_${exportId}.mp3`);
             await execAsync(`ffmpeg ${inputArgs} -filter_complex "${filterComplex}" -map "[out]" "${dubbedPath}" -y`);
@@ -361,10 +350,10 @@ router.post("/:jobId/export", async (req, res) => {
             // Cleanup segment files
             for (const f of segmentFiles) await fs.unlink(f).catch(() => {});
 
-            // 4. Merge into video
+            // 4. Scale video (ultrafast) then merge dubbed audio
             const scaledPath = path.join(exportDir, `scaled_${exportId}.mp4`);
-            await execAsync(`ffmpeg -i "${originalVideoPath}" -vf "scale=${scale}" -c:v libx264 -an "${scaledPath}" -y`);
-            await execAsync(`ffmpeg -i "${scaledPath}" -i "${dubbedPath}" -map 0:v -map 1:a -c:v copy -c:a aac -shortest "${outputPath}" -y`);
+            await execAsync(`ffmpeg -i "${originalVideoPath}" -vf "scale=${scale}" -c:v libx264 -preset ultrafast -crf 23 -threads 0 -an "${scaledPath}" -y`);
+            await execAsync(`ffmpeg -i "${scaledPath}" -i "${dubbedPath}" -map 0:v -map 1:a -c:v copy -c:a aac -threads 0 -shortest "${outputPath}" -y`);
             await fs.unlink(scaledPath).catch(() => {});
             await fs.unlink(dubbedPath).catch(() => {});
 
@@ -407,7 +396,7 @@ router.post("/:jobId/export", async (req, res) => {
       }
     }
 
-    await execAsync(`ffmpeg -i "${originalVideoPath}" -vf "scale=${scale}" -c:v libx264 -c:a aac "${outputPath}" -y`);
+    await execAsync(`ffmpeg -i "${originalVideoPath}" -vf "scale=${scale}" -c:v libx264 -preset ultrafast -crf 23 -c:a aac -threads 0 "${outputPath}" -y`);
     res.json({ downloadUrl: `/api/analysis/download/${outputFilename}`, filename: outputFilename });
   } catch (err) {
     req.log.error({ err }, "Export error");

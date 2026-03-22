@@ -229,6 +229,30 @@ export async function speechToText(
   return response.text;
 }
 
+/**
+ * Fast verbatim Text-to-Speech using the tts-1 model (standard TTS API).
+ * Much faster and always verbatim — no hallucination risk.
+ * Falls back to gpt-audio if the endpoint is unavailable.
+ */
+export async function textToSpeechFast(
+  text: string,
+  voice: "alloy" | "echo" | "fable" | "onyx" | "nova" | "shimmer" = "alloy",
+  speed: number = 1.0
+): Promise<Buffer> {
+  try {
+    const response = await openai.audio.speech.create({
+      model: "tts-1",
+      voice,
+      input: text,
+      response_format: "mp3",
+      speed: Math.min(Math.max(speed, 0.25), 4.0),
+    } as Parameters<typeof openai.audio.speech.create>[0]);
+    return Buffer.from(await response.arrayBuffer());
+  } catch {
+    return textToSpeech(text, voice, "mp3");
+  }
+}
+
 /** Speech-to-Text with accurate word/sentence timestamps (verbose_json). */
 export async function speechToTextVerbose(
   audioBuffer: Buffer,

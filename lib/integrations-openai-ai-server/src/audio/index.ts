@@ -11,4 +11,5 @@ export {
   speechToText,
   speechToTextStream,
   speechToTextVerbose,
+  textToSpeechFast,
 } from "./client";
