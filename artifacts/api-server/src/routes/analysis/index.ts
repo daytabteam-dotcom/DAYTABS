@@ -4,16 +4,22 @@ import { v4 as uuidv4 } from "uuid";
 import path from "path";
 import fs from "fs/promises";
 import os from "os";
+import { exec } from "child_process";
+import { promisify } from "util";
 import { db } from "@workspace/db";
 import { analysisJobsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { runAnalysisPipeline } from "./pipeline";
+import { openai } from "@workspace/integrations-openai-ai-server";
+import { textToSpeech } from "@workspace/integrations-openai-ai-server/audio";
 import {
   GetAnalysisStatusParams,
   GetAnalysisResultParams,
   ExportVideoParams,
   ExportVideoBody,
 } from "@workspace/api-zod";
+
+const execAsync = promisify(exec);
 
 const router: IRouter = Router();
 
@@ -177,32 +183,74 @@ router.post("/:jobId/export", async (req, res) => {
     const outputFilename = `daytabs_export_${body.resolution}_${exportId}.mp4`;
     const outputPath = path.join(exportDir, outputFilename);
 
-    const workDir = j.framesDir ? path.dirname(j.framesDir) : null;
-    const originalVideoFiles = workDir ? await fs.readdir(path.dirname(workDir)).catch(() => []) : [];
-    const videoFile = originalVideoFiles.find(f => f.endsWith(".mp4") || f.endsWith(".mov") || f.endsWith(".webm") || f.endsWith(".avi"));
+    const originalVideoPath = j.videoPath;
+    if (!originalVideoPath) {
+      res.status(409).json({ error: "Original video is no longer available. Please re-upload to export." });
+      return;
+    }
 
-    if (videoFile && workDir) {
-      const originalPath = path.join(path.dirname(workDir), videoFile);
-      const { exec } = await import("child_process");
-      const { promisify } = await import("util");
-      const execAsync = promisify(exec);
+    try {
+      await fs.access(originalVideoPath);
+    } catch {
+      res.status(409).json({ error: "Original video file has been cleaned up. Please re-upload to export." });
+      return;
+    }
 
-      try {
-        await execAsync(`ffmpeg -i "${originalPath}" -vf "scale=${scale}" -c:v libx264 -c:a aac "${outputPath}" -y`);
-        res.json({
-          downloadUrl: `/api/analysis/download/${outputFilename}`,
-          filename: outputFilename,
-        });
-        return;
-      } catch {
-        req.log.warn({ jobId: params.jobId }, "Original video not available for re-export, providing URL only");
+    const shouldReplaceAudio = j.replaceAudio === 1 && j.audioLanguage;
+
+    if (shouldReplaceAudio) {
+      const result = j.result as Record<string, unknown> | null;
+      const subtitles = result?.subtitles as { fullText?: string } | undefined;
+      const originalText = subtitles?.fullText || "";
+
+      if (!originalText) {
+        req.log.warn({ jobId: params.jobId }, "No transcript text available for audio replacement — skipping");
+      } else {
+        const targetLanguage = j.audioLanguage!;
+        req.log.info({ jobId: params.jobId, targetLanguage }, "Translating transcript for audio replacement");
+
+        let textForTts = originalText;
+        try {
+          const translationResp = await openai.chat.completions.create({
+            model: "gpt-4o-mini",
+            messages: [
+              {
+                role: "system",
+                content: `You are a professional translator. Translate the following text to ${targetLanguage}. Output only the translated text, preserving natural speech flow. Do not add any commentary.`,
+              },
+              { role: "user", content: originalText.slice(0, 4000) },
+            ],
+            max_completion_tokens: 2000,
+          });
+          textForTts = translationResp.choices[0]?.message?.content || originalText;
+        } catch (err) {
+          req.log.warn({ err }, "Translation failed, using original text for TTS");
+        }
+
+        req.log.info({ jobId: params.jobId }, "Generating TTS audio");
+        const ttsPath = path.join(exportDir, `tts_${exportId}.mp3`);
+        try {
+          const ttsBuffer = await textToSpeech(textForTts, "alloy", "mp3");
+          await fs.writeFile(ttsPath, ttsBuffer);
+
+          const scaledPath = path.join(exportDir, `scaled_${exportId}.mp4`);
+          await execAsync(`ffmpeg -i "${originalVideoPath}" -vf "scale=${scale}" -c:v libx264 -an "${scaledPath}" -y`);
+          await execAsync(`ffmpeg -i "${scaledPath}" -i "${ttsPath}" -map 0:v -map 1:a -c:v copy -c:a aac -shortest "${outputPath}" -y`);
+
+          await fs.unlink(scaledPath).catch(() => {});
+          await fs.unlink(ttsPath).catch(() => {});
+
+          res.json({ downloadUrl: `/api/analysis/download/${outputFilename}`, filename: outputFilename });
+          return;
+        } catch (err) {
+          req.log.warn({ err }, "Audio replacement failed, falling back to standard export");
+          await fs.unlink(ttsPath).catch(() => {});
+        }
       }
     }
 
-    res.json({
-      downloadUrl: `/api/analysis/download/${outputFilename}`,
-      filename: outputFilename,
-    });
+    await execAsync(`ffmpeg -i "${originalVideoPath}" -vf "scale=${scale}" -c:v libx264 -c:a aac "${outputPath}" -y`);
+    res.json({ downloadUrl: `/api/analysis/download/${outputFilename}`, filename: outputFilename });
   } catch (err) {
     req.log.error({ err }, "Export error");
     res.status(500).json({ error: "Export failed", details: err instanceof Error ? err.message : String(err) });

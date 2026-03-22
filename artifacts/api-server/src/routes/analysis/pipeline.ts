@@ -148,14 +148,17 @@ export async function runAnalysisPipeline(jobId: string, videoPath: string, plat
       },
     };
 
+    const ext = path.extname(videoPath);
+    const savedVideoPath = path.join(workDir, `original${ext}`);
+    await fs.rename(videoPath, savedVideoPath).catch(() => fs.unlink(videoPath).catch(() => {}));
+
     await updateJob(jobId, {
       status: "complete",
       progress: 100,
       currentStep: "Analysis complete",
+      videoPath: savedVideoPath,
       result,
     });
-
-    await fs.unlink(videoPath).catch(() => {});
   } catch (err) {
     logger.error({ err, jobId }, "Pipeline error");
     await updateJob(jobId, {
