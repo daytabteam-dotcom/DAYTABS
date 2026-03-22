@@ -13,6 +13,18 @@ const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
 const CORE_APP_URL = process.env.CORE_APP_URL || "/";
 
+function getPublicBaseUrl(req: import("express").Request): string {
+  const replitDomain = process.env.REPLIT_DEV_DOMAIN || (process.env.REPLIT_DOMAINS || "").split(",")[0]?.trim();
+  if (replitDomain) return `https://${replitDomain}`;
+  const forwarded = req.get("x-forwarded-host");
+  if (forwarded) return `${req.get("x-forwarded-proto") || "https"}://${forwarded}`;
+  return `${req.protocol}://${req.get("host")}`;
+}
+
+function getGoogleRedirectUri(req: import("express").Request): string {
+  return `${getPublicBaseUrl(req)}/api/auth/google/callback`;
+}
+
 function signToken(userId: number, email: string) {
   return jwt.sign({ user_id: userId, email }, JWT_SECRET, { expiresIn: "7d" });
 }
@@ -70,7 +82,7 @@ router.get("/google", (req, res) => {
     return;
   }
   const client = new OAuth2Client(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET);
-  const redirectUri = `${req.protocol}://${req.get("host")}/api/auth/google/callback`;
+  const redirectUri = getGoogleRedirectUri(req);
   const url = client.generateAuthUrl({
     access_type: "offline",
     scope: ["profile", "email"],
@@ -91,7 +103,7 @@ router.get("/google/callback", async (req, res) => {
       return;
     }
     const client = new OAuth2Client(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET);
-    const redirectUri = `${req.protocol}://${req.get("host")}/api/auth/google/callback`;
+    const redirectUri = getGoogleRedirectUri(req);
     const { tokens } = await client.getToken({ code, redirect_uri: redirectUri });
     client.setCredentials(tokens);
     const ticket = await client.verifyIdToken({ idToken: tokens.id_token!, audience: GOOGLE_CLIENT_ID });
