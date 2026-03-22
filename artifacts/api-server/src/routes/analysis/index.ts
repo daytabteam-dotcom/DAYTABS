@@ -11,7 +11,7 @@ import { analysisJobsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { runAnalysisPipeline } from "./pipeline";
 import { openai } from "@workspace/integrations-openai-ai-server";
-import { textToSpeech, textToSpeechFast } from "@workspace/integrations-openai-ai-server/audio";
+import { textToSpeech } from "@workspace/integrations-openai-ai-server/audio";
 import {
   GetAnalysisStatusParams,
   GetAnalysisResultParams,
@@ -238,245 +238,104 @@ router.post("/:jobId/export", async (req, res) => {
         transcript?: Array<{ start: number; end: number; text: string }>;
         fullText?: string;
       } | undefined;
-      const segments = subtitles?.transcript || [];
 
-      if (!segments.length && !subtitles?.fullText) {
-        req.log.warn({ jobId: params.jobId }, "No transcript available for audio replacement — skipping");
-      } else {
+      // Build full script from fullText or by joining all segment texts
+      const segments = subtitles?.transcript || [];
+      const fullScript = (subtitles?.fullText || segments.map((s) => s.text).join(" ")).trim();
+
+      if (fullScript) {
         const targetLanguage = j.audioLanguage!;
         const chosenVoice = (body.audioVoice as "alloy" | "echo" | "fable" | "onyx" | "nova" | "shimmer") || "alloy";
 
-        const sp = (result?.speakerProfile ?? null) as {
-          personality?: string; tone?: string; speed?: string; speechRateWpm?: number;
-          vocabularyStyle?: string; catchphrases?: string[]; emotionalRange?: string;
-        } | null;
-
-        const segmentFiles: string[] = [];
-
+        const chunkFiles: string[] = [];
         try {
-          if (segments.length > 0) {
-            // ── Per-segment timestamp-aware dubbing ─────────────────────────
-
-            // ── Helper: duration-adaptive translation for a single segment ──
-            const adaptForDuration = async (
-              originalText: string,
-              targetDurS: number,
-              hint?: "shorter" | "longer"
-            ): Promise<string> => {
-              const hintLine = hint === "shorter"
-                ? "The previous attempt was too long. Use shorter, simpler phrasing — fewer words."
-                : hint === "longer"
-                ? "The previous attempt was too short. Expand slightly with natural phrasing."
-                : "";
-              const resp = await openai.chat.completions.create({
-                model: "gpt-4o-mini",
-                messages: [
-                  {
-                    role: "system",
-                    content: `You are a professional dubbing adapter. Translate the given text to ${targetLanguage}, then adapt it so it can be spoken naturally in approximately ${targetDurS.toFixed(1)} seconds at a comfortable pace.
-Rules:
-- Preserve meaning, not exact wording
-- SHORT slot (≤2s): use brief, punchy phrasing
-- LONG slot (≥5s): allow fuller, more descriptive phrasing
-- Keep it conversational, as a human would naturally say it
-${hintLine}
-Return ONLY the adapted translation, nothing else.`,
-                  },
-                  { role: "user", content: originalText },
-                ],
-                max_completion_tokens: 200,
-              });
-              return resp.choices[0]?.message?.content?.trim() || originalText;
-            };
-
-            // ── Helper: generate TTS and measure duration ───────────────────
-            const generateSegmentTts = async (
-              text: string,
-              outPath: string
-            ): Promise<number> => {
-              const buf = await textToSpeechFast(text, chosenVoice);
-              await fs.writeFile(outPath, buf);
-              const { stdout } = await execAsync(
-                `ffprobe -v quiet -show_entries format=duration -of csv=p=0 "${outPath}"`
-              );
-              return parseFloat(stdout.trim()) || 0;
-            };
-
-            // ── Helper: add 150ms natural trailing silence ──────────────────
-            const addTrailingSilence = async (filePath: string, exportId: string, i: number): Promise<string> => {
-              const silentPath = path.join(exportDir, `seg_sil_${exportId}_${i}.mp3`);
-              await execAsync(
-                `ffmpeg -i "${filePath}" -af "apad=pad_dur=0.15" "${silentPath}" -y`
-              );
-              await fs.unlink(filePath).catch(() => {});
-              return silentPath;
-            };
-
-            req.log.info({ jobId: params.jobId, segmentCount: segments.length }, "Generating per-segment TTS (parallel)");
-
-            interface SegmentAudio { filePath: string; startMs: number; targetDurS: number; actualDurS: number; }
-            const segmentAudios: (SegmentAudio | null)[] = new Array(segments.length).fill(null);
-
-            // 1. Duration-adaptive translation (batch, with per-segment duration hints)
-            let adaptedTexts: string[] = segments.map((s) => s.text);
-            try {
-              const batchPrompt = segments
-                .map((s, i) => `[${i}] (${(s.end - s.start).toFixed(1)}s) ${s.text}`)
-                .join("\n");
-              const transResp = await openai.chat.completions.create({
-                model: "gpt-4o-mini",
-                messages: [
-                  {
-                    role: "system",
-                    content: `You are a professional dubbing adapter. For each numbered segment, translate to ${targetLanguage} and adapt the phrasing so it fits naturally within the duration shown in parentheses.
-Rules:
-- Preserve meaning, not exact words
-- SHORT slot (≤2s): use brief, punchy phrasing
-- LONG slot (≥5s): allow fuller, more descriptive phrasing
-- Keep it conversational and human-sounding
-- Return ONLY the adapted translations in [N] format, one per line, no extra text`,
-                  },
-                  { role: "user", content: batchPrompt },
-                ],
-                max_completion_tokens: 4000,
-              });
-              const parsed: Record<number, string> = {};
-              for (const line of (transResp.choices[0]?.message?.content || "").split("\n")) {
-                const m = line.match(/^\[(\d+)\]\s*(.+)/);
-                if (m) parsed[parseInt(m[1])] = m[2].trim();
-              }
-              adaptedTexts = segments.map((s, i) => parsed[i] || s.text);
-            } catch (err) {
-              req.log.warn({ err }, "Batch translation failed, using original text");
-            }
-
-            // 2. Generate TTS per segment (parallel batches of 5) + validate + 1 retry
-            const BATCH = 5;
-            const TOLERANCE = 0.10; // ±10% is acceptable
-            for (let b = 0; b < segments.length; b += BATCH) {
-              const batch = segments.slice(b, b + BATCH);
-              await Promise.all(batch.map(async (seg, batchIdx) => {
-                const i = b + batchIdx;
-                let text = adaptedTexts[i]?.trim() || seg.text.trim();
-                if (!text) return;
-
-                const startMs = Math.round(seg.start * 1000);
-                const targetDurS = Math.max(seg.end - seg.start, 0.3);
-                const segPath = path.join(exportDir, `seg_${exportId}_${i}.mp3`);
-                segmentFiles.push(segPath);
-
-                let actualDurS = await generateSegmentTts(text, segPath);
-
-                // Validate: if off by more than 10%, re-adapt text once and regenerate
-                if (actualDurS > 0) {
-                  const ratio = actualDurS / targetDurS;
-                  if (ratio > 1 + TOLERANCE || ratio < 1 - TOLERANCE) {
-                    const hint = ratio > 1 ? "shorter" : "longer";
-                    req.log.info({ i, targetDurS, actualDurS, hint }, "Segment duration off — re-adapting");
-                    try {
-                      text = await adaptForDuration(seg.text, targetDurS, hint);
-                      actualDurS = await generateSegmentTts(text, segPath);
-                    } catch (retryErr) {
-                      req.log.warn({ retryErr, i }, "Retry adaptation failed, keeping original");
-                    }
-                  }
-                }
-
-                // Add 150ms natural trailing silence (prevents abrupt cutoff)
-                const finalPath = await addTrailingSilence(segPath, exportId, i);
-                // Update segmentFiles to the new path so cleanup works
-                const origIdx = segmentFiles.indexOf(segPath);
-                if (origIdx !== -1) segmentFiles[origIdx] = finalPath;
-
-                segmentAudios[i] = { filePath: finalPath, startMs, targetDurS, actualDurS };
-                req.log.info({ i, startMs, targetDurS, actualDurS: actualDurS.toFixed(2) }, "Segment ready");
-              }));
-            }
-
-            // Sort by start time (ascending) before assembling timeline
-            const validSegments = (segmentAudios.filter((s): s is SegmentAudio => s !== null))
-              .sort((a, b) => a.startMs - b.startMs);
-
-            // 3. Overlap collision guard — trim any segment that bleeds into the next one
-            for (let si = 0; si < validSegments.length - 1; si++) {
-              const cur = validSegments[si];
-              const next = validSegments[si + 1];
-              const curEndMs = cur.startMs + Math.round(cur.actualDurS * 1000);
-              if (curEndMs > next.startMs) {
-                const maxDurS = Math.max((next.startMs - cur.startMs) / 1000, 0.05);
-                const trimmedPath = path.join(exportDir, `seg_trim_${exportId}_${si}.mp3`);
-                await execAsync(`ffmpeg -i "${cur.filePath}" -t ${maxDurS.toFixed(3)} "${trimmedPath}" -y`);
-                await fs.unlink(cur.filePath).catch(() => {});
-                cur.filePath = trimmedPath;
-                cur.actualDurS = maxDurS;
-                req.log.info({ si, maxDurS }, "Segment trimmed to prevent overlap");
-              }
-            }
-
-            // 4. Build timeline: adelay every segment to its EXACT original start time, then amix
-            const inputArgs = validSegments.map((s) => `-i "${s.filePath}"`).join(" ");
-            const filterParts = validSegments.map((s, i) =>
-              `[${i}:a]adelay=${s.startMs}|${s.startMs}[a${i}]`
-            );
-            const mixIn = validSegments.map((_, i) => `[a${i}]`).join("");
-            const filterComplex = `${filterParts.join(";")};${mixIn}amix=inputs=${validSegments.length}:duration=longest:normalize=0[aout]`;
-
-            const dubbedPath = path.join(exportDir, `dubbed_${exportId}.aac`);
-            await execAsync(`ffmpeg ${inputArgs} -filter_complex "${filterComplex}" -map "[aout]" -c:a aac -b:a 192k "${dubbedPath}" -y`);
-
-            // Cleanup all segment files (original + any trimmed versions)
-            for (const s of validSegments) await fs.unlink(s.filePath).catch(() => {});
-
-            // 5. Single-pass final merge: scale video + swap audio — NO intermediate file
-            //    Scale requires re-encode; we do it once and copy audio stream directly.
-            await execAsync(
-              `ffmpeg -i "${originalVideoPath}" -i "${dubbedPath}" ` +
-              `-filter_complex "[0:v]scale=${scale}[vout]" ` +
-              `-map "[vout]" -map 1:a ` +
-              `-c:v libx264 -preset ultrafast -crf 23 -threads 0 ` +
-              `-c:a copy -shortest "${outputPath}" -y`
-            );
-            await fs.unlink(dubbedPath).catch(() => {});
-
-            res.json({ downloadUrl: `/api/analysis/download/${outputFilename}`, filename: outputFilename });
-            return;
-
-          } else {
-            // ── Fallback: no segments, dub as single block ──────────────────
-            const originalText = subtitles?.fullText || "";
-            let textForTts = originalText;
-            try {
-              const transResp = await openai.chat.completions.create({
-                model: "gpt-4o-mini",
-                messages: [
-                  { role: "system", content: `Translate to ${targetLanguage}. Output only the translated text.` },
-                  { role: "user", content: originalText.slice(0, 4000) },
-                ],
-                max_completion_tokens: 2000,
-              });
-              textForTts = transResp.choices[0]?.message?.content || originalText;
-            } catch {}
-
-            const ttsBuffer = await textToSpeech(textForTts, chosenVoice, "mp3");
-            const ttsPath = path.join(exportDir, `tts_${exportId}.mp3`);
-            await fs.writeFile(ttsPath, ttsBuffer);
-
-            // Single-pass: scale video + replace audio stream
-            await execAsync(
-              `ffmpeg -i "${originalVideoPath}" -i "${ttsPath}" ` +
-              `-filter_complex "[0:v]scale=${scale}[vout]" ` +
-              `-map "[vout]" -map 1:a ` +
-              `-c:v libx264 -preset ultrafast -crf 23 -threads 0 ` +
-              `-c:a aac -b:a 192k -shortest "${outputPath}" -y`
-            );
-            await fs.unlink(ttsPath).catch(() => {});
-
-            res.json({ downloadUrl: `/api/analysis/download/${outputFilename}`, filename: outputFilename });
-            return;
+          // 1. Translate the full script in one call
+          let translatedScript = fullScript;
+          try {
+            const transResp = await openai.chat.completions.create({
+              model: "gpt-4o-mini",
+              messages: [
+                { role: "system", content: `You are a professional translator. Translate the following text to ${targetLanguage}. Preserve the tone and style of the original speaker. Return only the translated text, nothing else.` },
+                { role: "user", content: fullScript },
+              ],
+              max_completion_tokens: 4000,
+            });
+            translatedScript = transResp.choices[0]?.message?.content?.trim() || fullScript;
+          } catch (err) {
+            req.log.warn({ err }, "Translation failed, using original text");
           }
+
+          req.log.info({ jobId: params.jobId, chars: translatedScript.length }, "Generating TTS for full script");
+
+          // 2. Split into chunks ≤4096 chars (TTS API limit), breaking at sentence boundaries
+          const MAX_CHUNK = 4000;
+          const chunks: string[] = [];
+          if (translatedScript.length <= MAX_CHUNK) {
+            chunks.push(translatedScript);
+          } else {
+            let remaining = translatedScript;
+            while (remaining.length > MAX_CHUNK) {
+              const slice = remaining.slice(0, MAX_CHUNK);
+              const lastBreak = Math.max(
+                slice.lastIndexOf(". "),
+                slice.lastIndexOf("! "),
+                slice.lastIndexOf("? "),
+                slice.lastIndexOf("\n"),
+              );
+              const cutAt = lastBreak > MAX_CHUNK / 2 ? lastBreak + 1 : MAX_CHUNK;
+              chunks.push(remaining.slice(0, cutAt).trim());
+              remaining = remaining.slice(cutAt).trim();
+            }
+            if (remaining) chunks.push(remaining);
+          }
+
+          // 3. Generate TTS for each chunk in parallel using OpenAI tts-1
+          const chunkBuffers = await Promise.all(chunks.map(async (chunk) => {
+            const speech = await openai.audio.speech.create({
+              model: "tts-1",
+              voice: chosenVoice,
+              input: chunk,
+              response_format: "mp3",
+            } as Parameters<typeof openai.audio.speech.create>[0]);
+            return Buffer.from(await speech.arrayBuffer());
+          }));
+
+          // 4. Write chunk files and concatenate with ffmpeg if needed
+          let ttsPath: string;
+          if (chunkBuffers.length === 1) {
+            ttsPath = path.join(exportDir, `tts_${exportId}.mp3`);
+            await fs.writeFile(ttsPath, chunkBuffers[0]);
+            chunkFiles.push(ttsPath);
+          } else {
+            for (let ci = 0; ci < chunkBuffers.length; ci++) {
+              const p = path.join(exportDir, `tts_chunk_${exportId}_${ci}.mp3`);
+              await fs.writeFile(p, chunkBuffers[ci]);
+              chunkFiles.push(p);
+            }
+            const concatList = path.join(exportDir, `concat_${exportId}.txt`);
+            await fs.writeFile(concatList, chunkFiles.map((f) => `file '${f}'`).join("\n"));
+            ttsPath = path.join(exportDir, `tts_${exportId}.mp3`);
+            await execAsync(`ffmpeg -f concat -safe 0 -i "${concatList}" -c copy "${ttsPath}" -y`);
+            await fs.unlink(concatList).catch(() => {});
+            for (const f of chunkFiles) await fs.unlink(f).catch(() => {});
+          }
+
+          // 5. Single-pass merge: scale video + replace audio (no intermediate files)
+          await execAsync(
+            `ffmpeg -i "${originalVideoPath}" -i "${ttsPath}" ` +
+            `-filter_complex "[0:v]scale=${scale}[vout]" ` +
+            `-map "[vout]" -map 1:a ` +
+            `-c:v libx264 -preset ultrafast -crf 23 -threads 0 ` +
+            `-c:a aac -b:a 192k -shortest "${outputPath}" -y`
+          );
+          await fs.unlink(ttsPath).catch(() => {});
+
+          res.json({ downloadUrl: `/api/analysis/download/${outputFilename}`, filename: outputFilename });
+          return;
+
         } catch (err) {
           req.log.warn({ err }, "Audio replacement failed, falling back to standard export");
-          for (const f of segmentFiles) await fs.unlink(f).catch(() => {});
+          for (const f of chunkFiles) await fs.unlink(f).catch(() => {});
         }
       }
     }
