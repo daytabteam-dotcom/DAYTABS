@@ -209,4 +209,38 @@ router.post("/:jobId/export", async (req, res) => {
   }
 });
 
+router.get("/download/:filename", async (req, res) => {
+  try {
+    const { filename } = req.params;
+    if (!filename || filename.includes("..") || filename.includes("/")) {
+      res.status(400).json({ error: "Invalid filename" });
+      return;
+    }
+
+    const exportDir = path.join(os.tmpdir(), "daytabs-exports");
+    const filePath = path.join(exportDir, filename);
+
+    try {
+      await fs.access(filePath);
+    } catch {
+      res.status(404).json({ error: "File not found or has expired" });
+      return;
+    }
+
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.setHeader("Content-Type", "video/mp4");
+
+    const { createReadStream } = await import("fs");
+    const stream = createReadStream(filePath);
+    stream.pipe(res as unknown as NodeJS.WritableStream);
+
+    stream.on("end", () => {
+      fs.unlink(filePath).catch(() => {});
+    });
+  } catch (err) {
+    req.log.error({ err }, "Download error");
+    res.status(500).json({ error: "Download failed" });
+  }
+});
+
 export default router;
