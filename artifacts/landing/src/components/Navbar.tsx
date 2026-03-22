@@ -42,7 +42,7 @@ export default function Navbar() {
     >
       <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
         <Link href="/" className="flex items-center gap-2 cursor-pointer" data-testid="link-logo">
-          <img src="/landing/images/logo.jpg" alt="DayTabs" className="w-8 h-8 rounded-lg object-contain" />
+          <img src="/images/logo.jpg" alt="DayTabs" className="w-8 h-8 rounded-lg object-contain" />
           <span className="font-bold text-lg gradient-text">DayTabs</span>
         </Link>
 

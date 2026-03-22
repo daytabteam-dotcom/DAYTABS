@@ -40,7 +40,7 @@ export default function LoginPage() {
       >
         <div className="text-center mb-8">
           <Link href="/" className="inline-flex items-center gap-2 mb-6 cursor-pointer" data-testid="link-logo-login">
-            <img src="/landing/images/logo.jpg" alt="DayTabs" className="w-10 h-10 rounded-xl object-contain" />
+            <img src="/images/logo.jpg" alt="DayTabs" className="w-10 h-10 rounded-xl object-contain" />
             <span className="font-bold text-xl gradient-text">DayTabs</span>
           </Link>
           <h1 className="text-3xl font-bold mb-2">Welcome back</h1>

@@ -42,6 +42,6 @@ export const authApi = {
 };
 
 export function getCoreAppUrl(token?: string): string {
-  const base = "/";
+  const base = "/panel/";
   return token ? `${base}?token=${token}` : base;
 }
