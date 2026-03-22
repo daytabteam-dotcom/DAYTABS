@@ -251,14 +251,8 @@ router.post("/:jobId/export", async (req, res) => {
           vocabularyStyle?: string; catchphrases?: string[]; emotionalRange?: string;
         } | null;
 
-        const styleSystemPrompt = [
-          "You are a professional voice actor performing text-to-speech. Read the given text verbatim — do not add or omit words.",
-          sp?.personality ? `Speak with a ${sp.personality} personality.` : "",
-          sp?.tone ? `Use a ${sp.tone} tone throughout.` : "",
-          sp?.vocabularyStyle ? `Mirror this register in your delivery: ${sp.vocabularyStyle}.` : "",
-          sp?.emotionalRange && sp.emotionalRange !== "balanced"
-            ? `Vary your emotional delivery to match: ${sp.emotionalRange}.` : "",
-        ].filter(Boolean).join(" ");
+        // Speaker speech rate used to fine-tune TTS pre-speed adjustment
+        const speakerWpm = sp?.speechRateWpm && sp.speechRateWpm > 0 ? sp.speechRateWpm : null;
 
         const segmentFiles: string[] = [];
 
@@ -266,16 +260,22 @@ router.post("/:jobId/export", async (req, res) => {
           if (segments.length > 0) {
             // ── Per-segment timestamp-aware dubbing ─────────────────────────
 
-            // 1. Batch-translate all segments in one API call
+            // 1. Batch-translate with duration hints for natural length matching
             let translatedTexts: string[] = segments.map((s) => s.text);
             try {
-              const batchPrompt = segments.map((s, i) => `[${i}] ${s.text}`).join("\n");
+              const batchPrompt = segments
+                .map((s, i) => `[${i}] (${(s.end - s.start).toFixed(1)}s) ${s.text}`)
+                .join("\n");
               const transResp = await openai.chat.completions.create({
                 model: "gpt-4o-mini",
                 messages: [
                   {
                     role: "system",
-                    content: `You are a professional translator. Translate each numbered segment to ${targetLanguage}. Return ONLY the translations in the exact same [N] format, one per line, with no extra text.`,
+                    content: `You are a professional dubbing translator. Translate each numbered segment to ${targetLanguage}.
+Rules:
+- Keep translations natural and conversational — not literal
+- Match the duration shown in parentheses: keep translated text roughly the same spoken length
+- Return ONLY the translations in the exact same [N] format, one per line, no extra text`,
                   },
                   { role: "user", content: batchPrompt },
                 ],
@@ -297,7 +297,12 @@ router.post("/:jobId/export", async (req, res) => {
             interface SegmentAudio { filePath: string; startMs: number; targetDurS: number; actualDurS: number; }
             const segmentAudios: (SegmentAudio | null)[] = new Array(segments.length).fill(null);
 
-            // 2. Generate TTS in parallel batches of 5
+            // Estimate natural TTS duration from word count
+            // Default ~150 WPM ≈ 2.5 words/sec; use speaker's WPM if available
+            const wordsPerSec = (speakerWpm || 150) / 60;
+            const estimateNaturalDur = (text: string) => text.trim().split(/\s+/).length / wordsPerSec;
+
+            // 2. Generate TTS in parallel batches of 5, with pre-adjusted speed
             const BATCH = 5;
             for (let b = 0; b < segments.length; b += BATCH) {
               const batch = segments.slice(b, b + BATCH);
@@ -307,9 +312,16 @@ router.post("/:jobId/export", async (req, res) => {
                 if (!text) return;
 
                 const startMs = Math.round(seg.start * 1000);
-                const targetDurS = Math.max(seg.end - seg.start, 0.1);
+                const targetDurS = Math.max(seg.end - seg.start, 0.3);
 
-                const ttsBuffer = await textToSpeechFast(text, chosenVoice);
+                // Pre-adjust TTS speed so generated audio is close to target duration
+                // This avoids heavy post-processing which sounds robotic
+                const naturalDurS = estimateNaturalDur(text);
+                const desiredRatio = naturalDurS / targetDurS;
+                // Cap between 0.85x (slightly slower) and 1.1x (10% faster max at generation)
+                const ttsSpeed = Math.min(Math.max(desiredRatio, 0.85), 1.1);
+
+                const ttsBuffer = await textToSpeechFast(text, chosenVoice, ttsSpeed);
 
                 const segPath = path.join(exportDir, `seg_${exportId}_${i}.mp3`);
                 await fs.writeFile(segPath, ttsBuffer);
@@ -321,34 +333,52 @@ router.post("/:jobId/export", async (req, res) => {
                 const actualDurS = parseFloat(probOut.trim()) || targetDurS;
 
                 segmentAudios[i] = { filePath: segPath, startMs, targetDurS, actualDurS };
+                req.log.info({ i, startMs, targetDurS, actualDurS, ttsSpeed: ttsSpeed.toFixed(2) }, "Segment TTS done");
               }));
             }
 
             const validSegments = segmentAudios.filter((s): s is SegmentAudio => s !== null);
 
-            // 3. Build ffmpeg filter_complex: atempo + adelay + amix
-            const buildAtempoChain = (ratio: number): string => {
-              const capped = Math.min(Math.max(ratio, 0.5), 4.0);
-              if (capped <= 2.0 && capped >= 0.5) return `atempo=${capped.toFixed(4)},`;
-              // chain two filters for ratios > 2.0 or < 0.5
-              const half = Math.sqrt(capped);
-              return `atempo=${half.toFixed(4)},atempo=${half.toFixed(4)},`;
-            };
-
-            const inputArgs = validSegments.map((s) => `-i "${s.filePath}"`).join(" ");
-            const filterParts = validSegments.map((s, i) => {
+            // 3. Per-segment: apply minimal atempo (max 1.15x) or pad with silence
+            //    Process each segment file in-place before building the timeline
+            const MAX_ATEMPO = 1.15;
+            await Promise.all(validSegments.map(async (s, i) => {
               const ratio = s.actualDurS / s.targetDurS;
-              const atempoChain = ratio > 1.05 ? buildAtempoChain(ratio) : "";
-              return `[${i}:a]${atempoChain}adelay=${s.startMs}|${s.startMs}[a${i}]`;
-            });
+
+              if (ratio > 1.02) {
+                // Audio is too long — speed up slightly (max 1.15x)
+                const atempo = Math.min(ratio, MAX_ATEMPO).toFixed(4);
+                const adjustedPath = path.join(exportDir, `seg_adj_${exportId}_${i}.mp3`);
+                await execAsync(`ffmpeg -i "${s.filePath}" -filter:a "atempo=${atempo}" "${adjustedPath}" -y`);
+                await fs.unlink(s.filePath).catch(() => {});
+                s.filePath = adjustedPath;
+                s.actualDurS = s.actualDurS / parseFloat(atempo);
+              } else if (ratio < 0.95) {
+                // Audio is too short — pad end with silence to fill the slot
+                const padDurS = (s.targetDurS - s.actualDurS).toFixed(3);
+                const paddedPath = path.join(exportDir, `seg_pad_${exportId}_${i}.mp3`);
+                await execAsync(
+                  `ffmpeg -i "${s.filePath}" -af "apad=pad_dur=${padDurS}" -t ${s.targetDurS.toFixed(3)} "${paddedPath}" -y`
+                );
+                await fs.unlink(s.filePath).catch(() => {});
+                s.filePath = paddedPath;
+                s.actualDurS = s.targetDurS;
+              }
+            }));
+
+            // 4. Build timeline: adelay each segment to its original start time, then amix
+            const inputArgs = validSegments.map((s) => `-i "${s.filePath}"`).join(" ");
+            const filterParts = validSegments.map((s, i) =>
+              `[${i}:a]adelay=${s.startMs}|${s.startMs}[a${i}]`
+            );
             const mixIn = validSegments.map((_, i) => `[a${i}]`).join("");
             const filterComplex = `${filterParts.join(";")};${mixIn}amix=inputs=${validSegments.length}:duration=longest:normalize=0[out]`;
 
             const dubbedPath = path.join(exportDir, `dubbed_${exportId}.mp3`);
             await execAsync(`ffmpeg ${inputArgs} -filter_complex "${filterComplex}" -map "[out]" "${dubbedPath}" -y`);
 
-            // Cleanup segment files
-            for (const f of segmentFiles) await fs.unlink(f).catch(() => {});
+            // Cleanup all segment files (original + any adjusted/padded versions)
+            for (const s of validSegments) await fs.unlink(s.filePath).catch(() => {});
 
             // 4. Scale video (ultrafast) then merge dubbed audio
             const scaledPath = path.join(exportDir, `scaled_${exportId}.mp4`);

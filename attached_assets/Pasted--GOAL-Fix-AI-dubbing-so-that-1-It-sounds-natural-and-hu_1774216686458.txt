@@ -1,0 +1,129 @@
+🎯 GOAL:
+
+Fix AI dubbing so that:
+1. It sounds natural and human-like (not robotic)
+2. It is properly synchronized with the original speaker’s timing
+
+--------------------------------------------------
+
+⚠️ CURRENT ISSUE:
+
+- Dubbing sounds robotic
+- Audio is not synced with speaker timing
+- Entire audio is generated as one block
+
+--------------------------------------------------
+
+✅ REQUIRED CHANGES (MODIFY EXISTING PIPELINE)
+
+### 1. USE TIMESTAMPED TRANSCRIPTION
+
+In the current Whisper transcription step:
+
+- Enable word-level timestamps
+- Group words into sentences
+
+Expected structure:
+
+[
+  {
+    "sentence": "...",
+    "start": 0.0,
+    "end": 3.2
+  }
+]
+
+Do NOT change how Whisper is integrated — only extend output.
+
+--------------------------------------------------
+
+### 2. MODIFY TRANSLATION STEP
+
+Instead of translating full transcript:
+
+- Translate EACH sentence individually
+- Keep translations natural and conversational
+- Keep sentence length close to original duration
+
+Do NOT change translation provider — only adjust logic.
+
+--------------------------------------------------
+
+### 3. ADD SPEAKER STYLE EXTRACTION
+
+From existing transcript:
+
+Extract:
+- tone
+- energy
+- speaking speed
+
+Store as a simple object and reuse in TTS.
+
+Do NOT add heavy processing.
+
+--------------------------------------------------
+
+### 4. MODIFY TTS GENERATION (CRITICAL)
+
+Replace current “single audio generation” with:
+
+➡️ Generate audio PER SENTENCE
+
+For each sentence:
+- Use existing OpenAI TTS
+- Add style instructions:
+
+"Speak in a [tone] tone with [energy] energy at a [speed] pace. Use natural variation, avoid monotone, and sound conversational."
+
+DO NOT change TTS provider.
+
+--------------------------------------------------
+
+### 5. ADD TIMING ALIGNMENT
+
+For each generated sentence audio:
+
+- Calculate original duration:
+   duration = end - start
+
+- Compare with generated audio length
+
+IF too long:
+   - Slightly increase playback speed (max 1.1x)
+
+IF too short:
+   - Add small silence padding
+
+Use ffmpeg for:
+- speed adjustment
+- silence padding
+
+--------------------------------------------------
+
+### 6. MERGE AUDIO TIMELINE
+
+- Place each sentence audio at its original start time
+- Ensure no overlaps
+- Keep gaps natural
+
+Replace the old final audio generation with this timeline-based merge.
+
+--------------------------------------------------
+
+### 7. KEEP EVERYTHING ELSE UNCHANGED
+
+- Do NOT modify UI
+- Do NOT modify upload flow
+- Do NOT change APIs
+- Do NOT break existing features
+
+Only upgrade dubbing logic
+
+--------------------------------------------------
+
+🎯 FINAL RESULT:
+
+- Dubbing sounds human and expressive
+- Audio matches speaker timing
+- System remains lightweight and compatible with Replit
