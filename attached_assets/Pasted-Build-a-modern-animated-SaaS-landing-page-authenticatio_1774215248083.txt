@@ -1,0 +1,240 @@
+Build a modern, animated SaaS landing page + authentication gateway for an AI video analysis platform.
+
+IMPORTANT:
+- This project is ONLY a landing page + auth system
+- The CORE APP already exists separately
+- After login/signup, users MUST be redirected to the core app
+- Focus heavily on UI/UX, animations, and conversion
+
+--------------------------------------------------
+
+🧠 PRODUCT SUMMARY:
+
+This platform allows users to:
+- Upload videos
+- Get AI-powered video quality analysis (lighting, sound, clarity)
+- Get content feedback (hooks, storytelling, engagement)
+- Get SEO insights (titles, keywords, discoverability)
+- Generate transcripts
+- Translate and dub videos (premium)
+
+--------------------------------------------------
+
+🎨 UI / DESIGN SYSTEM:
+
+- Theme: Dark modern SaaS
+- Primary color: Purple gradient (#7B61FF → #A78BFA)
+- Style: Minimal, futuristic, glassmorphism feel
+- Font: Inter
+- Rounded corners: 2xl
+- Soft shadows
+- Smooth animations using Framer Motion
+
+--------------------------------------------------
+
+🌐 LANDING PAGE (SCROLL STORYTELLING)
+
+Create a guided, scroll-based experience:
+
+1. HERO SECTION
+- Headline: "Turn Any Video Into Actionable Insights with AI"
+- Subheadline explaining value
+- CTA buttons:
+   - "Get Started"
+   - "See How It Works"
+- Animated background (gradient or particles)
+
+---
+
+2. STEP 1 — UPLOAD
+- Visual animation of drag & drop upload
+- Text: "Upload your video in seconds"
+
+---
+
+3. STEP 2 — AI PROCESSING
+- Animation: waveform, text extraction, AI processing
+- Text: "Our AI analyzes every detail"
+
+---
+
+4. STEP 3 — INSIGHTS DASHBOARD
+- Animated cards:
+   - Quality Score
+   - Content Feedback
+   - SEO Suggestions
+- Should feel like a real product preview
+
+---
+
+5. STEP 4 — ADVANCED FEATURES
+- Show:
+   - Transcript
+   - Translation
+   - Dubbing
+- Animate text changing languages
+
+---
+
+6. FINAL CTA
+- "Start Growing Your Content Today"
+- CTA: Sign Up
+
+--------------------------------------------------
+
+🔐 AUTHENTICATION (GOOGLE + EMAIL)
+
+Implement:
+- Email/password signup & login
+- Google OAuth login
+
+AUTH FLOW:
+
+1. User clicks "Login" or "Sign Up"
+2. Can choose:
+   - Email/password
+   - Continue with Google
+
+3. After successful authentication:
+   - Create or retrieve user in database
+   - Generate JWT token
+
+4. REDIRECT USER TO CORE APP:
+
+- Use environment variable:
+   CORE_APP_URL=https://your-core-app.com
+
+- Redirect with token:
+   https://your-core-app.com?token=USER_JWT
+
+--------------------------------------------------
+
+🔑 TOKEN HANDLING:
+
+- Use JWT for authentication
+- Token should include:
+   - user_id
+   - email
+
+- Expiry: reasonable (e.g. 7 days)
+
+- Secure handling:
+   - Do NOT expose sensitive data
+   - Prefer httpOnly cookies if same domain
+   - Otherwise pass via URL for MVP
+
+--------------------------------------------------
+
+⚙️ ENV VARIABLES:
+
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+JWT_SECRET=
+CORE_APP_URL=
+
+--------------------------------------------------
+
+💰 PRICING PAGE
+
+Create 3 pricing tiers:
+
+FREE PLAN:
+- Upload 1 video
+- Limited quality report
+- Limited content report
+- Limited SEO report
+- 1 transcript
+
+PREMIUM PLAN ($25/month):
+- Upload up to 20 videos
+- Full quality report
+- Full content report
+- Full SEO report
+- Transcript
+- Translation
+- Dubbing
+
+PROFESSIONAL PLAN ($40/month):
+- Upload up to 100 videos
+- All features included
+
+UI:
+- Card layout
+- Highlight Premium as "Most Popular"
+- Smooth hover animations
+- CTA buttons
+
+--------------------------------------------------
+
+📩 CONTACT US PAGE
+
+Form fields:
+- Full Name
+- Email
+- Message
+
+Backend:
+- Send message to site owner email (use Nodemailer or API)
+- Show success message after submit
+
+--------------------------------------------------
+
+🧭 NAVIGATION
+
+Top navbar:
+- Logo
+- Features
+- Pricing
+- Contact
+- Login / Sign Up
+
+- Sticky on scroll
+- Smooth scrolling
+
+--------------------------------------------------
+
+⚙️ TECH STACK
+
+Frontend:
+- React (Vite or Next.js)
+- TailwindCSS
+- Framer Motion
+
+Backend:
+- Node.js + Express
+
+Database:
+- SQLite or lightweight DB
+
+Auth:
+- Google OAuth
+- JWT-based authentication
+
+--------------------------------------------------
+
+✨ EXTRA FEATURES
+
+- Fully responsive
+- Smooth scroll animations
+- Section-based animation triggers
+- Loading states for auth
+- "Redirecting..." screen after login
+- Error handling for auth failures
+
+--------------------------------------------------
+
+🎯 GOAL
+
+The landing page should:
+- Feel like a guided demo
+- Be visually impressive
+- Clearly explain the product in under 30 seconds
+- Drive users to sign up
+
+--------------------------------------------------
+
+OUTPUT:
+
+- Full working frontend + backend
+- Clean structure
+- Instructions to run

@@ -25,7 +25,8 @@ DayTabs is a full-stack AI-powered video analysis web application. Users upload 
 artifacts-monorepo/
 ├── artifacts/
 │   ├── api-server/         # Express API server
-│   └── daytabs/            # React + Vite frontend (DayTabs app)
+│   ├── daytabs/            # React + Vite frontend (DayTabs core app)
+│   └── landing/            # React + Vite landing page + auth gateway
 ├── lib/
 │   ├── api-spec/           # OpenAPI spec + Orval codegen config
 │   ├── api-client-react/   # Generated React Query hooks
