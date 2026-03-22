@@ -22,7 +22,9 @@ const SMTP_PASS = process.env.SMTP_PASS || "";
 const CONTACT_EMAIL = process.env.CONTACT_EMAIL || SMTP_USER;
 
 function getPublicBaseUrl(req: import("express").Request): string {
-  const replitDomain = process.env.REPLIT_DEV_DOMAIN || (process.env.REPLIT_DOMAINS || "").split(",")[0]?.trim();
+  const replitDomains = (process.env.REPLIT_DOMAINS || "").split(",").map(d => d.trim()).filter(Boolean);
+  // In production deployments REPLIT_DOMAINS contains the public *.replit.app domain first
+  const replitDomain = replitDomains[0] || process.env.REPLIT_DEV_DOMAIN;
   if (replitDomain) return `https://${replitDomain}`;
   const forwarded = req.get("x-forwarded-host");
   if (forwarded) return `${req.get("x-forwarded-proto") || "https"}://${forwarded}`;
@@ -30,8 +32,22 @@ function getPublicBaseUrl(req: import("express").Request): string {
 }
 
 function getGoogleRedirectUri(req: import("express").Request): string {
+  // Allow explicit override via env var — set this in production secrets to pin the URI
+  if (process.env.GOOGLE_REDIRECT_URI) return process.env.GOOGLE_REDIRECT_URI;
   return `${getPublicBaseUrl(req)}/api/auth/google/callback`;
 }
+
+// Debug endpoint — visit /api/auth/debug-oauth to see the exact redirect URI this server will use
+router.get("/debug-oauth", (req, res) => {
+  const redirectUri = getGoogleRedirectUri(req);
+  res.json({
+    redirectUri,
+    authorizedJsOrigin: redirectUri.replace("/api/auth/google/callback", ""),
+    authorizedRedirectUri: redirectUri,
+    envDomains: process.env.REPLIT_DOMAINS || "(not set)",
+    envDevDomain: process.env.REPLIT_DEV_DOMAIN || "(not set)",
+  });
+});
 
 function signToken(userId: number, email: string, name?: string | null) {
   return jwt.sign({ user_id: userId, email, name: name || email.split("@")[0] }, JWT_SECRET, { expiresIn: "7d" });
