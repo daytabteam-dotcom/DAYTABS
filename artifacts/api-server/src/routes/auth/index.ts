@@ -25,8 +25,8 @@ function getGoogleRedirectUri(req: import("express").Request): string {
   return `${getPublicBaseUrl(req)}/api/auth/google/callback`;
 }
 
-function signToken(userId: number, email: string) {
-  return jwt.sign({ user_id: userId, email }, JWT_SECRET, { expiresIn: "7d" });
+function signToken(userId: number, email: string, name?: string | null) {
+  return jwt.sign({ user_id: userId, email, name: name || email.split("@")[0] }, JWT_SECRET, { expiresIn: "7d" });
 }
 
 router.post("/signup", async (req, res) => {
@@ -43,7 +43,7 @@ router.post("/signup", async (req, res) => {
     }
     const passwordHash = await bcrypt.hash(password, 12);
     const [user] = await db.insert(usersTable).values({ email, name: name || null, passwordHash }).returning();
-    const token = signToken(user.id, user.email);
+    const token = signToken(user.id, user.email, user.name);
     res.json({ token, user: { id: user.id, email: user.email, name: user.name } });
   } catch (err) {
     req.log.error({ err }, "Signup error");
@@ -68,7 +68,7 @@ router.post("/login", async (req, res) => {
       res.status(401).json({ error: "Invalid email or password" });
       return;
     }
-    const token = signToken(user.id, user.email);
+    const token = signToken(user.id, user.email, user.name);
     res.json({ token, user: { id: user.id, email: user.email, name: user.name } });
   } catch (err) {
     req.log.error({ err }, "Login error");
@@ -122,7 +122,7 @@ router.get("/google/callback", async (req, res) => {
     } else if (!user.googleId) {
       await db.update(usersTable).set({ googleId: payload.sub }).where(eq(usersTable.id, user.id));
     }
-    const token = signToken(user.id, user.email);
+    const token = signToken(user.id, user.email, user.name);
     const destination = CORE_APP_URL.endsWith("/") ? CORE_APP_URL : `${CORE_APP_URL}/`;
     res.redirect(`${destination}?token=${token}`);
   } catch (err) {

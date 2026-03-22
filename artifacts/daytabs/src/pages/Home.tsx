@@ -3,6 +3,7 @@ import { useUploadVideoWithFile, useAnalysisPolling, useAnalysisResults } from "
 import { UploadSection } from "@/components/UploadSection";
 import { ProgressIndicator } from "@/components/ProgressIndicator";
 import { ResultsContainer } from "@/components/results/ResultsContainer";
+import { UserProfileMenu } from "@/components/UserProfileMenu";
 import { useToast } from "@/hooks/use-toast";
 import { AlertCircle } from "lucide-react";
 
@@ -68,14 +69,17 @@ export default function Home() {
             <img src={`${import.meta.env.BASE_URL}images/logo.jpg`} alt="DayTabs" className="w-10 h-10 object-contain rounded-lg drop-shadow-[0_0_15px_rgba(124,58,237,0.5)]" />
             <span className="text-2xl font-display font-bold tracking-tight text-white">Day<span className="text-primary">Tabs</span></span>
           </div>
-          {jobId && (
-            <button 
-              onClick={handleReset}
-              className="px-5 py-2.5 text-sm font-semibold rounded-xl bg-primary hover:bg-primary/80 text-white shadow-lg shadow-primary/30 transition-all hover:-translate-y-0.5 active:translate-y-0"
-            >
-              Analyze New Video
-            </button>
-          )}
+          <div className="flex items-center gap-3">
+            {jobId && (
+              <button 
+                onClick={handleReset}
+                className="px-5 py-2.5 text-sm font-semibold rounded-xl bg-primary hover:bg-primary/80 text-white shadow-lg shadow-primary/30 transition-all hover:-translate-y-0.5 active:translate-y-0"
+              >
+                Analyze New Video
+              </button>
+            )}
+            <UserProfileMenu />
+          </div>
         </div>
       </header>
 
