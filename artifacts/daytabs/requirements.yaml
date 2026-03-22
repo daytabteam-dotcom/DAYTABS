@@ -1,0 +1,18 @@
+packages:
+  "framer-motion": "For smooth transitions between analysis states and tabs"
+  "react-dropzone": "For premium drag-and-drop video upload experience"
+  "recharts": "For the quality score gauge and data visualization"
+  "clsx": "For conditional class merging"
+  "tailwind-merge": "For safely merging Tailwind utility classes"
+
+images:
+  - path: "artifacts/daytabs/public/images/logo.png"
+    description: "Minimal geometric logo mark resembling a stylized 'D' and 'T' intertwined, in deep violet and electric purple on a transparent background, sleek modern tech vibe"
+    aspect_ratio: "1:1"
+  - path: "artifacts/daytabs/public/images/hero-bg.png"
+    description: "Abstract dark background with deep indigo and vibrant purple gradient mesh, soft light leaks, subtle glowing orbs, very dark and premium aesthetic"
+    aspect_ratio: "16:9"
+
+notes:
+  - The generated orval hook for upload does not explicitly accept a File due to OpenAPI schema limitations, so a custom hook wrapping fetch is implemented.
+  - Polling for analysis status is implemented using TanStack Query's refetchInterval.

@@ -1,0 +1,177 @@
+DayTabs – Full-Stack Web App Specification
+IMPORTANT:
+* This app MUST process real video data only — no mock data, no hallucinations.
+* Keep it lightweight
+* Focus on working end-to-end.
+
+CORE FLOW
+1. User uploads a video (max 1 hour).
+2. User selects platform:
+    * YouTube (Long / Shorts)
+    * TikTok
+    * Instagram
+    * LinkedIn
+    * X
+3. Optional settings:
+    * Translate subtitles → select target language
+    * Replace video speaking language → select target language
+
+BACKEND PIPELINE
+STEP 1: Extract audio
+* Use ffmpeg:
+
+ffmpeg -i input.mp4 -q:a 0 -map a audio.mp3
+
+STEP 2: Extract frames (lightweight)
+* Use ffmpeg:
+
+ffmpeg -i input.mp4 -vf fps=1/3 frames/frame_%03d.jpg
+
+* Limit to first 5 frames (to reduce load)
+STEP 3: Transcription (REAL captions)
+* Use OpenAI Whisper API
+* Return transcript text + timestamps
+* STOP if transcription fails
+
+STEP 4: Visual Analysis (REAL)
+* Send extracted frames (base64) to OpenAI vision model
+* Analyze:
+    * Lighting (low / medium / high) 
+    * Brightness (numeric + level + assessment + suggestions + effect on viewers)
+    * Contrast
+    * Sharpness / blur
+    * Stability / camera shake
+    * Color balance
+    * Background (clean / normal / distracting)
+    * Framing (good / poor)
+* Provide actionable improvements and viewer impact
+
+STEP 5: Audio Analysis
+* Analyze audio file for:
+    * Volume (RMS / consistency)
+    * Clarity / speech intelligibility (Whisper confidence score)
+    * Background noise (spectral analysis)
+    * Filler words (“ums”, “uhs”)
+    * Gaps in speech
+    * Audio-video sync (optional deep learning for lip-sync)
+* Return numeric + level + assessment + suggestions + effect on viewers
+* Remove filler words and gaps in preview video and when exporting
+
+STEP 6: Editing / Pacing
+* Analyze video frames for:
+    * Cuts / scene transitions
+    * Average shot duration
+* Suggest improvements to pacing (shorten static shots, smooth transitions)
+
+STEP 7: Content Analysis
+* Input: transcript + first 10–15 sec + platform
+* Return STRICT JSON:
+
+{
+  "hooks": ["..."],
+  "weak_sections": [
+    {"start":"...","end":"...","text":"...","color":"red/yellow","reason":"..."}
+  ],
+  "improvements":["..."],
+  "audience":"...",
+  "problem_solved":"...",
+  "hook_score": 0-100
+}
+
+* Highlight bad/unnecessary parts in red/yellow
+* Generate hooks from long videos for short-form content with timestamps
+* Platform-specific logic:
+    * TikTok → fast hook, engagement
+    * YouTube → retention, clarity
+    * LinkedIn → value, authority
+
+STEP 8: Quality Score
+* Combine: lighting, video quality, background, audio clarity, pacing
+* Return:
+
+{
+  "score": 0-100,
+  "suggestions": ["...","..."]
+}
+
+* Include actionable improvements
+
+STEP 9: SEO + Metadata (REAL)
+* Use transcript + platform + real SEO APIs for hashtags
+* Return:
+
+{
+  "titles":["3 options"],
+  "description":"...",
+  "hashtags":[{"tag":"...","effect":"..."}],
+  "timestamps":[{"time":"00:00","label":"..."}]
+}
+
+* Show impact of each tag on engagement
+* Optimize for platform and views
+* Hashtags should be SEO-friendly to increase video reach
+* Generate tags based on selected platform. ex: YouTube needs more hashtags and X less
+STEP 10: Subtitles + Audio Replacement
+* Return full transcript
+* Optionally translate subtitles via OpenAI
+* Optionally replace video speaking language with AI voice similar to speaker’s voice
+* Sync to original timestamps
+* Export video in: 240p, 480p, 720p, 1080p, 4K
+
+FRONTEND (React + Tailwind, DayTab style)
+Theme:
+* Dark: #0F172A
+* Accent: #7C3AED
+Layout:
+TOP:
+* Upload video
+* Select platform
+TABS:
+1. 🎥 Quality
+    * Score (big number)
+    * Lighting / brightness / contrast / sharpness / stability / color balance / background / framing
+    * Suggestions (actionable)
+2. 🧠 Content
+    * Hook score
+    * Hooks list
+    * Weak sections (red/yellow)
+    * Improvements
+    * Audience
+    * Problem solved
+3. 📈 SEO
+    * Titles (3)
+    * Description
+    * Hashtags (from API, with effect)
+    * Timestamps
+4. 🎤 Subtitles
+    * Full transcript
+    * Translate button
+    * Replace audio language button
+    * Export options
+
+UX / Loading Steps
+* Uploading
+* Extracting audio
+* Extracting frames
+* Transcribing
+* Analyzing visual/audio/content
+* Generating SEO + subtitles
+* Final export
+
+ERROR HANDLING
+* If ffmpeg fails → show error
+* If transcription fails → STOP
+* Never generate fake data — all outputs must be real
+
+LIMITS
+* Max video length: 60 minutes
+* Max frames analyzed: 5 (for speed, adjust dynamically for longer videos)
+
+GOAL
+Create a working MVP that:
+* Generates real captions from video
+* Analyzes visuals + audio + content
+* Gives actionable suggestions
+* Outputs SEO, metadata, and subtitles
+* Supports subtitle translation and audio language replacement
+* Allows export in multiple resolutions

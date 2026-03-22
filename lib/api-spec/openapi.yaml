@@ -1,15 +1,16 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: DayTabs Video Analysis API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: analysis
+    description: Video analysis operations
 paths:
   /healthz:
     get:
@@ -24,6 +25,131 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /analysis/upload:
+    post:
+      operationId: uploadVideo
+      tags: [analysis]
+      summary: Upload video for analysis
+      description: Upload a video file to start the analysis pipeline
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [platform]
+              properties:
+                platform:
+                  type: string
+                  enum: [youtube_long, youtube_shorts, tiktok, instagram, linkedin, x]
+                translateSubtitles:
+                  type: boolean
+                  default: false
+                subtitleLanguage:
+                  type: string
+                replaceAudio:
+                  type: boolean
+                  default: false
+                audioLanguage:
+                  type: string
+      responses:
+        "200":
+          description: Upload successful, returns job ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /analysis/{jobId}/status:
+    get:
+      operationId: getAnalysisStatus
+      tags: [analysis]
+      summary: Get analysis job status
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Job status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalysisStatus"
+        "404":
+          description: Job not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /analysis/{jobId}/result:
+    get:
+      operationId: getAnalysisResult
+      tags: [analysis]
+      summary: Get complete analysis results
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Complete analysis results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalysisResult"
+        "404":
+          description: Job not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "425":
+          description: Analysis not yet complete
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /analysis/{jobId}/export:
+    post:
+      operationId: exportVideo
+      tags: [analysis]
+      summary: Export processed video
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExportRequest"
+      responses:
+        "200":
+          description: Export download URL
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExportResponse"
+        "404":
+          description: Job not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +160,278 @@ components:
       required:
         - status
 
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        details:
+          type: string
+      required:
+        - error
+
+    UploadResponse:
+      type: object
+      properties:
+        jobId:
+          type: string
+        message:
+          type: string
+      required:
+        - jobId
+        - message
+
+    AnalysisStatus:
+      type: object
+      properties:
+        jobId:
+          type: string
+        status:
+          type: string
+          enum: [queued, uploading, extracting_audio, extracting_frames, transcribing, analyzing_visual, analyzing_audio, analyzing_content, generating_seo, generating_subtitles, complete, error]
+        progress:
+          type: number
+        currentStep:
+          type: string
+        error:
+          type: string
+      required:
+        - jobId
+        - status
+        - progress
+        - currentStep
+
+    AnalysisResult:
+      type: object
+      properties:
+        jobId:
+          type: string
+        platform:
+          type: string
+        quality:
+          $ref: "#/components/schemas/QualityResult"
+        content:
+          $ref: "#/components/schemas/ContentResult"
+        seo:
+          $ref: "#/components/schemas/SeoResult"
+        subtitles:
+          $ref: "#/components/schemas/SubtitlesResult"
+      required:
+        - jobId
+        - platform
+        - quality
+        - content
+        - seo
+        - subtitles
+
+    QualityResult:
+      type: object
+      properties:
+        score:
+          type: number
+        lighting:
+          $ref: "#/components/schemas/MetricItem"
+        brightness:
+          $ref: "#/components/schemas/MetricItem"
+        contrast:
+          $ref: "#/components/schemas/MetricItem"
+        sharpness:
+          $ref: "#/components/schemas/MetricItem"
+        stability:
+          $ref: "#/components/schemas/MetricItem"
+        colorBalance:
+          $ref: "#/components/schemas/MetricItem"
+        background:
+          $ref: "#/components/schemas/MetricItem"
+        framing:
+          $ref: "#/components/schemas/MetricItem"
+        audioVolume:
+          $ref: "#/components/schemas/MetricItem"
+        audioClarity:
+          $ref: "#/components/schemas/MetricItem"
+        backgroundNoise:
+          $ref: "#/components/schemas/MetricItem"
+        fillerWords:
+          $ref: "#/components/schemas/MetricItem"
+        pacing:
+          $ref: "#/components/schemas/MetricItem"
+        suggestions:
+          type: array
+          items:
+            type: string
+      required:
+        - score
+        - suggestions
+
+    MetricItem:
+      type: object
+      properties:
+        level:
+          type: string
+        numeric:
+          type: number
+        assessment:
+          type: string
+        suggestions:
+          type: array
+          items:
+            type: string
+        effect:
+          type: string
+      required:
+        - level
+        - assessment
+
+    ContentResult:
+      type: object
+      properties:
+        hookScore:
+          type: number
+        hooks:
+          type: array
+          items:
+            type: string
+        weakSections:
+          type: array
+          items:
+            $ref: "#/components/schemas/WeakSection"
+        improvements:
+          type: array
+          items:
+            type: string
+        audience:
+          type: string
+        problemSolved:
+          type: string
+      required:
+        - hookScore
+        - hooks
+        - weakSections
+        - improvements
+        - audience
+        - problemSolved
+
+    WeakSection:
+      type: object
+      properties:
+        start:
+          type: string
+        end:
+          type: string
+        text:
+          type: string
+        color:
+          type: string
+          enum: [red, yellow]
+        reason:
+          type: string
+      required:
+        - start
+        - end
+        - text
+        - color
+        - reason
+
+    SeoResult:
+      type: object
+      properties:
+        titles:
+          type: array
+          items:
+            type: string
+        description:
+          type: string
+        hashtags:
+          type: array
+          items:
+            $ref: "#/components/schemas/HashtagItem"
+        timestamps:
+          type: array
+          items:
+            $ref: "#/components/schemas/TimestampItem"
+      required:
+        - titles
+        - description
+        - hashtags
+        - timestamps
+
+    HashtagItem:
+      type: object
+      properties:
+        tag:
+          type: string
+        effect:
+          type: string
+      required:
+        - tag
+        - effect
+
+    TimestampItem:
+      type: object
+      properties:
+        time:
+          type: string
+        label:
+          type: string
+      required:
+        - time
+        - label
+
+    SubtitlesResult:
+      type: object
+      properties:
+        transcript:
+          type: array
+          items:
+            $ref: "#/components/schemas/TranscriptSegment"
+        fullText:
+          type: string
+        translatedTranscript:
+          type: array
+          items:
+            $ref: "#/components/schemas/TranscriptSegment"
+        translatedLanguage:
+          type: string
+      required:
+        - transcript
+        - fullText
+
+    TranscriptSegment:
+      type: object
+      properties:
+        start:
+          type: number
+        end:
+          type: number
+        text:
+          type: string
+      required:
+        - start
+        - end
+        - text
+
+    ExportRequest:
+      type: object
+      properties:
+        resolution:
+          type: string
+          enum: [240p, 480p, 720p, 1080p, 4k]
+        removeFillerWords:
+          type: boolean
+          default: false
+        includeSubtitles:
+          type: boolean
+          default: false
+      required:
+        - resolution
+
+    ExportResponse:
+      type: object
+      properties:
+        downloadUrl:
+          type: string
+        filename:
+          type: string
+      required:
+        - downloadUrl
+        - filename

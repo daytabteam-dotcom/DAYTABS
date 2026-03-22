@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "DayTabs"
+version = "1.0.0"
+id = "artifacts/daytabs"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 19334
+
+[services.development]
+run = "pnpm --filter @workspace/daytabs run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/daytabs", "run", "build" ]
+publicDir = "artifacts/daytabs/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "19334"
+BASE_PATH = "/"
