@@ -1,0 +1,112 @@
+📄 Terms of Service
+1. Acceptance of Terms
+
+By accessing or using our platform, you agree to be bound by these Terms of Service. If you do not agree, you may not use the service.
+
+2. Description of Service
+
+Our platform provides AI-powered video analysis, including:
+
+Video quality insights
+Content and SEO analysis
+Transcription, translation, and dubbing features
+
+Access to features depends on your subscription plan.
+
+3. User Accounts
+You must provide accurate information when signing up.
+You are responsible for maintaining the security of your account.
+You are responsible for all activity under your account.
+4. Subscription & Payments
+Billing
+Paid plans are billed on a monthly subscription basis.
+By subscribing, you authorize us to charge your payment method automatically each billing cycle.
+No Refund Policy
+All payments are final and non-refundable.
+We do not provide refunds for partial usage, unused time, or accidental purchases.
+Cancellation
+You may cancel your subscription at any time.
+Cancellation will take effect at the end of the current billing period.
+You will continue to have access to paid features until that period ends.
+Price Changes
+We may update subscription pricing.
+Any price changes will be communicated at least 2 weeks in advance.
+Continued use after the change means you accept the new pricing.
+5. Usage Restrictions
+
+You agree NOT to:
+
+Use the platform for illegal or harmful activities
+Upload content that violates copyright or third-party rights
+Attempt to reverse engineer or exploit the system
+6. Service Availability
+We do not guarantee uninterrupted or error-free service.
+Features may be updated, modified, or discontinued at any time.
+7. Limitation of Liability
+
+We are not liable for:
+
+Any indirect, incidental, or consequential damages
+Loss of data, revenue, or business opportunities
+
+Use the service at your own risk.
+
+8. Termination
+
+We reserve the right to suspend or terminate accounts that violate these terms.
+
+9. Changes to Terms
+
+We may update these Terms at any time. Continued use of the platform means you accept the updated Terms.
+
+🔐 Privacy Policy
+1. Information We Collect
+Account Information
+Name
+Email address
+Authentication data (e.g., Google login)
+Usage Data
+Uploaded videos
+Generated transcripts and analysis
+Interaction with features
+2. How We Use Your Data
+
+We use your data to:
+
+Provide and improve our services
+Process video analysis and AI features
+Communicate updates and important information
+3. Data Storage & Security
+We take reasonable measures to protect your data
+However, no system is 100% secure
+You use the service at your own risk
+4. Data Sharing
+
+We do NOT sell your personal data.
+
+We may share data with:
+
+Trusted service providers (e.g., hosting, AI processing)
+Legal authorities if required by law
+5. User Content
+You retain ownership of your uploaded content
+By using the service, you grant us permission to process your content for providing features
+6. Data Retention
+We retain data as long as necessary to provide the service
+You may request deletion of your data
+7. Cookies & Tracking
+We may use cookies to improve user experience and authentication
+You can disable cookies in your browser settings
+8. Third-Party Services
+We may use third-party services (e.g., Google Authentication)
+Their privacy policies also apply
+9. Your Rights
+
+You may:
+
+Access your data
+Request corrections
+Request deletion
+10. Changes to Privacy Policy
+
+We may update this policy. Continued use of the platform means acceptance of changes.
