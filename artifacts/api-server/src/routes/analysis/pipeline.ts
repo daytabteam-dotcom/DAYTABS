@@ -6,63 +6,21 @@ import { db } from "@workspace/db";
 import { analysisJobsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { logger } from "../../lib/logger";
+import { openai } from "@workspace/integrations-openai-ai-server";
+import { speechToText } from "@workspace/integrations-openai-ai-server/audio";
 
 const execAsync = promisify(exec);
 
-const openaiBaseUrl = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
-const openaiApiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
-
-if (!openaiBaseUrl || !openaiApiKey) {
-  throw new Error("Missing OpenAI AI Integrations env vars");
-}
-
 async function callOpenAI(body: object): Promise<unknown> {
-  const response = await fetch(`${openaiBaseUrl}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${openaiApiKey}`,
-    },
-    body: JSON.stringify(body),
-  });
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`OpenAI error ${response.status}: ${text}`);
-  }
-  return response.json();
+  const response = await openai.chat.completions.create(body as Parameters<typeof openai.chat.completions.create>[0]);
+  return response;
 }
 
 async function transcribeAudio(audioPath: string): Promise<{ text: string; segments: Array<{ start: number; end: number; text: string }> }> {
-  const FormData = (await import("form-data")).default;
-  const formData = new FormData();
   const audioBuffer = await fs.readFile(audioPath);
-  formData.append("file", audioBuffer, { filename: "audio.mp3", contentType: "audio/mpeg" });
-  formData.append("model", "gpt-4o-mini-transcribe");
-  formData.append("response_format", "json");
-
-  const response = await fetch(`${openaiBaseUrl}/audio/transcriptions`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${openaiApiKey}`,
-      ...formData.getHeaders(),
-    },
-    body: formData as unknown as BodyInit,
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Transcription failed ${response.status}: ${text}`);
-  }
-
-  const result = await response.json() as { text: string };
-  const fullText = result.text || "";
-
+  const fullText = await speechToText(audioBuffer, "mp3");
   const segments = buildApproximateSegments(fullText);
-
-  return {
-    text: fullText,
-    segments,
-  };
+  return { text: fullText, segments };
 }
 
 function buildApproximateSegments(text: string): Array<{ start: number; end: number; text: string }> {
