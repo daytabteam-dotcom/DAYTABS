@@ -37,9 +37,8 @@ async function transcribeAudio(audioPath: string): Promise<{ text: string; segme
   const formData = new FormData();
   const audioBuffer = await fs.readFile(audioPath);
   formData.append("file", audioBuffer, { filename: "audio.mp3", contentType: "audio/mpeg" });
-  formData.append("model", "whisper-1");
-  formData.append("response_format", "verbose_json");
-  formData.append("timestamp_granularities[]", "segment");
+  formData.append("model", "gpt-4o-mini-transcribe");
+  formData.append("response_format", "json");
 
   const response = await fetch(`${openaiBaseUrl}/audio/transcriptions`, {
     method: "POST",
@@ -55,11 +54,29 @@ async function transcribeAudio(audioPath: string): Promise<{ text: string; segme
     throw new Error(`Transcription failed ${response.status}: ${text}`);
   }
 
-  const result = await response.json() as { text: string; segments?: Array<{ start: number; end: number; text: string }> };
+  const result = await response.json() as { text: string };
+  const fullText = result.text || "";
+
+  const segments = buildApproximateSegments(fullText);
+
   return {
-    text: result.text,
-    segments: result.segments || [],
+    text: fullText,
+    segments,
   };
+}
+
+function buildApproximateSegments(text: string): Array<{ start: number; end: number; text: string }> {
+  const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
+  const wordsPerSecond = 2.5;
+  let currentTime = 0;
+  return sentences.map((sentence) => {
+    const wordCount = sentence.trim().split(/\s+/).length;
+    const duration = wordCount / wordsPerSecond;
+    const start = currentTime;
+    const end = currentTime + duration;
+    currentTime = end;
+    return { start: Math.round(start * 10) / 10, end: Math.round(end * 10) / 10, text: sentence.trim() };
+  });
 }
 
 async function updateJob(jobId: string, updates: Partial<typeof analysisJobsTable.$inferInsert>) {
