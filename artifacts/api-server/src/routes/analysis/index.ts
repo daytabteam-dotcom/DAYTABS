@@ -228,11 +228,48 @@ router.post("/:jobId/export", async (req, res) => {
         }
 
         const chosenVoice = (body.audioVoice as "alloy" | "echo" | "fable" | "onyx" | "nova" | "shimmer") || "alloy";
-        req.log.info({ jobId: params.jobId, voice: chosenVoice }, "Generating TTS audio");
+        req.log.info({ jobId: params.jobId, voice: chosenVoice }, "Generating style-guided TTS audio");
         const ttsPath = path.join(exportDir, `tts_${exportId}.mp3`);
 
+        const sp = (result?.speakerProfile ?? null) as {
+          personality?: string; tone?: string; speed?: string; speechRateWpm?: number;
+          vocabularyStyle?: string; catchphrases?: string[]; emotionalRange?: string;
+        } | null;
+
+        const styleSystemPrompt = [
+          "You are a professional voice actor performing text-to-speech.",
+          sp?.personality ? `Speak with a ${sp.personality} personality.` : "",
+          sp?.tone ? `Use a ${sp.tone} tone throughout.` : "",
+          sp?.speed && sp?.speechRateWpm
+            ? `Match the original speaker's pace: ${sp.speed} (approximately ${sp.speechRateWpm} words per minute). Adjust your delivery speed accordingly.`
+            : "",
+          sp?.vocabularyStyle ? `The original speaker uses ${sp.vocabularyStyle} — mirror that register in delivery.` : "",
+          sp?.emotionalRange && sp.emotionalRange !== "balanced"
+            ? `Vary your emotional delivery to match: ${sp.emotionalRange}.` : "",
+          sp?.catchphrases?.length
+            ? `The original speaker favors phrases like: "${sp.catchphrases.join('", "')}". Incorporate similar verbal rhythm.` : "",
+          "Read the following text verbatim with the described style.",
+        ].filter(Boolean).join(" ");
+
+        req.log.info({ styleSystemPrompt }, "TTS style prompt built");
+
         try {
-          const ttsBuffer = await textToSpeech(textForTts, chosenVoice, "mp3");
+          let ttsBuffer: Buffer;
+          try {
+            const ttsResp = await openai.chat.completions.create({
+              model: "gpt-audio",
+              modalities: ["text", "audio"],
+              audio: { voice: chosenVoice, format: "mp3" },
+              messages: [
+                { role: "system", content: styleSystemPrompt },
+                { role: "user", content: textForTts },
+              ],
+            } as Parameters<typeof openai.chat.completions.create>[0]);
+            const audioData = (ttsResp.choices[0]?.message as unknown as { audio?: { data?: string } })?.audio?.data ?? "";
+            ttsBuffer = Buffer.from(audioData, "base64");
+          } catch {
+            ttsBuffer = await textToSpeech(textForTts, chosenVoice, "mp3");
+          }
           await fs.writeFile(ttsPath, ttsBuffer);
 
           const scaledPath = path.join(exportDir, `scaled_${exportId}.mp4`);

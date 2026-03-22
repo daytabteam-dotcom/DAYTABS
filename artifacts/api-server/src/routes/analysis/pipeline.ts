@@ -107,7 +107,10 @@ export async function runAnalysisPipeline(jobId: string, videoPath: string, plat
 
     await updateJob(jobId, { status: "generating_seo", progress: 78, currentStep: "Generating SEO & metadata" });
 
-    const seoResult = await generateSeo(transcriptText, platform);
+    const [seoResult, speakerProfile] = await Promise.all([
+      generateSeo(transcriptText, platform),
+      analyzeSpeakerStyle(transcriptText, transcriptSegments),
+    ]);
 
     await updateJob(jobId, { status: "generating_subtitles", progress: 90, currentStep: "Generating subtitles" });
 
@@ -146,6 +149,7 @@ export async function runAnalysisPipeline(jobId: string, videoPath: string, plat
         translatedTranscript: translatedSegments,
         translatedLanguage,
       },
+      speakerProfile,
     };
 
     const ext = path.extname(videoPath);
@@ -393,6 +397,72 @@ async function translateSubtitles(
     end: seg.end,
     text: translated[i] || seg.text,
   }));
+}
+
+async function analyzeSpeakerStyle(
+  transcriptText: string,
+  transcriptSegments: Array<{ start: number; end: number; text: string }>
+): Promise<{
+  personality: string;
+  tone: string;
+  speed: string;
+  speechRateWpm: number;
+  vocabularyStyle: string;
+  catchphrases: string[];
+  emotionalRange: string;
+}> {
+  const totalWords = transcriptText.split(/\s+/).filter(Boolean).length;
+  let speechRateWpm = 120;
+  if (transcriptSegments.length > 0) {
+    const lastSeg = transcriptSegments[transcriptSegments.length - 1];
+    const durationMinutes = lastSeg.end / 60;
+    if (durationMinutes > 0) speechRateWpm = Math.round(totalWords / durationMinutes);
+  }
+  const speed =
+    speechRateWpm < 100 ? "slow" :
+    speechRateWpm < 130 ? "moderate" :
+    speechRateWpm < 170 ? "fast" : "very fast";
+
+  const snippet = transcriptText.slice(0, 3000);
+  const prompt = `Analyze this video transcript and extract the speaker's communication style. Return STRICT JSON only (no markdown).
+
+Transcript: "${snippet}"
+
+Return exactly:
+{
+  "personality": "2-3 adjectives (e.g. 'friendly, energetic, direct')",
+  "tone": "2-3 adjectives (e.g. 'warm, enthusiastic, professional')",
+  "vocabularyStyle": "brief description (e.g. 'simple, casual, conversational with occasional technical terms')",
+  "catchphrases": ["up to 3 recurring verbal patterns or phrases, empty array if none"],
+  "emotionalRange": "brief description (e.g. 'mostly upbeat with occasional reflective pauses')"
+}`;
+
+  const defaults = { personality: "natural", tone: "neutral", speed, speechRateWpm, vocabularyStyle: "natural", catchphrases: [] as string[], emotionalRange: "balanced" };
+  try {
+    const resp = await callOpenAI({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: "You are an expert speech and linguistics analyst. Return only valid JSON." },
+        { role: "user", content: prompt },
+      ],
+      max_completion_tokens: 400,
+    }) as { choices: Array<{ message: { content: string } }> };
+    const raw = resp.choices[0]?.message?.content?.trim() ?? "";
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return { ...defaults };
+    const parsed = JSON.parse(jsonMatch[0]);
+    return {
+      personality: parsed.personality || defaults.personality,
+      tone: parsed.tone || defaults.tone,
+      speed,
+      speechRateWpm,
+      vocabularyStyle: parsed.vocabularyStyle || defaults.vocabularyStyle,
+      catchphrases: Array.isArray(parsed.catchphrases) ? parsed.catchphrases.slice(0, 3) : [],
+      emotionalRange: parsed.emotionalRange || defaults.emotionalRange,
+    };
+  } catch {
+    return { ...defaults };
+  }
 }
 
 function computeQualityScore(visualAnalysis: object, audioAnalysis: object): number {
