@@ -223,11 +223,14 @@ export function SubtitlesTab({ jobId, data, replaceAudio }: SubtitlesTabProps) {
                   const isLoading = loadingVoice === v.id;
                   const isPlaying = playingVoice === v.id;
                   return (
-                    <button
+                    <div
                       key={v.id}
+                      role="button"
+                      tabIndex={0}
                       onClick={() => setAudioVoice(v.id)}
+                      onKeyDown={(e) => e.key === "Enter" && setAudioVoice(v.id)}
                       className={`
-                        px-3 py-2.5 rounded-xl text-left transition-all duration-200 border relative
+                        px-3 py-2.5 rounded-xl text-left transition-all duration-200 border relative cursor-pointer
                         ${isSelected
                           ? 'bg-primary/20 border-primary text-white shadow-sm shadow-primary/20'
                           : 'bg-secondary/40 border-transparent text-muted-foreground hover:bg-secondary/70 hover:text-white'}
@@ -235,16 +238,19 @@ export function SubtitlesTab({ jobId, data, replaceAudio }: SubtitlesTabProps) {
                     >
                       <div className="flex items-center justify-between gap-1">
                         <div className="text-sm font-semibold truncate">{v.label}</div>
-                        <button
+                        <div
+                          role="button"
+                          tabIndex={0}
                           onClick={(e) => handlePlayPreview(e, v.id)}
-                          disabled={isLoading}
+                          onKeyDown={(e) => { if (e.key === "Enter") handlePlayPreview(e as unknown as React.MouseEvent, v.id); }}
                           title={isPlaying ? "Stop preview" : "Play preview"}
+                          aria-disabled={isLoading}
                           className={`
-                            shrink-0 flex items-center justify-center w-6 h-6 rounded-full transition-all duration-150
+                            shrink-0 flex items-center justify-center w-6 h-6 rounded-full transition-all duration-150 cursor-pointer
                             ${isPlaying
                               ? 'bg-primary text-white shadow-sm shadow-primary/40'
                               : isLoading
-                              ? 'bg-primary/30 text-primary'
+                              ? 'bg-primary/30 text-primary cursor-wait'
                               : isSelected
                               ? 'bg-primary/30 text-primary hover:bg-primary hover:text-white'
                               : 'bg-white/10 text-white/50 hover:bg-primary/40 hover:text-white'}
@@ -257,10 +263,10 @@ export function SubtitlesTab({ jobId, data, replaceAudio }: SubtitlesTabProps) {
                           ) : (
                             <Play className="w-3 h-3 fill-current" />
                           )}
-                        </button>
+                        </div>
                       </div>
                       <div className="text-xs opacity-70 mt-0.5">{v.description}</div>
-                    </button>
+                    </div>
                   );
                 })}
               </div>

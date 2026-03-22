@@ -229,6 +229,31 @@ export async function speechToText(
   return response.text;
 }
 
+/** Speech-to-Text with accurate word/sentence timestamps (verbose_json). */
+export async function speechToTextVerbose(
+  audioBuffer: Buffer,
+  format: "wav" | "mp3" | "webm" = "wav"
+): Promise<{ text: string; segments: Array<{ start: number; end: number; text: string }> }> {
+  const file = await toFile(audioBuffer, `audio.${format}`);
+  const response = await openai.audio.transcriptions.create({
+    file,
+    model: "gpt-4o-mini-transcribe",
+    response_format: "verbose_json",
+  } as Parameters<typeof openai.audio.transcriptions.create>[0]);
+  const r = response as unknown as {
+    text: string;
+    segments?: Array<{ start: number; end: number; text: string }>;
+  };
+  return {
+    text: r.text || "",
+    segments: (r.segments || []).map((s) => ({
+      start: s.start,
+      end: s.end,
+      text: s.text.trim(),
+    })),
+  };
+}
+
 /** Streaming Speech-to-Text. */
 export async function speechToTextStream(
   audioBuffer: Buffer,

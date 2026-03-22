@@ -7,7 +7,7 @@ import { analysisJobsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { logger } from "../../lib/logger";
 import { openai } from "@workspace/integrations-openai-ai-server";
-import { speechToText } from "@workspace/integrations-openai-ai-server/audio";
+import { speechToText, speechToTextVerbose } from "@workspace/integrations-openai-ai-server/audio";
 
 const execAsync = promisify(exec);
 
@@ -18,9 +18,16 @@ async function callOpenAI(body: object): Promise<unknown> {
 
 async function transcribeAudio(audioPath: string): Promise<{ text: string; segments: Array<{ start: number; end: number; text: string }> }> {
   const audioBuffer = await fs.readFile(audioPath);
-  const fullText = await speechToText(audioBuffer, "mp3");
-  const segments = buildApproximateSegments(fullText);
-  return { text: fullText, segments };
+  try {
+    const result = await speechToTextVerbose(audioBuffer, "mp3");
+    if (result.segments.length > 0) {
+      return result;
+    }
+    return { text: result.text, segments: buildApproximateSegments(result.text) };
+  } catch {
+    const fullText = await speechToText(audioBuffer, "mp3");
+    return { text: fullText, segments: buildApproximateSegments(fullText) };
+  }
 }
 
 function buildApproximateSegments(text: string): Array<{ start: number; end: number; text: string }> {
