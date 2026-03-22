@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { motion, AnimatePresence } from "framer-motion";
-import { Menu, X, Zap } from "lucide-react";
+import { Menu, X } from "lucide-react";
 
 const navLinks = [
   { label: "Features", href: "#features" },
@@ -42,9 +42,7 @@ export default function Navbar() {
     >
       <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
         <Link href="/" className="flex items-center gap-2 cursor-pointer" data-testid="link-logo">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center purple-glow">
-            <Zap className="w-4 h-4 text-white" />
-          </div>
+          <img src="/landing/images/logo.jpg" alt="DayTabs" className="w-8 h-8 rounded-lg object-contain" />
           <span className="font-bold text-lg gradient-text">DayTabs</span>
         </Link>
 

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
 import { motion } from "framer-motion";
-import { Zap, Mail, Lock, LogIn, AlertCircle } from "lucide-react";
+import { Mail, Lock, LogIn, AlertCircle } from "lucide-react";
 import { authApi, getCoreAppUrl } from "../lib/api";
 
 export default function LoginPage() {
@@ -40,9 +40,7 @@ export default function LoginPage() {
       >
         <div className="text-center mb-8">
           <Link href="/" className="inline-flex items-center gap-2 mb-6 cursor-pointer" data-testid="link-logo-login">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center">
-              <Zap className="w-5 h-5 text-white" />
-            </div>
+            <img src="/landing/images/logo.jpg" alt="DayTabs" className="w-10 h-10 rounded-xl object-contain" />
             <span className="font-bold text-xl gradient-text">DayTabs</span>
           </Link>
           <h1 className="text-3xl font-bold mb-2">Welcome back</h1>

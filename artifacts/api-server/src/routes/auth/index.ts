@@ -2,6 +2,7 @@ import { Router } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { OAuth2Client } from "google-auth-library";
+import nodemailer from "nodemailer";
 import { db } from "@workspace/db";
 import { usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
@@ -12,6 +13,13 @@ const JWT_SECRET = process.env.JWT_SECRET || "daytabs-dev-secret-change-in-produ
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
 const CORE_APP_URL = process.env.CORE_APP_URL || "/";
+
+// Email config — set these env vars to enable real email delivery
+const SMTP_HOST = process.env.SMTP_HOST || "smtp.gmail.com";
+const SMTP_PORT = parseInt(process.env.SMTP_PORT || "587", 10);
+const SMTP_USER = process.env.SMTP_USER || "";
+const SMTP_PASS = process.env.SMTP_PASS || "";
+const CONTACT_EMAIL = process.env.CONTACT_EMAIL || SMTP_USER;
 
 function getPublicBaseUrl(req: import("express").Request): string {
   const replitDomain = process.env.REPLIT_DEV_DOMAIN || (process.env.REPLIT_DOMAINS || "").split(",")[0]?.trim();
@@ -27,6 +35,16 @@ function getGoogleRedirectUri(req: import("express").Request): string {
 
 function signToken(userId: number, email: string, name?: string | null) {
   return jwt.sign({ user_id: userId, email, name: name || email.split("@")[0] }, JWT_SECRET, { expiresIn: "7d" });
+}
+
+function createMailTransport() {
+  if (!SMTP_USER || !SMTP_PASS) return null;
+  return nodemailer.createTransport({
+    host: SMTP_HOST,
+    port: SMTP_PORT,
+    secure: SMTP_PORT === 465,
+    auth: { user: SMTP_USER, pass: SMTP_PASS },
+  });
 }
 
 router.post("/signup", async (req, res) => {
@@ -138,11 +156,37 @@ router.post("/contact", async (req, res) => {
       res.status(400).json({ error: "Name, email, and message are required" });
       return;
     }
-    req.log.info({ name, email, message }, "Contact form submission");
+
+    req.log.info({ name, email }, "Contact form submission received");
+
+    const transport = createMailTransport();
+    if (transport && CONTACT_EMAIL) {
+      await transport.sendMail({
+        from: `"DayTabs Contact" <${SMTP_USER}>`,
+        to: CONTACT_EMAIL,
+        replyTo: `"${name}" <${email}>`,
+        subject: `New contact message from ${name}`,
+        text: `Name: ${name}\nEmail: ${email}\n\nMessage:\n${message}`,
+        html: `
+          <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
+            <h2 style="color:#7c3aed">New Contact Message — DayTabs</h2>
+            <table style="width:100%;border-collapse:collapse">
+              <tr><td style="padding:8px;font-weight:bold;color:#555">Name</td><td style="padding:8px">${name}</td></tr>
+              <tr><td style="padding:8px;font-weight:bold;color:#555">Email</td><td style="padding:8px"><a href="mailto:${email}">${email}</a></td></tr>
+            </table>
+            <div style="margin-top:16px;padding:16px;background:#f5f5f5;border-radius:8px;white-space:pre-wrap">${message}</div>
+          </div>
+        `,
+      });
+      req.log.info({ to: CONTACT_EMAIL }, "Contact email sent successfully");
+    } else {
+      req.log.warn("SMTP not configured — contact form email not sent. Set SMTP_USER, SMTP_PASS, and CONTACT_EMAIL env vars.");
+    }
+
     res.json({ success: true, message: "Message received. We'll get back to you soon!" });
   } catch (err) {
-    req.log.error({ err }, "Contact error");
-    res.status(500).json({ error: "Failed to send message" });
+    req.log.error({ err }, "Contact email error");
+    res.status(500).json({ error: "Failed to send message. Please try again." });
   }
 });
 
