@@ -23,6 +23,24 @@ const UPLOAD_LIMITS: Record<string, Record<string, number>> = {
   professional: { "pre-edit": -1, editing: -1, publish: -1 },
 };
 
+// File size limits in bytes per plan
+export const FILE_SIZE_LIMITS: Record<string, number> = {
+  free:         200 * 1024 * 1024,      // 200 MB
+  premium:      500 * 1024 * 1024,      // 500 MB
+  professional: 1024 * 1024 * 1024,    // 1 GB
+};
+
+export function getFileSizeLimit(plan: string): number {
+  return FILE_SIZE_LIMITS[plan] ?? FILE_SIZE_LIMITS.free;
+}
+
+export function getFileSizeLimitLabel(plan: string): string {
+  const bytes = getFileSizeLimit(plan);
+  return bytes >= 1024 * 1024 * 1024
+    ? `${(bytes / (1024 * 1024 * 1024)).toFixed(0)} GB`
+    : `${(bytes / (1024 * 1024)).toFixed(0)} MB`;
+}
+
 export function getPlanLabel(plan: string): string {
   if (plan === "premium") return "Premium Plan";
   if (plan === "professional") return "Professional Plan";

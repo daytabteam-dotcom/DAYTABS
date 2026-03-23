@@ -48,9 +48,9 @@ const PLAN_UPLOAD_LIMITS: Record<string, Record<string, number>> = {
 };
 
 const PLAN_SIZE_LIMITS: Record<string, number> = {
-  free:         500 * 1024 * 1024,   // 500 MB
-  premium:      2 * 1024 * 1024 * 1024,  // 2 GB
-  professional: 2 * 1024 * 1024 * 1024,  // 2 GB
+  free:         200 * 1024 * 1024,        // 200 MB
+  premium:      500 * 1024 * 1024,        // 500 MB
+  professional: 1024 * 1024 * 1024,      // 1 GB
 };
 
 async function checkUploadLimit(userId: number, plan: string, mode: string): Promise<{ allowed: boolean; used: number; limit: number }> {
@@ -113,7 +113,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: 2 * 1024 * 1024 * 1024 },
+  limits: { fileSize: 1024 * 1024 * 1024 },  // 1 GB (max for any plan)
   fileFilter: (_req, file, cb) => {
     const allowed = ["video/mp4", "video/quicktime", "video/x-msvideo", "video/webm", "video/mpeg", "video/mov"];
     if (allowed.includes(file.mimetype) || file.originalname.match(/\.(mp4|mov|avi|webm|mpeg|mkv)$/i)) {

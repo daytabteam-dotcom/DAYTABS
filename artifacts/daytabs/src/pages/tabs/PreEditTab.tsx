@@ -8,7 +8,7 @@ import { useAnalysisPolling, useAnalysisResults } from "@/hooks/use-analysis";
 import { usePdfExport } from "@/hooks/use-pdf-export";
 import { useVideoUpload } from "@/hooks/use-video-upload";
 import { useToast } from "@/hooks/use-toast";
-import { usePlan } from "@/hooks/use-plan";
+import { usePlan, getFileSizeLimit, getFileSizeLimitLabel } from "@/hooks/use-plan";
 import { LockedContent, LockedBadge } from "@/components/LockedContent";
 
 interface TabProps {
@@ -85,7 +85,7 @@ function FillerWordCard({ metric }: { metric: any }) {
   );
 }
 
-function UploadZone({ onFile, isPending }: { onFile: (f: File) => void; isPending: boolean }) {
+function UploadZone({ onFile, isPending, maxSizeLabel }: { onFile: (f: File) => void; isPending: boolean; maxSizeLabel?: string }) {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const onDrop = useCallback((accepted: File[]) => { const f = accepted[0]; if (!f) return; setFile(f); setPreview(URL.createObjectURL(f)); onFile(f); }, [onFile]);
@@ -112,7 +112,7 @@ function UploadZone({ onFile, isPending }: { onFile: (f: File) => void; isPendin
           <div className="text-center space-y-1">
             <p className="font-bold text-white text-base">{isDragActive ? "Drop it here!" : "Drop your video here"}</p>
             <p className="text-sm text-white/40">We'll check quality and improve your script</p>
-            <p className="text-xs text-white/25 mt-2">MP4, MOV, AVI, WebM · up to 2 GB</p>
+            <p className="text-xs text-white/25 mt-2">MP4, MOV, AVI, WebM · up to {maxSizeLabel ?? "200 MB"}</p>
           </div>
           <div className="px-5 py-2 bg-primary/10 border border-primary/20 rounded-full text-sm font-medium text-primary/80">Browse Files</div>
         </div>
@@ -131,6 +131,8 @@ export default function PreEditTab({ onDataReady, onDataReset, onRegisterExport 
   const { plan, getModeLimits } = usePlan();
   const isFree = !plan.isPaid;
   const { uploadsRemaining, uploadUsed, uploadLimit } = getModeLimits("pre-edit");
+  const fileSizeLimit = getFileSizeLimit(plan.plan);
+  const fileSizeLimitLabel = getFileSizeLimitLabel(plan.plan);
 
   const { ref, exportPdf, isExporting: isPdfExporting } = usePdfExport("daytabs-pre-edit.pdf");
   const { upload, isPending: isUploading, uploadProgress, resetUpload, error: uploadError } = useVideoUpload();
@@ -179,7 +181,7 @@ export default function PreEditTab({ onDataReady, onDataReset, onRegisterExport 
           </div>
         ) : (
           <>
-            <UploadZone onFile={(f) => setSelectedFile(f)} isPending={isUploading} />
+            <UploadZone onFile={(f) => setSelectedFile(f)} isPending={isUploading} maxSizeLabel={fileSizeLimitLabel} />
             {isUploading && uploadProgress > 0 && (
               <div className="space-y-1.5">
                 <div className="flex justify-between text-xs text-white/50">
@@ -192,7 +194,14 @@ export default function PreEditTab({ onDataReady, onDataReset, onRegisterExport 
               </div>
             )}
             <button
-              onClick={() => selectedFile && upload({ file: selectedFile, options: { mode: "pre-edit", platform: "youtube_long" } }, { onSuccess: (d) => { setJobId(d.jobId); toast({ title: "Analyzing video…" }); } })}
+              onClick={() => {
+                if (!selectedFile) return;
+                if (selectedFile.size > fileSizeLimit) {
+                  toast({ variant: "destructive", title: "File too large", description: `Your file is ${(selectedFile.size / (1024 * 1024)).toFixed(0)} MB. Please upload a file under ${fileSizeLimitLabel}.` });
+                  return;
+                }
+                upload({ file: selectedFile, options: { mode: "pre-edit", platform: "youtube_long" } }, { onSuccess: (d) => { setJobId(d.jobId); toast({ title: "Analyzing video…" }); } });
+              }}
               disabled={!selectedFile || isUploading}
               className="w-full py-4 rounded-xl bg-gradient-to-r from-primary to-purple-500 hover:from-primary/90 hover:to-purple-400 text-white font-bold text-base disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2 shadow-lg shadow-primary/25"
             >
@@ -241,15 +250,13 @@ export default function PreEditTab({ onDataReady, onDataReset, onRegisterExport 
             <p className="text-white/40 text-sm mt-1">Overall score: <span className="text-primary font-bold text-xl">{quality?.score ?? "—"}</span> / 100</p>
           </div>
           <div className="flex items-center gap-2">
-            <LockedContent locked={isFree} label="PDF export requires Premium" className="rounded-xl">
               <button
                 onClick={exportPdf}
-                disabled={isPdfExporting || isFree}
+                disabled={isPdfExporting}
                 className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-primary/15 hover:bg-primary/25 border border-primary/30 text-primary rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isPdfExporting ? <><div className="w-3.5 h-3.5 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />Exporting…</> : <><FileDown className="w-3.5 h-3.5" />Download PDF</>}
               </button>
-            </LockedContent>
             <button onClick={reset} className="px-4 py-2 text-sm font-medium bg-white/5 hover:bg-white/10 rounded-xl border border-white/10 transition-colors">Analyze Another</button>
           </div>
         </div>
@@ -341,22 +348,32 @@ export default function PreEditTab({ onDataReady, onDataReset, onRegisterExport 
             {scriptFeedback.improvedScript && (
               <div className="glass-card rounded-2xl p-6 border border-white/8">
                 <div className="flex items-center justify-between mb-4">
-                  <button onClick={() => setShowScript(s => !s)} className="flex items-center gap-2">
+                  <button onClick={() => !isFree && setShowScript(s => !s)} className="flex items-center gap-2">
                     <Lightbulb className="w-4 h-4 text-violet-400" />
                     <h4 className="font-semibold">Improved Script</h4>
-                    {showScript ? <ChevronUp className="w-4 h-4 text-white/40" /> : <ChevronDown className="w-4 h-4 text-white/40" />}
+                    {!isFree && (showScript ? <ChevronUp className="w-4 h-4 text-white/40" /> : <ChevronDown className="w-4 h-4 text-white/40" />)}
                   </button>
-                  <button
-                    onClick={() => setTeleprompterOpen(true)}
-                    className="flex items-center gap-2 px-4 py-2 bg-primary/15 hover:bg-primary/25 border border-primary/30 text-primary rounded-xl text-sm font-semibold transition-all"
-                  >
-                    <MonitorPlay className="w-4 h-4" />Teleprompter
-                  </button>
+                  {!isFree && (
+                    <button
+                      onClick={() => setTeleprompterOpen(true)}
+                      className="flex items-center gap-2 px-4 py-2 bg-primary/15 hover:bg-primary/25 border border-primary/30 text-primary rounded-xl text-sm font-semibold transition-all"
+                    >
+                      <MonitorPlay className="w-4 h-4" />Teleprompter
+                    </button>
+                  )}
                 </div>
-                {showScript && (
-                  <div className="mt-2 p-4 bg-violet-400/5 border border-violet-400/15 rounded-xl">
-                    <p className="text-sm text-white/80 whitespace-pre-wrap leading-relaxed">{scriptFeedback.improvedScript}</p>
-                  </div>
+                {isFree ? (
+                  <LockedContent locked label="Upgrade to read the improved script" className="rounded-xl">
+                    <div className="p-4 bg-violet-400/5 border border-violet-400/15 rounded-xl">
+                      <p className="text-sm text-white/80 whitespace-pre-wrap leading-relaxed">{scriptFeedback.improvedScript}</p>
+                    </div>
+                  </LockedContent>
+                ) : (
+                  showScript && (
+                    <div className="mt-2 p-4 bg-violet-400/5 border border-violet-400/15 rounded-xl">
+                      <p className="text-sm text-white/80 whitespace-pre-wrap leading-relaxed">{scriptFeedback.improvedScript}</p>
+                    </div>
+                  )
                 )}
               </div>
             )}

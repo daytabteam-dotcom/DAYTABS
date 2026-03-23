@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useRef } from "react";
 import { motion } from "framer-motion";
 import { Check, Loader2 } from "lucide-react";
 
@@ -28,7 +28,12 @@ export function ProgressIndicator({ currentStep, progress, mode }: ProgressIndic
   const STEPS = mode ? ALL_STEPS.filter(s => s.modes.includes(mode)) : ALL_STEPS;
 
   const currentIndex = STEPS.findIndex(s => s.id === currentStep);
-  const activeIndex = currentIndex === -1 ? 0 : currentIndex;
+  const rawIndex = currentIndex === -1 ? 0 : currentIndex;
+
+  // Never allow the active step to go backwards
+  const maxIndexRef = useRef(rawIndex);
+  if (rawIndex > maxIndexRef.current) maxIndexRef.current = rawIndex;
+  const activeIndex = maxIndexRef.current;
 
   return (
     <div className="w-full max-w-2xl mx-auto py-12 px-6 glass-card rounded-3xl">

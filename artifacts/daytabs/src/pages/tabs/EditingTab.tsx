@@ -7,7 +7,7 @@ import { useAnalysisPolling, useAnalysisResults } from "@/hooks/use-analysis";
 import { usePdfExport } from "@/hooks/use-pdf-export";
 import { useVideoUpload } from "@/hooks/use-video-upload";
 import { useToast } from "@/hooks/use-toast";
-import { usePlan } from "@/hooks/use-plan";
+import { usePlan, getFileSizeLimit, getFileSizeLimitLabel } from "@/hooks/use-plan";
 import { LockedContent, LockedBadge } from "@/components/LockedContent";
 
 interface TabProps {
@@ -16,7 +16,7 @@ interface TabProps {
   onRegisterExport: (fn: (() => Promise<void>) | null) => void;
 }
 
-function UploadZone({ onFile, isPending }: { onFile: (f: File) => void; isPending: boolean }) {
+function UploadZone({ onFile, isPending, maxSizeLabel }: { onFile: (f: File) => void; isPending: boolean; maxSizeLabel?: string }) {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const onDrop = useCallback((accepted: File[]) => { const f = accepted[0]; if (!f) return; setFile(f); setPreview(URL.createObjectURL(f)); onFile(f); }, [onFile]);
@@ -43,7 +43,7 @@ function UploadZone({ onFile, isPending }: { onFile: (f: File) => void; isPendin
           <div className="text-center space-y-1">
             <p className="font-bold text-white text-base">{isDragActive ? "Drop it here!" : "Drop your video here"}</p>
             <p className="text-sm text-white/40">We'll find hooks, cuts, and short-form segments</p>
-            <p className="text-xs text-white/25 mt-2">MP4, MOV, AVI, WebM · up to 2 GB</p>
+            <p className="text-xs text-white/25 mt-2">MP4, MOV, AVI, WebM · up to {maxSizeLabel ?? "200 MB"}</p>
           </div>
           <div className="px-5 py-2 bg-yellow-400/10 border border-yellow-400/20 rounded-full text-sm font-medium text-yellow-400/80">Browse Files</div>
         </div>
@@ -60,6 +60,8 @@ export default function EditingTab({ onDataReady, onDataReset, onRegisterExport 
   const { plan, getModeLimits } = usePlan();
   const isFree = !plan.isPaid;
   const { uploadsRemaining, uploadUsed, uploadLimit } = getModeLimits("editing");
+  const fileSizeLimit = getFileSizeLimit(plan.plan);
+  const fileSizeLimitLabel = getFileSizeLimitLabel(plan.plan);
 
   const { ref, exportPdf, isExporting: isPdfExporting } = usePdfExport("daytabs-editing.pdf");
   const { upload, isPending: isUploading, uploadProgress, resetUpload, error: uploadError } = useVideoUpload();
@@ -105,7 +107,7 @@ export default function EditingTab({ onDataReady, onDataReset, onRegisterExport 
           </div>
         ) : (
           <>
-            <UploadZone onFile={(f) => setSelectedFile(f)} isPending={isUploading} />
+            <UploadZone onFile={(f) => setSelectedFile(f)} isPending={isUploading} maxSizeLabel={fileSizeLimitLabel} />
             {isUploading && uploadProgress > 0 && (
               <div className="space-y-1.5">
                 <div className="flex justify-between text-xs text-white/50">
@@ -118,7 +120,14 @@ export default function EditingTab({ onDataReady, onDataReset, onRegisterExport 
               </div>
             )}
             <button
-              onClick={() => selectedFile && upload({ file: selectedFile, options: { mode: "editing", platform: "youtube_long" } }, { onSuccess: (d) => { setJobId(d.jobId); toast({ title: "Finding editing points…" }); } })}
+              onClick={() => {
+                if (!selectedFile) return;
+                if (selectedFile.size > fileSizeLimit) {
+                  toast({ variant: "destructive", title: "File too large", description: `Your file is ${(selectedFile.size / (1024 * 1024)).toFixed(0)} MB. Please upload a file under ${fileSizeLimitLabel}.` });
+                  return;
+                }
+                upload({ file: selectedFile, options: { mode: "editing", platform: "youtube_long" } }, { onSuccess: (d) => { setJobId(d.jobId); toast({ title: "Finding editing points…" }); } });
+              }}
               disabled={!selectedFile || isUploading}
               className="w-full py-4 rounded-xl bg-gradient-to-r from-yellow-500 to-amber-400 hover:from-yellow-400 hover:to-amber-300 text-black font-bold text-base disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2 shadow-lg shadow-yellow-500/20"
             >
@@ -151,15 +160,13 @@ export default function EditingTab({ onDataReady, onDataReset, onRegisterExport 
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div><h2 className="text-2xl font-bold">Editing Results</h2><p className="text-white/40 text-sm mt-1">AI-powered cut suggestions and highlights</p></div>
         <div className="flex items-center gap-2">
-          <LockedContent locked={isFree} label="PDF export requires Premium" className="rounded-xl">
             <button
               onClick={exportPdf}
-              disabled={isPdfExporting || isFree}
+              disabled={isPdfExporting}
               className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-yellow-400/10 hover:bg-yellow-400/20 border border-yellow-400/25 text-yellow-300 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isPdfExporting ? <><div className="w-3.5 h-3.5 border-2 border-yellow-400/30 border-t-yellow-400 rounded-full animate-spin" />Exporting…</> : <><FileDown className="w-3.5 h-3.5" />Download PDF</>}
             </button>
-          </LockedContent>
           <button onClick={reset} className="px-4 py-2 text-sm font-medium bg-white/5 hover:bg-white/10 rounded-xl border border-white/10 transition-colors">Analyze Another</button>
         </div>
       </div>
