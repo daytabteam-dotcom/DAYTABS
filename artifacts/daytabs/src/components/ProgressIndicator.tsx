@@ -2,28 +2,31 @@ import React from "react";
 import { motion } from "framer-motion";
 import { Check, Loader2 } from "lucide-react";
 
-const STEPS = [
-  { id: "uploading", label: "Uploading Video" },
-  { id: "extracting_audio", label: "Extracting Audio" },
-  { id: "transcribing", label: "Transcribing Speech" },
-  { id: "extracting_frames", label: "Extracting Frames" },
-  { id: "analyzing_visual", label: "Analyzing Visuals" },
-  { id: "analyzing_audio", label: "Analyzing Audio Quality" },
-  { id: "analyzing_content", label: "Identifying Editing Points" },
-  { id: "generating_seo", label: "Optimizing SEO" },
-  { id: "generating_subtitles", label: "Generating Subtitles" },
-  { id: "translating", label: "Translating Script" },
-  { id: "generating_audio", label: "Generating AI Voice" },
-  { id: "merging_video", label: "Merging Audio & Video" },
-  { id: "complete", label: "Finalizing Results" }
+const ALL_STEPS = [
+  { id: "uploading",            label: "Uploading Video",           modes: ["pre-edit","editing","publish","dubbing"] },
+  { id: "extracting_audio",     label: "Extracting Audio",          modes: ["pre-edit","editing","publish","dubbing"] },
+  { id: "transcribing",         label: "Transcribing Speech",       modes: ["pre-edit","editing","publish","dubbing"] },
+  { id: "extracting_frames",    label: "Extracting Frames",         modes: ["pre-edit","editing"] },
+  { id: "analyzing_visual",     label: "Analyzing Visuals",         modes: ["pre-edit","editing"] },
+  { id: "analyzing_audio",      label: "Analyzing Audio Quality",   modes: ["pre-edit","editing"] },
+  { id: "analyzing_content",    label: "Identifying Editing Points",modes: ["editing"] },
+  { id: "generating_seo",       label: "Optimizing SEO",            modes: ["publish"] },
+  { id: "generating_subtitles", label: "Generating Subtitles",      modes: ["publish"] },
+  { id: "translating",          label: "Translating Script",        modes: ["dubbing"] },
+  { id: "generating_audio",     label: "Generating AI Voice",       modes: ["dubbing"] },
+  { id: "merging_video",        label: "Merging Audio & Video",     modes: ["dubbing"] },
+  { id: "complete",             label: "Finalizing Results",        modes: ["pre-edit","editing","publish","dubbing"] },
 ];
 
 interface ProgressIndicatorProps {
   currentStep: string;
   progress: number;
+  mode?: "pre-edit" | "editing" | "publish" | "dubbing";
 }
 
-export function ProgressIndicator({ currentStep, progress }: ProgressIndicatorProps) {
+export function ProgressIndicator({ currentStep, progress, mode }: ProgressIndicatorProps) {
+  const STEPS = mode ? ALL_STEPS.filter(s => s.modes.includes(mode)) : ALL_STEPS;
+
   const currentIndex = STEPS.findIndex(s => s.id === currentStep);
   const activeIndex = currentIndex === -1 ? 0 : currentIndex;
 
@@ -34,7 +37,7 @@ export function ProgressIndicator({ currentStep, progress }: ProgressIndicatorPr
           Analyzing Your Content
         </h2>
         <div className="h-2 w-full bg-secondary rounded-full overflow-hidden">
-          <motion.div 
+          <motion.div
             className="h-full bg-gradient-to-r from-primary to-purple-400"
             initial={{ width: 0 }}
             animate={{ width: `${progress}%` }}
@@ -44,47 +47,37 @@ export function ProgressIndicator({ currentStep, progress }: ProgressIndicatorPr
         <p className="text-primary font-mono mt-3 font-semibold">{Math.round(progress)}% Complete</p>
       </div>
 
-      <div className="space-y-6 relative before:absolute before:inset-0 before:ml-5 before:-translate-x-px md:before:mx-auto md:before:translate-x-0 before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-white/10 before:to-transparent">
+      <div className="space-y-4 relative before:absolute before:inset-0 before:ml-5 before:-translate-x-px md:before:mx-auto md:before:translate-x-0 before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-white/10 before:to-transparent">
         {STEPS.map((step, index) => {
           const isCompleted = index < activeIndex;
           const isActive = index === activeIndex;
           const isPending = index > activeIndex;
 
           return (
-            <motion.div 
+            <motion.div
               key={step.id}
               initial={{ opacity: 0, x: -20 }}
               animate={{ opacity: isPending ? 0.3 : 1, x: 0 }}
-              transition={{ delay: index * 0.1 }}
-              className="relative flex items-center justify-between md:justify-normal md:odd:flex-row-reverse group is-active"
+              transition={{ delay: index * 0.06 }}
+              className="relative flex items-center justify-between md:justify-normal md:odd:flex-row-reverse group"
             >
-              {/* Icon */}
               <div className={`
                 flex items-center justify-center w-10 h-10 rounded-full border-2 shrink-0 md:order-1 md:group-odd:-translate-x-1/2 md:group-even:translate-x-1/2 shadow-xl z-10
                 transition-all duration-500
-                ${isCompleted ? 'bg-primary border-primary text-white' : ''}
-                ${isActive ? 'bg-background border-primary text-primary scale-110 shadow-primary/30' : ''}
-                ${isPending ? 'bg-background border-border text-muted-foreground' : ''}
+                ${isCompleted ? "bg-primary border-primary text-white" : ""}
+                ${isActive ? "bg-background border-primary text-primary scale-110 shadow-primary/30" : ""}
+                ${isPending ? "bg-background border-border text-muted-foreground" : ""}
               `}>
-                {isCompleted ? (
-                  <Check className="w-5 h-5" />
-                ) : isActive ? (
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                ) : (
-                  <div className="w-2 h-2 rounded-full bg-current opacity-50" />
-                )}
+                {isCompleted ? <Check className="w-5 h-5" /> : isActive ? <Loader2 className="w-5 h-5 animate-spin" /> : <div className="w-2 h-2 rounded-full bg-current opacity-50" />}
               </div>
-              
-              {/* Text */}
+
               <div className={`w-[calc(100%-4rem)] md:w-[calc(50%-2.5rem)] p-4 rounded-xl transition-all duration-300
-                ${isActive ? 'bg-white/5 border border-white/10 scale-[1.02]' : ''}
+                ${isActive ? "bg-white/5 border border-white/10 scale-[1.02]" : ""}
               `}>
-                <div className={`font-semibold ${isActive ? 'text-primary' : isCompleted ? 'text-foreground' : 'text-muted-foreground'}`}>
+                <div className={`font-semibold ${isActive ? "text-primary" : isCompleted ? "text-foreground" : "text-muted-foreground"}`}>
                   {step.label}
                 </div>
-                {isActive && (
-                  <div className="text-sm text-muted-foreground mt-1">Processing...</div>
-                )}
+                {isActive && <div className="text-sm text-muted-foreground mt-1">Processing…</div>}
               </div>
             </motion.div>
           );

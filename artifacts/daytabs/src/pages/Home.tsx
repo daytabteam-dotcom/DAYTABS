@@ -1,16 +1,18 @@
 import React, { useState } from "react";
 import { UserProfileMenu } from "@/components/UserProfileMenu";
-import { Brain, Scissors, TrendingUp, Globe } from "lucide-react";
+import { Brain, Scissors, TrendingUp, Globe, MonitorPlay } from "lucide-react";
 import PreEditTab from "./tabs/PreEditTab";
 import EditingTab from "./tabs/EditingTab";
 import PublishTab from "./tabs/PublishTab";
 import DubbingTab from "./tabs/DubbingTab";
+import TeleprompterTab from "./tabs/TeleprompterTab";
 
 const TABS = [
-  { id: "pre-edit", label: "Pre-Edit", icon: Brain, desc: "Quality + Script Feedback" },
-  { id: "editing", label: "Editing", icon: Scissors, desc: "Cuts, Hooks & Segments" },
-  { id: "publish", label: "Publish", icon: TrendingUp, desc: "SEO & Subtitles" },
-  { id: "dubbing", label: "Dubbing", icon: Globe, desc: "Translate & Dub" },
+  { id: "pre-edit",      label: "Pre-Edit",      icon: Brain,        desc: "Quality + Script" },
+  { id: "editing",       label: "Editing",        icon: Scissors,     desc: "Cuts & Hooks" },
+  { id: "publish",       label: "Publish",        icon: TrendingUp,   desc: "SEO & Subtitles" },
+  { id: "dubbing",       label: "Dubbing",        icon: Globe,        desc: "Translate & Dub" },
+  { id: "teleprompter",  label: "Teleprompter",   icon: MonitorPlay,  desc: "Read Your Script" },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -69,10 +71,11 @@ export default function Home() {
       </div>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 md:py-16 relative z-10">
-        {activeTab === "pre-edit" && <PreEditTab />}
-        {activeTab === "editing" && <EditingTab />}
-        {activeTab === "publish" && <PublishTab />}
-        {activeTab === "dubbing" && <DubbingTab />}
+        {activeTab === "pre-edit"     && <PreEditTab />}
+        {activeTab === "editing"      && <EditingTab />}
+        {activeTab === "publish"      && <PublishTab />}
+        {activeTab === "dubbing"      && <DubbingTab />}
+        {activeTab === "teleprompter" && <TeleprompterTab />}
       </main>
     </div>
   );
