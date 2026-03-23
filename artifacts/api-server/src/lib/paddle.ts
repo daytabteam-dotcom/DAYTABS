@@ -131,6 +131,28 @@ export async function fetchCustomerByEmail(email: string): Promise<{ id: string 
   }
 }
 
+export async function reactivateSubscription(
+  subscriptionId: string
+): Promise<{ success: boolean; forbidden: boolean }> {
+  if (!subscriptionId || !PADDLE_API_KEY) return { success: false, forbidden: false };
+  const res = await fetch(`${PADDLE_BASE}/subscriptions/${subscriptionId}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${PADDLE_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ scheduled_change: null }),
+  });
+  if (res.status === 403) {
+    return { success: false, forbidden: true };
+  }
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Paddle reactivate error ${res.status}: ${text}`);
+  }
+  return { success: true, forbidden: false };
+}
+
 export async function cancelSubscription(
   subscriptionId: string
 ): Promise<{ success: boolean; effectiveAt: string | null; forbidden: boolean }> {

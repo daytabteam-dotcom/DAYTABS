@@ -123,5 +123,23 @@ export function usePaddleSubscription() {
     return { effectiveAt: data.effectiveAt, requiresPortal: data.requiresPortal ?? false, portalUrl: data.portalUrl ?? null };
   }
 
-  return { subscription, loading, refetch: fetch_, formatNextBilling, formatCancelsOn, cancelSubscription };
+  async function reactivateSubscription(): Promise<{ success: boolean; requiresPortal: boolean; portalUrl: string | null }> {
+    const token = localStorage.getItem("daytabs_token");
+    if (!token) throw new Error("Not authenticated");
+    const res = await fetch("/api/paddle/reactivate-subscription", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Failed to reactivate" })) as { error?: string };
+      throw new Error(err.error ?? "Failed to reactivate subscription");
+    }
+    const data = await res.json() as { success: boolean; requiresPortal: boolean; portalUrl: string | null };
+    if (!data.requiresPortal) {
+      await fetch_();
+    }
+    return { success: data.success, requiresPortal: data.requiresPortal ?? false, portalUrl: data.portalUrl ?? null };
+  }
+
+  return { subscription, loading, refetch: fetch_, formatNextBilling, formatCancelsOn, cancelSubscription, reactivateSubscription };
 }

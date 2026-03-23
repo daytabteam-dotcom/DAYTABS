@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { LogOut, Crown, ChevronDown, Loader2, Tag, AlertCircle, CreditCard, Calendar, XCircle, AlertTriangle, X } from "lucide-react";
+import { LogOut, Crown, ChevronDown, Loader2, Tag, AlertCircle, CreditCard, Calendar, XCircle, AlertTriangle, X, RefreshCcw } from "lucide-react";
 import { useUser } from "@/hooks/use-user";
 import { usePaddle } from "@/hooks/use-paddle";
 import { usePlan, getPlanLabel, getPlanColor } from "@/hooks/use-plan";
@@ -115,11 +115,12 @@ export function UserProfileMenu() {
   const { user, logout } = useUser();
   const { discountCode, setDiscountCode, checkoutError } = usePaddle();
   const { plan, loading: planLoading } = usePlan();
-  const { subscription, formatNextBilling, formatCancelsOn, cancelSubscription } = usePaddleSubscription();
+  const { subscription, formatNextBilling, formatCancelsOn, cancelSubscription, reactivateSubscription } = usePaddleSubscription();
   const [open, setOpen] = useState(false);
   const [showCodeInput, setShowCodeInput] = useState(false);
   const [showPlanPicker, setShowPlanPicker] = useState(false);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  const [reactivating, setReactivating] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -148,6 +149,20 @@ export function UserProfileMenu() {
   const handleCancelClick = () => {
     setOpen(false);
     setShowCancelConfirm(true);
+  };
+
+  const handleReactivate = async () => {
+    setReactivating(true);
+    try {
+      const result = await reactivateSubscription();
+      if (result.requiresPortal && result.portalUrl) {
+        window.open(result.portalUrl, "_blank", "noopener,noreferrer");
+      }
+    } catch {
+      // ignore — subscription display will stay unchanged
+    } finally {
+      setReactivating(false);
+    }
   };
 
   return (
@@ -210,42 +225,56 @@ export function UserProfileMenu() {
             {plan.isPaid && subscription?.status === "active" && (
               <div className="space-y-1.5">
                 {isPendingCancellation ? (
-                  <div className="flex items-center gap-1.5 text-xs text-amber-400/70">
-                    <XCircle className="w-3 h-3 shrink-0" />
-                    <span>Cancels {cancelsOn} — reverts to Free</span>
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-1.5 text-xs text-amber-400/70">
+                      <XCircle className="w-3 h-3 shrink-0" />
+                      <span>Cancels {cancelsOn} — reverts to Free</span>
+                    </div>
+                    <button
+                      onClick={handleReactivate}
+                      disabled={reactivating}
+                      className="w-full flex items-center justify-center gap-1.5 py-1.5 text-xs font-medium rounded-lg bg-emerald-600/15 hover:bg-emerald-600/25 text-emerald-400 transition-colors cursor-pointer disabled:opacity-60"
+                      data-testid="button-reactivate-subscription"
+                    >
+                      {reactivating ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <RefreshCcw className="w-3 h-3" />
+                      )}
+                      {reactivating ? "Reactivating…" : "Keep my plan"}
+                    </button>
                   </div>
                 ) : (
-                  nextBilling && (
-                    <div className="flex items-center gap-1.5 text-xs text-white/35">
-                      <Calendar className="w-3 h-3 shrink-0" />
-                      <span>Renews {nextBilling}</span>
+                  <div className="space-y-1.5">
+                    {nextBilling && (
+                      <div className="flex items-center gap-1.5 text-xs text-white/35">
+                        <Calendar className="w-3 h-3 shrink-0" />
+                        <span>Renews {nextBilling}</span>
+                      </div>
+                    )}
+                    <div className="flex items-center gap-2">
+                      {subscription.managementUrls.updatePaymentMethod && (
+                        <a
+                          href={subscription.managementUrls.updatePaymentMethod}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1 text-xs text-white/35 hover:text-white/60 transition-colors"
+                        >
+                          <CreditCard className="w-3 h-3" />
+                          Update payment
+                        </a>
+                      )}
+                      <button
+                        onClick={handleCancelClick}
+                        className="flex items-center gap-1 text-xs text-white/25 hover:text-red-400/70 transition-colors ml-auto cursor-pointer"
+                        data-testid="button-cancel-subscription"
+                      >
+                        <XCircle className="w-3 h-3" />
+                        Cancel
+                      </button>
                     </div>
-                  )
+                  </div>
                 )}
-
-                <div className="flex items-center gap-2">
-                  {subscription.managementUrls.updatePaymentMethod && !isPendingCancellation && (
-                    <a
-                      href={subscription.managementUrls.updatePaymentMethod}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-1 text-xs text-white/35 hover:text-white/60 transition-colors"
-                    >
-                      <CreditCard className="w-3 h-3" />
-                      Update payment
-                    </a>
-                  )}
-                  {!isPendingCancellation && (
-                    <button
-                      onClick={handleCancelClick}
-                      className="flex items-center gap-1 text-xs text-white/25 hover:text-red-400/70 transition-colors ml-auto cursor-pointer"
-                      data-testid="button-cancel-subscription"
-                    >
-                      <XCircle className="w-3 h-3" />
-                      Cancel
-                    </button>
-                  )}
-                </div>
               </div>
             )}
 

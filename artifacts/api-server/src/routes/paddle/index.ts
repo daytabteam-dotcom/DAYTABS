@@ -10,6 +10,7 @@ import {
   fetchSubscriptionsByCustomerId,
   fetchCustomerByEmail,
   cancelSubscription,
+  reactivateSubscription,
 } from "../../lib/paddle";
 
 const router = Router();
@@ -182,6 +183,41 @@ router.post("/cancel-subscription", requireAuth, async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "Failed to cancel subscription");
     res.status(500).json({ error: "Failed to cancel subscription" });
+  }
+});
+
+/**
+ * POST /api/paddle/reactivate-subscription
+ * Remove a pending cancellation so the subscription continues normally.
+ */
+router.post("/reactivate-subscription", requireAuth, async (req, res) => {
+  try {
+    const [user] = await db
+      .select()
+      .from(usersTable)
+      .where(eq(usersTable.id, req.auth!.user_id))
+      .limit(1);
+
+    if (!user) { res.status(404).json({ error: "User not found" }); return; }
+    if (!user.paddleSubscriptionId) {
+      res.status(400).json({ error: "No active subscription found" });
+      return;
+    }
+
+    const result = await reactivateSubscription(user.paddleSubscriptionId);
+
+    if (result.forbidden) {
+      const subscription = await fetchSubscriptionById(user.paddleSubscriptionId);
+      const portalUrl = subscription?.managementUrls?.cancel ?? null;
+      req.log.warn({ userId: user.id }, "Paddle reactivate forbidden — returning portal URL fallback");
+      res.json({ success: false, requiresPortal: true, portalUrl });
+      return;
+    }
+
+    res.json({ success: result.success, requiresPortal: false, portalUrl: null });
+  } catch (err) {
+    req.log.error({ err }, "Failed to reactivate subscription");
+    res.status(500).json({ error: "Failed to reactivate subscription" });
   }
 });
 
