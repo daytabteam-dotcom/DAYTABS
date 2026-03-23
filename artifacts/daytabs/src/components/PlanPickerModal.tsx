@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { createPortal } from "react-dom";
 import { X, Star, Building, Check } from "lucide-react";
 import { usePaddle, PADDLE_PRICES } from "@/hooks/use-paddle";
 import { useUser } from "@/hooks/use-user";
@@ -70,7 +71,7 @@ export function PlanPickerModal({ onClose }: PlanPickerModalProps) {
     }
   };
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-[200] flex items-center justify-center p-4"
       data-testid="modal-plan-picker"
@@ -149,6 +150,7 @@ export function PlanPickerModal({ onClose }: PlanPickerModalProps) {
           </p>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
