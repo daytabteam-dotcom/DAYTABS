@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { LogOut, Crown, ChevronDown, Loader2 } from "lucide-react";
+import { LogOut, Crown, ChevronDown, Loader2, Tag, AlertCircle } from "lucide-react";
 import { useUser } from "@/hooks/use-user";
 import { usePaddle, PADDLE_PRICES } from "@/hooks/use-paddle";
 import { usePlan, getPlanLabel, getPlanColor } from "@/hooks/use-plan";
@@ -12,9 +12,10 @@ function getInitials(name: string): string {
 
 export function UserProfileMenu() {
   const { user, logout } = useUser();
-  const { openCheckout } = usePaddle();
+  const { openCheckout, discountCode, setDiscountCode, checkoutError } = usePaddle();
   const { plan, loading } = usePlan();
   const [open, setOpen] = useState(false);
+  const [showCodeInput, setShowCodeInput] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -33,7 +34,6 @@ export function UserProfileMenu() {
   const planColor = getPlanColor(plan.plan);
 
   const handleUpgrade = () => {
-    setOpen(false);
     const priceId = PADDLE_PRICES.premium;
     if (priceId) {
       openCheckout(priceId, user.email);
@@ -62,7 +62,7 @@ export function UserProfileMenu() {
 
       {open && (
         <div
-          className="absolute right-0 top-full mt-2 w-64 rounded-2xl border border-white/10 bg-[#1a1025] shadow-2xl shadow-black/50 z-50 overflow-hidden"
+          className="absolute right-0 top-full mt-2 w-72 rounded-2xl border border-white/10 bg-[#1a1025] shadow-2xl shadow-black/50 z-50 overflow-hidden"
           data-testid="panel-user-profile"
         >
           {/* Profile header */}
@@ -97,14 +97,45 @@ export function UserProfileMenu() {
                 </span>
               )}
             </div>
+
             {!plan.isPaid && (
-              <button
-                onClick={handleUpgrade}
-                className="mt-2 w-full py-1.5 text-xs font-medium rounded-lg bg-violet-600/20 hover:bg-violet-600/30 text-violet-300 transition-colors cursor-pointer"
-                data-testid="button-upgrade-plan"
-              >
-                Upgrade Plan
-              </button>
+              <div className="mt-2 space-y-2">
+                {/* Discount code toggle */}
+                <button
+                  onClick={() => setShowCodeInput((v) => !v)}
+                  className="flex items-center gap-1.5 text-xs text-white/35 hover:text-white/60 transition-colors"
+                >
+                  <Tag className="w-3 h-3" />
+                  Have a discount code?
+                </button>
+
+                {showCodeInput && (
+                  <div className="space-y-1.5">
+                    <input
+                      type="text"
+                      value={discountCode}
+                      onChange={(e) => setDiscountCode(e.target.value.toUpperCase())}
+                      placeholder="Enter discount code"
+                      className="w-full px-3 py-2 text-xs rounded-lg bg-white/5 border border-white/15 text-white placeholder-white/30 focus:outline-none focus:border-violet-500/50 font-mono tracking-wider"
+                      onKeyDown={(e) => e.key === "Enter" && handleUpgrade()}
+                    />
+                    {checkoutError && (
+                      <div className="flex items-start gap-1.5">
+                        <AlertCircle className="w-3 h-3 text-red-400 mt-0.5 shrink-0" />
+                        <p className="text-xs text-red-400">{checkoutError}</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <button
+                  onClick={handleUpgrade}
+                  className="w-full py-1.5 text-xs font-medium rounded-lg bg-violet-600/20 hover:bg-violet-600/30 text-violet-300 transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                  data-testid="button-upgrade-plan"
+                >
+                  Upgrade Plan
+                </button>
+              </div>
             )}
           </div>
 
