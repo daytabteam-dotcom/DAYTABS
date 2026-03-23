@@ -9,7 +9,7 @@ import { promisify } from "util";
 import { db } from "@workspace/db";
 import { analysisJobsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
-import { runAnalysisPipeline } from "./pipeline";
+import { runAnalysisPipeline, type PipelineMode } from "./pipeline";
 import { openai } from "@workspace/integrations-openai-ai-server";
 import { textToSpeech } from "@workspace/integrations-openai-ai-server/audio";
 import {
@@ -90,12 +90,7 @@ router.post("/upload", upload.single("video"), async (req, res) => {
       return;
     }
 
-    const platform = req.body.platform as string;
-    if (!platform) {
-      res.status(400).json({ error: "Platform is required" });
-      return;
-    }
-
+    const platform = (req.body.platform as string) || "youtube_long";
     const validPlatforms = ["youtube_long", "youtube_shorts", "tiktok", "instagram", "linkedin", "x"];
     if (!validPlatforms.includes(platform)) {
       res.status(400).json({ error: "Invalid platform" });
@@ -103,28 +98,38 @@ router.post("/upload", upload.single("video"), async (req, res) => {
     }
 
     const jobId = uuidv4();
+    const mode = (req.body.mode as PipelineMode) || "pre-edit";
+    const validModes: PipelineMode[] = ["pre-edit", "editing", "publish", "dubbing"];
+    if (!validModes.includes(mode)) {
+      res.status(400).json({ error: "Invalid mode" });
+      return;
+    }
     const translateSubtitles = req.body.translateSubtitles === "true" || req.body.translateSubtitles === true;
-    const replaceAudio = req.body.replaceAudio === "true" || req.body.replaceAudio === true;
+    const audioLanguage = req.body.audioLanguage || null;
+    const audioVoice = req.body.audioVoice || "alloy";
 
     await db.insert(analysisJobsTable).values({
       id: jobId,
       status: "queued",
       progress: 2,
       currentStep: "Uploading",
+      mode,
       platform,
       translateSubtitles: translateSubtitles ? 1 : 0,
       subtitleLanguage: req.body.subtitleLanguage || null,
-      replaceAudio: replaceAudio ? 1 : 0,
-      audioLanguage: req.body.audioLanguage || null,
+      replaceAudio: mode === "dubbing" ? 1 : 0,
+      audioLanguage,
       videoPath: req.file.path,
     });
 
     setImmediate(() => {
-      runAnalysisPipeline(jobId, req.file!.path, platform, {
+      runAnalysisPipeline(jobId, req.file!.path, {
+        mode,
+        platform,
         translateSubtitles,
         subtitleLanguage: req.body.subtitleLanguage || undefined,
-        replaceAudio,
-        audioLanguage: req.body.audioLanguage || undefined,
+        audioLanguage: audioLanguage || undefined,
+        audioVoice,
       }).catch((err) => {
         req.log.error({ err, jobId }, "Pipeline error");
       });

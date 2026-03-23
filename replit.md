@@ -2,7 +2,7 @@
 
 ## Overview
 
-DayTabs is a full-stack AI-powered video analysis web application. Users upload videos (up to 1 hour/2GB), select a target platform, and receive comprehensive analysis covering video quality, content strategy, SEO metadata, and subtitles.
+DayTabs is a full-stack AI-powered video analysis web application. Users upload videos (up to 2GB), choose one of 4 analysis modes, and receive AI-powered insights and output. Protected by auth (email/password + Google OAuth). Subscription payments via Paddle.
 
 ## Stack
 
@@ -15,9 +15,10 @@ DayTabs is a full-stack AI-powered video analysis web application. Users upload 
 - **Validation**: Zod (`zod/v4`), `drizzle-zod`
 - **API codegen**: Orval (from OpenAPI spec)
 - **Build**: esbuild (CJS bundle)
-- **Frontend**: React + Vite, Tailwind CSS, shadcn/ui, Recharts, Framer Motion
-- **AI**: Replit AI Integrations (OpenAI) — Whisper for transcription, GPT-5.2 Vision for visuals, GPT-5.2 for content/SEO analysis
+- **Frontend**: React + Vite, Tailwind CSS, shadcn/ui, Framer Motion
+- **AI**: Replit AI Integrations (OpenAI) — Whisper for transcription, GPT-4o Vision for visuals, GPT-4o for content/SEO/script, TTS for dubbing
 - **Video processing**: ffmpeg (system-provided)
+- **Payments**: Paddle (live mode)
 
 ## Structure
 
@@ -25,8 +26,8 @@ DayTabs is a full-stack AI-powered video analysis web application. Users upload 
 artifacts-monorepo/
 ├── artifacts/
 │   ├── api-server/         # Express API server
-│   ├── daytabs/            # React + Vite frontend (DayTabs core app)
-│   └── landing/            # React + Vite landing page + auth gateway
+│   ├── daytabs/            # React + Vite frontend (DayTabs core app, /panel/)
+│   └── landing/            # React + Vite landing page + auth gateway (/)
 ├── lib/
 │   ├── api-spec/           # OpenAPI spec + Orval codegen config
 │   ├── api-client-react/   # Generated React Query hooks
@@ -39,50 +40,76 @@ artifacts-monorepo/
 └── package.json
 ```
 
-## Analysis Pipeline
+## 4 Analysis Pipeline Modes
 
-The backend runs a 10-step pipeline for each uploaded video:
+Each uploaded video is processed through ONE of 4 mode-specific pipelines:
 
-1. **Extract audio** — ffmpeg extracts audio as MP3
-2. **Extract frames** — ffmpeg extracts 1 frame per 3 seconds (max 5 frames)
-3. **Transcribe** — OpenAI Whisper API (gpt-4o-mini-transcribe equivalent) — STOPS if fails
-4. **Visual analysis** — OpenAI Vision (GPT-5.2) analyzes lighting, brightness, contrast, sharpness, stability, color balance, background, framing
-5. **Audio analysis** — Analyzes volume, clarity (Whisper confidence), background noise, filler words
-6. **Content analysis** — GPT-5.2 analyzes hooks, weak sections, improvements per platform
-7. **SEO generation** — GPT-5.2 generates titles, description, hashtags, timestamps
-8. **Subtitle generation** — Full transcript from Whisper with timestamps
-9. **Translation** (optional) — Translates subtitles to target language
-10. **Quality score** — Computed from all metrics (0-100)
+### 1. Pre-Edit (`pre-edit`)
+- Extract audio → transcribe → extract frames (max 5) → visual analysis → audio analysis → script feedback
+- Result: `{ quality: { score, lighting, brightness, … audioClarity, fillerWords, … }, scriptFeedback: { hookSuggestions, weakSections, improvedScript } }`
+
+### 2. Editing (`editing`)
+- Extract audio → transcribe → identify editing points (hooks, cuts, short-form segments)
+- Result: `{ hooks, removeSections, shortVideos, editingSuggestions, transcript }`
+
+### 3. Publish (`publish`)
+- Extract audio → transcribe → generate SEO → generate SRT subtitle file → optional translation
+- Result: `{ platform, titles, description, hashtags, timestamps, subtitleFile: { format, language, content } }`
+
+### 4. Dubbing (`dubbing`)
+- Extract audio → transcribe → translate → TTS (chunked) → ffmpeg merge → download link
+- Result: `{ translatedLanguage, voice, downloadUrl, filename }`
 
 ## Key Files
 
-- `artifacts/api-server/src/routes/analysis/pipeline.ts` — Main analysis pipeline
-- `artifacts/api-server/src/routes/analysis/index.ts` — Upload, status, result, export endpoints
-- `artifacts/daytabs/src/pages/Home.tsx` — Main page
-- `artifacts/daytabs/src/hooks/use-analysis.ts` — Analysis state management
-- `lib/db/src/schema/analysisJobs.ts` — Analysis jobs table
+- `artifacts/api-server/src/routes/analysis/services.ts` — Shared service functions (extractAudio, extractFrames, transcribeAudio, analyzeVisuals, analyzeAudio, analyzeScriptFeedback, analyzeEditingPoints, generateSeo, generateSrt, translateSegments, computeQualityScore)
+- `artifacts/api-server/src/routes/analysis/pipeline.ts` — Mode dispatcher + 4 sub-pipelines
+- `artifacts/api-server/src/routes/analysis/index.ts` — Upload, status, result, export, voice-preview, download endpoints
+- `artifacts/daytabs/src/pages/Home.tsx` — 4-tab layout (Pre-Edit, Editing, Publish, Dubbing)
+- `artifacts/daytabs/src/pages/tabs/PreEditTab.tsx` — Upload + quality + script feedback results
+- `artifacts/daytabs/src/pages/tabs/EditingTab.tsx` — Upload + hooks/cuts/segments results
+- `artifacts/daytabs/src/pages/tabs/PublishTab.tsx` — Upload + platform + SEO/SRT results
+- `artifacts/daytabs/src/pages/tabs/DubbingTab.tsx` — Upload + language/voice + download
+- `artifacts/daytabs/src/components/TabUpload.tsx` — Shared dropzone upload component
+- `artifacts/daytabs/src/hooks/use-analysis.ts` — useAnalysisPolling, useAnalysisResults hooks
+- `lib/db/src/schema/analysisJobs.ts` — Analysis jobs table (includes `mode` column)
 
 ## API Endpoints
 
-- `POST /api/analysis/upload` — Upload video (multipart/form-data)
+- `POST /api/analysis/upload` — Upload video (multipart/form-data, fields: video, mode, platform, audioLanguage, audioVoice, translateSubtitles, subtitleLanguage)
 - `GET /api/analysis/:jobId/status` — Poll analysis status
-- `GET /api/analysis/:jobId/result` — Get complete results
-- `POST /api/analysis/:jobId/export` — Export processed video
+- `GET /api/analysis/:jobId/result` — Get complete results (shape varies by mode)
+- `POST /api/analysis/:jobId/export` — Export processed video (legacy/resolution export)
+- `GET /api/analysis/voice-preview/:voice` — Stream AI voice sample audio
+- `GET /api/analysis/download/:filename` — Download dubbed video file
+
+## Database Schema
+
+Table: `analysis_jobs`
+- `id` (text, PK)
+- `status` (text) — queued → extracting_audio → transcribing → analyzing_content → complete / error
+- `progress` (real, 0–100)
+- `currentStep` (text)
+- `mode` (text) — pre-edit | editing | publish | dubbing
+- `platform` (text) — youtube_long | youtube_shorts | tiktok | instagram | linkedin | x
+- `translateSubtitles` (integer 0/1)
+- `subtitleLanguage` (text, nullable)
+- `replaceAudio` (integer 0/1)
+- `audioLanguage` (text, nullable)
+- `result` (jsonb) — mode-specific result JSON
+- `videoPath` (text, nullable)
+- `error` (text, nullable)
+- `createdAt`, `updatedAt` (timestamp)
 
 ## Environment Variables
 
 - `DATABASE_URL` — PostgreSQL connection string (auto-provisioned by Replit)
 - `AI_INTEGRATIONS_OPENAI_BASE_URL` — Replit AI proxy URL (auto-provisioned)
 - `AI_INTEGRATIONS_OPENAI_API_KEY` — Replit AI API key (auto-provisioned)
-
-## Platforms Supported
-
-- YouTube Long (`youtube_long`)
-- YouTube Shorts (`youtube_shorts`)
-- TikTok (`tiktok`)
-- Instagram (`instagram`)
-- LinkedIn (`linkedin`)
-- X/Twitter (`x`)
+- `JWT_SECRET` — Session token signing
+- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` — Google OAuth
+- `SMTP_USER`, `SMTP_PASS`, `CONTACT_EMAIL` — Email sending
+- `VITE_PADDLE_CLIENT_TOKEN`, `VITE_PADDLE_PRICE_FREE`, `VITE_PADDLE_PRICE_PREMIUM`, `VITE_PADDLE_PRICE_PRO` — Paddle payments
 
 ## TypeScript & Composite Projects
 

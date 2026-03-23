@@ -1,0 +1,237 @@
+GOAL
+
+Refactor the current app (which runs all analysis in one request) into a modular, menu-based system with separate pipelines per use case to:
+
+Reduce token usage
+Improve UX
+Allow users to run only what they need
+
+⚠️ Do NOT rebuild the app from scratch.
+⚠️ Reuse existing backend functions (ffmpeg, Whisper, OpenAI calls).
+⚠️ Split logic into smaller endpoints.
+
+1️⃣ FRONTEND CHANGES (CRITICAL)
+
+Replace current UI:
+
+❌ Remove single “Analyze Video” button
+❌ Remove single combined results page
+
+Add 4 MENUS (tabs):
+
+🧠 Pre-Edit
+✂️ Editing
+📈 Publish
+🌍 Dubbing
+
+Each tab should:
+
+Have its own action button
+Call its own API endpoint
+Show only relevant results
+
+Keep theme:
+
+Background: #0F172A
+Accent: #7C3AED
+2️⃣ BACKEND REFACTOR (IMPORTANT)
+
+❌ REMOVE:
+
+Single endpoint like:
+
+/analyze-video
+
+✅ CREATE 4 NEW ENDPOINTS:
+ENDPOINT 1: /pre-edit-analysis
+
+Purpose:
+Analyze video quality + improve script
+
+Pipeline:
+
+Extract audio (ffmpeg)
+Transcribe (Whisper)
+Extract frames (max 5)
+Run:
+Visual analysis (OpenAI Vision)
+Basic audio analysis
+Run content improvement (OpenAI)
+
+Return JSON:
+
+{
+ "quality": {
+   "brightness": {
+     "value": 62,
+     "level": "medium",
+     "assessment": "average",
+     "suggestion": "Increase brightness slightly",
+     "effect": "Improves engagement"
+   }
+ },
+ "script_feedback": {
+   "hook_suggestions": ["..."],
+   "weak_sections": [
+     {
+       "text": "...",
+       "reason": "...",
+       "replacement": "..."
+     }
+   ],
+   "improved_script": "..."
+ }
+}
+ENDPOINT 2: /editing-assistant
+
+Purpose:
+Help user edit video
+
+Pipeline:
+
+Extract audio
+Transcribe (Whisper)
+Detect:
+filler words
+pauses (gaps)
+Detect scenes (ffmpeg scene detection)
+Identify hooks (OpenAI)
+Identify short-form segments if video > 90 sec
+Generate editing suggestions
+
+Return JSON:
+
+{
+ "hooks":[{"start":"...","end":"...","reason":"..."}],
+ "remove_sections":[{"start":"...","end":"...","reason":"filler/gap"}],
+ "short_videos":[{"start":"...","end":"...","reason":"..."}],
+ "editing_suggestions":["..."],
+ "transcript":[{"time":"...","text":"..."}]
+}
+ENDPOINT 3: /publish-optimizer
+
+Purpose:
+Generate SEO & publishing content
+
+Input:
+
+transcript OR script
+platform
+
+Logic:
+
+YouTube → titles + description + tags + timestamps + subtitle file generation
+TikTok / IG / X / LinkedIn → caption + hashtags
+
+⚠️ Hashtags MUST come from real SEO API (no hallucination)
+
+✅ NEW: YouTube Subtitle File Generation
+
+If platform = YouTube:
+
+Use transcript timestamps (from Whisper)
+Convert into .srt format (YouTube-supported subtitles)
+
+Example:
+
+1
+00:00:00,000 --> 00:00:03,000
+Hello everyone, welcome to this video
+
+2
+00:00:03,000 --> 00:00:06,000
+Today we are going to talk about...
+Ensure:
+Accurate timestamps
+Proper numbering
+Clean text (remove filler words if possible)
+
+Return JSON:
+
+{
+ "titles":["...","...","..."],
+ "description":"...",
+ "hashtags":[
+   {"tag":"#...","reason":"High search volume"}
+ ],
+ "timestamps":[{"time":"...","label":"..."}],
+ "subtitle_file": {
+   "format": "srt",
+   "content": "FULL GENERATED SRT CONTENT"
+ }
+}
+ENDPOINT 4: /video-dubbing
+
+Purpose:
+Translate + replace spoken audio
+
+Pipeline:
+
+Extract audio (ffmpeg)
+Transcribe (Whisper)
+Translate (OpenAI)
+Generate TTS audio
+Replace audio:
+ffmpeg -i video.mp4 -i new_audio.mp3 -c:v copy -map 0:v:0 -map 1:a:0 output.mp4
+
+Return:
+
+{
+ "translated_language":"...",
+ "download_url":"..."
+}
+3️⃣ SHARED LOGIC (REUSE EXISTING CODE)
+
+DO NOT duplicate:
+
+ffmpeg functions
+Whisper transcription
+OpenAI calls
+
+Instead:
+
+Move them into reusable services:
+transcribeVideo()
+extractFrames()
+analyzeVisual()
+4️⃣ TOKEN OPTIMIZATION (VERY IMPORTANT)
+Each endpoint should:
+Only send required data
+NOT send full transcript unless needed
+NOT run all analyses
+
+Example:
+
+Pre-edit → no SEO
+Publish → no visual analysis
+5️⃣ UX IMPROVEMENTS
+
+For each metric:
+
+Instead of:
+
+Brightness: 62
+
+Return + display:
+
+Brightness: 62 (Medium)
+→ Slightly increase brightness
+→ Helps viewer retention
+
+6️⃣ REMOVE FROM CURRENT APP
+❌ Combined “all-in-one” response
+❌ Metadata tab duplication
+❌ Running all AI tasks at once
+7️⃣ KEEP
+Existing ffmpeg logic
+Existing Whisper integration
+Existing OpenAI API setup
+Existing UI components (refactor only)
+FINAL RESULT
+
+After refactor, app should:
+
+✅ Let user choose what they want
+✅ Run only that pipeline
+✅ Be faster + cheaper
+✅ Be easier to use

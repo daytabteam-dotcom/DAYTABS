@@ -5,13 +5,16 @@ import { Check, Loader2 } from "lucide-react";
 const STEPS = [
   { id: "uploading", label: "Uploading Video" },
   { id: "extracting_audio", label: "Extracting Audio" },
-  { id: "extracting_frames", label: "Extracting Frames" },
   { id: "transcribing", label: "Transcribing Speech" },
+  { id: "extracting_frames", label: "Extracting Frames" },
   { id: "analyzing_visual", label: "Analyzing Visuals" },
   { id: "analyzing_audio", label: "Analyzing Audio Quality" },
-  { id: "analyzing_content", label: "Generating Hooks & Content" },
+  { id: "analyzing_content", label: "Identifying Editing Points" },
   { id: "generating_seo", label: "Optimizing SEO" },
   { id: "generating_subtitles", label: "Generating Subtitles" },
+  { id: "translating", label: "Translating Script" },
+  { id: "generating_audio", label: "Generating AI Voice" },
+  { id: "merging_video", label: "Merging Audio & Video" },
   { id: "complete", label: "Finalizing Results" }
 ];
 
