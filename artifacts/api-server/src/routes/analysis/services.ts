@@ -185,41 +185,249 @@ Return:
   });
 }
 
-export async function analyzeEditingPoints(transcript: string, segments: Array<{ start: number; end: number; text: string }>): Promise<object> {
-  const fillerPattern = /\b(um+|uh+|er+|ah+|like|you know|basically)\b/gi;
+// ─── Timestamp helpers ────────────────────────────────────────────────────────
+
+function fmtSecs(s: number): string {
+  const m = Math.floor(s / 60);
+  const sec = Math.floor(s % 60);
+  return `${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+}
+
+function normText(t: string): string {
+  return t.toLowerCase().replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Find the transcript segment whose text best matches a given AI-returned snippet.
+ * Returns the segment and a confidence level based on word-overlap score.
+ */
+function matchTextToSegment(
+  snippet: string,
+  segments: Array<{ start: number; end: number; text: string }>
+): { segment: typeof segments[0]; confidence: "high" | "medium" | "low" } | null {
+  const normSnippet = normText(snippet);
+  if (!normSnippet || segments.length === 0) return null;
+
+  let bestScore = 0;
+  let bestSeg: typeof segments[0] | null = null;
+
+  for (const seg of segments) {
+    const normSeg = normText(seg.text);
+    let score = 0;
+
+    if (normSeg.includes(normSnippet) || normSnippet.includes(normSeg)) {
+      score = Math.min(normSnippet.length, normSeg.length) / Math.max(normSnippet.length, normSeg.length);
+    } else {
+      const snippetWords = new Set(normSnippet.split(/\s+/).filter(Boolean));
+      const segWords = normSeg.split(/\s+/).filter(Boolean);
+      const overlap = segWords.filter(w => snippetWords.has(w)).length;
+      score = overlap / Math.max(snippetWords.size, segWords.length);
+    }
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestSeg = seg;
+    }
+  }
+
+  if (!bestSeg || bestScore < 0.3) return null;
+  const confidence: "high" | "medium" | "low" = bestScore >= 0.8 ? "high" : bestScore >= 0.5 ? "medium" : "low";
+  return { segment: bestSeg, confidence };
+}
+
+/**
+ * Detect silences in an audio file using ffmpeg's silencedetect filter.
+ * Returns an array of {start, end} in seconds. Silent errors return [].
+ */
+async function detectSilences(
+  audioPath: string,
+  minDurationSec = 0.8,
+  noiseDb = -30
+): Promise<Array<{ start: number; end: number }>> {
+  try {
+    const { stderr } = await execAsync(
+      `ffmpeg -i "${audioPath}" -af silencedetect=n=${noiseDb}dB:d=${minDurationSec} -f null - 2>&1 || true`
+    );
+    const silences: Array<{ start: number; end: number }> = [];
+    const endMatches = [...stderr.matchAll(/silence_end: ([\d.]+)/g)];
+    let ei = 0;
+    for (const m of stderr.matchAll(/silence_start: ([\d.]+)/g)) {
+      const start = parseFloat(m[1]);
+      const end = parseFloat(endMatches[ei]?.[1] ?? "0");
+      if (end > start) silences.push({ start, end });
+      ei++;
+    }
+    return silences;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Analyze editing points — hooks, removable sections, short clips, and tips.
+ *
+ * Key rule: OpenAI NEVER generates timestamps. All timestamps come from:
+ *   - Whisper segment data (hooks matched by text, filler words by segment)
+ *   - ffmpeg silence detection (remove sections)
+ *   - Grouped Whisper chunks (short video candidates)
+ */
+export async function analyzeEditingPoints(
+  transcript: string,
+  segments: Array<{ start: number; end: number; text: string }>,
+  audioPath?: string
+): Promise<object> {
   const lastSeg = segments[segments.length - 1];
   const totalDuration = lastSeg?.end ?? 0;
 
-  const response = await callOpenAI({
+  // ── STEP 1: AI returns hook TEXT snippets (NOT timestamps) ────────────────
+  const hookResponse = await callOpenAI({
     model: "gpt-4o",
-    max_completion_tokens: 2500,
+    max_completion_tokens: 1000,
     messages: [{
       role: "user",
-      content: `You are a professional video editor. Analyze this transcript with timestamps and return STRICT JSON only.
+      content: `You are a video editor identifying attention-grabbing moments. Read this transcript and copy 2–4 exact sentences or phrases that work best as hooks (attention-grabbing, surprising, or high-value).
 
-Transcript with timestamps (JSON array): ${JSON.stringify(segments.slice(0, 60))}
-Full transcript: "${transcript.substring(0, 2000)}"
-Total duration: ${Math.round(totalDuration)}s
-Video is ${totalDuration > 90 ? "long-form (>90s)" : "short-form (≤90s)"}
+IMPORTANT: Copy the text EXACTLY as it appears in the transcript. Do NOT invent timestamps.
 
-Return:
+Transcript: "${transcript.substring(0, 3000)}"
+
+Return STRICT JSON only:
 {
-  "hooks": [{"start":"MM:SS","end":"MM:SS","reason":"why this is a strong hook moment"}],
-  "removeSections": [{"start":"MM:SS","end":"MM:SS","reason":"filler/pause/repetition/off-topic"}],
-  "shortVideos": ${totalDuration > 90 ? '[{"start":"MM:SS","end":"MM:SS","title":"...","reason":"best standalone segment"}]' : '[]'},
-  "editingSuggestions": ["actionable editing tip 1","tip 2","tip 3","tip 4","tip 5"]
-}
-
-Format timestamps as MM:SS (e.g. "01:23"). Only suggest real timestamps from the transcript.`,
+  "hookTexts": ["exact sentence from transcript", "another exact phrase"],
+  "editingSuggestions": ["specific editing tip 1","tip 2","tip 3","tip 4","tip 5"]
+}`,
     }],
   });
-  const fallback = {
-    hooks: segments.slice(0, 2).map(s => ({ start: "00:00", end: "00:05", reason: "Strong opening moment" })),
-    removeSections: [],
-    shortVideos: [],
-    editingSuggestions: ["Cut any pauses longer than 2 seconds", "Start with the strongest hook", "Remove filler words", "End with a clear CTA", "Keep intro under 15 seconds"],
+
+  const hookData = parseJson<{ hookTexts: string[]; editingSuggestions: string[] }>(
+    hookResponse.choices[0]?.message?.content ?? "{}",
+    { hookTexts: [], editingSuggestions: [] }
+  );
+
+  // Map AI text snippets → real Whisper timestamps
+  const hooks = hookData.hookTexts
+    .map((hookText) => {
+      const match = matchTextToSegment(hookText, segments);
+      if (!match) return null;
+      return {
+        text: hookText,
+        start: fmtSecs(match.segment.start),
+        end: fmtSecs(match.segment.end),
+        reason: "Strong hook moment identified from transcript",
+        confidence: match.confidence,
+      };
+    })
+    .filter(Boolean);
+
+  // ── STEP 2: Remove sections — real data only, no AI timestamps ────────────
+  const removeSections: Array<{ start: string; end: string; reason: string }> = [];
+
+  // 2a: Filler-word segments from Whisper timestamps
+  const fillerRx = /\b(um+|uh+|er+|ah+|hmm+|like|you know|basically)\b/gi;
+  for (const seg of segments) {
+    fillerRx.lastIndex = 0;
+    if (fillerRx.test(seg.text) && seg.end - seg.start <= 4) {
+      removeSections.push({
+        start: fmtSecs(seg.start),
+        end: fmtSecs(seg.end),
+        reason: `Filler words: "${seg.text.trim()}"`,
+      });
+    }
+  }
+
+  // 2b: Silence gaps from ffmpeg (only if audio file path is provided)
+  if (audioPath) {
+    const silences = await detectSilences(audioPath);
+    for (const s of silences) {
+      if (!removeSections.some(r => r.start === fmtSecs(s.start))) {
+        removeSections.push({
+          start: fmtSecs(s.start),
+          end: fmtSecs(s.end),
+          reason: "Silence gap detected",
+        });
+      }
+    }
+    // Sort by start time
+    removeSections.sort((a, b) => a.start.localeCompare(b.start));
+  }
+
+  // ── STEP 3: Short video candidates — chunk-based, timestamps from Whisper ──
+  const shortVideos: Array<{ start: string; end: string; title?: string; reason: string; confidence: string }> = [];
+
+  if (totalDuration > 90 && segments.length > 0) {
+    const CHUNK_SEC = 22; // ~20-25 second chunks
+    const chunks: Array<{ start: number; end: number; texts: string[]; index: number }> = [];
+    let chunkStart = segments[0].start;
+    let chunkTexts: string[] = [];
+    let chunkEnd = segments[0].end;
+
+    for (const seg of segments) {
+      if (seg.start - chunkStart > CHUNK_SEC && chunkTexts.length > 0) {
+        chunks.push({ start: chunkStart, end: chunkEnd, texts: chunkTexts, index: chunks.length });
+        chunkStart = seg.start;
+        chunkTexts = [];
+      }
+      chunkTexts.push(seg.text);
+      chunkEnd = seg.end;
+    }
+    if (chunkTexts.length > 0) {
+      chunks.push({ start: chunkStart, end: chunkEnd, texts: chunkTexts, index: chunks.length });
+    }
+
+    if (chunks.length >= 2) {
+      const chunkSummaries = chunks.map(c => ({
+        index: c.index,
+        durationSec: Math.round(c.end - c.start),
+        text: c.texts.join(" ").substring(0, 200),
+      }));
+
+      const shortVideoResponse = await callOpenAI({
+        model: "gpt-4o-mini",
+        max_completion_tokens: 600,
+        messages: [{
+          role: "user",
+          content: `You are a short-form video editor. Review these ${CHUNK_SEC}-second transcript chunks and identify which ones would work well as standalone short videos (complete idea, engaging, no abrupt start/end).
+
+Chunks: ${JSON.stringify(chunkSummaries)}
+
+Return STRICT JSON — only use the provided index numbers, do NOT invent timestamps:
+{"goodChunks":[{"index":0,"title":"short title","reason":"why it works as a short video"}]}`,
+        }],
+      });
+
+      const shortData = parseJson<{ goodChunks: Array<{ index: number; title?: string; reason: string }> }>(
+        shortVideoResponse.choices[0]?.message?.content ?? "{}",
+        { goodChunks: [] }
+      );
+
+      for (const gc of shortData.goodChunks) {
+        const chunk = chunks[gc.index];
+        if (!chunk) continue;
+        shortVideos.push({
+          start: fmtSecs(chunk.start),
+          end: fmtSecs(chunk.end),
+          title: gc.title,
+          reason: gc.reason,
+          confidence: "high",
+        });
+      }
+    }
+  }
+
+  return {
+    hooks,
+    removeSections: removeSections.slice(0, 12),
+    shortVideos,
+    editingSuggestions: hookData.editingSuggestions?.length
+      ? hookData.editingSuggestions
+      : [
+          "Cut pauses longer than 1.5 seconds",
+          "Start with the strongest hook",
+          "Remove filler word segments shown above",
+          "End with a clear call to action",
+          "Keep intro under 15 seconds",
+        ],
   };
-  return parseJson(response.choices[0]?.message?.content ?? "{}", fallback);
 }
 
 export async function generateSeo(transcript: string, platform: string): Promise<object> {

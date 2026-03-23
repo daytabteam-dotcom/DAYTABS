@@ -72,8 +72,8 @@ export async function runAnalysisPipeline(
       // videoPath = original (for high-quality frame extraction)
       await runPreEdit(jobId, videoPath, workDir, audioPath, transcriptText, transcriptSegments, whisperConfidence);
     } else if (mode === "editing") {
-      // Editing is transcript-only — no frames needed
-      await runEditing(jobId, transcriptText, transcriptSegments);
+      // Pass audioPath so silence detection can find real gaps
+      await runEditing(jobId, audioPath, transcriptText, transcriptSegments);
     } else if (mode === "publish") {
       await runPublish(jobId, transcriptText, transcriptSegments, options);
     } else if (mode === "dubbing") {
@@ -143,11 +143,12 @@ async function runPreEdit(
 
 async function runEditing(
   jobId: string,
+  audioPath: string,
   transcriptText: string,
   transcriptSegments: Array<{ start: number; end: number; text: string }>
 ) {
   await updateJob(jobId, { status: "analyzing_content", progress: 50, currentStep: "Identifying editing points" });
-  const editingData = await analyzeEditingPoints(transcriptText, transcriptSegments);
+  const editingData = await analyzeEditingPoints(transcriptText, transcriptSegments, audioPath);
 
   await updateJob(jobId, {
     status: "complete",

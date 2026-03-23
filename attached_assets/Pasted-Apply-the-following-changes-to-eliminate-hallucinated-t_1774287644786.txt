@@ -1,0 +1,136 @@
+Apply the following changes to eliminate hallucinated timestamps and ensure all time segments are real and grounded in video data.
+
+GOAL
+
+Ensure that:
+
+Hooks
+Short video segments
+Remove sections
+
+are based on REAL timestamps from transcript or scene detection, NOT AI guesses.
+
+❌ CURRENT PROBLEM
+
+OpenAI is generating timestamps like:
+
+{"start":"00:30","end":"00:55"}
+These are hallucinated and NOT aligned with actual video
+✅ REQUIRED FIX
+🔒 RULE: AI MUST NOT GENERATE TIMESTAMPS
+Do NOT ask OpenAI to generate start/end times
+AI should ONLY:
+Analyze text
+Score segments
+Identify good/bad parts
+✅ STEP 1: USE WHISPER TIMESTAMPS AS SOURCE OF TRUTH
+
+When transcribing:
+
+Ensure Whisper returns:
+
+[
+  {
+    "start": 12.4,
+    "end": 15.8,
+    "text": "This is the hook"
+  }
+]
+✅ STEP 2: MAP HOOKS TO REAL SEGMENTS
+New Flow:
+Get transcript segments (with timestamps)
+Send ONLY TEXT to OpenAI:
+Ask:
+Which parts are hooks
+Which parts are weak
+OpenAI returns:
+text snippets (NOT timestamps)
+Example AI response:
+{
+ "hooks": [
+   "This is the biggest mistake people make"
+ ]
+}
+✅ STEP 3: MATCH TEXT → TIMESTAMP (BACKEND LOGIC)
+
+In backend:
+
+Find matching transcript segment for that text
+Assign its real timestamps
+Final Output:
+{
+ "hooks":[
+   {
+     "text":"This is the biggest mistake people make",
+     "start":"00:12",
+     "end":"00:16",
+     "confidence":"high"
+   }
+ ]
+}
+✅ STEP 4: SHORT VIDEO SEGMENTS (NO HALLUCINATION)
+DO NOT:
+Let AI generate start/end
+INSTEAD:
+Option A (Simple – recommended for MVP):
+Group transcript segments into chunks (10–30 sec)
+Send chunk texts to AI
+Ask:
+“Is this a good short video?”
+
+Return:
+
+{
+ "short_videos":[
+   {
+     "start":"00:30",
+     "end":"00:55",
+     "reason":"Complete idea"
+   }
+ ]
+}
+
+(based on REAL grouped timestamps)
+
+Option B (Advanced):
+Combine:
+transcript timestamps
+scene detection timestamps
+✅ STEP 5: REMOVE SECTIONS (FILLERS / GAPS)
+
+Use REAL data:
+
+Silence detection (ffmpeg)
+Whisper timestamps for filler words
+
+Example:
+
+{
+ "remove_sections":[
+   {
+     "start":"00:45",
+     "end":"00:48",
+     "reason":"Silence"
+   }
+ ]
+}
+⚠️ STRICT RULES
+❌ Never generate timestamps via OpenAI
+❌ Never guess time ranges
+✅ Always map from real transcript or video analysis
+💡 OPTIONAL IMPROVEMENT
+
+Add confidence:
+
+"confidence": "high | medium | low"
+
+Based on text matching accuracy
+
+RESULT
+
+After fix:
+
+✅ Hooks align perfectly with video
+✅ Short clips are actually usable
+✅ No fake timestamps
+✅ Much higher product trust
