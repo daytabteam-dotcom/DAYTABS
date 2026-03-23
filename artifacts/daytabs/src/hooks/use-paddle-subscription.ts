@@ -68,8 +68,13 @@ export function usePaddleSubscription() {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
-        const data = await res.json() as { subscription: PaddleSubscription | null };
+        const data = await res.json() as { subscription: PaddleSubscription | null; plan: string; freshToken: string | null };
         setSubscription(data.subscription);
+        // If the backend synced the plan and issued a fresh token, save it and notify listeners
+        if (data.freshToken) {
+          localStorage.setItem("daytabs_token", data.freshToken);
+          window.dispatchEvent(new CustomEvent("daytabs:plan-updated"));
+        }
       }
     } catch {
       // ignore

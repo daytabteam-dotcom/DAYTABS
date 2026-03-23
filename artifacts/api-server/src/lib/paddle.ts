@@ -119,6 +119,18 @@ export async function fetchSubscriptionsByCustomerId(customerId: string): Promis
   }
 }
 
+export async function fetchCustomerByEmail(email: string): Promise<{ id: string } | null> {
+  if (!email || !PADDLE_API_KEY) return null;
+  try {
+    const data = await paddleFetch<{ data: Array<{ id: string }> }>(
+      `/customers?email=${encodeURIComponent(email)}&per_page=1`
+    );
+    return data.data?.[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function cancelSubscription(subscriptionId: string): Promise<{ success: boolean; effectiveAt: string | null }> {
   if (!subscriptionId || !PADDLE_API_KEY) return { success: false, effectiveAt: null };
   const res = await fetch(`${PADDLE_BASE}/subscriptions/${subscriptionId}/cancel`, {

@@ -8,6 +8,7 @@ import {
   fetchAllPrices,
   fetchSubscriptionById,
   fetchSubscriptionsByCustomerId,
+  fetchCustomerByEmail,
   cancelSubscription,
 } from "../../lib/paddle";
 
@@ -82,38 +83,65 @@ router.get("/subscription", requireAuth, async (req, res) => {
     if (!user) { res.status(404).json({ error: "User not found" }); return; }
 
     let subscription = null;
+    let syncedPlan: string | null = null;
+    let syncedSubscriptionId: string | null = null;
+    let syncedCustomerId: string | null = null;
 
-    // Try by stored subscription ID first (fastest)
+    // 1. Try by stored subscription ID first (fastest)
     if (user.paddleSubscriptionId) {
       subscription = await fetchSubscriptionById(user.paddleSubscriptionId);
-      // If canceled, clear it
       if (subscription?.status === "canceled") {
         subscription = null;
-        await db
-          .update(usersTable)
-          .set({ paddleSubscriptionId: null, plan: "free" } as never)
-          .where(eq(usersTable.id, user.id));
+        syncedPlan = "free";
+        syncedSubscriptionId = "";
       }
     }
 
-    // Fall back to customer ID lookup
+    // 2. Fall back to customer ID lookup
     if (!subscription && user.paddleCustomerId) {
       const subs = await fetchSubscriptionsByCustomerId(user.paddleCustomerId);
-      subscription = subs[0] ?? null;
-
-      // Sync plan from Paddle if it differs
+      subscription = subs.find((s) => s.status === "active" || s.status === "trialing") ?? subs[0] ?? null;
       if (subscription) {
-        const paddlePlan = priceIdToPlan(subscription.priceId) ?? "free";
-        if (paddlePlan !== user.plan && paddlePlan !== "free") {
-          await db
-            .update(usersTable)
-            .set({ plan: paddlePlan as string, paddleSubscriptionId: subscription.id })
-            .where(eq(usersTable.id, user.id));
+        syncedPlan = priceIdToPlan(subscription.priceId) ?? null;
+        syncedSubscriptionId = subscription.id;
+      }
+    }
+
+    // 3. Email-based fallback — catches users whose Paddle IDs were never stored
+    if (!subscription) {
+      const customer = await fetchCustomerByEmail(user.email);
+      if (customer) {
+        syncedCustomerId = customer.id;
+        const subs = await fetchSubscriptionsByCustomerId(customer.id);
+        subscription = subs.find((s) => s.status === "active" || s.status === "trialing") ?? subs[0] ?? null;
+        if (subscription) {
+          syncedPlan = priceIdToPlan(subscription.priceId) ?? null;
+          syncedSubscriptionId = subscription.id;
         }
       }
     }
 
-    res.json({ subscription, plan: user.plan });
+    // 4. Persist any discovered changes
+    const planToStore = syncedPlan ?? user.plan;
+    const needsUpdate =
+      (syncedPlan !== null && syncedPlan !== user.plan) ||
+      (syncedSubscriptionId !== null && syncedSubscriptionId !== user.paddleSubscriptionId) ||
+      (syncedCustomerId !== null && syncedCustomerId !== user.paddleCustomerId);
+
+    if (needsUpdate) {
+      const updates: Record<string, unknown> = { plan: planToStore };
+      if (syncedSubscriptionId !== null) updates.paddleSubscriptionId = syncedSubscriptionId || null;
+      if (syncedCustomerId !== null) updates.paddleCustomerId = syncedCustomerId;
+      await db.update(usersTable).set(updates as never).where(eq(usersTable.id, user.id));
+      req.log.info({ userId: user.id, planToStore, syncedSubscriptionId }, "Synced plan from Paddle");
+    }
+
+    // 5. Return fresh JWT so the client can update its token immediately
+    const freshToken = needsUpdate
+      ? signToken(user.id, user.email, user.name, planToStore)
+      : null;
+
+    res.json({ subscription, plan: planToStore, freshToken });
   } catch (err) {
     req.log.error({ err }, "Failed to fetch subscription");
     res.status(500).json({ error: "Failed to fetch subscription" });
