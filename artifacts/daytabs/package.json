@@ -75,6 +75,7 @@
     "zod": "catalog:"
   },
   "dependencies": {
+    "@paddle/paddle-js": "^1.6.2",
     "react-dropzone": "^15.0.0"
   }
 }

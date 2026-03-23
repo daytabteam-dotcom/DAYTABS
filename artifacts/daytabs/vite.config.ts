@@ -18,6 +18,13 @@ if (!basePath) {
 
 export default defineConfig({
   base: basePath,
+  define: {
+    "import.meta.env.VITE_PADDLE_CLIENT_TOKEN": JSON.stringify(process.env.PADDLE_CLIENT_TOKEN ?? ""),
+    "import.meta.env.VITE_PADDLE_ENVIRONMENT": JSON.stringify(process.env.PADDLE_ENVIRONMENT ?? "production"),
+    "import.meta.env.VITE_PADDLE_PRICE_FREE": JSON.stringify(process.env.PADDLE_PRICE_FREE ?? ""),
+    "import.meta.env.VITE_PADDLE_PRICE_PREMIUM": JSON.stringify(process.env.PADDLE_PRICE_PREMIUM ?? ""),
+    "import.meta.env.VITE_PADDLE_PRICE_PROFESSIONAL": JSON.stringify(process.env.PADDLE_PRICE_PROFESSIONAL ?? ""),
+  },
   plugins: [
     react(),
     tailwindcss(),

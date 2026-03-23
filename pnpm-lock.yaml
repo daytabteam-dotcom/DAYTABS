@@ -263,6 +263,9 @@ importers:
 
   artifacts/daytabs:
     dependencies:
+      '@paddle/paddle-js':
+        specifier: ^1.6.2
+        version: 1.6.2
       react-dropzone:
         specifier: ^15.0.0
         version: 15.0.0(react@19.1.0)
@@ -459,6 +462,9 @@ importers:
 
   artifacts/landing:
     dependencies:
+      '@paddle/paddle-js':
+        specifier: ^1.6.2
+        version: 1.6.2
       axios:
         specifier: ^1.13.6
         version: 1.13.6
@@ -1099,6 +1105,9 @@ packages:
 
   '@orval/zod@8.5.3':
     resolution: {integrity: sha512-qcbnpGE0VrgCDm0hNWQSOmzbfgdnr1xo+PYQ3PJjxfLuk3kGdJmFANTr53/1lI3sZUvWZwX5nKJCLWVxvwJEgg==}
+
+  '@paddle/paddle-js@1.6.2':
+    resolution: {integrity: sha512-nx1NXCzwWUWjf0iaRDiXZlfWgFjNZ6996RFcTDk0G0ggzrh514Zsc6jGTPOUGdLB1sYJXVQiKKoNLoKoXhH+sA==}
 
   '@pinojs/redact@0.4.0':
     resolution: {integrity: sha512-k2ENnmBugE/rzQfEcdWHcCY+/FM3VLzH9cYEsbdsoqrvzAKRhUZeRNhAZvB8OitQJ1TBed3yqWtdjzS6wJKBwg==}
@@ -4024,6 +4033,8 @@ snapshots:
       - '@faker-js/faker'
       - supports-color
       - typescript
+
+  '@paddle/paddle-js@1.6.2': {}
 
   '@pinojs/redact@0.4.0': {}
 

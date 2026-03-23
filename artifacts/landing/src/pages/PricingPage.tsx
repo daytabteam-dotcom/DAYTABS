@@ -2,9 +2,11 @@ import { useLocation } from "wouter";
 import { motion } from "framer-motion";
 import { Check, Zap, Star, Building } from "lucide-react";
 import Navbar from "../components/Navbar";
+import { usePaddle, PADDLE_PRICES } from "../hooks/use-paddle";
 
 const plans = [
   {
+    key: "free" as const,
     name: "Free",
     price: "$0",
     period: "forever",
@@ -25,6 +27,7 @@ const plans = [
     ctaStyle: "border border-white/20 hover:border-violet-500/40 hover:bg-white/5",
   },
   {
+    key: "premium" as const,
     name: "Premium",
     price: "$25",
     period: "per month",
@@ -47,6 +50,7 @@ const plans = [
     ctaStyle: "bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-500 hover:to-purple-400 shadow-lg shadow-violet-500/30",
   },
   {
+    key: "professional" as const,
     name: "Professional",
     price: "$40",
     period: "per month",
@@ -71,6 +75,20 @@ const plans = [
 
 export default function PricingPage() {
   const [, navigate] = useLocation();
+  const { openCheckout } = usePaddle();
+
+  const handlePlanClick = (key: "free" | "premium" | "professional") => {
+    if (key === "free") {
+      navigate("/signup");
+      return;
+    }
+    const priceId = PADDLE_PRICES[key];
+    if (priceId) {
+      openCheckout(priceId);
+    } else {
+      navigate("/signup");
+    }
+  };
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -128,7 +146,7 @@ export default function PricingPage() {
                 </div>
 
                 <button
-                  onClick={() => navigate("/signup")}
+                  onClick={() => handlePlanClick(plan.key)}
                   className={`w-full py-3 rounded-xl text-sm font-semibold text-white transition-all mb-8 cursor-pointer ${plan.ctaStyle}`}
                   data-testid={`button-plan-${plan.name.toLowerCase()}`}
                 >

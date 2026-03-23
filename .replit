@@ -33,3 +33,8 @@ channel = "stable-25_05"
 
 [userenv.shared]
 CORE_APP_URL = "/"
+PADDLE_CLIENT_TOKEN = "live_e4f803009f3f70ed2494b2b01a0"
+PADDLE_ENVIRONMENT = "production"
+PADDLE_PRICE_FREE = "pri_01kmc297md22sfs6jrz6h2pf8d"
+PADDLE_PRICE_PREMIUM = "pri_01kmc2dafpfp9n1xj2scp9ndmr"
+PADDLE_PRICE_PROFESSIONAL = "pri_01kmc2h86tpe7wyz11rxakhv78"

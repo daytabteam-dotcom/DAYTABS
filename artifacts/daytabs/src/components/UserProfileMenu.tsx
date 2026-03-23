@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
-import { LogOut, User, Crown, ChevronDown } from "lucide-react";
+import { LogOut, Crown, ChevronDown } from "lucide-react";
 import { useUser } from "@/hooks/use-user";
+import { usePaddle, PADDLE_PRICES } from "@/hooks/use-paddle";
 
 function getInitials(name: string): string {
   const parts = name.trim().split(/\s+/);
@@ -13,6 +14,7 @@ const PLAN_COLOR = "text-violet-400";
 
 export function UserProfileMenu() {
   const { user, logout } = useUser();
+  const { openCheckout } = usePaddle();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -28,6 +30,16 @@ export function UserProfileMenu() {
 
   const initials = getInitials(user.name);
   const displayName = user.name.length > 18 ? user.name.slice(0, 18) + "…" : user.name;
+
+  const handleUpgrade = () => {
+    setOpen(false);
+    const priceId = PADDLE_PRICES.premium;
+    if (priceId) {
+      openCheckout(priceId, user.email);
+    } else {
+      window.location.href = "/pricing";
+    }
+  };
 
   return (
     <div className="relative" ref={ref}>
@@ -81,7 +93,7 @@ export function UserProfileMenu() {
               </span>
             </div>
             <button
-              onClick={() => { window.location.href = "/landing/pricing"; }}
+              onClick={handleUpgrade}
               className="mt-2 w-full py-1.5 text-xs font-medium rounded-lg bg-violet-600/20 hover:bg-violet-600/30 text-violet-300 transition-colors cursor-pointer"
               data-testid="button-upgrade-plan"
             >
