@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import { UserProfileMenu } from "@/components/UserProfileMenu";
 import { Brain, Scissors, TrendingUp, Globe, MonitorPlay } from "lucide-react";
 import PreEditTab from "./tabs/PreEditTab";
@@ -6,6 +6,7 @@ import EditingTab from "./tabs/EditingTab";
 import PublishTab from "./tabs/PublishTab";
 import DubbingTab from "./tabs/DubbingTab";
 import TeleprompterTab from "./tabs/TeleprompterTab";
+import { ExportWarningDialog } from "@/components/ExportWarningDialog";
 
 const TABS = [
   { id: "pre-edit",      label: "Pre-Edit",      icon: Brain,        desc: "Quality + Script" },
@@ -19,9 +20,69 @@ type TabId = (typeof TABS)[number]["id"];
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<TabId>("pre-edit");
+  const [activeTabHasData, setActiveTabHasData] = useState(false);
+  const [pendingTab, setPendingTab] = useState<TabId | null>(null);
+  const [showWarning, setShowWarning] = useState(false);
+  const [isDialogExporting, setIsDialogExporting] = useState(false);
+  const exportFnRef = useRef<(() => Promise<void>) | null>(null);
+
+  function handleTabClick(tabId: TabId) {
+    if (tabId === activeTab) return;
+    if (activeTabHasData) {
+      setPendingTab(tabId);
+      setShowWarning(true);
+    } else {
+      doSwitch(tabId);
+    }
+  }
+
+  function doSwitch(tabId: TabId) {
+    setActiveTab(tabId);
+    setActiveTabHasData(false);
+    exportFnRef.current = null;
+  }
+
+  async function handleExportAndSwitch() {
+    if (exportFnRef.current) {
+      setIsDialogExporting(true);
+      try {
+        await exportFnRef.current();
+      } finally {
+        setIsDialogExporting(false);
+      }
+    }
+    if (pendingTab) doSwitch(pendingTab);
+    setShowWarning(false);
+    setPendingTab(null);
+  }
+
+  function handleSwitchAnyway() {
+    if (pendingTab) doSwitch(pendingTab);
+    setShowWarning(false);
+    setPendingTab(null);
+  }
+
+  function handleCancel() {
+    setShowWarning(false);
+    setPendingTab(null);
+  }
+
+  const tabCallbacks = {
+    onDataReady: () => setActiveTabHasData(true),
+    onDataReset: () => { setActiveTabHasData(false); exportFnRef.current = null; },
+    onRegisterExport: (fn: (() => Promise<void>) | null) => { exportFnRef.current = fn; },
+  };
 
   return (
     <div className="min-h-screen relative overflow-x-hidden selection:bg-primary/30">
+      <ExportWarningDialog
+        open={showWarning}
+        isExporting={isDialogExporting}
+        onExportAndSwitch={handleExportAndSwitch}
+        onSwitchAnyway={handleSwitchAnyway}
+        onCancel={handleCancel}
+      />
+
       <div className="fixed inset-0 pointer-events-none z-[-1] overflow-hidden">
         <img
           src={`${import.meta.env.BASE_URL}images/hero-bg.png`}
@@ -34,7 +95,7 @@ export default function Home() {
 
       <header className="w-full border-b border-white/5 bg-background/50 backdrop-blur-xl sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
-          <div className="flex items-center gap-3 cursor-pointer" onClick={() => setActiveTab("pre-edit")}>
+          <div className="flex items-center gap-3 cursor-pointer" onClick={() => handleTabClick("pre-edit")}>
             <img src={`${import.meta.env.BASE_URL}images/logo.jpg`} alt="DayTabs" className="w-10 h-10 object-contain rounded-lg drop-shadow-[0_0_15px_rgba(124,58,237,0.5)]" />
             <span className="text-2xl font-display font-bold tracking-tight text-white">Day<span className="text-primary">Tabs</span></span>
           </div>
@@ -51,7 +112,7 @@ export default function Home() {
               return (
                 <button
                   key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
+                  onClick={() => handleTabClick(tab.id)}
                   className={`flex items-center gap-2.5 px-5 py-3 rounded-xl text-sm font-semibold whitespace-nowrap transition-all duration-200 shrink-0 ${
                     isActive
                       ? "bg-primary/20 text-primary border border-primary/30 shadow-lg shadow-primary/10"
@@ -71,10 +132,10 @@ export default function Home() {
       </div>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 md:py-16 relative z-10">
-        {activeTab === "pre-edit"     && <PreEditTab />}
-        {activeTab === "editing"      && <EditingTab />}
-        {activeTab === "publish"      && <PublishTab />}
-        {activeTab === "dubbing"      && <DubbingTab />}
+        {activeTab === "pre-edit"     && <PreEditTab     {...tabCallbacks} />}
+        {activeTab === "editing"      && <EditingTab     {...tabCallbacks} />}
+        {activeTab === "publish"      && <PublishTab     {...tabCallbacks} />}
+        {activeTab === "dubbing"      && <DubbingTab     {...tabCallbacks} />}
         {activeTab === "teleprompter" && <TeleprompterTab />}
       </main>
     </div>

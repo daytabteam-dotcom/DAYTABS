@@ -1,13 +1,20 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { useDropzone } from "react-dropzone";
 import { motion } from "framer-motion";
-import { Wand2, CheckCircle2, AlertTriangle, XCircle, ChevronDown, ChevronUp, Lightbulb, Zap, Upload, Film, Brain, MonitorPlay, Volume2 } from "lucide-react";
+import { Wand2, CheckCircle2, AlertTriangle, XCircle, ChevronDown, ChevronUp, Lightbulb, Zap, Upload, Film, Brain, MonitorPlay, Volume2, FileDown } from "lucide-react";
 import { ProgressIndicator } from "@/components/ProgressIndicator";
 import { Teleprompter } from "@/components/Teleprompter";
 import { useAnalysisPolling, useAnalysisResults } from "@/hooks/use-analysis";
+import { usePdfExport } from "@/hooks/use-pdf-export";
 import { getUploadVideoUrl } from "@workspace/api-client-react";
 import { useToast } from "@/hooks/use-toast";
+
+interface TabProps {
+  onDataReady: () => void;
+  onDataReset: () => void;
+  onRegisterExport: (fn: (() => Promise<void>) | null) => void;
+}
 
 function MetricCard({ title, metric }: { title: string; metric: any }) {
   if (!metric) return null;
@@ -167,12 +174,14 @@ function UploadZone({ onFile, isPending }: { onFile: (f: File) => void; isPendin
   );
 }
 
-export default function PreEditTab() {
+export default function PreEditTab({ onDataReady, onDataReset, onRegisterExport }: TabProps) {
   const { toast } = useToast();
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [showScript, setShowScript] = useState(false);
   const [teleprompterOpen, setTeleprompterOpen] = useState(false);
+
+  const { ref, exportPdf, isExporting: isPdfExporting } = usePdfExport("daytabs-pre-edit.pdf");
 
   const uploadMutation = useMutation({
     mutationFn: async (f: File) => {
@@ -192,7 +201,21 @@ export default function PreEditTab() {
   const isComplete = statusData?.status === "complete";
   const { data: rawResults } = useAnalysisResults(jobId, isComplete);
   const results = rawResults as any;
-  const reset = () => { setJobId(null); setSelectedFile(null); uploadMutation.reset(); };
+
+  useEffect(() => {
+    if (isComplete && results) {
+      onDataReady();
+      onRegisterExport(exportPdf);
+    }
+  }, [isComplete, results]);
+
+  const reset = () => {
+    setJobId(null);
+    setSelectedFile(null);
+    uploadMutation.reset();
+    onDataReset();
+    onRegisterExport(null);
+  };
 
   if (!jobId) {
     return (
@@ -239,13 +262,22 @@ export default function PreEditTab() {
         <Teleprompter script={scriptFeedback.improvedScript} onClose={() => setTeleprompterOpen(false)} />
       )}
 
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-10">
-        <div className="flex items-center justify-between">
+      <motion.div ref={ref} initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-10">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
             <h2 className="text-2xl font-bold">Pre-Edit Results</h2>
             <p className="text-white/40 text-sm mt-1">Overall score: <span className="text-primary font-bold text-xl">{quality?.score ?? "—"}</span> / 100</p>
           </div>
-          <button onClick={reset} className="px-4 py-2 text-sm font-medium bg-white/5 hover:bg-white/10 rounded-xl border border-white/10 transition-colors">Analyze Another</button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={exportPdf}
+              disabled={isPdfExporting}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-primary/15 hover:bg-primary/25 border border-primary/30 text-primary rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isPdfExporting ? <><div className="w-3.5 h-3.5 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />Exporting…</> : <><FileDown className="w-3.5 h-3.5" />Download PDF</>}
+            </button>
+            <button onClick={reset} className="px-4 py-2 text-sm font-medium bg-white/5 hover:bg-white/10 rounded-xl border border-white/10 transition-colors">Analyze Another</button>
+          </div>
         </div>
 
         <section>

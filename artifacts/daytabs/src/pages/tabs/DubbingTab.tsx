@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { useDropzone } from "react-dropzone";
 import { motion } from "framer-motion";
@@ -7,6 +7,12 @@ import { ProgressIndicator } from "@/components/ProgressIndicator";
 import { useAnalysisPolling, useAnalysisResults } from "@/hooks/use-analysis";
 import { getUploadVideoUrl } from "@workspace/api-client-react";
 import { useToast } from "@/hooks/use-toast";
+
+interface TabProps {
+  onDataReady: () => void;
+  onDataReset: () => void;
+  onRegisterExport: (fn: (() => Promise<void>) | null) => void;
+}
 
 const LANGUAGES = ["Spanish","French","German","Japanese","Portuguese","Arabic","Chinese (Simplified)","Korean","Italian","Russian","Hindi","Turkish"];
 const VOICES = [
@@ -76,7 +82,7 @@ function UploadZone({ onFile, isPending, language }: { onFile: (f: File) => void
   );
 }
 
-export default function DubbingTab() {
+export default function DubbingTab({ onDataReady, onDataReset, onRegisterExport }: TabProps) {
   const { toast } = useToast();
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
@@ -105,7 +111,22 @@ export default function DubbingTab() {
   const isComplete = statusData?.status === "complete";
   const { data: rawResults } = useAnalysisResults(jobId, isComplete);
   const results = rawResults as any;
-  const reset = () => { setJobId(null); setSelectedFile(null); uploadMutation.reset(); previewAudio?.pause(); };
+
+  useEffect(() => {
+    if (isComplete && results) {
+      onDataReady();
+      onRegisterExport(null);
+    }
+  }, [isComplete, results]);
+
+  const reset = () => {
+    setJobId(null);
+    setSelectedFile(null);
+    uploadMutation.reset();
+    previewAudio?.pause();
+    onDataReset();
+    onRegisterExport(null);
+  };
 
   const toggleVoicePreview = async (voiceId: string) => {
     if (playingVoice === voiceId) { previewAudio?.pause(); setPlayingVoice(null); return; }

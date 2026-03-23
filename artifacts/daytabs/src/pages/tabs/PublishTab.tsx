@@ -1,12 +1,19 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { useDropzone } from "react-dropzone";
 import { motion } from "framer-motion";
-import { TrendingUp, Copy, Check, Download, Hash, Clock, FileText, Globe, Film, Upload } from "lucide-react";
+import { TrendingUp, Copy, Check, Download, Hash, Clock, FileText, Globe, Film, Upload, FileDown } from "lucide-react";
 import { ProgressIndicator } from "@/components/ProgressIndicator";
 import { useAnalysisPolling, useAnalysisResults } from "@/hooks/use-analysis";
+import { usePdfExport } from "@/hooks/use-pdf-export";
 import { getUploadVideoUrl } from "@workspace/api-client-react";
 import { useToast } from "@/hooks/use-toast";
+
+interface TabProps {
+  onDataReady: () => void;
+  onDataReset: () => void;
+  onRegisterExport: (fn: (() => Promise<void>) | null) => void;
+}
 
 const PLATFORMS = [
   { id: "youtube_long", label: "YouTube" },
@@ -86,13 +93,15 @@ function UploadZone({ onFile, isPending, platform }: { onFile: (f: File) => void
   );
 }
 
-export default function PublishTab() {
+export default function PublishTab({ onDataReady, onDataReset, onRegisterExport }: TabProps) {
   const { toast } = useToast();
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [platform, setPlatform] = useState("youtube_long");
   const [translateSubs, setTranslateSubs] = useState(false);
   const [subLang, setSubLang] = useState("Spanish");
+
+  const { ref, exportPdf, isExporting: isPdfExporting } = usePdfExport("daytabs-publish.pdf");
 
   const uploadMutation = useMutation({
     mutationFn: async (f: File) => {
@@ -114,7 +123,21 @@ export default function PublishTab() {
   const isComplete = statusData?.status === "complete";
   const { data: rawResults } = useAnalysisResults(jobId, isComplete);
   const results = rawResults as any;
-  const reset = () => { setJobId(null); setSelectedFile(null); uploadMutation.reset(); };
+
+  useEffect(() => {
+    if (isComplete && results) {
+      onDataReady();
+      onRegisterExport(exportPdf);
+    }
+  }, [isComplete, results]);
+
+  const reset = () => {
+    setJobId(null);
+    setSelectedFile(null);
+    uploadMutation.reset();
+    onDataReset();
+    onRegisterExport(null);
+  };
 
   const downloadSrt = () => {
     if (!results?.subtitleFile?.content) return;
@@ -185,10 +208,19 @@ export default function PublishTab() {
   }
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-8">
-      <div className="flex items-center justify-between">
+    <motion.div ref={ref} initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-8">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <div><h2 className="text-2xl font-bold">Publish Results</h2><p className="text-white/40 text-sm mt-1 capitalize">{results.platform?.replace(/_/g, " ")}</p></div>
-        <button onClick={reset} className="px-4 py-2 text-sm font-medium bg-white/5 hover:bg-white/10 rounded-xl border border-white/10 transition-colors">Optimize Another</button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={exportPdf}
+            disabled={isPdfExporting}
+            className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-emerald-400/10 hover:bg-emerald-400/20 border border-emerald-400/25 text-emerald-300 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isPdfExporting ? <><div className="w-3.5 h-3.5 border-2 border-emerald-400/30 border-t-emerald-400 rounded-full animate-spin" />Exporting…</> : <><FileDown className="w-3.5 h-3.5" />Download PDF</>}
+          </button>
+          <button onClick={reset} className="px-4 py-2 text-sm font-medium bg-white/5 hover:bg-white/10 rounded-xl border border-white/10 transition-colors">Optimize Another</button>
+        </div>
       </div>
 
       {results.titles?.length > 0 && (

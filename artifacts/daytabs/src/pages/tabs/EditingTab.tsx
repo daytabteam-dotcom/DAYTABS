@@ -1,12 +1,19 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { useDropzone } from "react-dropzone";
 import { motion } from "framer-motion";
-import { Scissors, Clock, Zap, Film, Lightbulb, MessageSquare, Upload } from "lucide-react";
+import { Scissors, Clock, Zap, Film, Lightbulb, MessageSquare, Upload, FileDown } from "lucide-react";
 import { ProgressIndicator } from "@/components/ProgressIndicator";
 import { useAnalysisPolling, useAnalysisResults } from "@/hooks/use-analysis";
+import { usePdfExport } from "@/hooks/use-pdf-export";
 import { getUploadVideoUrl } from "@workspace/api-client-react";
 import { useToast } from "@/hooks/use-toast";
+
+interface TabProps {
+  onDataReady: () => void;
+  onDataReset: () => void;
+  onRegisterExport: (fn: (() => Promise<void>) | null) => void;
+}
 
 function UploadZone({ onFile, isPending }: { onFile: (f: File) => void; isPending: boolean }) {
   const [file, setFile] = useState<File | null>(null);
@@ -66,10 +73,12 @@ function UploadZone({ onFile, isPending }: { onFile: (f: File) => void; isPendin
   );
 }
 
-export default function EditingTab() {
+export default function EditingTab({ onDataReady, onDataReset, onRegisterExport }: TabProps) {
   const { toast } = useToast();
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
+
+  const { ref, exportPdf, isExporting: isPdfExporting } = usePdfExport("daytabs-editing.pdf");
 
   const uploadMutation = useMutation({
     mutationFn: async (f: File) => {
@@ -89,7 +98,21 @@ export default function EditingTab() {
   const isComplete = statusData?.status === "complete";
   const { data: rawResults } = useAnalysisResults(jobId, isComplete);
   const results = rawResults as any;
-  const reset = () => { setJobId(null); setSelectedFile(null); uploadMutation.reset(); };
+
+  useEffect(() => {
+    if (isComplete && results) {
+      onDataReady();
+      onRegisterExport(exportPdf);
+    }
+  }, [isComplete, results]);
+
+  const reset = () => {
+    setJobId(null);
+    setSelectedFile(null);
+    uploadMutation.reset();
+    onDataReset();
+    onRegisterExport(null);
+  };
 
   if (!jobId) {
     return (
@@ -127,10 +150,19 @@ export default function EditingTab() {
   }
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-8">
-      <div className="flex items-center justify-between">
+    <motion.div ref={ref} initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-8">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <div><h2 className="text-2xl font-bold">Editing Results</h2><p className="text-white/40 text-sm mt-1">AI-powered cut suggestions and highlights</p></div>
-        <button onClick={reset} className="px-4 py-2 text-sm font-medium bg-white/5 hover:bg-white/10 rounded-xl border border-white/10 transition-colors">Analyze Another</button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={exportPdf}
+            disabled={isPdfExporting}
+            className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-yellow-400/10 hover:bg-yellow-400/20 border border-yellow-400/25 text-yellow-300 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isPdfExporting ? <><div className="w-3.5 h-3.5 border-2 border-yellow-400/30 border-t-yellow-400 rounded-full animate-spin" />Exporting…</> : <><FileDown className="w-3.5 h-3.5" />Download PDF</>}
+          </button>
+          <button onClick={reset} className="px-4 py-2 text-sm font-medium bg-white/5 hover:bg-white/10 rounded-xl border border-white/10 transition-colors">Analyze Another</button>
+        </div>
       </div>
 
       <div className="grid md:grid-cols-2 gap-6">
