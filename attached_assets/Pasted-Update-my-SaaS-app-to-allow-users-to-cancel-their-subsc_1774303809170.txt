@@ -1,0 +1,58 @@
+Update my SaaS app to allow users to cancel their subscription and update payment info directly within the app, without logging into Paddle. Implement the following:
+
+1. Add a "Manage Subscription" button:
+   - Place it in the profile menu (top-right dropdown) or next to the Upgrade button.
+   - Button text: "Manage Subscription"
+
+2. When the user clicks the button:
+   - Call a backend endpoint (`/api/paddle/portal`) that generates a Paddle **customer portal session** for that user.
+   - Return the portal session URL to the frontend.
+
+3. Open the portal session:
+   - Open the returned URL in a new tab or modal.
+   - The user can update their card, billing info, or cancel their subscription from within this portal.
+
+4. Backend implementation:
+   - Use Paddle **API key** stored in environment variables (`PADDLE_API_KEY`).
+   - Use the user's Paddle **customer_id** stored in your DB.
+   - Endpoint example:
+     ```js
+     const response = await fetch("https://vendors.paddle.com/api/2.0/subscription/users/portal_sessions", {
+       method: "POST",
+       headers: {
+         "Authorization": `Bearer ${process.env.PADDLE_API_KEY}`,
+         "Content-Type": "application/json"
+       },
+       body: JSON.stringify({
+         user_id: paddleCustomerId,
+         return_url: "https://your-app.com/profile"
+       })
+     });
+     const data = await response.json();
+     res.json({ portalUrl: data.response.url });
+     ```
+
+5. Frontend implementation:
+   - Fetch `/api/paddle/portal` when the user clicks the button.
+   - Open the returned `portalUrl`.
+
+6. Post-update:
+   - Ensure that your webhook endpoint listens for:
+     - `subscription.canceled` → downgrade user to Free
+     - `subscription.updated` → reflect plan changes if needed
+   - Update your DB accordingly so frontend shows the correct plan.
+
+7. UX:
+   - Show a loading state while generating the portal URL.
+   - Handle errors gracefully (e.g., show a message if portal creation fails).
+
+8. Security:
+   - Only generate portal sessions for logged-in users.
+   - Never expose Paddle API keys to the frontend.
+   - Use the backend to map logged-in users to Paddle customer IDs.
+
+9. Optional enhancements:
+   - Track portal sessions in logs for debugging.
+   - Show confirmation messages after cancellation in-app based on webhook events.
+
+Return the full updated frontend + backend code that implements this "Manage Subscription" feature securely and seamlessly.

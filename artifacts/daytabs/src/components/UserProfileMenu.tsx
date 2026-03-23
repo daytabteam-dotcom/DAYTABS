@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { LogOut, Crown, ChevronDown, Loader2, Tag, AlertCircle, CreditCard, Calendar, XCircle, AlertTriangle, X, RefreshCcw } from "lucide-react";
+import { LogOut, Crown, ChevronDown, Loader2, Tag, AlertCircle, Calendar, XCircle, AlertTriangle, X, RefreshCcw, Settings } from "lucide-react";
 import { useUser } from "@/hooks/use-user";
 import { usePaddle } from "@/hooks/use-paddle";
 import { usePlan, getPlanLabel, getPlanColor } from "@/hooks/use-plan";
@@ -121,6 +121,8 @@ export function UserProfileMenu() {
   const [showPlanPicker, setShowPlanPicker] = useState(false);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [reactivating, setReactivating] = useState(false);
+  const [portalLoading, setPortalLoading] = useState(false);
+  const [portalError, setPortalError] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -162,6 +164,28 @@ export function UserProfileMenu() {
       // ignore — subscription display will stay unchanged
     } finally {
       setReactivating(false);
+    }
+  };
+
+  const handleManageSubscription = async () => {
+    setPortalLoading(true);
+    setPortalError(null);
+    try {
+      const token = localStorage.getItem("daytabs_token");
+      const res = await fetch("/api/paddle/portal", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(err.error ?? "Could not open billing portal");
+      }
+      const data = await res.json() as { portalUrl: string };
+      window.open(data.portalUrl, "_blank", "noopener,noreferrer");
+    } catch (e) {
+      setPortalError(e instanceof Error ? e.message : "Something went wrong");
+    } finally {
+      setPortalLoading(false);
     }
   };
 
@@ -236,43 +260,45 @@ export function UserProfileMenu() {
                       className="w-full flex items-center justify-center gap-1.5 py-1.5 text-xs font-medium rounded-lg bg-emerald-600/15 hover:bg-emerald-600/25 text-emerald-400 transition-colors cursor-pointer disabled:opacity-60"
                       data-testid="button-reactivate-subscription"
                     >
-                      {reactivating ? (
-                        <Loader2 className="w-3 h-3 animate-spin" />
-                      ) : (
-                        <RefreshCcw className="w-3 h-3" />
-                      )}
+                      {reactivating ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCcw className="w-3 h-3" />}
                       {reactivating ? "Reactivating…" : "Keep my plan"}
                     </button>
                   </div>
                 ) : (
-                  <div className="space-y-1.5">
+                  <div className="space-y-2">
                     {nextBilling && (
                       <div className="flex items-center gap-1.5 text-xs text-white/35">
                         <Calendar className="w-3 h-3 shrink-0" />
                         <span>Renews {nextBilling}</span>
                       </div>
                     )}
-                    <div className="flex items-center gap-2">
-                      {subscription.managementUrls.updatePaymentMethod && (
-                        <a
-                          href={subscription.managementUrls.updatePaymentMethod}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center gap-1 text-xs text-white/35 hover:text-white/60 transition-colors"
-                        >
-                          <CreditCard className="w-3 h-3" />
-                          Update payment
-                        </a>
-                      )}
-                      <button
-                        onClick={handleCancelClick}
-                        className="flex items-center gap-1 text-xs text-white/25 hover:text-red-400/70 transition-colors ml-auto cursor-pointer"
-                        data-testid="button-cancel-subscription"
-                      >
-                        <XCircle className="w-3 h-3" />
-                        Cancel
-                      </button>
-                    </div>
+
+                    {/* Manage Subscription — opens Paddle portal */}
+                    <button
+                      onClick={handleManageSubscription}
+                      disabled={portalLoading}
+                      className="w-full flex items-center justify-center gap-1.5 py-1.5 text-xs font-medium rounded-lg bg-white/5 hover:bg-white/10 text-white/50 hover:text-white/80 transition-colors cursor-pointer disabled:opacity-60"
+                      data-testid="button-manage-subscription"
+                    >
+                      {portalLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Settings className="w-3 h-3" />}
+                      {portalLoading ? "Opening portal…" : "Manage Subscription"}
+                    </button>
+
+                    {portalError && (
+                      <div className="flex items-start gap-1.5">
+                        <AlertCircle className="w-3 h-3 text-red-400 mt-0.5 shrink-0" />
+                        <p className="text-xs text-red-400">{portalError}</p>
+                      </div>
+                    )}
+
+                    <button
+                      onClick={handleCancelClick}
+                      className="flex items-center gap-1 text-xs text-white/25 hover:text-red-400/70 transition-colors cursor-pointer"
+                      data-testid="button-cancel-subscription"
+                    >
+                      <XCircle className="w-3 h-3" />
+                      Cancel subscription
+                    </button>
                   </div>
                 )}
               </div>

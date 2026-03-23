@@ -11,6 +11,7 @@ import {
   fetchCustomerByEmail,
   cancelSubscription,
   reactivateSubscription,
+  createPortalSession,
 } from "../../lib/paddle";
 
 const router = Router();
@@ -218,6 +219,53 @@ router.post("/reactivate-subscription", requireAuth, async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "Failed to reactivate subscription");
     res.status(500).json({ error: "Failed to reactivate subscription" });
+  }
+});
+
+/**
+ * POST /api/paddle/portal
+ * Generate a Paddle customer portal session URL for the authenticated user.
+ * The portal lets them update payment methods, view invoices, and manage billing.
+ */
+router.post("/portal", requireAuth, async (req, res) => {
+  try {
+    const [user] = await db
+      .select()
+      .from(usersTable)
+      .where(eq(usersTable.id, req.auth!.user_id))
+      .limit(1);
+
+    if (!user) { res.status(404).json({ error: "User not found" }); return; }
+
+    // Ensure we have a Paddle customer ID — look it up by email if not stored
+    let customerId = user.paddleCustomerId;
+    if (!customerId) {
+      const customer = await fetchCustomerByEmail(user.email);
+      if (customer) {
+        customerId = customer.id;
+        await db
+          .update(usersTable)
+          .set({ paddleCustomerId: customerId } as never)
+          .where(eq(usersTable.id, user.id));
+      }
+    }
+
+    if (!customerId) {
+      res.status(400).json({ error: "No billing account found. Please subscribe first." });
+      return;
+    }
+
+    const session = await createPortalSession(customerId, user.paddleSubscriptionId ?? undefined);
+    if (!session) {
+      res.status(500).json({ error: "Could not generate portal session" });
+      return;
+    }
+
+    req.log.info({ userId: user.id }, "Paddle portal session created");
+    res.json({ portalUrl: session.url });
+  } catch (err) {
+    req.log.error({ err }, "Failed to create portal session");
+    res.status(500).json({ error: "Failed to open billing portal" });
   }
 });
 

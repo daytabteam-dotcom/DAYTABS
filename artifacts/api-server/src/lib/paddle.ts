@@ -131,6 +131,39 @@ export async function fetchCustomerByEmail(email: string): Promise<{ id: string 
   }
 }
 
+export async function createPortalSession(
+  customerId: string,
+  subscriptionId?: string
+): Promise<{ url: string } | null> {
+  if (!customerId || !PADDLE_API_KEY) return null;
+  const body: Record<string, unknown> = {};
+  if (subscriptionId) body.subscription_ids = [subscriptionId];
+  const res = await fetch(`${PADDLE_BASE}/customers/${customerId}/portal-sessions`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${PADDLE_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Paddle portal error ${res.status}: ${text}`);
+  }
+  const data = await res.json() as {
+    data: {
+      urls: {
+        general: { overview: string };
+        subscriptions?: Array<{ update_payment_method: string }>;
+      };
+    };
+  };
+  const url =
+    data.data?.urls?.subscriptions?.[0]?.update_payment_method ??
+    data.data?.urls?.general?.overview;
+  return url ? { url } : null;
+}
+
 export async function reactivateSubscription(
   subscriptionId: string
 ): Promise<{ success: boolean; forbidden: boolean }> {
