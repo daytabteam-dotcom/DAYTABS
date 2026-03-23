@@ -24,8 +24,12 @@ export default function Navbar() {
   const handleNavClick = (href: string) => {
     setMenuOpen(false);
     if (href.startsWith("#")) {
-      const el = document.querySelector(href);
-      el?.scrollIntoView({ behavior: "smooth" });
+      if (location === "/") {
+        const el = document.querySelector(href);
+        el?.scrollIntoView({ behavior: "smooth" });
+      } else {
+        navigate("/" + href);
+      }
     } else {
       navigate(href);
     }
