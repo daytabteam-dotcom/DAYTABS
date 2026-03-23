@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect } from "react";
-import { LogOut, Crown, ChevronDown } from "lucide-react";
+import { LogOut, Crown, ChevronDown, Loader2 } from "lucide-react";
 import { useUser } from "@/hooks/use-user";
 import { usePaddle, PADDLE_PRICES } from "@/hooks/use-paddle";
+import { usePlan, getPlanLabel, getPlanColor } from "@/hooks/use-plan";
 
 function getInitials(name: string): string {
   const parts = name.trim().split(/\s+/);
@@ -9,12 +10,10 @@ function getInitials(name: string): string {
   return name.slice(0, 2).toUpperCase();
 }
 
-const PLAN = "Free Plan";
-const PLAN_COLOR = "text-violet-400";
-
 export function UserProfileMenu() {
   const { user, logout } = useUser();
   const { openCheckout } = usePaddle();
+  const { plan, loading } = usePlan();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -30,6 +29,8 @@ export function UserProfileMenu() {
 
   const initials = getInitials(user.name);
   const displayName = user.name.length > 18 ? user.name.slice(0, 18) + "…" : user.name;
+  const planLabel = getPlanLabel(plan.plan);
+  const planColor = getPlanColor(plan.plan);
 
   const handleUpgrade = () => {
     setOpen(false);
@@ -88,17 +89,23 @@ export function UserProfileMenu() {
                 <Crown className="w-3.5 h-3.5 text-violet-400" />
                 <span className="text-xs text-white/50">Subscription</span>
               </div>
-              <span className={`text-xs font-semibold ${PLAN_COLOR}`} data-testid="text-user-plan">
-                {PLAN}
-              </span>
+              {loading ? (
+                <Loader2 className="w-3.5 h-3.5 text-white/30 animate-spin" />
+              ) : (
+                <span className={`text-xs font-semibold ${planColor}`} data-testid="text-user-plan">
+                  {planLabel}
+                </span>
+              )}
             </div>
-            <button
-              onClick={handleUpgrade}
-              className="mt-2 w-full py-1.5 text-xs font-medium rounded-lg bg-violet-600/20 hover:bg-violet-600/30 text-violet-300 transition-colors cursor-pointer"
-              data-testid="button-upgrade-plan"
-            >
-              Upgrade Plan
-            </button>
+            {!plan.isPaid && (
+              <button
+                onClick={handleUpgrade}
+                className="mt-2 w-full py-1.5 text-xs font-medium rounded-lg bg-violet-600/20 hover:bg-violet-600/30 text-violet-300 transition-colors cursor-pointer"
+                data-testid="button-upgrade-plan"
+              >
+                Upgrade Plan
+              </button>
+            )}
           </div>
 
           {/* Actions */}

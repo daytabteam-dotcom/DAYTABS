@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react";
 
-interface UserInfo {
+export interface UserInfo {
   userId: number;
   email: string;
   name: string;
+  plan: string;
 }
 
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
@@ -16,11 +17,6 @@ function decodeJwtPayload(token: string): Record<string, unknown> | null {
   } catch {
     return null;
   }
-}
-
-function getInitials(email: string): string {
-  const name = email.split("@")[0];
-  return name.slice(0, 2).toUpperCase();
 }
 
 export function useUser() {
@@ -51,8 +47,9 @@ export function useUser() {
     const email = (payload.email as string) || "";
     const jwtName = (payload.name as string) || "";
     const name = jwtName || email.split("@")[0].replace(/[._]/g, " ");
+    const plan = (payload.plan as string) || "free";
 
-    setUser({ userId: payload.user_id as number, email, name });
+    setUser({ userId: payload.user_id as number, email, name, plan });
   }, []);
 
   const logout = () => {

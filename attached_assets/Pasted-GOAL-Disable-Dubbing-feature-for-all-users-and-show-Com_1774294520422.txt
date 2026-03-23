@@ -1,0 +1,82 @@
+GOAL
+Disable Dubbing feature for all users and show “Coming Soon” label.
+Apply subscription rules for Pre-Edit, Editing, and SEO/Publish tabs.
+Reduce token costs for Free users by limiting AI calculations.
+Keep Premium and Professional users with increased/full access.
+1️⃣ FRONTEND CHANGES
+Dubbing Tab:
+Disable action button
+Overlay label: “Coming Soon”
+Subscription Checks:
+Add logic to check user plan (Free / Premium / Professional) for each tab.
+For Free users, blur restricted sections and limit calculations.
+For Premium, full metrics but max 20 uploads per tab per month.
+For Professional, unlimited uploads per tab.
+Free/Premium Notice Messages:
+Show if the user exceeds the upload limit.
+2️⃣ BACKEND / API LOGIC
+Free Plan Rules
+
+Pre-Edit Tab:
+
+Max 1 video upload
+Analyze only:
+Lighting
+Brightness
+Contrast
+Blur remaining sections (titles visible)
+Audio: show Volume only, blur rest
+Hooks: first only, blur others
+Weak sections: first only, blur rest
+Improved Script: accessible
+PDF download: locked
+
+Editing Tab:
+
+Max 3 video uploads
+Hooks: first only, blur remaining
+Editing tips: first 2 only, blur remaining
+Transcript: first 3 lines, blur remaining
+PDF export: locked
+
+SEO / Publish Tab:
+
+Cannot upload YouTube Long videos, allowed: YT Shorts, TikTok, X, Instagram, LinkedIn
+Translate subtitle: locked
+Titles: first only, blur others
+Full description: accessible
+Hashtags: first 3 visible, rest blurred
+Timestamp: calculate first 30 seconds, blur rest
+Subtitle file: locked
+PDF download: locked
+Max 2 video uploads
+Premium Plan Rules
+Full access to all metrics and AI calculations
+Max 20 video uploads per tab per month
+Dubbing: disabled, Coming Soon label
+Professional Plan Rules
+Full access to all metrics and AI calculations
+Unlimited video uploads per tab
+Dubbing: disabled, Coming Soon label
+3️⃣ TOKEN / COST OPTIMIZATION
+Free users: only calculate listed metrics per tab
+Avoid sending unnecessary transcript, frames, or AI calls for blurred/locked content
+Premium/Professional: run full AI analysis
+4️⃣ UX / DISPLAY
+Blurred sections: title/header visible, content obscured
+Locked features clearly labeled:
+Export PDF – Locked for Free Users
+Subtitle File – Locked for Free Users
+Teleprompter: accessible for all plans
+5️⃣ SHARED LOGIC
+Reuse existing backend functions (ffmpeg, Whisper, OpenAI)
+Add conditional checks per subscription plan before running analysis
+Maintain existing Dark Theme (#0F172A) + Purple accent (#7C3AED)
+
+✅ EXPECTED RESULT
+
+Free users: limited AI usage, blurred/locked metrics, max upload restrictions
+Premium users: full access except Dubbing, 20 uploads per tab per month
+Professional users: full access, unlimited uploads
+Dubbing: disabled for all, shows Coming Soon
+Token usage optimized for Free users

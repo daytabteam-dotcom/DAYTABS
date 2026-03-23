@@ -11,6 +11,11 @@ export interface VideoUploadOptions {
   audioVoice?: string;
 }
 
+function getAuthHeader(): Record<string, string> {
+  const token = localStorage.getItem("daytabs_token");
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 /**
  * Upload a video for analysis.
  *
@@ -46,14 +51,21 @@ export function useVideoUpload() {
       let fileKey = "";
 
       try {
-        const presignRes = await fetch(`/api/analysis/presign-upload?ext=${ext}`);
+        const presignRes = await fetch(
+          `/api/analysis/presign-upload?ext=${ext}&mode=${options.mode}`,
+          { headers: getAuthHeader() }
+        );
         if (presignRes.ok) {
           const body = (await presignRes.json()) as { uploadUrl: string; fileKey: string };
           uploadUrl = body.uploadUrl;
           fileKey = body.fileKey;
           useR2 = true;
+        } else if (presignRes.status === 429 || presignRes.status === 403) {
+          const e = (await presignRes.json().catch(() => ({}))) as { error?: string };
+          throw new Error(e.error ?? "Upload not allowed");
         }
-      } catch {
+      } catch (err) {
+        if (err instanceof Error && (err.message.includes("limit") || err.message.includes("requires"))) throw err;
         // network error fetching presign — fall through to multipart
       }
 
@@ -92,7 +104,7 @@ export function useVideoUpload() {
           // Tell the backend to start processing the uploaded R2 object
           const startRes = await fetch("/api/analysis/start", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { "Content-Type": "application/json", ...getAuthHeader() },
             body: JSON.stringify({
               fileKey,
               mode: options.mode,
@@ -112,6 +124,7 @@ export function useVideoUpload() {
           setUploadProgress(100);
           return startRes.json() as Promise<{ jobId: string }>;
         } catch (r2Err) {
+          if (r2Err instanceof Error && (r2Err.message.includes("limit") || r2Err.message.includes("requires") || r2Err.message.includes("allowed"))) throw r2Err;
           // R2 PUT failed (most likely CORS) — fall through to multipart
           console.warn("[upload] R2 direct upload failed, falling back to multipart:", r2Err);
           setUploadProgress(0);
@@ -133,7 +146,11 @@ export function useVideoUpload() {
       }, 500);
 
       try {
-        const res = await fetch(getUploadVideoUrl(), { method: "POST", body: form });
+        const res = await fetch(getUploadVideoUrl(), {
+          method: "POST",
+          headers: getAuthHeader(),
+          body: form,
+        });
         if (!res.ok) {
           const e = (await res.json().catch(() => ({}))) as { error?: string };
           throw new Error(e.error ?? "Upload failed");

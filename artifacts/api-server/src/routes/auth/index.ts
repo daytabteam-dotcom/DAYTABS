@@ -5,7 +5,9 @@ import { OAuth2Client } from "google-auth-library";
 import nodemailer from "nodemailer";
 import { db } from "@workspace/db";
 import { usersTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { eq, and, gte, count } from "drizzle-orm";
+import { analysisJobsTable } from "@workspace/db";
+import { requireAuth } from "../../middlewares/auth";
 
 const router = Router();
 
@@ -14,7 +16,6 @@ const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
 const CORE_APP_URL = process.env.CORE_APP_URL || "/panel/";
 
-// Email config — set these env vars to enable real email delivery
 const SMTP_HOST = process.env.SMTP_HOST || "smtp.gmail.com";
 const SMTP_PORT = parseInt(process.env.SMTP_PORT || "587", 10);
 const SMTP_USER = process.env.SMTP_USER || "";
@@ -22,10 +23,8 @@ const SMTP_PASS = process.env.SMTP_PASS || "";
 const CONTACT_EMAIL = process.env.CONTACT_EMAIL || SMTP_USER;
 
 function getPublicBaseUrl(req: import("express").Request): string {
-  // Prefer the actual host the browser used — works correctly in both dev and production
   const forwarded = req.get("x-forwarded-host");
   if (forwarded) return `${req.get("x-forwarded-proto") || "https"}://${forwarded}`;
-  // Fallback: environment hints (useful when behind some proxies that strip forwarded headers)
   const replitDomains = (process.env.REPLIT_DOMAINS || "").split(",").map(d => d.trim()).filter(Boolean);
   const replitDomain = process.env.NODE_ENV === "production"
     ? replitDomains[0]
@@ -35,12 +34,10 @@ function getPublicBaseUrl(req: import("express").Request): string {
 }
 
 function getGoogleRedirectUri(req: import("express").Request): string {
-  // Allow explicit override via env var — set this in production secrets to pin the URI
   if (process.env.GOOGLE_REDIRECT_URI) return process.env.GOOGLE_REDIRECT_URI;
   return `${getPublicBaseUrl(req)}/api/auth/google/callback`;
 }
 
-// Debug endpoint — visit /api/auth/debug-oauth to see the exact redirect URI this server will use
 router.get("/debug-oauth", (req, res) => {
   const redirectUri = getGoogleRedirectUri(req);
   res.json({
@@ -52,8 +49,12 @@ router.get("/debug-oauth", (req, res) => {
   });
 });
 
-function signToken(userId: number, email: string, name?: string | null) {
-  return jwt.sign({ user_id: userId, email, name: name || email.split("@")[0] }, JWT_SECRET, { expiresIn: "7d" });
+function signToken(userId: number, email: string, name?: string | null, plan = "free") {
+  return jwt.sign(
+    { user_id: userId, email, name: name || email.split("@")[0], plan },
+    JWT_SECRET,
+    { expiresIn: "7d" }
+  );
 }
 
 function createMailTransport() {
@@ -66,22 +67,38 @@ function createMailTransport() {
   });
 }
 
+/** Monthly upload count per user per tab mode */
+async function getMonthlyUploadCounts(userId: number): Promise<Record<string, number>> {
+  const startOfMonth = new Date();
+  startOfMonth.setDate(1);
+  startOfMonth.setHours(0, 0, 0, 0);
+
+  const rows = await db
+    .select({ mode: analysisJobsTable.mode, cnt: count() })
+    .from(analysisJobsTable)
+    .where(
+      and(
+        eq(analysisJobsTable.userId, userId),
+        gte(analysisJobsTable.createdAt, startOfMonth)
+      )
+    )
+    .groupBy(analysisJobsTable.mode);
+
+  const result: Record<string, number> = {};
+  for (const row of rows) result[row.mode] = Number(row.cnt);
+  return result;
+}
+
 router.post("/signup", async (req, res) => {
   try {
     const { email, password, name } = req.body as { email?: string; password?: string; name?: string };
-    if (!email || !password) {
-      res.status(400).json({ error: "Email and password are required" });
-      return;
-    }
+    if (!email || !password) { res.status(400).json({ error: "Email and password are required" }); return; }
     const existing = await db.select().from(usersTable).where(eq(usersTable.email, email)).limit(1);
-    if (existing.length > 0) {
-      res.status(409).json({ error: "An account with this email already exists" });
-      return;
-    }
+    if (existing.length > 0) { res.status(409).json({ error: "An account with this email already exists" }); return; }
     const passwordHash = await bcrypt.hash(password, 12);
     const [user] = await db.insert(usersTable).values({ email, name: name || null, passwordHash }).returning();
-    const token = signToken(user.id, user.email, user.name);
-    res.json({ token, user: { id: user.id, email: user.email, name: user.name } });
+    const token = signToken(user.id, user.email, user.name, user.plan);
+    res.json({ token, user: { id: user.id, email: user.email, name: user.name, plan: user.plan } });
   } catch (err) {
     req.log.error({ err }, "Signup error");
     res.status(500).json({ error: "Signup failed" });
@@ -91,75 +108,64 @@ router.post("/signup", async (req, res) => {
 router.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body as { email?: string; password?: string };
-    if (!email || !password) {
-      res.status(400).json({ error: "Email and password are required" });
-      return;
-    }
+    if (!email || !password) { res.status(400).json({ error: "Email and password are required" }); return; }
     const [user] = await db.select().from(usersTable).where(eq(usersTable.email, email)).limit(1);
-    if (!user || !user.passwordHash) {
-      res.status(401).json({ error: "Invalid email or password" });
-      return;
-    }
+    if (!user || !user.passwordHash) { res.status(401).json({ error: "Invalid email or password" }); return; }
     const valid = await bcrypt.compare(password, user.passwordHash);
-    if (!valid) {
-      res.status(401).json({ error: "Invalid email or password" });
-      return;
-    }
-    const token = signToken(user.id, user.email, user.name);
-    res.json({ token, user: { id: user.id, email: user.email, name: user.name } });
+    if (!valid) { res.status(401).json({ error: "Invalid email or password" }); return; }
+    const token = signToken(user.id, user.email, user.name, user.plan);
+    res.json({ token, user: { id: user.id, email: user.email, name: user.name, plan: user.plan } });
   } catch (err) {
     req.log.error({ err }, "Login error");
     res.status(500).json({ error: "Login failed" });
   }
 });
 
-router.get("/google", (req, res) => {
-  if (!GOOGLE_CLIENT_ID) {
-    res.status(503).json({ error: "Google OAuth is not configured" });
-    return;
+router.get("/me", requireAuth, async (req, res) => {
+  try {
+    const [user] = await db.select().from(usersTable).where(eq(usersTable.id, req.auth!.user_id)).limit(1);
+    if (!user) { res.status(404).json({ error: "User not found" }); return; }
+    const uploadCounts = await getMonthlyUploadCounts(user.id);
+    res.json({
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      plan: user.plan,
+      uploadCounts,
+    });
+  } catch (err) {
+    req.log.error({ err }, "Get me error");
+    res.status(500).json({ error: "Failed to get user info" });
   }
+});
+
+router.get("/google", (req, res) => {
+  if (!GOOGLE_CLIENT_ID) { res.status(503).json({ error: "Google OAuth is not configured" }); return; }
   const client = new OAuth2Client(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET);
   const redirectUri = getGoogleRedirectUri(req);
-  const url = client.generateAuthUrl({
-    access_type: "offline",
-    scope: ["profile", "email"],
-    redirect_uri: redirectUri,
-  });
+  const url = client.generateAuthUrl({ access_type: "offline", scope: ["profile", "email"], redirect_uri: redirectUri });
   res.redirect(url);
 });
 
 router.get("/google/callback", async (req, res) => {
   try {
-    if (!GOOGLE_CLIENT_ID) {
-      res.redirect(`${CORE_APP_URL}?error=google_not_configured`);
-      return;
-    }
+    if (!GOOGLE_CLIENT_ID) { res.redirect(`${CORE_APP_URL}?error=google_not_configured`); return; }
     const { code } = req.query as { code?: string };
-    if (!code) {
-      res.redirect(`${CORE_APP_URL}?error=no_code`);
-      return;
-    }
+    if (!code) { res.redirect(`${CORE_APP_URL}?error=no_code`); return; }
     const client = new OAuth2Client(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET);
     const redirectUri = getGoogleRedirectUri(req);
     const { tokens } = await client.getToken({ code, redirect_uri: redirectUri });
     client.setCredentials(tokens);
     const ticket = await client.verifyIdToken({ idToken: tokens.id_token!, audience: GOOGLE_CLIENT_ID });
     const payload = ticket.getPayload();
-    if (!payload?.email) {
-      res.redirect(`${CORE_APP_URL}?error=no_email`);
-      return;
-    }
+    if (!payload?.email) { res.redirect(`${CORE_APP_URL}?error=no_email`); return; }
     let [user] = await db.select().from(usersTable).where(eq(usersTable.email, payload.email)).limit(1);
     if (!user) {
-      [user] = await db.insert(usersTable).values({
-        email: payload.email,
-        name: payload.name || null,
-        googleId: payload.sub,
-      }).returning();
+      [user] = await db.insert(usersTable).values({ email: payload.email, name: payload.name || null, googleId: payload.sub }).returning();
     } else if (!user.googleId) {
       await db.update(usersTable).set({ googleId: payload.sub }).where(eq(usersTable.id, user.id));
     }
-    const token = signToken(user.id, user.email, user.name);
+    const token = signToken(user.id, user.email, user.name, user.plan);
     const destination = CORE_APP_URL.endsWith("/") ? CORE_APP_URL : `${CORE_APP_URL}/`;
     res.redirect(`${destination}?token=${token}`);
   } catch (err) {
@@ -171,13 +177,8 @@ router.get("/google/callback", async (req, res) => {
 router.post("/contact", async (req, res) => {
   try {
     const { name, email, message } = req.body as { name?: string; email?: string; message?: string };
-    if (!name || !email || !message) {
-      res.status(400).json({ error: "Name, email, and message are required" });
-      return;
-    }
-
+    if (!name || !email || !message) { res.status(400).json({ error: "Name, email, and message are required" }); return; }
     req.log.info({ name, email }, "Contact form submission received");
-
     const transport = createMailTransport();
     if (transport && CONTACT_EMAIL) {
       await transport.sendMail({
@@ -186,22 +187,9 @@ router.post("/contact", async (req, res) => {
         replyTo: `"${name}" <${email}>`,
         subject: `New contact message from ${name}`,
         text: `Name: ${name}\nEmail: ${email}\n\nMessage:\n${message}`,
-        html: `
-          <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
-            <h2 style="color:#7c3aed">New Contact Message — DayTabs</h2>
-            <table style="width:100%;border-collapse:collapse">
-              <tr><td style="padding:8px;font-weight:bold;color:#555">Name</td><td style="padding:8px">${name}</td></tr>
-              <tr><td style="padding:8px;font-weight:bold;color:#555">Email</td><td style="padding:8px"><a href="mailto:${email}">${email}</a></td></tr>
-            </table>
-            <div style="margin-top:16px;padding:16px;background:#f5f5f5;border-radius:8px;white-space:pre-wrap">${message}</div>
-          </div>
-        `,
+        html: `<div style="font-family:sans-serif;max-width:600px;margin:0 auto"><h2 style="color:#7c3aed">New Contact Message — DayTabs</h2><table style="width:100%;border-collapse:collapse"><tr><td style="padding:8px;font-weight:bold;color:#555">Name</td><td style="padding:8px">${name}</td></tr><tr><td style="padding:8px;font-weight:bold;color:#555">Email</td><td style="padding:8px"><a href="mailto:${email}">${email}</a></td></tr></table><div style="margin-top:16px;padding:16px;background:#f5f5f5;border-radius:8px;white-space:pre-wrap">${message}</div></div>`,
       });
-      req.log.info({ to: CONTACT_EMAIL }, "Contact email sent successfully");
-    } else {
-      req.log.warn("SMTP not configured — contact form email not sent. Set SMTP_USER, SMTP_PASS, and CONTACT_EMAIL env vars.");
     }
-
     res.json({ success: true, message: "Message received. We'll get back to you soon!" });
   } catch (err) {
     req.log.error({ err }, "Contact email error");

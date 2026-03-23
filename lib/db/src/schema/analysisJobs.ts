@@ -4,6 +4,7 @@ import { z } from "zod/v4";
 
 export const analysisJobsTable = pgTable("analysis_jobs", {
   id: text("id").primaryKey(),
+  userId: integer("user_id"),
   status: text("status").notNull().default("queued"),
   progress: real("progress").notNull().default(0),
   currentStep: text("current_step").notNull().default("queued"),

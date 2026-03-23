@@ -1,8 +1,5 @@
 import fs from "fs/promises";
 import path from "path";
-import os from "os";
-import { promisify } from "util";
-import { exec } from "child_process";
 import { db } from "@workspace/db";
 import { analysisJobsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
@@ -11,10 +8,6 @@ import {
   analyzeVisuals, analyzeAudio, analyzeScriptFeedback, analyzeEditingPoints,
   generateSeo, generateSrt, translateSegments, computeQualityScore, logger,
 } from "./services";
-import { openai } from "@workspace/integrations-openai-ai-server";
-import { textToSpeech } from "@workspace/integrations-openai-ai-server/audio";
-
-const execAsync = promisify(exec);
 
 export type PipelineMode = "pre-edit" | "editing" | "publish" | "dubbing";
 
@@ -25,6 +18,8 @@ export interface PipelineOptions {
   subtitleLanguage?: string;
   audioLanguage?: string;
   audioVoice?: string;
+  /** User's subscription plan — controls AI depth and result scope */
+  plan?: string;
 }
 
 export async function runAnalysisPipeline(
@@ -33,23 +28,19 @@ export async function runAnalysisPipeline(
   options: PipelineOptions
 ): Promise<void> {
   const workDir = path.join(path.dirname(videoPath), jobId);
-  // Compressed proxy — used for all heavy AI/transcription processing
   const compressedPath = path.join(workDir, "compressed.mp4");
-  // Audio is extracted from the compressed proxy (faster, smaller file)
   const audioPath = path.join(workDir, "audio.mp3");
+  const plan = options.plan ?? "free";
 
   try {
     await fs.mkdir(workDir, { recursive: true });
 
-    // Step 1: Generate compressed proxy from original video
     await updateJob(jobId, { status: "extracting_audio", progress: 5, currentStep: "Compressing video for processing" });
     await compressVideo(videoPath, compressedPath);
 
-    // Step 2: Extract audio from compressed proxy (not the original)
     await updateJob(jobId, { status: "extracting_audio", progress: 12, currentStep: "Extracting audio" });
     await extractAudio(compressedPath, audioPath);
 
-    // Step 3: Transcribe from compressed audio
     await updateJob(jobId, { status: "transcribing", progress: 22, currentStep: "Transcribing audio", audioPath });
     let transcriptText = "";
     let transcriptSegments: Array<{ start: number; end: number; text: string }> = [];
@@ -69,19 +60,14 @@ export async function runAnalysisPipeline(
     const mode = options.mode;
 
     if (mode === "pre-edit") {
-      // videoPath = original (for high-quality frame extraction)
-      await runPreEdit(jobId, videoPath, workDir, audioPath, transcriptText, transcriptSegments, whisperConfidence);
+      await runPreEdit(jobId, videoPath, workDir, audioPath, transcriptText, transcriptSegments, whisperConfidence, plan);
     } else if (mode === "editing") {
-      // Pass audioPath so silence detection can find real gaps
-      await runEditing(jobId, audioPath, transcriptText, transcriptSegments);
+      await runEditing(jobId, audioPath, transcriptText, transcriptSegments, plan);
     } else if (mode === "publish") {
-      await runPublish(jobId, transcriptText, transcriptSegments, options);
-    } else if (mode === "dubbing") {
-      // compressedPath = compressed proxy used for dubbing video merge
-      await runDubbing(jobId, compressedPath, workDir, transcriptText, transcriptSegments, options);
+      await runPublish(jobId, transcriptText, transcriptSegments, options, plan);
     }
+    // dubbing is blocked at the route level — no pipeline handler needed
 
-    // Keep original video in workDir, clean up compressed proxy
     const savedVideoExt = path.extname(videoPath);
     const savedVideoPath = path.join(workDir, `original${savedVideoExt}`);
     await fs.rename(videoPath, savedVideoPath).catch(() => fs.unlink(videoPath).catch(() => {}));
@@ -103,14 +89,16 @@ async function runPreEdit(
   audioPath: string,
   transcriptText: string,
   transcriptSegments: Array<{ start: number; end: number; text: string }>,
-  whisperConfidence: number
+  whisperConfidence: number,
+  plan: string
 ) {
+  const isFree = plan === "free";
   const framesDir = path.join(workDir, "frames");
   await fs.mkdir(framesDir, { recursive: true });
 
-  // Extract first 10 frames from ORIGINAL video (high quality, not compressed)
+  // Free users: extract 5 frames (cost savings); paid: 10 frames for richer analysis
   await updateJob(jobId, { status: "extracting_frames", progress: 35, currentStep: "Extracting frames" });
-  const frameBase64List = await extractFrames(originalVideoPath, framesDir);
+  const frameBase64List = await extractFrames(originalVideoPath, framesDir, isFree ? 5 : 10);
 
   await updateJob(jobId, { status: "analyzing_visual", progress: 50, currentStep: "Analyzing visuals" });
   const visualAnalysis = await analyzeVisuals(frameBase64List, "youtube_long");
@@ -119,7 +107,9 @@ async function runPreEdit(
   const audioAnalysis = await analyzeAudio(transcriptText, whisperConfidence);
 
   await updateJob(jobId, { status: "analyzing_content", progress: 80, currentStep: "Analyzing script" });
-  const scriptFeedback = await analyzeScriptFeedback(transcriptText, transcriptSegments);
+  // Free users: truncate transcript before sending to AI (saves tokens)
+  const transcriptForAI = isFree ? transcriptText.slice(0, 1500) : transcriptText;
+  const scriptFeedback = await analyzeScriptFeedback(transcriptForAI, transcriptSegments);
 
   const qualityScore = computeQualityScore(visualAnalysis, audioAnalysis);
 
@@ -130,6 +120,7 @@ async function runPreEdit(
     result: {
       mode: "pre-edit",
       jobId,
+      plan,
       quality: {
         score: qualityScore,
         ...visualAnalysis,
@@ -145,10 +136,15 @@ async function runEditing(
   jobId: string,
   audioPath: string,
   transcriptText: string,
-  transcriptSegments: Array<{ start: number; end: number; text: string }>
+  transcriptSegments: Array<{ start: number; end: number; text: string }>,
+  plan: string
 ) {
+  const isFree = plan === "free";
   await updateJob(jobId, { status: "analyzing_content", progress: 50, currentStep: "Identifying editing points" });
-  const editingData = await analyzeEditingPoints(transcriptText, transcriptSegments, audioPath);
+
+  // Free users: truncate transcript to limit AI tokens
+  const transcriptForAI = isFree ? transcriptText.slice(0, 2000) : transcriptText;
+  const editingData = await analyzeEditingPoints(transcriptForAI, transcriptSegments, audioPath);
 
   await updateJob(jobId, {
     status: "complete",
@@ -157,6 +153,7 @@ async function runEditing(
     result: {
       mode: "editing",
       jobId,
+      plan,
       ...(editingData as object),
       transcript: transcriptSegments.map(s => ({
         time: formatTime(s.start),
@@ -170,17 +167,21 @@ async function runPublish(
   jobId: string,
   transcriptText: string,
   transcriptSegments: Array<{ start: number; end: number; text: string }>,
-  options: PipelineOptions
+  options: PipelineOptions,
+  plan: string
 ) {
+  const isFree = plan === "free";
   const platform = options.platform || "youtube_long";
 
   await updateJob(jobId, { status: "generating_seo", progress: 50, currentStep: "Generating SEO content" });
-  const seoResult = await generateSeo(transcriptText, platform, transcriptSegments);
+  const transcriptForAI = isFree ? transcriptText.slice(0, 2000) : transcriptText;
+  const seoResult = await generateSeo(transcriptForAI, platform, transcriptSegments);
 
   await updateJob(jobId, { status: "generating_subtitles", progress: 75, currentStep: "Generating subtitle file" });
 
   let subtitleSegments = transcriptSegments;
-  if (options.translateSubtitles && options.subtitleLanguage) {
+  // Free users: subtitle translation is locked (also blocked on frontend)
+  if (!isFree && options.translateSubtitles && options.subtitleLanguage) {
     try {
       subtitleSegments = await translateSegments(transcriptSegments, options.subtitleLanguage);
     } catch (err) {
@@ -197,118 +198,15 @@ async function runPublish(
     result: {
       mode: "publish",
       jobId,
+      plan,
       platform,
       ...(seoResult as object),
       subtitleFile: {
         format: "srt",
-        language: options.translateSubtitles && options.subtitleLanguage ? options.subtitleLanguage : "original",
+        language: !isFree && options.translateSubtitles && options.subtitleLanguage ? options.subtitleLanguage : "original",
         content: srtContent,
       },
       transcript: { segments: transcriptSegments, fullText: transcriptText },
-    },
-  });
-}
-
-async function runDubbing(
-  jobId: string,
-  videoPath: string,
-  workDir: string,
-  transcriptText: string,
-  transcriptSegments: Array<{ start: number; end: number; text: string }>,
-  options: PipelineOptions
-) {
-  const targetLanguage = options.audioLanguage || "Spanish";
-  const voice = (options.audioVoice as "alloy" | "echo" | "fable" | "onyx" | "nova" | "shimmer") || "alloy";
-  const exportDir = path.join(os.tmpdir(), "daytabs-exports");
-  await fs.mkdir(exportDir, { recursive: true });
-
-  await updateJob(jobId, { status: "translating", progress: 35, currentStep: `Translating to ${targetLanguage}` });
-
-  let translatedScript = transcriptText;
-  try {
-    const transResp = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        { role: "system", content: `Professional translator. Translate to ${targetLanguage}. Preserve tone and style. Return only translated text.` },
-        { role: "user", content: transcriptText },
-      ],
-      max_completion_tokens: 4000,
-    } as Parameters<typeof openai.chat.completions.create>[0]);
-    translatedScript = (transResp.choices[0]?.message?.content ?? translatedScript).trim();
-  } catch (err) {
-    logger.warn({ err, jobId }, "Translation failed, using original");
-  }
-
-  await updateJob(jobId, { status: "generating_audio", progress: 55, currentStep: "Generating AI voice" });
-
-  const MAX_CHUNK = 4000;
-  const chunks: string[] = [];
-  if (translatedScript.length <= MAX_CHUNK) {
-    chunks.push(translatedScript);
-  } else {
-    let remaining = translatedScript;
-    while (remaining.length > MAX_CHUNK) {
-      const slice = remaining.slice(0, MAX_CHUNK);
-      const lastBreak = Math.max(slice.lastIndexOf(". "), slice.lastIndexOf("! "), slice.lastIndexOf("? "), slice.lastIndexOf("\n"));
-      const cutAt = lastBreak > MAX_CHUNK / 2 ? lastBreak + 1 : MAX_CHUNK;
-      chunks.push(remaining.slice(0, cutAt).trim());
-      remaining = remaining.slice(cutAt).trim();
-    }
-    if (remaining) chunks.push(remaining);
-  }
-
-  const chunkBuffers = await Promise.all(chunks.map(async (chunk) => {
-    const speech = await openai.audio.speech.create({
-      model: "tts-1", voice, input: chunk, response_format: "mp3",
-    } as Parameters<typeof openai.audio.speech.create>[0]);
-    return Buffer.from(await speech.arrayBuffer());
-  }));
-
-  await updateJob(jobId, { status: "merging_video", progress: 75, currentStep: "Merging audio with video" });
-
-  const dubId = jobId.slice(0, 8);
-  const chunkFiles: string[] = [];
-  let ttsPath: string;
-
-  if (chunkBuffers.length === 1) {
-    ttsPath = path.join(workDir, `tts_${dubId}.mp3`);
-    await fs.writeFile(ttsPath, chunkBuffers[0]);
-    chunkFiles.push(ttsPath);
-  } else {
-    for (let ci = 0; ci < chunkBuffers.length; ci++) {
-      const p = path.join(workDir, `tts_chunk_${dubId}_${ci}.mp3`);
-      await fs.writeFile(p, chunkBuffers[ci]);
-      chunkFiles.push(p);
-    }
-    const concatList = path.join(workDir, `concat_${dubId}.txt`);
-    await fs.writeFile(concatList, chunkFiles.map(f => `file '${f}'`).join("\n"));
-    ttsPath = path.join(workDir, `tts_${dubId}.mp3`);
-    await execAsync(`ffmpeg -f concat -safe 0 -i "${concatList}" -c copy "${ttsPath}" -y`);
-    await fs.unlink(concatList).catch(() => {});
-    for (const f of chunkFiles) await fs.unlink(f).catch(() => {});
-  }
-
-  const outputFilename = `daytabs_dubbed_${targetLanguage.toLowerCase()}_${dubId}.mp4`;
-  const outputPath = path.join(exportDir, outputFilename);
-
-  await execAsync(
-    `ffmpeg -i "${videoPath}" -i "${ttsPath}" ` +
-    `-map 0:v:0 -map 1:a:0 ` +
-    `-c:v copy -c:a aac -b:a 192k -shortest "${outputPath}" -y`
-  );
-  await fs.unlink(ttsPath).catch(() => {});
-
-  await updateJob(jobId, {
-    status: "complete",
-    progress: 100,
-    currentStep: "Dubbing complete",
-    result: {
-      mode: "dubbing",
-      jobId,
-      translatedLanguage: targetLanguage,
-      voice,
-      downloadUrl: `/api/analysis/download/${outputFilename}`,
-      filename: outputFilename,
     },
   });
 }

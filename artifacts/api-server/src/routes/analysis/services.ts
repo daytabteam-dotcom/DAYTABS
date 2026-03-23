@@ -109,12 +109,12 @@ export async function compressVideo(inputPath: string, outputPath: string): Prom
 /**
  * Extract the first 10 frames from the ORIGINAL (uncompressed) video for high-quality visual analysis.
  */
-export async function extractFrames(videoPath: string, framesDir: string): Promise<string[]> {
+export async function extractFrames(videoPath: string, framesDir: string, count = 10): Promise<string[]> {
   await execAsync(
-    `ffmpeg -i "${videoPath}" -vf "select=lt(n\\,10)" -vsync vfr "${framesDir}/frame_%03d.jpg" -y`
+    `ffmpeg -i "${videoPath}" -vf "select=lt(n\\,${count})" -vsync vfr "${framesDir}/frame_%03d.jpg" -y`
   );
   const files = await fs.readdir(framesDir);
-  const jpgs = files.filter(f => f.endsWith(".jpg")).sort().slice(0, 10);
+  const jpgs = files.filter(f => f.endsWith(".jpg")).sort().slice(0, count);
   return Promise.all(jpgs.map(async (f) => {
     const buf = await fs.readFile(path.join(framesDir, f));
     return buf.toString("base64");
