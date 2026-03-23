@@ -175,7 +175,7 @@ async function runPublish(
   const platform = options.platform || "youtube_long";
 
   await updateJob(jobId, { status: "generating_seo", progress: 50, currentStep: "Generating SEO content" });
-  const seoResult = await generateSeo(transcriptText, platform);
+  const seoResult = await generateSeo(transcriptText, platform, transcriptSegments);
 
   await updateJob(jobId, { status: "generating_subtitles", progress: 75, currentStep: "Generating subtitle file" });
 

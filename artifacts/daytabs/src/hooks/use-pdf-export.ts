@@ -1,5 +1,12 @@
 import { useRef, useState, useCallback } from "react";
 
+/**
+ * PDF export via window.open + window.print().
+ *
+ * Rationale: html2canvas fails on modern CSS (oklab colors, backdrop-filter, etc.).
+ * Opening a new window with the results HTML + all document styles lets the native
+ * browser renderer handle everything correctly, then window.print() saves as PDF.
+ */
 export function usePdfExport(filename: string) {
   const ref = useRef<HTMLDivElement>(null);
   const [isExporting, setIsExporting] = useState(false);
@@ -8,33 +15,65 @@ export function usePdfExport(filename: string) {
     const el = ref.current;
     if (!el) return;
     setIsExporting(true);
+
     try {
-      const [html2canvas, { default: jsPDF }] = await Promise.all([
-        import("html2canvas").then(m => m.default),
-        import("jspdf"),
-      ]);
+      // Collect all <link rel="stylesheet"> and <style> tags from the host page
+      const styleHtml = Array.from(
+        document.querySelectorAll<HTMLElement>('link[rel="stylesheet"], style')
+      )
+        .map((n) => n.outerHTML)
+        .join("\n");
 
-      const canvas = await html2canvas(el, {
-        backgroundColor: "#0f0a1e",
-        scale: 1.5,
-        logging: false,
-        useCORS: true,
-        allowTaint: true,
-        scrollY: 0,
-        windowHeight: el.scrollHeight,
-        height: el.scrollHeight,
-      });
+      const bodyHtml = el.outerHTML;
 
-      const imgData = canvas.toDataURL("image/png");
-      const pxPerMm = 3.7795;
-      const pageW = 210;
-      const pageH = Math.ceil((canvas.height / canvas.width) * pageW);
+      const printDoc = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>${filename.replace(".pdf", "")}</title>
+  ${styleHtml}
+  <style>
+    /* Ensure dark background is printed */
+    html, body {
+      background: #0f0a1e !important;
+      color: #ffffff !important;
+      margin: 0;
+      padding: 16px;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    /* Remove backdrop-blur which some browsers can't print */
+    * {
+      backdrop-filter: none !important;
+      -webkit-backdrop-filter: none !important;
+    }
+    @media print {
+      html, body { padding: 0; }
+    }
+  </style>
+</head>
+<body>
+  ${bodyHtml}
+  <script>
+    window.onload = function () {
+      window.print();
+      setTimeout(function () { window.close(); }, 1000);
+    };
+  </script>
+</body>
+</html>`;
 
-      const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: [pageW, pageH] });
-      pdf.addImage(imgData, "PNG", 0, 0, pageW, pageH);
-      pdf.save(filename);
+      const win = window.open("", "_blank", "width=900,height=700");
+      if (!win) {
+        alert("Pop-up blocked — please allow pop-ups for this site and try again.");
+        return;
+      }
+      win.document.open();
+      win.document.write(printDoc);
+      win.document.close();
     } finally {
-      setIsExporting(false);
+      // Give a moment for the window to open before re-enabling the button
+      setTimeout(() => setIsExporting(false), 800);
     }
   }, [filename]);
 

@@ -17,11 +17,35 @@ export async function updateJob(jobId: string, updates: Partial<typeof analysisJ
     .where(eq(analysisJobsTable.id, jobId));
 }
 
-export function buildApproximateSegments(text: string): Array<{ start: number; end: number; text: string }> {
+/**
+ * Get the actual duration of an audio/video file via ffprobe.
+ * Returns 0 on failure — callers should treat 0 as "unknown".
+ */
+export async function getMediaDuration(filePath: string): Promise<number> {
+  try {
+    const { stdout } = await execAsync(
+      `ffprobe -v error -show_entries format=duration -of csv=p=0 "${filePath}" 2>&1`
+    );
+    const d = parseFloat(stdout.trim());
+    return isNaN(d) ? 0 : d;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Build approximate segments from plain text by splitting on sentence boundaries.
+ * When actualDurationSec is provided (from ffprobe), timestamps are scaled
+ * proportionally so they never exceed the real video length.
+ */
+export function buildApproximateSegments(
+  text: string,
+  actualDurationSec = 0
+): Array<{ start: number; end: number; text: string }> {
   const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
   const wordsPerSecond = 2.5;
   let currentTime = 0;
-  return sentences.map((sentence) => {
+  const segs = sentences.map((sentence) => {
     const wordCount = sentence.trim().split(/\s+/).length;
     const duration = wordCount / wordsPerSecond;
     const start = currentTime;
@@ -29,17 +53,42 @@ export function buildApproximateSegments(text: string): Array<{ start: number; e
     currentTime = end;
     return { start: Math.round(start * 10) / 10, end: Math.round(end * 10) / 10, text: sentence.trim() };
   });
+
+  // Scale proportionally so timestamps never exceed actual video length
+  if (actualDurationSec > 0 && currentTime > 0 && Math.abs(currentTime - actualDurationSec) > 1) {
+    const scale = actualDurationSec / currentTime;
+    return segs.map(s => ({
+      ...s,
+      start: Math.round(s.start * scale * 10) / 10,
+      end: Math.min(Math.round(s.end * scale * 10) / 10, actualDurationSec),
+    }));
+  }
+
+  return segs;
 }
 
 export async function transcribeAudio(audioPath: string): Promise<{ text: string; segments: Array<{ start: number; end: number; text: string }> }> {
   const audioBuffer = await fs.readFile(audioPath);
+
+  // Get real audio duration so approximate segments (fallback) are scaled correctly
+  const actualDuration = await getMediaDuration(audioPath);
+
   try {
     const result = await speechToTextVerbose(audioBuffer, "mp3");
-    if (result.segments.length > 0) return result;
-    return { text: result.text, segments: buildApproximateSegments(result.text) };
+    if (result.segments.length > 0) {
+      // Clamp Whisper timestamps to actual duration in case of edge-case overrun
+      if (actualDuration > 0) {
+        const clamped = result.segments
+          .filter(s => s.start < actualDuration)
+          .map(s => ({ ...s, end: Math.min(s.end, actualDuration) }));
+        if (clamped.length > 0) return { text: result.text, segments: clamped };
+      }
+      return result;
+    }
+    return { text: result.text, segments: buildApproximateSegments(result.text, actualDuration) };
   } catch {
     const fullText = await speechToText(audioBuffer, "mp3");
-    return { text: fullText, segments: buildApproximateSegments(fullText) };
+    return { text: fullText, segments: buildApproximateSegments(fullText, actualDuration) };
   }
 }
 
@@ -414,10 +463,37 @@ Return STRICT JSON — only use the provided index numbers, do NOT invent timest
     }
   }
 
+  // ── FINAL SAFETY CLAMP — filter/fix anything beyond actual video length ──────
+  function parseTs(ts: string): number {
+    const parts = ts.split(":").map(Number);
+    return (parts[0] ?? 0) * 60 + (parts[1] ?? 0);
+  }
+
+  function clampTs(ts: string): string {
+    if (!totalDuration) return ts;
+    const secs = Math.min(parseTs(ts), totalDuration);
+    return fmtSecs(secs);
+  }
+
+  const clampedHooks = totalDuration
+    ? hooks.filter(h => h && parseTs(h!.start) < totalDuration)
+        .map(h => h ? { ...h, start: clampTs(h.start), end: clampTs(h.end) } : h)
+    : hooks;
+
+  const clampedRemovals = totalDuration
+    ? removeSections.filter(s => parseTs(s.start) < totalDuration)
+        .map(s => ({ ...s, end: clampTs(s.end) }))
+    : removeSections;
+
+  const clampedShortVideos = totalDuration
+    ? shortVideos.filter(sv => parseTs(sv.start) < totalDuration)
+        .map(sv => ({ ...sv, end: clampTs(sv.end) }))
+    : shortVideos;
+
   return {
-    hooks,
-    removeSections: removeSections.slice(0, 12),
-    shortVideos,
+    hooks: clampedHooks,
+    removeSections: clampedRemovals.slice(0, 12),
+    shortVideos: clampedShortVideos,
     editingSuggestions: hookData.editingSuggestions?.length
       ? hookData.editingSuggestions
       : [
@@ -430,24 +506,82 @@ Return STRICT JSON — only use the provided index numbers, do NOT invent timest
   };
 }
 
-export async function generateSeo(transcript: string, platform: string): Promise<object> {
+/**
+ * Generate real chapter timestamps from Whisper segments by sampling at ~10 evenly-spaced
+ * points across the video — avoids AI hallucinating times beyond video length.
+ */
+function buildChapterPoints(
+  segments: Array<{ start: number; end: number; text: string }>,
+  maxChapters = 10
+): Array<{ time: string; text: string; start: number }> {
+  if (!segments.length) return [];
+  const totalDur = segments[segments.length - 1]!.end;
+  const interval = totalDur / Math.min(maxChapters, segments.length);
+  const chapters: Array<{ time: string; text: string; start: number }> = [];
+  let nextTarget = 0;
+
+  for (const seg of segments) {
+    if (seg.start >= nextTarget) {
+      chapters.push({
+        start: seg.start,
+        time: fmtSecs(seg.start),
+        text: seg.text.trim().substring(0, 80),
+      });
+      nextTarget = seg.start + interval;
+    }
+    if (chapters.length >= maxChapters) break;
+  }
+  // Ensure first chapter is always 00:00
+  if (chapters.length && chapters[0]!.start > 0) {
+    chapters.unshift({ start: 0, time: "0:00", text: segments[0]!.text.trim().substring(0, 80) });
+  }
+  return chapters;
+}
+
+export async function generateSeo(
+  transcript: string,
+  platform: string,
+  segments: Array<{ start: number; end: number; text: string }> = []
+): Promise<object> {
   const hashtagCounts: Record<string, number> = {
     youtube_long: 15, youtube_shorts: 10, tiktok: 8, instagram: 12, linkedin: 5, x: 3,
   };
   const count = hashtagCounts[platform] || 8;
 
+  // Build chapter points from REAL segment timestamps (no hallucination)
+  const chapterPoints = buildChapterPoints(segments, 10);
+  const chapterHint = chapterPoints.length
+    ? `\n\nReal chapter timestamps (use EXACTLY these times, only change "label"):\n${chapterPoints.map(c => `${c.time} — "${c.text}"`).join("\n")}`
+    : "";
+
   const response = await callOpenAI({
     model: "gpt-4o",
-    max_completion_tokens: 1500,
-    messages: [{ role: "user", content: `SEO expert for ${platform}. Transcript: "${transcript.substring(0, 1500)}". Generate ${count} hashtags. Return STRICT JSON:
-{"titles":["title 1","title 2","title 3"],"description":"full optimized description","hashtags":[{"tag":"#Tag","effect":"reaches X audience"}],"timestamps":[{"time":"00:00","label":"Introduction"}]}` }],
+    max_completion_tokens: 1800,
+    messages: [{ role: "user", content: `SEO expert for ${platform}. Transcript: "${transcript.substring(0, 1500)}". Generate ${count} hashtags.${chapterHint}
+
+Return STRICT JSON — use the EXACT times provided above for timestamps, only write short labels:
+{"titles":["title 1","title 2","title 3"],"description":"full optimized description","hashtags":[{"tag":"#Tag","effect":"reaches X audience"}],"timestamps":[{"time":"0:00","label":"Introduction"}]}` }],
   });
-  return parseJson(response.choices[0]?.message?.content ?? "{}", {
-    titles: ["Engaging title for your video", "Alternative title with keywords", "Third option"],
-    description: "Video description with keywords and call to action.",
-    hashtags: [{ tag: "#VideoContent", effect: "Broad reach" }],
-    timestamps: [{ time: "00:00", label: "Introduction" }],
-  });
+
+  const parsed = parseJson<{ titles: string[]; description: string; hashtags: object[]; timestamps: Array<{ time: string; label: string }> }>(
+    response.choices[0]?.message?.content ?? "{}",
+    {
+      titles: ["Engaging title for your video", "Alternative title with keywords", "Third option"],
+      description: "Video description with keywords and call to action.",
+      hashtags: [{ tag: "#VideoContent", effect: "Broad reach" }],
+      timestamps: [{ time: "0:00", label: "Introduction" }],
+    }
+  );
+
+  // Override timestamps with real positions — AI may have ignored our hint
+  if (chapterPoints.length) {
+    parsed.timestamps = parsed.timestamps.map((t, i) => ({
+      time: chapterPoints[i]?.time ?? t.time,
+      label: t.label,
+    }));
+  }
+
+  return parsed;
 }
 
 export async function translateSegments(
