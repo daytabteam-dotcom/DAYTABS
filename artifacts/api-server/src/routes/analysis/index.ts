@@ -10,6 +10,7 @@ import { db } from "@workspace/db";
 import { analysisJobsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { runAnalysisPipeline, type PipelineMode } from "./pipeline";
+import { updateJob } from "./services";
 import { openai } from "@workspace/integrations-openai-ai-server";
 import { textToSpeech } from "@workspace/integrations-openai-ai-server/audio";
 import {
@@ -18,6 +19,7 @@ import {
   ExportVideoParams,
   ExportVideoBody,
 } from "@workspace/api-zod";
+import { isR2Configured, generatePresignedPutUrl, downloadFromR2, deleteFromR2 } from "../../lib/r2";
 
 const execAsync = promisify(exec);
 
@@ -81,6 +83,110 @@ const upload = multer({
       cb(new Error("Invalid file type. Only video files are allowed."));
     }
   },
+});
+
+// ── R2 Direct Upload — Step 1: Get a presigned PUT URL ───────────────────────
+router.get("/presign-upload", async (req, res) => {
+  if (!isR2Configured()) {
+    res.status(503).json({ error: "R2 storage not configured — use the direct /upload endpoint instead" });
+    return;
+  }
+
+  const ext = ((req.query.ext as string) || "mp4").replace(/^\./, "").toLowerCase();
+  const validExts = ["mp4", "mov", "avi", "webm", "mpeg", "mkv"];
+  if (!validExts.includes(ext)) {
+    res.status(400).json({ error: "Invalid file extension" });
+    return;
+  }
+
+  const contentTypeMap: Record<string, string> = {
+    mp4: "video/mp4", mov: "video/quicktime", avi: "video/x-msvideo",
+    webm: "video/webm", mpeg: "video/mpeg", mkv: "video/x-matroska",
+  };
+
+  const fileKey = `videos/${uuidv4()}.${ext}`;
+  try {
+    const uploadUrl = await generatePresignedPutUrl(fileKey, contentTypeMap[ext] ?? "video/mp4");
+    res.json({ uploadUrl, fileKey });
+  } catch (err) {
+    req.log.error({ err }, "Failed to generate R2 presigned URL");
+    res.status(500).json({ error: "Failed to generate upload URL" });
+  }
+});
+
+// ── R2 Direct Upload — Step 2: Start analysis from an already-uploaded R2 key
+router.post("/start", async (req, res) => {
+  if (!isR2Configured()) {
+    res.status(503).json({ error: "R2 storage not configured" });
+    return;
+  }
+
+  const { fileKey, mode, platform, translateSubtitles, subtitleLanguage, audioLanguage, audioVoice } = req.body as {
+    fileKey: string;
+    mode?: string;
+    platform?: string;
+    translateSubtitles?: boolean;
+    subtitleLanguage?: string;
+    audioLanguage?: string;
+    audioVoice?: string;
+  };
+
+  if (!fileKey || typeof fileKey !== "string") {
+    res.status(400).json({ error: "fileKey is required" });
+    return;
+  }
+
+  const validModes: PipelineMode[] = ["pre-edit", "editing", "publish", "dubbing"];
+  const validatedMode: PipelineMode = validModes.includes(mode as PipelineMode) ? (mode as PipelineMode) : "pre-edit";
+
+  const validPlatforms = ["youtube_long", "youtube_shorts", "tiktok", "instagram", "linkedin", "x"];
+  const validatedPlatform = validPlatforms.includes(platform ?? "") ? platform! : "youtube_long";
+
+  const jobId = uuidv4();
+  const ext = path.extname(fileKey).replace(".", "") || "mp4";
+  const localPath = path.join(uploadDir, `${jobId}.${ext}`);
+
+  await db.insert(analysisJobsTable).values({
+    id: jobId,
+    status: "queued",
+    progress: 2,
+    currentStep: "Downloading video",
+    mode: validatedMode,
+    platform: validatedPlatform,
+    translateSubtitles: translateSubtitles ? 1 : 0,
+    subtitleLanguage: subtitleLanguage || null,
+    replaceAudio: validatedMode === "dubbing" ? 1 : 0,
+    audioLanguage: audioLanguage || null,
+    videoPath: localPath,
+  });
+
+  // Return the jobId immediately — download + pipeline runs in background
+  res.json({ jobId, message: "Analysis started." });
+
+  setImmediate(async () => {
+    try {
+      await updateJob(jobId, { status: "queued", progress: 5, currentStep: "Downloading video from cloud storage" });
+      await fs.mkdir(uploadDir, { recursive: true });
+      await downloadFromR2(fileKey, localPath);
+      // Delete from R2 immediately after download — no permanent video storage
+      deleteFromR2(fileKey).catch(() => {});
+    } catch (err) {
+      req.log.error({ err, jobId }, "Failed to download from R2");
+      await updateJob(jobId, { status: "error", error: "Failed to download video from cloud storage. Please try uploading again." });
+      return;
+    }
+
+    runAnalysisPipeline(jobId, localPath, {
+      mode: validatedMode,
+      platform: validatedPlatform,
+      translateSubtitles: Boolean(translateSubtitles),
+      subtitleLanguage: subtitleLanguage || undefined,
+      audioLanguage: audioLanguage || undefined,
+      audioVoice: (audioVoice as "alloy" | "echo" | "fable" | "onyx" | "nova" | "shimmer") || "alloy",
+    }).catch((err) => {
+      req.log.error({ err, jobId }, "Pipeline error (R2 start)");
+    });
+  });
 });
 
 router.post("/upload", upload.single("video"), async (req, res) => {

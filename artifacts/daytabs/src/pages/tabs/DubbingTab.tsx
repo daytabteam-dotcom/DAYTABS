@@ -1,11 +1,10 @@
 import React, { useState, useCallback, useEffect } from "react";
-import { useMutation } from "@tanstack/react-query";
 import { useDropzone } from "react-dropzone";
 import { motion } from "framer-motion";
 import { Globe, Download, Mic, Play, Pause, Upload, Film } from "lucide-react";
 import { ProgressIndicator } from "@/components/ProgressIndicator";
 import { useAnalysisPolling, useAnalysisResults } from "@/hooks/use-analysis";
-import { getUploadVideoUrl } from "@workspace/api-client-react";
+import { useVideoUpload } from "@/hooks/use-video-upload";
 import { useToast } from "@/hooks/use-toast";
 
 interface TabProps {
@@ -91,21 +90,11 @@ export default function DubbingTab({ onDataReady, onDataReset, onRegisterExport 
   const [previewAudio, setPreviewAudio] = useState<HTMLAudioElement | null>(null);
   const [playingVoice, setPlayingVoice] = useState<string | null>(null);
 
-  const uploadMutation = useMutation({
-    mutationFn: async (f: File) => {
-      const form = new FormData();
-      form.append("video", f);
-      form.append("mode", "dubbing");
-      form.append("platform", "youtube_long");
-      form.append("audioLanguage", language);
-      form.append("audioVoice", voice);
-      const res = await fetch(getUploadVideoUrl(), { method: "POST", body: form });
-      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || "Upload failed"); }
-      return res.json() as Promise<{ jobId: string }>;
-    },
-    onSuccess: (data) => { setJobId(data.jobId); toast({ title: `Dubbing to ${language}…` }); },
-    onError: (err: Error) => toast({ variant: "destructive", title: "Upload failed", description: err.message }),
-  });
+  const { upload, isPending: isUploading, uploadProgress, resetUpload, error: uploadError } = useVideoUpload();
+
+  useEffect(() => {
+    if (uploadError) toast({ variant: "destructive", title: "Upload failed", description: uploadError.message });
+  }, [uploadError]);
 
   const { data: statusData } = useAnalysisPolling(jobId);
   const isComplete = statusData?.status === "complete";
@@ -122,7 +111,7 @@ export default function DubbingTab({ onDataReady, onDataReset, onRegisterExport 
   const reset = () => {
     setJobId(null);
     setSelectedFile(null);
-    uploadMutation.reset();
+    resetUpload();
     previewAudio?.pause();
     onDataReset();
     onRegisterExport(null);
@@ -173,11 +162,23 @@ export default function DubbingTab({ onDataReady, onDataReset, onRegisterExport 
           </div>
         </div>
 
-        <UploadZone onFile={(f) => setSelectedFile(f)} isPending={uploadMutation.isPending} language={language} />
-
-        <button onClick={() => selectedFile && uploadMutation.mutate(selectedFile)} disabled={!selectedFile || uploadMutation.isPending}
+        <UploadZone onFile={(f) => setSelectedFile(f)} isPending={isUploading} language={language} />
+        {isUploading && uploadProgress > 0 && (
+          <div className="space-y-1.5">
+            <div className="flex justify-between text-xs text-white/50">
+              <span>{uploadProgress < 95 ? "Uploading to cloud…" : "Starting analysis…"}</span>
+              <span>{uploadProgress}%</span>
+            </div>
+            <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
+              <div className="h-full bg-gradient-to-r from-indigo-600 to-violet-500 rounded-full transition-all duration-300" style={{ width: `${uploadProgress}%` }} />
+            </div>
+          </div>
+        )}
+        <button
+          onClick={() => selectedFile && upload({ file: selectedFile, options: { mode: "dubbing", platform: "youtube_long", audioLanguage: language, audioVoice: voice } }, { onSuccess: (d) => { setJobId(d.jobId); toast({ title: `Dubbing to ${language}…` }); } })}
+          disabled={!selectedFile || isUploading}
           className="w-full py-4 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-500 hover:from-indigo-500 hover:to-violet-400 text-white font-bold text-base disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2 shadow-lg shadow-indigo-500/20">
-          {uploadMutation.isPending
+          {isUploading
             ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Uploading…</>
             : <><Globe className="w-5 h-5" />Dub to {language}</>}
         </button>

@@ -1,0 +1,149 @@
+GOAL
+
+Replace current file upload system with:
+
+✅ Direct upload to Cloudflare R2 (NOT via server)
+✅ Backend processes video from R2
+✅ Automatically DELETE video after report generation
+
+⚠️ RULES
+Do NOT store videos on local server
+Do NOT process uploads directly from frontend file
+Always use R2 file URL
+Delete file after processing completes
+1️⃣ SETUP CLOUDFLARE R2
+
+Use:
+
+Cloudflare R2
+Install AWS SDK (R2 is S3-compatible):
+npm install @aws-sdk/client-s3 @aws-sdk/s3-request-presigner
+Add ENV variables:
+R2_ACCOUNT_ID=...
+R2_ACCESS_KEY_ID=...
+R2_SECRET_ACCESS_KEY=...
+R2_BUCKET_NAME=daytabs-videos
+R2_PUBLIC_URL=https://<your-bucket-url>
+2️⃣ CREATE R2 CLIENT
+import { S3Client } from "@aws-sdk/client-s3";
+
+const r2 = new S3Client({
+  region: "auto",
+  endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+  credentials: {
+    accessKeyId: process.env.R2_ACCESS_KEY_ID,
+    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+  },
+});
+3️⃣ GENERATE PRESIGNED UPLOAD URL
+Endpoint: /generate-upload-url
+import { PutObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+
+app.post("/generate-upload-url", async (req, res) => {
+  const fileName = `videos/${Date.now()}.mp4`;
+
+  const command = new PutObjectCommand({
+    Bucket: process.env.R2_BUCKET_NAME,
+    Key: fileName,
+    ContentType: "video/mp4",
+  });
+
+  const uploadUrl = await getSignedUrl(r2, command, { expiresIn: 60 });
+
+  res.json({
+    uploadUrl,
+    fileKey: fileName,
+    fileUrl: `${process.env.R2_PUBLIC_URL}/${fileName}`,
+  });
+});
+4️⃣ FRONTEND UPLOAD (DIRECT TO R2)
+
+Replace current upload logic:
+
+// Step 1: get upload URL
+const res = await fetch("/generate-upload-url", { method: "POST" });
+const { uploadUrl, fileUrl, fileKey } = await res.json();
+
+// Step 2: upload directly to R2
+await fetch(uploadUrl, {
+  method: "PUT",
+  headers: {
+    "Content-Type": file.type,
+  },
+  body: file,
+});
+
+// Step 3: send fileUrl to backend for processing
+await fetch("/editing-assistant", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ videoUrl: fileUrl, fileKey }),
+});
+5️⃣ BACKEND: DOWNLOAD FROM R2 FOR PROCESSING
+
+Inside your endpoints (/editing-assistant, etc):
+
+import fs from "fs";
+import fetch from "node-fetch";
+
+async function downloadVideo(videoUrl) {
+  const res = await fetch(videoUrl);
+  const buffer = await res.arrayBuffer();
+  fs.writeFileSync("input.mp4", Buffer.from(buffer));
+}
+Use it:
+await downloadVideo(videoUrl);
+
+// THEN run your existing ffmpeg pipeline
+6️⃣ DELETE VIDEO AFTER PROCESSING
+IMPORTANT: Always delete after report generation
+import { DeleteObjectCommand } from "@aws-sdk/client-s3";
+
+async function deleteFromR2(fileKey) {
+  await r2.send(
+    new DeleteObjectCommand({
+      Bucket: process.env.R2_BUCKET_NAME,
+      Key: fileKey,
+    })
+  );
+}
+Call it at END of each endpoint:
+try {
+  // process video
+  // generate report
+
+  res.json(result);
+
+} finally {
+  await deleteFromR2(fileKey);
+}
+7️⃣ FAIL-SAFE (IMPORTANT)
+
+If processing fails:
+
+STILL delete file
+
+Already handled by finally block above ✅
+
+8️⃣ OPTIONAL (RECOMMENDED)
+Add auto-clean backup:
+Keep files max 1 hour (in case crash happens)
+
+Use R2 lifecycle rules OR:
+
+// optional: cron job cleanup
+FINAL FLOW
+User selects video
+Upload → directly to R2 ⚡
+Backend downloads video
+Process (ffmpeg + Whisper + AI)
+Return results
+Delete video from R2 🧹
+RESULT
+
+✅ Much faster uploads
+✅ No server overload
+✅ No storage buildup
+✅ Works on Replit free tier
+✅ Scalable

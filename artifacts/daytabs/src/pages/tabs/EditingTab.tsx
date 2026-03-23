@@ -1,12 +1,11 @@
 import React, { useState, useCallback, useEffect } from "react";
-import { useMutation } from "@tanstack/react-query";
 import { useDropzone } from "react-dropzone";
 import { motion } from "framer-motion";
 import { Scissors, Clock, Zap, Film, Lightbulb, MessageSquare, Upload, FileDown } from "lucide-react";
 import { ProgressIndicator } from "@/components/ProgressIndicator";
 import { useAnalysisPolling, useAnalysisResults } from "@/hooks/use-analysis";
 import { usePdfExport } from "@/hooks/use-pdf-export";
-import { getUploadVideoUrl } from "@workspace/api-client-react";
+import { useVideoUpload } from "@/hooks/use-video-upload";
 import { useToast } from "@/hooks/use-toast";
 
 interface TabProps {
@@ -80,19 +79,11 @@ export default function EditingTab({ onDataReady, onDataReset, onRegisterExport 
 
   const { ref, exportPdf, isExporting: isPdfExporting } = usePdfExport("daytabs-editing.pdf");
 
-  const uploadMutation = useMutation({
-    mutationFn: async (f: File) => {
-      const form = new FormData();
-      form.append("video", f);
-      form.append("mode", "editing");
-      form.append("platform", "youtube_long");
-      const res = await fetch(getUploadVideoUrl(), { method: "POST", body: form });
-      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || "Upload failed"); }
-      return res.json() as Promise<{ jobId: string }>;
-    },
-    onSuccess: (data) => { setJobId(data.jobId); toast({ title: "Finding editing points…" }); },
-    onError: (err: Error) => toast({ variant: "destructive", title: "Upload failed", description: err.message }),
-  });
+  const { upload, isPending: isUploading, uploadProgress, resetUpload, error: uploadError } = useVideoUpload();
+
+  useEffect(() => {
+    if (uploadError) toast({ variant: "destructive", title: "Upload failed", description: uploadError.message });
+  }, [uploadError]);
 
   const { data: statusData } = useAnalysisPolling(jobId);
   const isComplete = statusData?.status === "complete";
@@ -109,7 +100,7 @@ export default function EditingTab({ onDataReady, onDataReset, onRegisterExport 
   const reset = () => {
     setJobId(null);
     setSelectedFile(null);
-    uploadMutation.reset();
+    resetUpload();
     onDataReset();
     onRegisterExport(null);
   };
@@ -121,13 +112,24 @@ export default function EditingTab({ onDataReady, onDataReset, onRegisterExport 
           <h2 className="text-3xl font-bold">Editing Assistant</h2>
           <p className="text-white/50 text-sm">Find the best hooks, detect what to cut, and identify short-form opportunities.</p>
         </div>
-        <UploadZone onFile={(f) => setSelectedFile(f)} isPending={uploadMutation.isPending} />
+        <UploadZone onFile={(f) => setSelectedFile(f)} isPending={isUploading} />
+        {isUploading && uploadProgress > 0 && (
+          <div className="space-y-1.5">
+            <div className="flex justify-between text-xs text-white/50">
+              <span>{uploadProgress < 95 ? "Uploading to cloud…" : "Starting analysis…"}</span>
+              <span>{uploadProgress}%</span>
+            </div>
+            <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
+              <div className="h-full bg-gradient-to-r from-yellow-500 to-amber-400 rounded-full transition-all duration-300" style={{ width: `${uploadProgress}%` }} />
+            </div>
+          </div>
+        )}
         <button
-          onClick={() => selectedFile && uploadMutation.mutate(selectedFile)}
-          disabled={!selectedFile || uploadMutation.isPending}
+          onClick={() => selectedFile && upload({ file: selectedFile, options: { mode: "editing", platform: "youtube_long" } }, { onSuccess: (d) => { setJobId(d.jobId); toast({ title: "Finding editing points…" }); } })}
+          disabled={!selectedFile || isUploading}
           className="w-full py-4 rounded-xl bg-gradient-to-r from-yellow-500 to-amber-400 hover:from-yellow-400 hover:to-amber-300 text-black font-bold text-base disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2 shadow-lg shadow-yellow-500/20"
         >
-          {uploadMutation.isPending
+          {isUploading
             ? <><div className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin" /> Uploading…</>
             : <><Scissors className="w-5 h-5" /> Analyze for Editing</>}
         </button>
