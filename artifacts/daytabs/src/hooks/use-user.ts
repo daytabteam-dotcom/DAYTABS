@@ -59,7 +59,7 @@ export function useUser() {
     localStorage.removeItem("daytabs_token");
     localStorage.removeItem("daytabs_user_name");
     setUser(null);
-    window.location.href = "/landing/";
+    window.location.href = "/login";
   };
 
   return { user, logout };
