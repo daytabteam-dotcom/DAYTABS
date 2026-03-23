@@ -4,6 +4,8 @@ import { motion } from "framer-motion";
 import { Check, Zap, Star, Building, Loader2 } from "lucide-react";
 import Navbar from "../components/Navbar";
 
+type Feature = { text: string; badge?: string };
+
 const plans = [
   {
     key: "free" as const,
@@ -16,18 +18,16 @@ const plans = [
     borderColor: "border-white/10",
     popular: false,
     features: [
-      "3 Pre-Edit analyses / month",
-      "5 Editing analyses / month",
-      "3 Publish analyses / month",
-      "Up to 200 MB per video",
-      "Quality, Content & SEO reports",
-      "Basic transcript",
-    ],
-    missing: [
-      "AI Dubbing & Translation",
-      "Teleprompter",
-      "Priority support",
-    ],
+      { text: "3 Pre-Edit analyses / month" },
+      { text: "5 Editing analyses / month" },
+      { text: "3 Publish analyses / month" },
+      { text: "Up to 200 MB per video" },
+      { text: "Quality, Content & SEO reports" },
+      { text: "Basic transcript" },
+      { text: "Teleprompter 🖥️" },
+      { text: "AI Dubbing 🌍", badge: "Coming Soon" },
+    ] as Feature[],
+    missing: ["Priority support"] as string[],
     cta: "Get Started Free",
     ctaStyle: "border border-white/20 hover:border-violet-500/40 hover:bg-white/5",
   },
@@ -42,16 +42,16 @@ const plans = [
     borderColor: "border-violet-500/50",
     popular: true,
     features: [
-      "30 Pre-Edit analyses / month",
-      "50 Editing analyses / month",
-      "30 Publish analyses / month",
-      "Up to 500 MB per video",
-      "Full Quality, Content & SEO reports",
-      "Transcript & Translation",
-      "AI Dubbing (🌍 multi-language)",
-      "Teleprompter (🖥️)",
-    ],
-    missing: [],
+      { text: "30 Pre-Edit analyses / month" },
+      { text: "50 Editing analyses / month" },
+      { text: "30 Publish analyses / month" },
+      { text: "Up to 500 MB per video" },
+      { text: "Full Quality, Content & SEO reports" },
+      { text: "Transcript & Translation" },
+      { text: "Teleprompter 🖥️" },
+      { text: "AI Dubbing 🌍", badge: "Coming Soon" },
+    ] as Feature[],
+    missing: [] as string[],
     cta: "Start Premium",
     ctaStyle: "bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-500 hover:to-purple-400 shadow-lg shadow-violet-500/30",
   },
@@ -66,16 +66,16 @@ const plans = [
     borderColor: "border-white/10",
     popular: false,
     features: [
-      "Unlimited Pre-Edit analyses",
-      "Unlimited Editing analyses",
-      "Unlimited Publish analyses",
-      "Up to 1 GB per video",
-      "All Premium features included",
-      "AI Dubbing & Translation",
-      "Teleprompter",
-      "Priority processing & support",
-    ],
-    missing: [],
+      { text: "Unlimited Pre-Edit analyses" },
+      { text: "Unlimited Editing analyses" },
+      { text: "Unlimited Publish analyses" },
+      { text: "Up to 1 GB per video" },
+      { text: "All Premium features included" },
+      { text: "Teleprompter 🖥️" },
+      { text: "AI Dubbing 🌍", badge: "Coming Soon" },
+      { text: "Priority processing & support" },
+    ] as Feature[],
+    missing: [] as string[],
     cta: "Start Professional",
     ctaStyle: "border border-white/20 hover:border-violet-500/40 hover:bg-white/5",
   },
@@ -181,9 +181,16 @@ export default function PricingPage() {
 
                 <div className="space-y-3">
                   {plan.features.map((feature) => (
-                    <div key={feature} className="flex items-center gap-3 text-sm text-white/70">
+                    <div key={feature.text} className="flex items-center gap-3 text-sm text-white/70">
                       <Check className="w-4 h-4 text-violet-400 shrink-0" />
-                      {feature}
+                      <span className="flex items-center gap-2 flex-wrap">
+                        {feature.text}
+                        {feature.badge && (
+                          <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded-md bg-amber-500/15 text-amber-400 border border-amber-500/25 leading-none">
+                            {feature.badge}
+                          </span>
+                        )}
+                      </span>
                     </div>
                   ))}
                   {plan.missing.map((feature) => (
