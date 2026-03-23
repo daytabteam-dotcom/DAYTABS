@@ -14,13 +14,15 @@ export interface VideoUploadOptions {
 /**
  * Upload a video for analysis.
  *
- * Flow when Cloudflare R2 is configured (preferred):
+ * Preferred flow (Cloudflare R2 direct upload — requires CORS on the bucket):
  *   1. GET /api/analysis/presign-upload  → presigned PUT URL + fileKey
- *   2. PUT directly to R2 (with XHR progress)
- *   3. POST /api/analysis/start          → jobId (backend downloads from R2, deletes it, runs pipeline)
+ *   2. PUT directly to R2 with XHR (real progress %)
+ *   3. POST /api/analysis/start          → jobId
  *
- * Fallback (legacy multipart upload, used when R2 is not configured):
- *   1. POST /api/analysis/upload         → jobId
+ * Automatic fallback (legacy multipart, always works):
+ *   - When R2 is not configured (/presign-upload returns 503)
+ *   - When the XHR PUT fails (e.g. CORS not yet configured on the bucket)
+ *   → POST /api/analysis/upload          → jobId
  */
 export function useVideoUpload() {
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -28,71 +30,95 @@ export function useVideoUpload() {
   const reset = useCallback(() => setUploadProgress(0), []);
 
   const mutation = useMutation({
-    mutationFn: async ({ file, options }: { file: File; options: VideoUploadOptions }): Promise<{ jobId: string }> => {
+    mutationFn: async ({
+      file,
+      options,
+    }: {
+      file: File;
+      options: VideoUploadOptions;
+    }): Promise<{ jobId: string }> => {
       setUploadProgress(0);
 
-      // ── Try R2 presigned upload ────────────────────────────────────────────
+      // ── Step 1: Try to get a presigned R2 URL ──────────────────────────────
       const ext = (file.name.split(".").pop() ?? "mp4").toLowerCase();
-      const presignRes = await fetch(`/api/analysis/presign-upload?ext=${ext}`);
+      let useR2 = false;
+      let uploadUrl = "";
+      let fileKey = "";
 
-      if (presignRes.ok) {
-        const { uploadUrl, fileKey } = await presignRes.json() as { uploadUrl: string; fileKey: string };
-
-        // Upload directly to R2 using XHR (supports progress events)
-        await new Promise<void>((resolve, reject) => {
-          const xhr = new XMLHttpRequest();
-
-          xhr.upload.addEventListener("progress", (e) => {
-            if (e.lengthComputable) {
-              // Reserve last 5 % for the /start call
-              setUploadProgress(Math.round((e.loaded / e.total) * 93));
-            }
-          });
-
-          xhr.addEventListener("load", () => {
-            if (xhr.status >= 200 && xhr.status < 300) {
-              resolve();
-            } else {
-              reject(new Error(`Cloud upload failed (HTTP ${xhr.status})`));
-            }
-          });
-
-          xhr.addEventListener("error", () => reject(new Error("Network error during upload")));
-          xhr.addEventListener("abort", () => reject(new Error("Upload cancelled")));
-
-          xhr.open("PUT", uploadUrl);
-          xhr.setRequestHeader("Content-Type", file.type || "video/mp4");
-          xhr.send(file);
-        });
-
-        setUploadProgress(96);
-
-        // Tell the backend to start processing the uploaded R2 object
-        const startRes = await fetch("/api/analysis/start", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            fileKey,
-            mode: options.mode,
-            platform: options.platform ?? "youtube_long",
-            translateSubtitles: options.translateSubtitles ?? false,
-            subtitleLanguage: options.subtitleLanguage,
-            audioLanguage: options.audioLanguage,
-            audioVoice: options.audioVoice,
-          }),
-        });
-
-        if (!startRes.ok) {
-          const e = await startRes.json().catch(() => ({})) as { error?: string };
-          throw new Error(e.error ?? "Failed to start analysis");
+      try {
+        const presignRes = await fetch(`/api/analysis/presign-upload?ext=${ext}`);
+        if (presignRes.ok) {
+          const body = (await presignRes.json()) as { uploadUrl: string; fileKey: string };
+          uploadUrl = body.uploadUrl;
+          fileKey = body.fileKey;
+          useR2 = true;
         }
-
-        setUploadProgress(100);
-        return startRes.json() as Promise<{ jobId: string }>;
+      } catch {
+        // network error fetching presign — fall through to multipart
       }
 
-      // ── Fallback: direct multipart upload ─────────────────────────────────
-      // R2 returned 503 (not configured) — use legacy endpoint
+      // ── Step 2a: R2 direct PUT (if presign succeeded) ─────────────────────
+      if (useR2) {
+        try {
+          await new Promise<void>((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+
+            xhr.upload.addEventListener("progress", (e) => {
+              if (e.lengthComputable) {
+                setUploadProgress(Math.round((e.loaded / e.total) * 93));
+              }
+            });
+
+            xhr.addEventListener("load", () => {
+              if (xhr.status >= 200 && xhr.status < 300) {
+                resolve();
+              } else {
+                reject(new Error(`R2 upload returned HTTP ${xhr.status}`));
+              }
+            });
+
+            xhr.addEventListener("error", () =>
+              reject(new Error("R2 network error (CORS may not be configured)"))
+            );
+            xhr.addEventListener("abort", () => reject(new Error("Upload cancelled")));
+
+            xhr.open("PUT", uploadUrl);
+            xhr.setRequestHeader("Content-Type", file.type || "video/mp4");
+            xhr.send(file);
+          });
+
+          setUploadProgress(96);
+
+          // Tell the backend to start processing the uploaded R2 object
+          const startRes = await fetch("/api/analysis/start", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              fileKey,
+              mode: options.mode,
+              platform: options.platform ?? "youtube_long",
+              translateSubtitles: options.translateSubtitles ?? false,
+              subtitleLanguage: options.subtitleLanguage,
+              audioLanguage: options.audioLanguage,
+              audioVoice: options.audioVoice,
+            }),
+          });
+
+          if (!startRes.ok) {
+            const e = (await startRes.json().catch(() => ({}))) as { error?: string };
+            throw new Error(e.error ?? "Failed to start analysis");
+          }
+
+          setUploadProgress(100);
+          return startRes.json() as Promise<{ jobId: string }>;
+        } catch (r2Err) {
+          // R2 PUT failed (most likely CORS) — fall through to multipart
+          console.warn("[upload] R2 direct upload failed, falling back to multipart:", r2Err);
+          setUploadProgress(0);
+        }
+      }
+
+      // ── Step 2b: Legacy multipart fallback ────────────────────────────────
       const form = new FormData();
       form.append("video", file);
       form.append("mode", options.mode);
@@ -102,7 +128,6 @@ export function useVideoUpload() {
       if (options.audioLanguage) form.append("audioLanguage", options.audioLanguage);
       if (options.audioVoice) form.append("audioVoice", options.audioVoice);
 
-      // Simulate upload progress for the fallback (no XHR → no real progress)
       const fakeInterval = setInterval(() => {
         setUploadProgress((p) => Math.min(p + 3, 85));
       }, 500);
@@ -110,7 +135,7 @@ export function useVideoUpload() {
       try {
         const res = await fetch(getUploadVideoUrl(), { method: "POST", body: form });
         if (!res.ok) {
-          const e = await res.json().catch(() => ({})) as { error?: string };
+          const e = (await res.json().catch(() => ({}))) as { error?: string };
           throw new Error(e.error ?? "Upload failed");
         }
         setUploadProgress(100);
@@ -130,6 +155,9 @@ export function useVideoUpload() {
     isError: mutation.isError,
     error: mutation.error,
     uploadProgress,
-    resetUpload: () => { mutation.reset(); reset(); },
+    resetUpload: () => {
+      mutation.reset();
+      reset();
+    },
   };
 }
