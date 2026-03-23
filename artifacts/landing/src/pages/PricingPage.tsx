@@ -1,6 +1,7 @@
 import { useLocation } from "wouter";
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { Check, Zap, Star, Building } from "lucide-react";
+import { Check, Zap, Star, Building, Loader2 } from "lucide-react";
 import Navbar from "../components/Navbar";
 
 const plans = [
@@ -72,8 +73,26 @@ const plans = [
   },
 ];
 
+interface LivePrice { unitAmount: number; currency: string; }
+
+function formatLivePrice(p: LivePrice | undefined): string {
+  if (!p) return "";
+  const dollars = p.unitAmount / 100;
+  return `$${dollars % 1 === 0 ? dollars.toFixed(0) : dollars.toFixed(2)}`;
+}
+
 export default function PricingPage() {
   const [, navigate] = useLocation();
+  const [livePrices, setLivePrices] = useState<Record<string, LivePrice>>({});
+  const [pricesLoading, setPricesLoading] = useState(true);
+
+  useEffect(() => {
+    fetch("/api/paddle/prices")
+      .then((r) => r.json())
+      .then((d: { prices: Record<string, LivePrice> }) => setLivePrices(d.prices ?? {}))
+      .catch(() => {})
+      .finally(() => setPricesLoading(false));
+  }, []);
 
   const handlePlanClick = (_key: "free" | "premium" | "professional") => {
     navigate("/signup");
@@ -130,8 +149,18 @@ export default function PricingPage() {
                 <p className="text-white/40 text-sm mb-6">{plan.description}</p>
 
                 <div className="mb-8">
-                  <span className="text-5xl font-black">{plan.price}</span>
-                  <span className="text-white/40 text-sm ml-2">/{plan.period}</span>
+                  {plan.key !== "free" && pricesLoading ? (
+                    <Loader2 className="w-8 h-8 text-white/30 animate-spin" />
+                  ) : (
+                    <>
+                      <span className="text-5xl font-black">
+                        {plan.key === "free"
+                          ? plan.price
+                          : (formatLivePrice(livePrices[plan.key]) || plan.price)}
+                      </span>
+                      <span className="text-white/40 text-sm ml-2">/{plan.period}</span>
+                    </>
+                  )}
                 </div>
 
                 <button

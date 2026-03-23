@@ -4,6 +4,11 @@ import { db, usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import jwt from "jsonwebtoken";
 import { requireAuth } from "../../middlewares/auth";
+import {
+  fetchAllPrices,
+  fetchSubscriptionById,
+  fetchSubscriptionsByCustomerId,
+} from "../../lib/paddle";
 
 const router = Router();
 
@@ -47,10 +52,76 @@ function verifyPaddleSignature(rawBody: string, signatureHeader: string, secret:
 }
 
 /**
+ * GET /api/paddle/prices
+ * Returns live price data (amount, currency, billing period) from Paddle.
+ * Public — no auth required.
+ */
+router.get("/prices", async (req, res) => {
+  try {
+    const prices = await fetchAllPrices();
+    res.json({ prices });
+  } catch (err) {
+    req.log.error({ err }, "Failed to fetch Paddle prices");
+    res.status(500).json({ error: "Failed to fetch prices" });
+  }
+});
+
+/**
+ * GET /api/paddle/subscription
+ * Returns the authenticated user's active Paddle subscription (if any).
+ */
+router.get("/subscription", requireAuth, async (req, res) => {
+  try {
+    const [user] = await db
+      .select()
+      .from(usersTable)
+      .where(eq(usersTable.id, req.auth!.user_id))
+      .limit(1);
+
+    if (!user) { res.status(404).json({ error: "User not found" }); return; }
+
+    let subscription = null;
+
+    // Try by stored subscription ID first (fastest)
+    if (user.paddleSubscriptionId) {
+      subscription = await fetchSubscriptionById(user.paddleSubscriptionId);
+      // If canceled, clear it
+      if (subscription?.status === "canceled") {
+        subscription = null;
+        await db
+          .update(usersTable)
+          .set({ paddleSubscriptionId: null, plan: "free" } as never)
+          .where(eq(usersTable.id, user.id));
+      }
+    }
+
+    // Fall back to customer ID lookup
+    if (!subscription && user.paddleCustomerId) {
+      const subs = await fetchSubscriptionsByCustomerId(user.paddleCustomerId);
+      subscription = subs[0] ?? null;
+
+      // Sync plan from Paddle if it differs
+      if (subscription) {
+        const paddlePlan = priceIdToPlan(subscription.priceId) ?? "free";
+        if (paddlePlan !== user.plan && paddlePlan !== "free") {
+          await db
+            .update(usersTable)
+            .set({ plan: paddlePlan as string, paddleSubscriptionId: subscription.id })
+            .where(eq(usersTable.id, user.id));
+        }
+      }
+    }
+
+    res.json({ subscription, plan: user.plan });
+  } catch (err) {
+    req.log.error({ err }, "Failed to fetch subscription");
+    res.status(500).json({ error: "Failed to fetch subscription" });
+  }
+});
+
+/**
  * POST /api/paddle/webhook
  * Paddle sends subscription lifecycle events here.
- * Configure in Paddle Dashboard → Notifications → New Notification.
- * Set PADDLE_WEBHOOK_SECRET env var to the webhook secret from the dashboard.
  */
 router.post("/webhook", async (req, res) => {
   const rawBody = JSON.stringify(req.body);
@@ -76,13 +147,12 @@ router.post("/webhook", async (req, res) => {
   ) {
     const customerEmail: string | undefined =
       data?.customer?.email ?? data?.custom_data?.user_email;
-
     const userId: number | undefined =
       data?.custom_data?.user_id ? Number(data.custom_data.user_id) : undefined;
-
+    const customerId: string | undefined = data?.customer_id ?? data?.customer?.id;
+    const subscriptionId: string | undefined = data?.id ?? data?.subscription_id;
     const priceId: string | undefined =
       data?.items?.[0]?.price?.id ?? data?.price?.id;
-
     const plan = priceId ? priceIdToPlan(priceId) : null;
 
     if (plan && plan !== "free" && (customerEmail || userId)) {
@@ -91,7 +161,11 @@ router.post("/webhook", async (req, res) => {
           ? eq(usersTable.id, userId)
           : eq(usersTable.email, customerEmail!);
 
-        await db.update(usersTable).set({ plan: plan as string }).where(where);
+        const updates: Record<string, unknown> = { plan: plan as string };
+        if (customerId) updates.paddleCustomerId = customerId;
+        if (subscriptionId) updates.paddleSubscriptionId = subscriptionId;
+
+        await db.update(usersTable).set(updates as never).where(where);
         req.log.info({ plan, customerEmail, userId }, "Plan updated via webhook");
       } catch (err) {
         req.log.error({ err }, "Failed to update plan via webhook");
@@ -113,7 +187,10 @@ router.post("/webhook", async (req, res) => {
         const where = userId
           ? eq(usersTable.id, userId)
           : eq(usersTable.email, customerEmail!);
-        await db.update(usersTable).set({ plan: "free" as string }).where(where);
+        await db
+          .update(usersTable)
+          .set({ plan: "free" as string, paddleSubscriptionId: null } as never)
+          .where(where);
         req.log.info({ customerEmail, userId }, "Plan reset to free via webhook");
       } catch (err) {
         req.log.error({ err }, "Failed to reset plan via webhook");
@@ -126,12 +203,15 @@ router.post("/webhook", async (req, res) => {
 
 /**
  * POST /api/paddle/checkout-complete
- * Called immediately by the frontend when the Paddle checkout.completed event fires.
- * Requires auth. Updates the plan in DB and issues a fresh JWT.
+ * Called immediately by the frontend when checkout.completed fires.
  */
 router.post("/checkout-complete", requireAuth, async (req, res) => {
   try {
-    const { priceId } = req.body as { priceId?: string };
+    const { priceId, customerId, subscriptionId } = req.body as {
+      priceId?: string;
+      customerId?: string;
+      subscriptionId?: string;
+    };
     if (!priceId) { res.status(400).json({ error: "priceId is required" }); return; }
 
     const plan = priceIdToPlan(priceId);
@@ -145,7 +225,11 @@ router.post("/checkout-complete", requireAuth, async (req, res) => {
 
     if (!user) { res.status(404).json({ error: "User not found" }); return; }
 
-    await db.update(usersTable).set({ plan } as never).where(eq(usersTable.id, user.id));
+    const updates: Record<string, unknown> = { plan: plan as string };
+    if (customerId) updates.paddleCustomerId = customerId;
+    if (subscriptionId) updates.paddleSubscriptionId = subscriptionId;
+
+    await db.update(usersTable).set(updates as never).where(eq(usersTable.id, user.id));
 
     const token = signToken(user.id, user.email, user.name, plan);
     req.log.info({ userId: user.id, plan }, "Plan updated via checkout-complete");

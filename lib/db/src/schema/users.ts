@@ -7,6 +7,8 @@ export const usersTable = pgTable("users", {
   passwordHash: text("password_hash"),
   googleId: text("google_id").unique(),
   plan: text("plan").notNull().default("free"),
+  paddleCustomerId: text("paddle_customer_id"),
+  paddleSubscriptionId: text("paddle_subscription_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

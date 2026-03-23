@@ -20,7 +20,11 @@ function notifyDiscountListeners(code: string) {
   discountListeners.forEach((fn) => fn(code));
 }
 
-async function handleCheckoutComplete(priceId: string) {
+async function handleCheckoutComplete(
+  priceId: string,
+  customerId?: string,
+  subscriptionId?: string,
+) {
   const token = localStorage.getItem("daytabs_token");
   if (!token) return;
   try {
@@ -30,13 +34,12 @@ async function handleCheckoutComplete(priceId: string) {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ priceId }),
+      body: JSON.stringify({ priceId, customerId, subscriptionId }),
     });
     if (res.ok) {
       const { token: newToken } = await res.json() as { token: string; plan: string };
       if (newToken) {
         localStorage.setItem("daytabs_token", newToken);
-        // Notify the app that the plan has been updated
         window.dispatchEvent(new CustomEvent("daytabs:plan-updated"));
       }
     }
@@ -55,13 +58,15 @@ function ensurePaddleInitialized() {
     },
     eventCallback(event) {
       if (event.name === "checkout.completed") {
-        const priceId: string | undefined =
-          (event.data as Record<string, unknown> | undefined)?.items &&
-          Array.isArray((event.data as Record<string, unknown>).items)
-            ? ((event.data as Record<string, unknown>).items as Array<{ price_id?: string }>)[0]?.price_id
-            : undefined;
+        const d = event.data as Record<string, unknown> | undefined;
+        const items = Array.isArray(d?.items)
+          ? (d!.items as Array<{ price_id?: string }>)
+          : [];
+        const priceId = items[0]?.price_id;
+        const customerId = (d?.customer as Record<string, unknown> | undefined)?.id as string | undefined;
+        const subscriptionId = (d?.subscription as Record<string, unknown> | undefined)?.id as string | undefined;
         if (priceId) {
-          handleCheckoutComplete(priceId).catch(() => {});
+          handleCheckoutComplete(priceId, customerId, subscriptionId).catch(() => {});
         }
       }
     },

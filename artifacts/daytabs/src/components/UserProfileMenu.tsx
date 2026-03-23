@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect } from "react";
-import { LogOut, Crown, ChevronDown, Loader2, Tag, AlertCircle } from "lucide-react";
+import { LogOut, Crown, ChevronDown, Loader2, Tag, AlertCircle, ExternalLink, CreditCard, Calendar } from "lucide-react";
 import { useUser } from "@/hooks/use-user";
 import { usePaddle } from "@/hooks/use-paddle";
 import { usePlan, getPlanLabel, getPlanColor } from "@/hooks/use-plan";
+import { usePaddleSubscription } from "@/hooks/use-paddle-subscription";
 import { PlanPickerModal } from "@/components/PlanPickerModal";
 
 function getInitials(name: string): string {
@@ -14,7 +15,8 @@ function getInitials(name: string): string {
 export function UserProfileMenu() {
   const { user, logout } = useUser();
   const { discountCode, setDiscountCode, checkoutError } = usePaddle();
-  const { plan, loading } = usePlan();
+  const { plan, loading: planLoading } = usePlan();
+  const { subscription, formatNextBilling } = usePaddleSubscription();
   const [open, setOpen] = useState(false);
   const [showCodeInput, setShowCodeInput] = useState(false);
   const [showPlanPicker, setShowPlanPicker] = useState(false);
@@ -34,6 +36,7 @@ export function UserProfileMenu() {
   const displayName = user.name.length > 18 ? user.name.slice(0, 18) + "…" : user.name;
   const planLabel = getPlanLabel(plan.plan);
   const planColor = getPlanColor(plan.plan);
+  const nextBilling = formatNextBilling();
 
   const handleUpgrade = () => {
     setOpen(false);
@@ -80,14 +83,14 @@ export function UserProfileMenu() {
             </div>
           </div>
 
-          {/* Plan badge */}
-          <div className="px-4 py-3 border-b border-white/8">
+          {/* Subscription section */}
+          <div className="px-4 py-3 border-b border-white/8 space-y-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Crown className="w-3.5 h-3.5 text-violet-400" />
                 <span className="text-xs text-white/50">Subscription</span>
               </div>
-              {loading ? (
+              {planLoading ? (
                 <Loader2 className="w-3.5 h-3.5 text-white/30 animate-spin" />
               ) : (
                 <span className={`text-xs font-semibold ${planColor}`} data-testid="text-user-plan">
@@ -96,9 +99,45 @@ export function UserProfileMenu() {
               )}
             </div>
 
+            {/* Active subscription details */}
+            {plan.isPaid && subscription?.status === "active" && (
+              <div className="space-y-1.5">
+                {nextBilling && (
+                  <div className="flex items-center gap-1.5 text-xs text-white/35">
+                    <Calendar className="w-3 h-3 shrink-0" />
+                    <span>Renews {nextBilling}</span>
+                  </div>
+                )}
+                <div className="flex items-center gap-2">
+                  {subscription.managementUrls.updatePaymentMethod && (
+                    <a
+                      href={subscription.managementUrls.updatePaymentMethod}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1 text-xs text-white/35 hover:text-white/60 transition-colors"
+                    >
+                      <CreditCard className="w-3 h-3" />
+                      Update payment
+                    </a>
+                  )}
+                  {subscription.managementUrls.cancel && (
+                    <a
+                      href={subscription.managementUrls.cancel}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1 text-xs text-white/25 hover:text-red-400/70 transition-colors ml-auto"
+                    >
+                      <ExternalLink className="w-3 h-3" />
+                      Cancel
+                    </a>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Free plan — upgrade CTA */}
             {!plan.isPaid && (
-              <div className="mt-2 space-y-2">
-                {/* Discount code toggle */}
+              <div className="space-y-2">
                 <button
                   onClick={() => setShowCodeInput((v) => !v)}
                   className="flex items-center gap-1.5 text-xs text-white/35 hover:text-white/60 transition-colors"

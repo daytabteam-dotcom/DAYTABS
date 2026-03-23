@@ -1,19 +1,18 @@
 import { useEffect } from "react";
 import { createPortal } from "react-dom";
-import { X, Star, Building, Check } from "lucide-react";
+import { X, Star, Building, Check, Loader2 } from "lucide-react";
 import { usePaddle, PADDLE_PRICES } from "@/hooks/use-paddle";
 import { useUser } from "@/hooks/use-user";
+import { usePaddlePrices } from "@/hooks/use-paddle-subscription";
 
 interface PlanPickerModalProps {
   onClose: () => void;
 }
 
-const plans = [
-  {
+const PLAN_META = {
+  premium: {
     key: "premium" as const,
     name: "Premium",
-    price: "$25",
-    period: "/mo",
     icon: Star,
     color: "from-violet-600 to-purple-500",
     border: "border-violet-500/50",
@@ -30,11 +29,9 @@ const plans = [
     ],
     ctaClass: "bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-500 hover:to-purple-400 shadow-lg shadow-violet-500/20",
   },
-  {
+  professional: {
     key: "professional" as const,
     name: "Professional",
-    price: "$40",
-    period: "/mo",
     icon: Building,
     color: "from-purple-600 to-pink-500",
     border: "border-white/10",
@@ -51,11 +48,12 @@ const plans = [
     ],
     ctaClass: "bg-gradient-to-r from-purple-600 to-pink-500 hover:from-purple-500 hover:to-pink-400 shadow-lg shadow-purple-500/20",
   },
-];
+};
 
 export function PlanPickerModal({ onClose }: PlanPickerModalProps) {
   const { user } = useUser();
   const { openCheckout } = usePaddle();
+  const { formatPrice, loading: pricesLoading } = usePaddlePrices();
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -70,6 +68,8 @@ export function PlanPickerModal({ onClose }: PlanPickerModalProps) {
       onClose();
     }
   };
+
+  const plans = [PLAN_META.premium, PLAN_META.professional];
 
   return createPortal(
     <div
@@ -114,13 +114,19 @@ export function PlanPickerModal({ onClose }: PlanPickerModalProps) {
 
                 <div className="flex items-center gap-3">
                   <div className={`w-9 h-9 rounded-lg bg-gradient-to-br ${plan.color} flex items-center justify-center shrink-0`}>
-                    <plan.icon className="w-4.5 h-4.5 text-white w-[18px] h-[18px]" />
+                    <plan.icon className="w-[18px] h-[18px] text-white" />
                   </div>
                   <div>
                     <p className="text-sm font-bold text-white">{plan.name}</p>
                     <div className="flex items-baseline gap-0.5">
-                      <span className="text-xl font-black text-white">{plan.price}</span>
-                      <span className="text-xs text-white/40">{plan.period}</span>
+                      {pricesLoading ? (
+                        <Loader2 className="w-3.5 h-3.5 text-white/30 animate-spin" />
+                      ) : (
+                        <>
+                          <span className="text-xl font-black text-white">{formatPrice(plan.key)}</span>
+                          <span className="text-xs text-white/40">/mo</span>
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>
