@@ -105,7 +105,7 @@ export function usePaddleSubscription() {
     });
   }
 
-  async function cancelSubscription(): Promise<{ effectiveAt: string | null }> {
+  async function cancelSubscription(): Promise<{ effectiveAt: string | null; requiresPortal: boolean; portalUrl: string | null }> {
     const token = localStorage.getItem("daytabs_token");
     if (!token) throw new Error("Not authenticated");
     const res = await fetch("/api/paddle/cancel-subscription", {
@@ -116,9 +116,11 @@ export function usePaddleSubscription() {
       const err = await res.json().catch(() => ({ error: "Failed to cancel" })) as { error?: string };
       throw new Error(err.error ?? "Failed to cancel subscription");
     }
-    const data = await res.json() as { effectiveAt: string | null };
-    await fetch_();
-    return { effectiveAt: data.effectiveAt };
+    const data = await res.json() as { effectiveAt: string | null; requiresPortal: boolean; portalUrl: string | null };
+    if (!data.requiresPortal) {
+      await fetch_();
+    }
+    return { effectiveAt: data.effectiveAt, requiresPortal: data.requiresPortal ?? false, portalUrl: data.portalUrl ?? null };
   }
 
   return { subscription, loading, refetch: fetch_, formatNextBilling, formatCancelsOn, cancelSubscription };

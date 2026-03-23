@@ -168,7 +168,17 @@ router.post("/cancel-subscription", requireAuth, async (req, res) => {
     }
 
     const result = await cancelSubscription(user.paddleSubscriptionId);
-    res.json({ success: result.success, effectiveAt: result.effectiveAt });
+
+    if (result.forbidden) {
+      // API key lacks cancel permission — fall back to Paddle's self-serve portal
+      const subscription = await fetchSubscriptionById(user.paddleSubscriptionId);
+      const portalUrl = subscription?.managementUrls?.cancel ?? null;
+      req.log.warn({ userId: user.id }, "Paddle cancel forbidden — returning portal URL fallback");
+      res.json({ success: false, requiresPortal: true, portalUrl, effectiveAt: null });
+      return;
+    }
+
+    res.json({ success: result.success, effectiveAt: result.effectiveAt, requiresPortal: false, portalUrl: null });
   } catch (err) {
     req.log.error({ err }, "Failed to cancel subscription");
     res.status(500).json({ error: "Failed to cancel subscription" });

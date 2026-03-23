@@ -131,8 +131,10 @@ export async function fetchCustomerByEmail(email: string): Promise<{ id: string 
   }
 }
 
-export async function cancelSubscription(subscriptionId: string): Promise<{ success: boolean; effectiveAt: string | null }> {
-  if (!subscriptionId || !PADDLE_API_KEY) return { success: false, effectiveAt: null };
+export async function cancelSubscription(
+  subscriptionId: string
+): Promise<{ success: boolean; effectiveAt: string | null; forbidden: boolean }> {
+  if (!subscriptionId || !PADDLE_API_KEY) return { success: false, effectiveAt: null, forbidden: false };
   const res = await fetch(`${PADDLE_BASE}/subscriptions/${subscriptionId}/cancel`, {
     method: "POST",
     headers: {
@@ -141,11 +143,14 @@ export async function cancelSubscription(subscriptionId: string): Promise<{ succ
     },
     body: JSON.stringify({ effective_from: "next_billing_period" }),
   });
+  if (res.status === 403) {
+    return { success: false, effectiveAt: null, forbidden: true };
+  }
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`Paddle cancel error ${res.status}: ${text}`);
   }
   const data = await res.json() as { data: Record<string, unknown> };
   const sc = data.data?.scheduled_change as { effective_at?: string } | null;
-  return { success: true, effectiveAt: sc?.effective_at ?? null };
+  return { success: true, effectiveAt: sc?.effective_at ?? null, forbidden: false };
 }

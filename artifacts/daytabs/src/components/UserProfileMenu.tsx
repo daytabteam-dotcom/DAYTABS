@@ -16,7 +16,7 @@ function getInitials(name: string): string {
 interface CancelConfirmModalProps {
   planName: string;
   activeUntil: string | null;
-  onConfirm: () => Promise<void>;
+  onConfirm: () => Promise<{ effectiveAt: string | null; requiresPortal: boolean; portalUrl: string | null } | void>;
   onClose: () => void;
 }
 
@@ -28,8 +28,13 @@ function CancelConfirmModal({ planName, activeUntil, onConfirm, onClose }: Cance
     setCancelling(true);
     setError(null);
     try {
-      await onConfirm();
-      onClose();
+      const result = await onConfirm();
+      if (result?.requiresPortal && result.portalUrl) {
+        window.open(result.portalUrl, "_blank", "noopener,noreferrer");
+        onClose();
+      } else {
+        onClose();
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong. Please try again.");
     } finally {
@@ -307,7 +312,7 @@ export function UserProfileMenu() {
         <CancelConfirmModal
           planName={subscription.planName || planLabel}
           activeUntil={nextBilling}
-          onConfirm={async () => { await cancelSubscription(); }}
+          onConfirm={cancelSubscription}
           onClose={() => setShowCancelConfirm(false)}
         />
       )}
