@@ -1,6 +1,8 @@
 import express, { type Express } from "express";
 import cors from "cors";
 import pinoHttp from "pino-http";
+import path from "path";
+import { fileURLToPath } from "url";
 import router from "./routes";
 import { logger } from "./lib/logger";
 
@@ -30,5 +32,24 @@ app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
 app.use("/api", router);
+
+// In production, serve the built frontend apps from the API server
+if (process.env.NODE_ENV === "production") {
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  const landingDir = path.resolve(__dirname, "../../landing/dist/public");
+  const daytabsDir = path.resolve(__dirname, "../../daytabs/dist/public");
+
+  // Serve DayTabs panel at /panel/
+  app.use("/panel", express.static(daytabsDir));
+  app.use("/panel", (_req, res) => {
+    res.sendFile(path.join(daytabsDir, "index.html"));
+  });
+
+  // Serve landing page at /  (must come last — catch-all)
+  app.use(express.static(landingDir));
+  app.use((_req, res) => {
+    res.sendFile(path.join(landingDir, "index.html"));
+  });
+}
 
 export default app;

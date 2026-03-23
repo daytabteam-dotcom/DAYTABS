@@ -15,18 +15,15 @@ run = "pnpm --filter @workspace/api-server run dev"
 [services.production]
 
 [services.production.build]
-args = ["pnpm", "--filter", "@workspace/api-server", "run", "build"]
-
-[services.production.build.env]
-NODE_ENV = "production"
+args = ["bash", "-c", "NODE_ENV=production pnpm --filter @workspace/api-server run build && BASE_PATH=/ pnpm --filter @workspace/landing run build && BASE_PATH=/panel/ pnpm --filter @workspace/daytabs run build"]
 
 [services.production.run]
-# we don't run through pnpm to make startup faster in production
 args = ["node", "--enable-source-maps", "artifacts/api-server/dist/index.mjs"]
 
 [services.production.run.env]
 PORT = "8080"
 NODE_ENV = "production"
+CORE_APP_URL = "/panel/"
 
 [services.production.health.startup]
 path = "/api/healthz"
