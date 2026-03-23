@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
-import { LogOut, Crown, ChevronDown, Loader2, Tag, AlertCircle, ExternalLink, CreditCard, Calendar } from "lucide-react";
+import { createPortal } from "react-dom";
+import { LogOut, Crown, ChevronDown, Loader2, Tag, AlertCircle, CreditCard, Calendar, XCircle, AlertTriangle, X } from "lucide-react";
 import { useUser } from "@/hooks/use-user";
 import { usePaddle } from "@/hooks/use-paddle";
 import { usePlan, getPlanLabel, getPlanColor } from "@/hooks/use-plan";
@@ -12,14 +13,108 @@ function getInitials(name: string): string {
   return name.slice(0, 2).toUpperCase();
 }
 
+interface CancelConfirmModalProps {
+  planName: string;
+  activeUntil: string | null;
+  onConfirm: () => Promise<void>;
+  onClose: () => void;
+}
+
+function CancelConfirmModal({ planName, activeUntil, onConfirm, onClose }: CancelConfirmModalProps) {
+  const [cancelling, setCancelling] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleConfirm = async () => {
+    setCancelling(true);
+    setError(null);
+    try {
+      await onConfirm();
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Something went wrong. Please try again.");
+    } finally {
+      setCancelling(false);
+    }
+  };
+
+  return createPortal(
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative w-full max-w-sm bg-[#1a1025] border border-white/10 rounded-2xl shadow-2xl shadow-black/60 overflow-hidden">
+        <button
+          onClick={onClose}
+          className="absolute top-3 right-3 text-white/30 hover:text-white/60 transition-colors cursor-pointer"
+        >
+          <X className="w-4 h-4" />
+        </button>
+
+        <div className="p-6">
+          <div className="flex items-center justify-center w-12 h-12 rounded-full bg-red-500/10 border border-red-500/20 mx-auto mb-4">
+            <AlertTriangle className="w-6 h-6 text-red-400" />
+          </div>
+
+          <h3 className="text-lg font-bold text-white text-center mb-1">Cancel subscription?</h3>
+          <p className="text-sm text-white/50 text-center mb-5">
+            Your <span className="text-white/70 font-medium">{planName}</span> plan will stay active
+            {activeUntil ? (
+              <> until <span className="text-white/70 font-medium">{activeUntil}</span></>
+            ) : (
+              " until the end of your current billing period"
+            )}
+            , then reset to Free automatically.
+          </p>
+
+          <div className="flex items-start gap-2 bg-amber-500/8 border border-amber-500/15 rounded-xl px-3 py-2.5 mb-5">
+            <AlertCircle className="w-3.5 h-3.5 text-amber-400/70 mt-0.5 shrink-0" />
+            <p className="text-xs text-amber-400/70">No refund will be issued for the remaining billing period.</p>
+          </div>
+
+          {error && (
+            <div className="flex items-start gap-2 bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2.5 mb-4">
+              <AlertCircle className="w-3.5 h-3.5 text-red-400 mt-0.5 shrink-0" />
+              <p className="text-xs text-red-400">{error}</p>
+            </div>
+          )}
+
+          <div className="flex gap-2">
+            <button
+              onClick={onClose}
+              disabled={cancelling}
+              className="flex-1 py-2.5 text-sm font-medium rounded-xl bg-white/5 hover:bg-white/10 text-white/60 hover:text-white/80 transition-colors cursor-pointer"
+            >
+              Keep plan
+            </button>
+            <button
+              onClick={handleConfirm}
+              disabled={cancelling}
+              className="flex-1 py-2.5 text-sm font-semibold rounded-xl bg-red-600/80 hover:bg-red-600 text-white transition-colors cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-60"
+            >
+              {cancelling ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <>
+                  <XCircle className="w-3.5 h-3.5" />
+                  Confirm cancel
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 export function UserProfileMenu() {
   const { user, logout } = useUser();
   const { discountCode, setDiscountCode, checkoutError } = usePaddle();
   const { plan, loading: planLoading } = usePlan();
-  const { subscription, formatNextBilling } = usePaddleSubscription();
+  const { subscription, formatNextBilling, formatCancelsOn, cancelSubscription } = usePaddleSubscription();
   const [open, setOpen] = useState(false);
   const [showCodeInput, setShowCodeInput] = useState(false);
   const [showPlanPicker, setShowPlanPicker] = useState(false);
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -37,10 +132,17 @@ export function UserProfileMenu() {
   const planLabel = getPlanLabel(plan.plan);
   const planColor = getPlanColor(plan.plan);
   const nextBilling = formatNextBilling();
+  const cancelsOn = formatCancelsOn();
+  const isPendingCancellation = !!cancelsOn;
 
   const handleUpgrade = () => {
     setOpen(false);
     setShowPlanPicker(true);
+  };
+
+  const handleCancelClick = () => {
+    setOpen(false);
+    setShowCancelConfirm(true);
   };
 
   return (
@@ -102,14 +204,22 @@ export function UserProfileMenu() {
             {/* Active subscription details */}
             {plan.isPaid && subscription?.status === "active" && (
               <div className="space-y-1.5">
-                {nextBilling && (
-                  <div className="flex items-center gap-1.5 text-xs text-white/35">
-                    <Calendar className="w-3 h-3 shrink-0" />
-                    <span>Renews {nextBilling}</span>
+                {isPendingCancellation ? (
+                  <div className="flex items-center gap-1.5 text-xs text-amber-400/70">
+                    <XCircle className="w-3 h-3 shrink-0" />
+                    <span>Cancels {cancelsOn} — reverts to Free</span>
                   </div>
+                ) : (
+                  nextBilling && (
+                    <div className="flex items-center gap-1.5 text-xs text-white/35">
+                      <Calendar className="w-3 h-3 shrink-0" />
+                      <span>Renews {nextBilling}</span>
+                    </div>
+                  )
                 )}
+
                 <div className="flex items-center gap-2">
-                  {subscription.managementUrls.updatePaymentMethod && (
+                  {subscription.managementUrls.updatePaymentMethod && !isPendingCancellation && (
                     <a
                       href={subscription.managementUrls.updatePaymentMethod}
                       target="_blank"
@@ -120,16 +230,15 @@ export function UserProfileMenu() {
                       Update payment
                     </a>
                   )}
-                  {subscription.managementUrls.cancel && (
-                    <a
-                      href={subscription.managementUrls.cancel}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-1 text-xs text-white/25 hover:text-red-400/70 transition-colors ml-auto"
+                  {!isPendingCancellation && (
+                    <button
+                      onClick={handleCancelClick}
+                      className="flex items-center gap-1 text-xs text-white/25 hover:text-red-400/70 transition-colors ml-auto cursor-pointer"
+                      data-testid="button-cancel-subscription"
                     >
-                      <ExternalLink className="w-3 h-3" />
+                      <XCircle className="w-3 h-3" />
                       Cancel
-                    </a>
+                    </button>
                   )}
                 </div>
               </div>
@@ -192,6 +301,15 @@ export function UserProfileMenu() {
 
       {showPlanPicker && (
         <PlanPickerModal onClose={() => setShowPlanPicker(false)} />
+      )}
+
+      {showCancelConfirm && subscription && (
+        <CancelConfirmModal
+          planName={subscription.planName || planLabel}
+          activeUntil={nextBilling}
+          onConfirm={async () => { await cancelSubscription(); }}
+          onClose={() => setShowCancelConfirm(false)}
+        />
       )}
     </div>
   );

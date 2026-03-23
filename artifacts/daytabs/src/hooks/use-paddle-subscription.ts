@@ -16,6 +16,10 @@ export interface PaddleSubscription {
   planName: string;
   nextBilledAt: string | null;
   canceledAt: string | null;
+  scheduledChange: {
+    action: "cancel" | "pause" | "resume";
+    effectiveAt: string;
+  } | null;
   managementUrls: {
     updatePaymentMethod: string | null;
     cancel: string | null;
@@ -88,5 +92,29 @@ export function usePaddleSubscription() {
     });
   }
 
-  return { subscription, loading, refetch: fetch_, formatNextBilling };
+  function formatCancelsOn(): string | null {
+    const sc = subscription?.scheduledChange;
+    if (!sc || sc.action !== "cancel") return null;
+    return new Date(sc.effectiveAt).toLocaleDateString("en-US", {
+      year: "numeric", month: "short", day: "numeric",
+    });
+  }
+
+  async function cancelSubscription(): Promise<{ effectiveAt: string | null }> {
+    const token = localStorage.getItem("daytabs_token");
+    if (!token) throw new Error("Not authenticated");
+    const res = await fetch("/api/paddle/cancel-subscription", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Failed to cancel" })) as { error?: string };
+      throw new Error(err.error ?? "Failed to cancel subscription");
+    }
+    const data = await res.json() as { effectiveAt: string | null };
+    await fetch_();
+    return { effectiveAt: data.effectiveAt };
+  }
+
+  return { subscription, loading, refetch: fetch_, formatNextBilling, formatCancelsOn, cancelSubscription };
 }

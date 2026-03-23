@@ -22,6 +22,10 @@ export interface PaddleSubscription {
   planName: string;
   nextBilledAt: string | null;
   canceledAt: string | null;
+  scheduledChange: {
+    action: "cancel" | "pause" | "resume";
+    effectiveAt: string;
+  } | null;
   managementUrls: {
     updatePaymentMethod: string | null;
     cancel: string | null;
@@ -70,27 +74,34 @@ export async function fetchAllPrices(): Promise<Record<string, PaddlePrice>> {
   return result;
 }
 
+function mapSubscription(d: Record<string, unknown>): PaddleSubscription {
+  const items = d.items as Array<{ price: { id: string; name: string } }>;
+  const priceId = items?.[0]?.price?.id ?? "";
+  const planName = items?.[0]?.price?.name ?? "";
+  const mgmt = d.management_urls as { update_payment_method?: string; cancel?: string } | null;
+  const sc = d.scheduled_change as { action?: string; effective_at?: string } | null;
+  return {
+    id: d.id as string,
+    status: d.status as PaddleSubscription["status"],
+    priceId,
+    planName,
+    nextBilledAt: (d.next_billed_at as string) || null,
+    canceledAt: (d.canceled_at as string) || null,
+    scheduledChange: sc?.action && sc.effective_at
+      ? { action: sc.action as PaddleSubscription["scheduledChange"]["action"], effectiveAt: sc.effective_at }
+      : null,
+    managementUrls: {
+      updatePaymentMethod: mgmt?.update_payment_method ?? null,
+      cancel: mgmt?.cancel ?? null,
+    },
+  };
+}
+
 export async function fetchSubscriptionById(subscriptionId: string): Promise<PaddleSubscription | null> {
   if (!subscriptionId || !PADDLE_API_KEY) return null;
   try {
     const data = await paddleFetch<{ data: Record<string, unknown> }>(`/subscriptions/${subscriptionId}`);
-    const d = data.data;
-    const items = d.items as Array<{ price: { id: string; name: string } }>;
-    const priceId = items?.[0]?.price?.id ?? "";
-    const planName = items?.[0]?.price?.name ?? "";
-    const mgmt = d.management_urls as { update_payment_method?: string; cancel?: string } | null;
-    return {
-      id: d.id as string,
-      status: d.status as PaddleSubscription["status"],
-      priceId,
-      planName,
-      nextBilledAt: (d.next_billed_at as string) || null,
-      canceledAt: (d.canceled_at as string) || null,
-      managementUrls: {
-        updatePaymentMethod: mgmt?.update_payment_method ?? null,
-        cancel: mgmt?.cancel ?? null,
-      },
-    };
+    return mapSubscription(data.data);
   } catch {
     return null;
   }
@@ -102,25 +113,27 @@ export async function fetchSubscriptionsByCustomerId(customerId: string): Promis
     const data = await paddleFetch<{ data: Array<Record<string, unknown>> }>(
       `/subscriptions?customer_id=${customerId}&status=active&per_page=10`
     );
-    return (data.data ?? []).map((d) => {
-      const items = d.items as Array<{ price: { id: string; name: string } }>;
-      const priceId = items?.[0]?.price?.id ?? "";
-      const planName = items?.[0]?.price?.name ?? "";
-      const mgmt = d.management_urls as { update_payment_method?: string; cancel?: string } | null;
-      return {
-        id: d.id as string,
-        status: d.status as PaddleSubscription["status"],
-        priceId,
-        planName,
-        nextBilledAt: (d.next_billed_at as string) || null,
-        canceledAt: (d.canceled_at as string) || null,
-        managementUrls: {
-          updatePaymentMethod: mgmt?.update_payment_method ?? null,
-          cancel: mgmt?.cancel ?? null,
-        },
-      };
-    });
+    return (data.data ?? []).map(mapSubscription);
   } catch {
     return [];
   }
+}
+
+export async function cancelSubscription(subscriptionId: string): Promise<{ success: boolean; effectiveAt: string | null }> {
+  if (!subscriptionId || !PADDLE_API_KEY) return { success: false, effectiveAt: null };
+  const res = await fetch(`${PADDLE_BASE}/subscriptions/${subscriptionId}/cancel`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${PADDLE_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ effective_from: "next_billing_period" }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Paddle cancel error ${res.status}: ${text}`);
+  }
+  const data = await res.json() as { data: Record<string, unknown> };
+  const sc = data.data?.scheduled_change as { effective_at?: string } | null;
+  return { success: true, effectiveAt: sc?.effective_at ?? null };
 }

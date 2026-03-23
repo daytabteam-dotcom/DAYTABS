@@ -8,6 +8,7 @@ import {
   fetchAllPrices,
   fetchSubscriptionById,
   fetchSubscriptionsByCustomerId,
+  cancelSubscription,
 } from "../../lib/paddle";
 
 const router = Router();
@@ -116,6 +117,33 @@ router.get("/subscription", requireAuth, async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "Failed to fetch subscription");
     res.status(500).json({ error: "Failed to fetch subscription" });
+  }
+});
+
+/**
+ * POST /api/paddle/cancel-subscription
+ * Cancel the user's subscription at the end of the current billing period.
+ * No immediate refund — the plan stays active until next_billed_at, then resets to free.
+ */
+router.post("/cancel-subscription", requireAuth, async (req, res) => {
+  try {
+    const [user] = await db
+      .select()
+      .from(usersTable)
+      .where(eq(usersTable.id, req.auth!.user_id))
+      .limit(1);
+
+    if (!user) { res.status(404).json({ error: "User not found" }); return; }
+    if (!user.paddleSubscriptionId) {
+      res.status(400).json({ error: "No active subscription found" });
+      return;
+    }
+
+    const result = await cancelSubscription(user.paddleSubscriptionId);
+    res.json({ success: result.success, effectiveAt: result.effectiveAt });
+  } catch (err) {
+    req.log.error({ err }, "Failed to cancel subscription");
+    res.status(500).json({ error: "Failed to cancel subscription" });
   }
 });
 
