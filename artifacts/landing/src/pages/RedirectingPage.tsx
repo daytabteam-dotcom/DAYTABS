@@ -7,7 +7,7 @@ export default function RedirectingPage() {
 
   useEffect(() => {
     const token = new URLSearchParams(window.location.search).get("token");
-    const coreAppUrl = "/";
+    const coreAppUrl = "/panel/";
     const destination = token ? `${coreAppUrl}?token=${token}` : coreAppUrl;
 
     const timer = setInterval(() => {
