@@ -92,6 +92,13 @@ export function usePlan() {
     if (user) fetchPlanInfo();
   }, [user, fetchPlanInfo]);
 
+  // Refetch whenever the Paddle checkout-complete handler updates the token
+  useEffect(() => {
+    const handler = () => fetchPlanInfo();
+    window.addEventListener("daytabs:plan-updated", handler);
+    return () => window.removeEventListener("daytabs:plan-updated", handler);
+  }, [fetchPlanInfo]);
+
   // Derive planInfo from user JWT as immediate fallback while fetching
   const effectivePlan = (planInfo?.plan ?? user?.plan ?? "free") as PlanName;
   const effectiveInfo: PlanInfo = planInfo ?? {

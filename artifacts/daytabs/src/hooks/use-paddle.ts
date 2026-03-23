@@ -20,6 +20,56 @@ function notifyDiscountListeners(code: string) {
   discountListeners.forEach((fn) => fn(code));
 }
 
+async function handleCheckoutComplete(priceId: string) {
+  const token = localStorage.getItem("daytabs_token");
+  if (!token) return;
+  try {
+    const res = await fetch("/api/paddle/checkout-complete", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ priceId }),
+    });
+    if (res.ok) {
+      const { token: newToken } = await res.json() as { token: string; plan: string };
+      if (newToken) {
+        localStorage.setItem("daytabs_token", newToken);
+        // Notify the app that the plan has been updated
+        window.dispatchEvent(new CustomEvent("daytabs:plan-updated"));
+      }
+    }
+  } catch {
+    // Webhook will handle it as fallback
+  }
+}
+
+function ensurePaddleInitialized() {
+  if (paddleInstance || !CLIENT_TOKEN) return;
+  initializePaddle({
+    token: CLIENT_TOKEN,
+    environment: ENVIRONMENT,
+    checkout: {
+      settings: { displayMode: "overlay", theme: "dark", locale: "en" },
+    },
+    eventCallback(event) {
+      if (event.name === "checkout.completed") {
+        const priceId: string | undefined =
+          (event.data as Record<string, unknown> | undefined)?.items &&
+          Array.isArray((event.data as Record<string, unknown>).items)
+            ? ((event.data as Record<string, unknown>).items as Array<{ price_id?: string }>)[0]?.price_id
+            : undefined;
+        if (priceId) {
+          handleCheckoutComplete(priceId).catch(() => {});
+        }
+      }
+    },
+  }).then((instance) => {
+    if (instance) paddleInstance = instance;
+  });
+}
+
 export function usePaddle() {
   const [paddle, setPaddle] = useState<Paddle | null>(paddleInstance);
   const [discountCode, _setDiscountCode] = useState(() => globalDiscountCode);
@@ -36,15 +86,12 @@ export function usePaddle() {
   useEffect(() => {
     if (paddleInstance) { setPaddle(paddleInstance); return; }
     if (!CLIENT_TOKEN) return;
-    initializePaddle({
-      token: CLIENT_TOKEN,
-      environment: ENVIRONMENT,
-      checkout: {
-        settings: { displayMode: "overlay", theme: "dark", locale: "en" },
-      },
-    }).then((instance) => {
-      if (instance) { paddleInstance = instance; setPaddle(instance); }
-    });
+    ensurePaddleInitialized();
+    // Poll briefly until the instance is ready
+    const interval = setInterval(() => {
+      if (paddleInstance) { setPaddle(paddleInstance); clearInterval(interval); }
+    }, 100);
+    return () => clearInterval(interval);
   }, []);
 
   const setDiscountCode = useCallback((code: string) => {
@@ -57,7 +104,6 @@ export function usePaddle() {
     if (!paddle) return;
     setCheckoutError(null);
 
-    // Auto-apply FREE100 for configured admin email
     const autoCode = ADMIN_EMAIL && userEmail === ADMIN_EMAIL ? "FREE100" : undefined;
     const userCode = globalDiscountCode.trim() !== "" ? globalDiscountCode.trim().toUpperCase() : undefined;
     const resolvedCode = autoCode ?? userCode;
