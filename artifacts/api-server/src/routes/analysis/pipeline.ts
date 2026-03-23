@@ -7,7 +7,7 @@ import { db } from "@workspace/db";
 import { analysisJobsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import {
-  updateJob, transcribeAudio, extractAudio, extractFrames,
+  updateJob, transcribeAudio, extractAudio, compressVideo, extractFrames,
   analyzeVisuals, analyzeAudio, analyzeScriptFeedback, analyzeEditingPoints,
   generateSeo, generateSrt, translateSegments, computeQualityScore, logger,
 } from "./services";
@@ -33,15 +33,24 @@ export async function runAnalysisPipeline(
   options: PipelineOptions
 ): Promise<void> {
   const workDir = path.join(path.dirname(videoPath), jobId);
+  // Compressed proxy — used for all heavy AI/transcription processing
+  const compressedPath = path.join(workDir, "compressed.mp4");
+  // Audio is extracted from the compressed proxy (faster, smaller file)
   const audioPath = path.join(workDir, "audio.mp3");
 
   try {
     await fs.mkdir(workDir, { recursive: true });
 
-    await updateJob(jobId, { status: "extracting_audio", progress: 8, currentStep: "Extracting audio" });
-    await extractAudio(videoPath, audioPath);
+    // Step 1: Generate compressed proxy from original video
+    await updateJob(jobId, { status: "extracting_audio", progress: 5, currentStep: "Compressing video for processing" });
+    await compressVideo(videoPath, compressedPath);
 
-    await updateJob(jobId, { status: "transcribing", progress: 20, currentStep: "Transcribing audio", audioPath });
+    // Step 2: Extract audio from compressed proxy (not the original)
+    await updateJob(jobId, { status: "extracting_audio", progress: 12, currentStep: "Extracting audio" });
+    await extractAudio(compressedPath, audioPath);
+
+    // Step 3: Transcribe from compressed audio
+    await updateJob(jobId, { status: "transcribing", progress: 22, currentStep: "Transcribing audio", audioPath });
     let transcriptText = "";
     let transcriptSegments: Array<{ start: number; end: number; text: string }> = [];
     let whisperConfidence = 0.85;
@@ -60,30 +69,36 @@ export async function runAnalysisPipeline(
     const mode = options.mode;
 
     if (mode === "pre-edit") {
+      // videoPath = original (for high-quality frame extraction)
       await runPreEdit(jobId, videoPath, workDir, audioPath, transcriptText, transcriptSegments, whisperConfidence);
     } else if (mode === "editing") {
-      await runEditing(jobId, videoPath, transcriptText, transcriptSegments);
+      // Editing is transcript-only — no frames needed
+      await runEditing(jobId, transcriptText, transcriptSegments);
     } else if (mode === "publish") {
-      await runPublish(jobId, videoPath, transcriptText, transcriptSegments, options);
+      await runPublish(jobId, transcriptText, transcriptSegments, options);
     } else if (mode === "dubbing") {
-      await runDubbing(jobId, videoPath, workDir, transcriptText, transcriptSegments, options);
+      // compressedPath = compressed proxy used for dubbing video merge
+      await runDubbing(jobId, compressedPath, workDir, transcriptText, transcriptSegments, options);
     }
 
+    // Keep original video in workDir, clean up compressed proxy
     const savedVideoExt = path.extname(videoPath);
     const savedVideoPath = path.join(workDir, `original${savedVideoExt}`);
     await fs.rename(videoPath, savedVideoPath).catch(() => fs.unlink(videoPath).catch(() => {}));
+    await fs.unlink(compressedPath).catch(() => {});
     await db.update(analysisJobsTable).set({ videoPath: savedVideoPath, updatedAt: new Date() }).where(eq(analysisJobsTable.id, jobId));
 
   } catch (err) {
     logger.error({ err, jobId }, "Pipeline error");
     await updateJob(jobId, { status: "error", error: err instanceof Error ? err.message : String(err) });
     await fs.unlink(videoPath).catch(() => {});
+    await fs.unlink(compressedPath).catch(() => {});
   }
 }
 
 async function runPreEdit(
   jobId: string,
-  videoPath: string,
+  originalVideoPath: string,
   workDir: string,
   audioPath: string,
   transcriptText: string,
@@ -93,8 +108,9 @@ async function runPreEdit(
   const framesDir = path.join(workDir, "frames");
   await fs.mkdir(framesDir, { recursive: true });
 
+  // Extract first 10 frames from ORIGINAL video (high quality, not compressed)
   await updateJob(jobId, { status: "extracting_frames", progress: 35, currentStep: "Extracting frames" });
-  const frameBase64List = await extractFrames(videoPath, framesDir, 5);
+  const frameBase64List = await extractFrames(originalVideoPath, framesDir);
 
   await updateJob(jobId, { status: "analyzing_visual", progress: 50, currentStep: "Analyzing visuals" });
   const visualAnalysis = await analyzeVisuals(frameBase64List, "youtube_long");
@@ -127,7 +143,6 @@ async function runPreEdit(
 
 async function runEditing(
   jobId: string,
-  videoPath: string,
   transcriptText: string,
   transcriptSegments: Array<{ start: number; end: number; text: string }>
 ) {
@@ -152,7 +167,6 @@ async function runEditing(
 
 async function runPublish(
   jobId: string,
-  videoPath: string,
   transcriptText: string,
   transcriptSegments: Array<{ start: number; end: number; text: string }>,
   options: PipelineOptions

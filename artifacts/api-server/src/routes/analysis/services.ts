@@ -47,10 +47,25 @@ export async function extractAudio(videoPath: string, audioPath: string): Promis
   await execAsync(`ffmpeg -i "${videoPath}" -q:a 0 -map a "${audioPath}" -y`);
 }
 
-export async function extractFrames(videoPath: string, framesDir: string, maxFrames = 5): Promise<string[]> {
-  await execAsync(`ffmpeg -i "${videoPath}" -vf "fps=1/3" "${framesDir}/frame_%03d.jpg" -y`);
+/**
+ * Generate a compressed proxy video for heavy processing (transcription, audio analysis, etc.)
+ * Scale to 640px wide, high CRF for fast encoding — not used for output, only for AI processing.
+ */
+export async function compressVideo(inputPath: string, outputPath: string): Promise<void> {
+  await execAsync(
+    `ffmpeg -i "${inputPath}" -vf scale=640:-2 -crf 32 -preset veryfast "${outputPath}" -y`
+  );
+}
+
+/**
+ * Extract the first 10 frames from the ORIGINAL (uncompressed) video for high-quality visual analysis.
+ */
+export async function extractFrames(videoPath: string, framesDir: string): Promise<string[]> {
+  await execAsync(
+    `ffmpeg -i "${videoPath}" -vf "select=lt(n\\,10)" -vsync vfr "${framesDir}/frame_%03d.jpg" -y`
+  );
   const files = await fs.readdir(framesDir);
-  const jpgs = files.filter(f => f.endsWith(".jpg")).sort().slice(0, maxFrames);
+  const jpgs = files.filter(f => f.endsWith(".jpg")).sort().slice(0, 10);
   return Promise.all(jpgs.map(async (f) => {
     const buf = await fs.readFile(path.join(framesDir, f));
     return buf.toString("base64");
