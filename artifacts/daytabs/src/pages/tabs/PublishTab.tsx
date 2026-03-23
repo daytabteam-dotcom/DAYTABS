@@ -1,8 +1,8 @@
-import React, { useState } from "react";
+import React, { useState, useCallback } from "react";
 import { useMutation } from "@tanstack/react-query";
+import { useDropzone } from "react-dropzone";
 import { motion } from "framer-motion";
-import { TrendingUp, Copy, Check, Download, Hash, Clock, FileText, Globe } from "lucide-react";
-import { TabUpload } from "@/components/TabUpload";
+import { TrendingUp, Copy, Check, Download, Hash, Clock, FileText, Globe, Film, Upload } from "lucide-react";
 import { ProgressIndicator } from "@/components/ProgressIndicator";
 import { useAnalysisPolling, useAnalysisResults } from "@/hooks/use-analysis";
 import { getUploadVideoUrl } from "@workspace/api-client-react";
@@ -27,9 +27,68 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
+function UploadZone({ onFile, isPending, platform }: { onFile: (f: File) => void; isPending: boolean; platform: string }) {
+  const [file, setFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+  const label = PLATFORMS.find(p => p.id === platform)?.label || "your platform";
+
+  const onDrop = useCallback((accepted: File[]) => {
+    const f = accepted[0];
+    if (!f) return;
+    setFile(f);
+    setPreview(URL.createObjectURL(f));
+    onFile(f);
+  }, [onFile]);
+
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop, accept: { "video/*": [".mp4", ".mov", ".avi", ".webm"] }, maxFiles: 1, disabled: isPending,
+  });
+
+  return (
+    <div
+      {...getRootProps()}
+      className={`relative overflow-hidden rounded-2xl cursor-pointer transition-all duration-300 border-2 ${
+        isDragActive ? "border-emerald-400 bg-emerald-400/10 scale-[1.01]" : "border-white/10 hover:border-emerald-400/40 bg-emerald-400/3 hover:bg-emerald-400/6"
+      } ${file ? "min-h-[200px] p-2" : "p-10"}`}
+    >
+      <input {...getInputProps()} />
+      {file && preview ? (
+        <div className="relative w-full min-h-[180px] rounded-xl overflow-hidden bg-black/50">
+          <video src={preview} className="w-full h-full object-cover opacity-40" autoPlay loop muted playsInline />
+          <div className="absolute inset-0 flex flex-col items-center justify-center p-6 bg-gradient-to-t from-black/80 via-transparent to-transparent">
+            <Film className="w-8 h-8 text-emerald-400 mb-2" />
+            <p className="text-white font-semibold text-sm text-center truncate max-w-full px-4">{file.name}</p>
+            <p className="text-white/50 text-xs mt-1">{(file.size / (1024 * 1024)).toFixed(1)} MB</p>
+            <span className="mt-3 px-3 py-1 bg-white/15 backdrop-blur-md rounded-full text-xs text-white">Click to replace</span>
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-col items-center gap-4">
+          <div className="relative">
+            <div className="w-20 h-20 rounded-full bg-emerald-400/15 border border-emerald-400/20 flex items-center justify-center">
+              <TrendingUp className="w-9 h-9 text-emerald-400/70" />
+            </div>
+            <div className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-emerald-400/30 border border-emerald-400/40 flex items-center justify-center">
+              <Upload className="w-3.5 h-3.5 text-emerald-400" />
+            </div>
+          </div>
+          <div className="text-center space-y-1">
+            <p className="font-bold text-white text-base">{isDragActive ? "Drop it here!" : "Drop your video here"}</p>
+            <p className="text-sm text-white/40">We'll generate SEO content & subtitles for <span className="text-emerald-400/80">{label}</span></p>
+            <p className="text-xs text-white/25 mt-2">MP4, MOV, AVI, WebM · up to 2 GB</p>
+          </div>
+          <div className="px-5 py-2 bg-emerald-400/10 border border-emerald-400/20 rounded-full text-sm font-medium text-emerald-400/80">
+            Browse Files
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function PublishTab() {
   const { toast } = useToast();
-  const [file, setFile] = useState<File | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [platform, setPlatform] = useState("youtube_long");
   const [translateSubs, setTranslateSubs] = useState(false);
@@ -55,7 +114,7 @@ export default function PublishTab() {
   const isComplete = statusData?.status === "complete";
   const { data: rawResults } = useAnalysisResults(jobId, isComplete);
   const results = rawResults as any;
-  const reset = () => { setJobId(null); setFile(null); uploadMutation.reset(); };
+  const reset = () => { setJobId(null); setSelectedFile(null); uploadMutation.reset(); };
 
   const downloadSrt = () => {
     if (!results?.subtitleFile?.content) return;
@@ -70,10 +129,9 @@ export default function PublishTab() {
     return (
       <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="max-w-2xl mx-auto space-y-6">
         <div className="text-center space-y-2">
-          <h2 className="text-3xl font-bold">📈 Publish Optimizer</h2>
-          <p className="text-white/50">Generate titles, descriptions, hashtags, and subtitle files for your platform.</p>
+          <h2 className="text-3xl font-bold">Publish Optimizer</h2>
+          <p className="text-white/50 text-sm">Generate platform-specific titles, descriptions, hashtags, and subtitle files.</p>
         </div>
-        <TabUpload onFile={setFile} isUploading={uploadMutation.isPending} file={file} />
 
         <div className="glass-card rounded-2xl p-5 border border-white/8 space-y-4">
           <div>
@@ -81,29 +139,32 @@ export default function PublishTab() {
             <div className="grid grid-cols-3 gap-2">
               {PLATFORMS.map(p => (
                 <button key={p.id} onClick={() => setPlatform(p.id)}
-                  className={`py-2 px-3 rounded-xl text-sm font-medium transition-all ${platform === p.id ? "bg-primary text-white shadow-lg shadow-primary/20" : "bg-secondary text-white/60 hover:bg-secondary/80"}`}>
+                  className={`py-2 px-3 rounded-xl text-sm font-medium transition-all ${platform === p.id ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30" : "bg-secondary text-white/60 hover:bg-secondary/80 border border-transparent"}`}>
                   {p.label}
                 </button>
               ))}
             </div>
           </div>
-
           <div className="flex items-center justify-between pt-3 border-t border-white/8">
             <div className="flex items-center gap-2"><Globe className="w-4 h-4 text-white/40" /><span className="text-sm text-white/70">Translate Subtitles</span></div>
-            <button onClick={() => setTranslateSubs(v => !v)} className={`w-11 h-6 rounded-full relative transition-colors ${translateSubs ? "bg-primary" : "bg-white/10"}`}>
+            <button onClick={() => setTranslateSubs(v => !v)} className={`w-11 h-6 rounded-full relative transition-colors ${translateSubs ? "bg-emerald-500" : "bg-white/10"}`}>
               <div className={`w-4 h-4 rounded-full bg-white absolute top-1 transition-transform ${translateSubs ? "left-6" : "left-1"}`} />
             </button>
           </div>
           {translateSubs && (
             <select value={subLang} onChange={e => setSubLang(e.target.value)} className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm">
-              {["Spanish","French","German","Japanese","Portuguese","Arabic","Chinese","Korean"].map(l => <option key={l} value={l}>{l}</option>)}
+              {["Spanish","French","German","Japanese","Portuguese","Arabic","Chinese","Korean"].map(l => <option key={l}>{l}</option>)}
             </select>
           )}
         </div>
 
-        <button onClick={() => file && uploadMutation.mutate(file)} disabled={!file || uploadMutation.isPending}
-          className="w-full py-4 rounded-xl bg-gradient-to-r from-primary to-purple-500 text-white font-bold text-base disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2 shadow-lg shadow-primary/25">
-          {uploadMutation.isPending ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Uploading…</> : <><TrendingUp className="w-5 h-5" />Optimize for Publishing</>}
+        <UploadZone onFile={(f) => setSelectedFile(f)} isPending={uploadMutation.isPending} platform={platform} />
+
+        <button onClick={() => selectedFile && uploadMutation.mutate(selectedFile)} disabled={!selectedFile || uploadMutation.isPending}
+          className="w-full py-4 rounded-xl bg-gradient-to-r from-emerald-600 to-green-500 hover:from-emerald-500 hover:to-green-400 text-white font-bold text-base disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20">
+          {uploadMutation.isPending
+            ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Uploading…</>
+            : <><TrendingUp className="w-5 h-5" />Optimize for Publishing</>}
         </button>
       </motion.div>
     );
@@ -126,17 +187,17 @@ export default function PublishTab() {
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-8">
       <div className="flex items-center justify-between">
-        <div><h2 className="text-2xl font-bold">Publish Optimizer</h2><p className="text-white/40 text-sm mt-1 capitalize">{results.platform?.replace("_", " ")}</p></div>
+        <div><h2 className="text-2xl font-bold">Publish Results</h2><p className="text-white/40 text-sm mt-1 capitalize">{results.platform?.replace(/_/g, " ")}</p></div>
         <button onClick={reset} className="px-4 py-2 text-sm font-medium bg-white/5 hover:bg-white/10 rounded-xl border border-white/10 transition-colors">Optimize Another</button>
       </div>
 
       {results.titles?.length > 0 && (
         <div className="glass-card rounded-2xl p-6 border border-white/8">
-          <h3 className="font-semibold mb-4 flex items-center gap-2"><FileText className="w-4 h-4 text-primary" />Title Options</h3>
+          <h3 className="font-semibold mb-4 flex items-center gap-2"><FileText className="w-4 h-4 text-emerald-400" />Title Options</h3>
           <div className="space-y-2">
             {results.titles.map((t: string, i: number) => (
-              <div key={i} className="flex items-center gap-3 p-3 bg-white/3 border border-white/8 rounded-xl hover:border-primary/20 transition-all group">
-                <span className="text-xs text-primary/50 font-mono shrink-0">#{i + 1}</span>
+              <div key={i} className="flex items-center gap-3 p-3 bg-white/3 border border-white/8 rounded-xl hover:border-emerald-400/20 transition-all">
+                <span className="text-xs text-emerald-400/50 font-mono shrink-0">#{i + 1}</span>
                 <p className="text-sm text-white/80 flex-1">{t}</p>
                 <CopyButton text={t} />
               </div>
@@ -158,13 +219,13 @@ export default function PublishTab() {
       {results.hashtags?.length > 0 && (
         <div className="glass-card rounded-2xl p-6 border border-white/8">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold flex items-center gap-2"><Hash className="w-4 h-4 text-green-400" />Hashtags</h3>
+            <h3 className="font-semibold flex items-center gap-2"><Hash className="w-4 h-4 text-emerald-400" />Hashtags</h3>
             <CopyButton text={results.hashtags.map((h: any) => h.tag).join(" ")} />
           </div>
           <div className="flex flex-wrap gap-2">
             {results.hashtags.map((h: any, i: number) => (
               <div key={i} className="group relative">
-                <span className="px-3 py-1.5 bg-green-400/10 border border-green-400/20 text-green-300 text-sm rounded-full font-mono cursor-default">{h.tag}</span>
+                <span className="px-3 py-1.5 bg-emerald-400/10 border border-emerald-400/20 text-emerald-300 text-sm rounded-full font-mono cursor-default">{h.tag}</span>
                 {h.effect && <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-1.5 bg-background/95 border border-white/10 text-xs text-white/60 rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">{h.effect}</div>}
               </div>
             ))}
@@ -181,7 +242,7 @@ export default function PublishTab() {
           <div className="space-y-1.5">
             {results.timestamps.map((ts: any, i: number) => (
               <div key={i} className="flex items-center gap-3 py-2 border-b border-white/5 last:border-0">
-                <span className="text-xs font-mono text-primary/70 w-14 shrink-0">{ts.time}</span>
+                <span className="text-xs font-mono text-emerald-400/70 w-14 shrink-0">{ts.time}</span>
                 <span className="text-sm text-white/70">{ts.label}</span>
               </div>
             ))}
@@ -192,7 +253,8 @@ export default function PublishTab() {
       {results.subtitleFile?.content && (
         <div className="glass-card rounded-2xl p-6 border border-violet-400/20">
           <div className="flex items-center justify-between">
-            <div><h3 className="font-semibold flex items-center gap-2"><FileText className="w-4 h-4 text-violet-400" />Subtitle File</h3>
+            <div>
+              <h3 className="font-semibold flex items-center gap-2"><FileText className="w-4 h-4 text-violet-400" />Subtitle File</h3>
               <p className="text-xs text-white/40 mt-1">SRT format · {results.subtitleFile.language} · {results.subtitleFile.content.split("\n\n").length} segments</p>
             </div>
             <button onClick={downloadSrt} className="flex items-center gap-2 px-4 py-2.5 bg-violet-600/20 hover:bg-violet-600/30 text-violet-300 border border-violet-400/20 rounded-xl text-sm font-medium transition-colors">

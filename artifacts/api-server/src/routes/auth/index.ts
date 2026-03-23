@@ -22,12 +22,15 @@ const SMTP_PASS = process.env.SMTP_PASS || "";
 const CONTACT_EMAIL = process.env.CONTACT_EMAIL || SMTP_USER;
 
 function getPublicBaseUrl(req: import("express").Request): string {
-  const replitDomains = (process.env.REPLIT_DOMAINS || "").split(",").map(d => d.trim()).filter(Boolean);
-  // In production deployments REPLIT_DOMAINS contains the public *.replit.app domain first
-  const replitDomain = replitDomains[0] || process.env.REPLIT_DEV_DOMAIN;
-  if (replitDomain) return `https://${replitDomain}`;
+  // Prefer the actual host the browser used — works correctly in both dev and production
   const forwarded = req.get("x-forwarded-host");
   if (forwarded) return `${req.get("x-forwarded-proto") || "https"}://${forwarded}`;
+  // Fallback: environment hints (useful when behind some proxies that strip forwarded headers)
+  const replitDomains = (process.env.REPLIT_DOMAINS || "").split(",").map(d => d.trim()).filter(Boolean);
+  const replitDomain = process.env.NODE_ENV === "production"
+    ? replitDomains[0]
+    : (process.env.REPLIT_DEV_DOMAIN || replitDomains[0]);
+  if (replitDomain) return `https://${replitDomain}`;
   return `${req.protocol}://${req.get("host")}`;
 }
 
