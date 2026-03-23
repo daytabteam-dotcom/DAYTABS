@@ -2,7 +2,6 @@ import { useLocation } from "wouter";
 import { motion } from "framer-motion";
 import { Check, Zap, Star, Building } from "lucide-react";
 import Navbar from "../components/Navbar";
-import { usePaddle, PADDLE_PRICES } from "../hooks/use-paddle";
 
 const plans = [
   {
@@ -75,19 +74,9 @@ const plans = [
 
 export default function PricingPage() {
   const [, navigate] = useLocation();
-  const { openCheckout } = usePaddle();
 
-  const handlePlanClick = (key: "free" | "premium" | "professional") => {
-    if (key === "free") {
-      navigate("/signup");
-      return;
-    }
-    const priceId = PADDLE_PRICES[key];
-    if (priceId) {
-      openCheckout(priceId);
-    } else {
-      navigate("/signup");
-    }
+  const handlePlanClick = (_key: "free" | "premium" | "professional") => {
+    navigate("/signup");
   };
 
   return (

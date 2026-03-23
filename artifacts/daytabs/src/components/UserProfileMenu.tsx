@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect } from "react";
 import { LogOut, Crown, ChevronDown, Loader2, Tag, AlertCircle } from "lucide-react";
 import { useUser } from "@/hooks/use-user";
-import { usePaddle, PADDLE_PRICES } from "@/hooks/use-paddle";
+import { usePaddle } from "@/hooks/use-paddle";
 import { usePlan, getPlanLabel, getPlanColor } from "@/hooks/use-plan";
+import { PlanPickerModal } from "@/components/PlanPickerModal";
 
 function getInitials(name: string): string {
   const parts = name.trim().split(/\s+/);
@@ -12,10 +13,11 @@ function getInitials(name: string): string {
 
 export function UserProfileMenu() {
   const { user, logout } = useUser();
-  const { openCheckout, discountCode, setDiscountCode, checkoutError } = usePaddle();
+  const { discountCode, setDiscountCode, checkoutError } = usePaddle();
   const { plan, loading } = usePlan();
   const [open, setOpen] = useState(false);
   const [showCodeInput, setShowCodeInput] = useState(false);
+  const [showPlanPicker, setShowPlanPicker] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -34,12 +36,8 @@ export function UserProfileMenu() {
   const planColor = getPlanColor(plan.plan);
 
   const handleUpgrade = () => {
-    const priceId = PADDLE_PRICES.premium;
-    if (priceId) {
-      openCheckout(priceId, user.email);
-    } else {
-      window.location.href = "/pricing";
-    }
+    setOpen(false);
+    setShowPlanPicker(true);
   };
 
   return (
@@ -151,6 +149,10 @@ export function UserProfileMenu() {
             </button>
           </div>
         </div>
+      )}
+
+      {showPlanPicker && (
+        <PlanPickerModal onClose={() => setShowPlanPicker(false)} />
       )}
     </div>
   );
