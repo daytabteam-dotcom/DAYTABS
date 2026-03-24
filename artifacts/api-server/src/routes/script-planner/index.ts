@@ -6,69 +6,89 @@ const router: IRouter = Router();
 
 router.use(requireAuth);
 
-const SYSTEM_PROMPT_FULL = `You are an expert content strategist and scriptwriter who works with top YouTube and social media creators.
-Your job is to generate a professional, engaging video script based on the user's idea.
+const SYSTEM_PROMPT_FULL = `You are an expert content strategist and scriptwriter who specialises in high-performing YouTube and social media videos.
 
-Rules:
+CRITICAL: Every reply MUST be valid JSON matching the exact structure below — no extra text, no markdown, no code fences.
+
+Rules for every script you write or edit:
 - Write like a real human creator — conversational, punchy, and natural
-- Never use robotic or AI-sounding phrases ("In today's video...", "Without further ado...")
-- Open with a strong hook that grabs attention in the first 5 seconds
-- Use proven storytelling structures (Problem → Agitate → Solve, Story → Lesson, etc.)
-- Include natural pacing cues, pauses, emphasis
-- Add influencer-style retention tricks (open loops, callbacks, curiosity gaps)
-- Each section must include a concrete camera angle, B-roll idea, and a presentation tip
+- NEVER use: "In today's video...", "Without further ado...", "Let's dive in", "In this video" 
+- Hook must grab attention in the first 5 seconds — pattern interrupt, bold statement, or curiosity gap
+- Use proven structures: Hook → Problem → Story → Solution → CTA, or AIDA, or PAS
+- Add influencer retention tricks: open loops, callbacks, "stay to the end" moments
+- Include natural pacing: [PAUSE], [EMPHASISE], [BEAT] cues inside the script
+- When the user asks for edits (shorter hook, different tone, more energy), update the full script accordingly
+- Always regenerate ALL sections matching the updated script
 
-Return ONLY valid JSON matching this exact structure:
+JSON structure (return this exact shape every time):
 {
-  "script": "Full word-for-word script ready to read on camera",
+  "script": "Complete word-for-word script with pacing cues",
+  "title": "Suggested video title",
   "sections": [
     {
       "start": "0:00",
       "end": "0:15",
-      "text": "The hook/opening words from the script",
-      "camera_angle": "Specific angle or shot description",
-      "broll": "Specific B-roll footage to show during this section",
-      "presentation_tip": "One concrete delivery tip for this moment"
+      "label": "Hook",
+      "text": "Exact script words for this section",
+      "camera_angle": "Specific shot/angle description",
+      "broll": "Concrete B-roll footage idea",
+      "presentation_tip": "One specific delivery tip"
     }
   ],
-  "teleprompter_ready": true
+  "teleprompter_ready": true,
+  "summary": "One sentence describing what was changed or created"
 }`;
 
-const SYSTEM_PROMPT_FREE = `You are an expert scriptwriter.
-Generate a short, engaging video script based on the user's idea.
+const SYSTEM_PROMPT_FREE = `You are an expert scriptwriter for social media videos.
+
+CRITICAL: Every reply MUST be valid JSON matching the exact structure below — no extra text.
 
 Rules:
 - Write conversationally — no robotic AI phrases
-- Include one strong hook at the start
+- Include one strong hook at the start (pattern interrupt or curiosity gap)
 - Keep it concise and punchy
-- Add 1-2 camera tips
+- When the user asks for edits, update the full script accordingly
 
-Return ONLY valid JSON:
+JSON structure:
 {
-  "script": "Full script text",
+  "script": "Complete script text",
+  "title": "Suggested video title",
   "sections": [
     {
       "start": "0:00",
       "end": "0:20",
-      "text": "Hook section",
-      "camera_angle": "One camera angle tip",
+      "label": "Hook",
+      "text": "Hook script words",
+      "camera_angle": "One camera tip",
       "broll": "",
       "presentation_tip": "One delivery tip"
     }
   ],
-  "teleprompter_ready": true
+  "teleprompter_ready": true,
+  "summary": "One sentence describing what was created or changed"
 }`;
 
-router.post("/generate", async (req, res) => {
-  const { idea } = req.body as { idea?: string };
+interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
 
-  if (!idea || typeof idea !== "string" || idea.trim().length < 5) {
-    res.status(400).json({ error: "Please provide a video idea (at least 5 characters)." });
+router.post("/generate", async (req, res) => {
+  const { messages } = req.body as { messages?: ChatMessage[] };
+
+  if (!Array.isArray(messages) || messages.length === 0) {
+    res.status(400).json({ error: "Please provide a conversation history." });
     return;
   }
 
-  if (idea.trim().length > 1000) {
-    res.status(400).json({ error: "Video idea is too long. Keep it under 1000 characters." });
+  const lastUserMsg = [...messages].reverse().find(m => m.role === "user");
+  if (!lastUserMsg || lastUserMsg.content.trim().length < 3) {
+    res.status(400).json({ error: "Please enter a message." });
+    return;
+  }
+
+  if (lastUserMsg.content.trim().length > 2000) {
+    res.status(400).json({ error: "Message is too long. Keep it under 2000 characters." });
     return;
   }
 
@@ -78,31 +98,38 @@ router.post("/generate", async (req, res) => {
 
   const systemPrompt = isFree ? SYSTEM_PROMPT_FREE : SYSTEM_PROMPT_FULL;
   const model = isPaid ? "gpt-4o" : "gpt-4o-mini";
-  const maxTokens = isFree ? 1200 : 3500;
+  const maxTokens = isFree ? 1200 : 4000;
+
+  // Cap history to last 10 messages to avoid token overrun
+  const history = messages.slice(-10);
 
   try {
     const completion = await openai.chat.completions.create({
       model,
       messages: [
         { role: "system", content: systemPrompt },
-        { role: "user", content: `Video idea: ${idea.trim()}` },
+        ...history,
       ],
       max_completion_tokens: maxTokens,
       response_format: { type: "json_object" },
     });
 
     const raw = completion.choices[0]?.message?.content ?? "{}";
+
     let parsed: {
       script?: string;
+      title?: string;
       sections?: Array<{
         start: string;
         end: string;
+        label?: string;
         text: string;
         camera_angle: string;
         broll: string;
         presentation_tip: string;
       }>;
       teleprompter_ready?: boolean;
+      summary?: string;
     };
 
     try {
@@ -122,8 +149,11 @@ router.post("/generate", async (req, res) => {
 
     res.json({
       script,
+      title: parsed.title ?? "",
       sections: isFree ? sections.slice(0, 1) : sections,
       teleprompter_ready: true,
+      summary: parsed.summary ?? "Script updated.",
+      raw,
       plan,
       full_plan: isPaid,
     });
