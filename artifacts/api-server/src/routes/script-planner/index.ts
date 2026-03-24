@@ -1,6 +1,8 @@
 import { Router, type IRouter } from "express";
 import { requireAuth } from "../../middlewares/auth";
 import { openai } from "@workspace/integrations-openai-ai-server";
+import { db, scriptPlannerChatsTable } from "@workspace/db";
+import { eq, and, desc } from "drizzle-orm";
 
 const router: IRouter = Router();
 
@@ -73,6 +75,8 @@ interface ChatMessage {
   content: string;
 }
 
+// ── Generate ─────────────────────────────────────────────────────────────────
+
 router.post("/generate", async (req, res) => {
   const { messages } = req.body as { messages?: ChatMessage[] };
 
@@ -100,7 +104,6 @@ router.post("/generate", async (req, res) => {
   const model = isPaid ? "gpt-4o" : "gpt-4o-mini";
   const maxTokens = isFree ? 1200 : 4000;
 
-  // Cap history to last 10 messages to avoid token overrun
   const history = messages.slice(-10);
 
   try {
@@ -160,6 +163,151 @@ router.post("/generate", async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "Script planner generation failed");
     res.status(500).json({ error: "Failed to generate script. Please try again." });
+  }
+});
+
+// ── Chat CRUD ─────────────────────────────────────────────────────────────────
+
+// GET /chats — list all chats for the authenticated user
+router.get("/chats", async (req, res) => {
+  const userId = req.auth!.user_id;
+
+  try {
+    const chats = await db
+      .select({
+        id: scriptPlannerChatsTable.id,
+        title: scriptPlannerChatsTable.title,
+        createdAt: scriptPlannerChatsTable.createdAt,
+        updatedAt: scriptPlannerChatsTable.updatedAt,
+      })
+      .from(scriptPlannerChatsTable)
+      .where(eq(scriptPlannerChatsTable.userId, userId))
+      .orderBy(desc(scriptPlannerChatsTable.updatedAt));
+
+    res.json({ chats });
+  } catch (err) {
+    req.log.error({ err }, "Failed to list chats");
+    res.status(500).json({ error: "Failed to load chats." });
+  }
+});
+
+// GET /chats/:id — get a single chat (full data)
+router.get("/chats/:id", async (req, res) => {
+  const userId = req.auth!.user_id;
+  const chatId = parseInt(req.params.id, 10);
+
+  if (isNaN(chatId)) {
+    res.status(400).json({ error: "Invalid chat ID." });
+    return;
+  }
+
+  try {
+    const [chat] = await db
+      .select()
+      .from(scriptPlannerChatsTable)
+      .where(and(eq(scriptPlannerChatsTable.id, chatId), eq(scriptPlannerChatsTable.userId, userId)));
+
+    if (!chat) {
+      res.status(404).json({ error: "Chat not found." });
+      return;
+    }
+
+    res.json({ chat });
+  } catch (err) {
+    req.log.error({ err }, "Failed to fetch chat");
+    res.status(500).json({ error: "Failed to load chat." });
+  }
+});
+
+// POST /chats — create a new chat
+router.post("/chats", async (req, res) => {
+  const userId = req.auth!.user_id;
+  const { title, displayMessages, apiHistory, result } = req.body as {
+    title?: string;
+    displayMessages?: unknown[];
+    apiHistory?: unknown[];
+    result?: unknown;
+  };
+
+  if (!title || typeof title !== "string") {
+    res.status(400).json({ error: "Title is required." });
+    return;
+  }
+
+  try {
+    const [created] = await db
+      .insert(scriptPlannerChatsTable)
+      .values({
+        userId,
+        title: title.slice(0, 100),
+        displayMessages: displayMessages ?? [],
+        apiHistory: apiHistory ?? [],
+        result: result ?? null,
+      })
+      .returning({ id: scriptPlannerChatsTable.id });
+
+    res.json({ chatId: created.id });
+  } catch (err) {
+    req.log.error({ err }, "Failed to create chat");
+    res.status(500).json({ error: "Failed to save chat." });
+  }
+});
+
+// PUT /chats/:id — update an existing chat
+router.put("/chats/:id", async (req, res) => {
+  const userId = req.auth!.user_id;
+  const chatId = parseInt(req.params.id, 10);
+
+  if (isNaN(chatId)) {
+    res.status(400).json({ error: "Invalid chat ID." });
+    return;
+  }
+
+  const { title, displayMessages, apiHistory, result } = req.body as {
+    title?: string;
+    displayMessages?: unknown[];
+    apiHistory?: unknown[];
+    result?: unknown;
+  };
+
+  try {
+    await db
+      .update(scriptPlannerChatsTable)
+      .set({
+        ...(title !== undefined && { title: String(title).slice(0, 100) }),
+        ...(displayMessages !== undefined && { displayMessages }),
+        ...(apiHistory !== undefined && { apiHistory }),
+        ...(result !== undefined && { result }),
+        updatedAt: new Date(),
+      })
+      .where(and(eq(scriptPlannerChatsTable.id, chatId), eq(scriptPlannerChatsTable.userId, userId)));
+
+    res.json({ ok: true });
+  } catch (err) {
+    req.log.error({ err }, "Failed to update chat");
+    res.status(500).json({ error: "Failed to update chat." });
+  }
+});
+
+// DELETE /chats/:id — delete a chat
+router.delete("/chats/:id", async (req, res) => {
+  const userId = req.auth!.user_id;
+  const chatId = parseInt(req.params.id, 10);
+
+  if (isNaN(chatId)) {
+    res.status(400).json({ error: "Invalid chat ID." });
+    return;
+  }
+
+  try {
+    await db
+      .delete(scriptPlannerChatsTable)
+      .where(and(eq(scriptPlannerChatsTable.id, chatId), eq(scriptPlannerChatsTable.userId, userId)));
+
+    res.json({ ok: true });
+  } catch (err) {
+    req.log.error({ err }, "Failed to delete chat");
+    res.status(500).json({ error: "Failed to delete chat." });
   }
 });
 
