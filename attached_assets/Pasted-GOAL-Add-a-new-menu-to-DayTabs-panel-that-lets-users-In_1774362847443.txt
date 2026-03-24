@@ -1,0 +1,81 @@
+GOAL
+Add a new menu to DayTabs panel that lets users:
+* Input a video idea
+* Generate a high-quality script for that idea
+* Get video capture suggestions (camera angles, shots, presentation techniques)
+* Use influencer-style content strategies
+* Avoid AI-sounding or robotic scripts
+* Include a teleprompter mode for reading the generated script
+
+1️⃣ FRONTEND CHANGES
+Add new menu/tab:
+🎬 Script & Content Planner
+* Input: Text box for “Video Idea”
+* Button: “Generate Script & Plan”
+* Output panel:
+    * Generated script (editable)
+    * Video capture suggestions (angles, shots, B-roll, lighting)
+    * Presentation techniques (influencer tips)
+    * Button: “Open Teleprompter”
+Teleprompter view:
+* Scrolls the generated script line by line
+* Only shows the script
+* Adjustable scroll speed
+Keep dark theme + purple accent:
+* Background: #0F172A
+* Accent: #7C3AED
+
+2️⃣ BACKEND ENDPOINT
+Create new endpoint: /script-planner
+Purpose: Generate high-quality, influencer-style scripts + full content plan
+Pipeline:
+1. Receive video idea from user
+2. Call OpenAI with system prompt:
+
+You are an expert content strategist and scriptwriter. 
+Generate a professional video script based on the user's idea. 
+Follow top content creators' strategies. 
+- Make it engaging and conversational
+- Avoid AI-sounding sentences
+- Use presentation techniques (hooks, storytelling, pacing)
+- Suggest camera angles, B-roll, visuals, and motion ideas
+- Include influencer-style tips to retain viewers
+- Output in structured JSON format
+
+1. Return JSON:
+
+{
+  "script": "Full script text",
+  "sections": [
+    {"start": "00:00", "end": "00:15", "text": "Hook suggestion", "camera_angle": "...", "B-roll": "...", "presentation_tip": "..."},
+    {"start": "00:15", "end": "00:45", "text": "Main content", "camera_angle": "...", "B-roll": "...", "presentation_tip": "..."},
+    ...
+  ],
+  "teleprompter_ready": true
+}
+
+1. Optional: Add token optimization:
+* Only generate first draft for Free users, lock full plan for Premium/Pro
+
+3️⃣ FRONTEND DISPLAY
+Display panel:
+* Script section (scrollable, editable)
+* Video plan table:
+    * Section / time
+    * Camera angles
+    * B-roll suggestions
+    * Presentation tips
+* Button: “Open Teleprompter” → launches full-screen scrolling script
+UX tip:
+* Highlight hooks and key sections in colors (red/yellow)
+* Collapsible sections for Free users to save tokens
+
+4️⃣ SHARED LOGIC / REUSE
+* Reuse existing OpenAI API setup
+* Optional: cache scripts to avoid regenerating on repeated requests
+* Keep teleprompter logic reusable
+
+5️⃣ LIMITS & TOKEN OPTIMIZATION
+* Free: basic script + one hook + 1-2 camera tips
+* Premium: 25 full script + all camera angles + B-roll + presentation tips + teleprompter
+* Professional: same as Premium + unlimited script generations
