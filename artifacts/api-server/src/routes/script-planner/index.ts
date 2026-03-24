@@ -2,7 +2,7 @@ import { Router, type IRouter } from "express";
 import { requireAuth } from "../../middlewares/auth";
 import { openai } from "@workspace/integrations-openai-ai-server";
 import { db, scriptPlannerChatsTable } from "@workspace/db";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, count, gte } from "drizzle-orm";
 
 const router: IRouter = Router();
 
@@ -10,13 +10,14 @@ router.use(requireAuth);
 
 const SYSTEM_PROMPT_FULL = `You are an expert content strategist and scriptwriter who specialises in high-performing YouTube and social media videos.
 
-CRITICAL: Every reply MUST be valid JSON matching the exact structure below — no extra text, no markdown, no code fences.
+CRITICAL: Every reply MUST be valid JSON matching the exact structure below. No extra text, no markdown, no code fences.
 
 Rules for every script you write or edit:
-- Write like a real human creator — conversational, punchy, and natural
-- NEVER use: "In today's video...", "Without further ado...", "Let's dive in", "In this video" 
-- Hook must grab attention in the first 5 seconds — pattern interrupt, bold statement, or curiosity gap
-- Use proven structures: Hook → Problem → Story → Solution → CTA, or AIDA, or PAS
+- Write like a real human creator, conversational, punchy, and natural
+- NEVER use: "In today's video...", "Without further ado...", "Let's dive in", "In this video"
+- NEVER use em dashes (the character —) anywhere in your output, use commas or semicolons instead
+- Hook must grab attention in the first 5 seconds, pattern interrupt, bold statement, or curiosity gap
+- Use proven structures: Hook, Problem, Story, Solution, CTA, or AIDA, or PAS
 - Add influencer retention tricks: open loops, callbacks, "stay to the end" moments
 - Include natural pacing: [PAUSE], [EMPHASISE], [BEAT] cues inside the script
 - When the user asks for edits (shorter hook, different tone, more energy), update the full script accordingly
@@ -43,10 +44,11 @@ JSON structure (return this exact shape every time):
 
 const SYSTEM_PROMPT_FREE = `You are an expert scriptwriter for social media videos.
 
-CRITICAL: Every reply MUST be valid JSON matching the exact structure below — no extra text.
+CRITICAL: Every reply MUST be valid JSON matching the exact structure below. No extra text.
 
 Rules:
-- Write conversationally — no robotic AI phrases
+- Write conversationally, no robotic AI phrases
+- NEVER use em dashes (the character —) anywhere, use commas or semicolons instead
 - Include one strong hook at the start (pattern interrupt or curiosity gap)
 - Keep it concise and punchy
 - When the user asks for edits, update the full script accordingly
@@ -99,6 +101,19 @@ router.post("/generate", async (req, res) => {
   const plan = req.auth!.plan ?? "free";
   const isFree = plan === "free";
   const isPaid = plan === "premium" || plan === "professional";
+
+  // Enforce free message limit (max 3 user messages per chat)
+  if (isFree) {
+    const userMessageCount = messages.filter(m => m.role === "user").length;
+    if (userMessageCount > 3) {
+      res.status(403).json({
+        error: "You've used all 3 messages on the free plan. Upgrade to Premium for unlimited messages.",
+        limitReached: true,
+        type: "message_limit",
+      });
+      return;
+    }
+  }
 
   const systemPrompt = isFree ? SYSTEM_PROMPT_FREE : SYSTEM_PROMPT_FULL;
   const model = isPaid ? "gpt-4o" : "gpt-4o-mini";
@@ -234,7 +249,46 @@ router.post("/chats", async (req, res) => {
     return;
   }
 
+  const plan = req.auth!.plan ?? "free";
+  const isFree = plan === "free";
+  const isPremium = plan === "premium";
+
   try {
+    // Enforce chat count limits by plan
+    if (isFree) {
+      const [{ total }] = await db
+        .select({ total: count() })
+        .from(scriptPlannerChatsTable)
+        .where(eq(scriptPlannerChatsTable.userId, userId));
+      if (total >= 1) {
+        res.status(403).json({
+          error: "Free plan is limited to 1 saved chat. Upgrade to Premium for 20 chats per month.",
+          limitReached: true,
+          type: "chat_limit",
+        });
+        return;
+      }
+    } else if (isPremium) {
+      const startOfMonth = new Date();
+      startOfMonth.setDate(1);
+      startOfMonth.setHours(0, 0, 0, 0);
+      const [{ total }] = await db
+        .select({ total: count() })
+        .from(scriptPlannerChatsTable)
+        .where(and(
+          eq(scriptPlannerChatsTable.userId, userId),
+          gte(scriptPlannerChatsTable.createdAt, startOfMonth),
+        ));
+      if (total >= 20) {
+        res.status(403).json({
+          error: "You've reached 20 chats this month. Upgrade to Professional for unlimited chats.",
+          limitReached: true,
+          type: "chat_limit",
+        });
+        return;
+      }
+    }
+
     const [created] = await db
       .insert(scriptPlannerChatsTable)
       .values({

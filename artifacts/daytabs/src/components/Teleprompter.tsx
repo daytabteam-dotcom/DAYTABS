@@ -146,9 +146,9 @@ export function Teleprompter({ script, onClose }: TeleprompterProps) {
 
       {/* Key hints */}
       <div className="shrink-0 flex items-center justify-center gap-8 py-2 border-t border-white/5 bg-black/80 text-xs text-white/25">
-        <span>Space — Play / Pause</span>
-        <span>↑ ↓ — Speed</span>
-        <span>Esc — Close</span>
+        <span>Space: Play / Pause</span>
+        <span>↑ ↓: Speed</span>
+        <span>Esc: Close</span>
       </div>
     </div>
   );

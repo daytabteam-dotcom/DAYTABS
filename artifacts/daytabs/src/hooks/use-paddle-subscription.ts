@@ -47,7 +47,7 @@ export function usePaddlePrices() {
 
   function formatPrice(plan: "premium" | "professional"): string {
     const p = prices[plan];
-    if (!p) return "—";
+    if (!p) return "";
     const dollars = p.unitAmount / 100;
     return `$${dollars % 1 === 0 ? dollars.toFixed(0) : dollars.toFixed(2)}`;
   }

@@ -247,7 +247,7 @@ export default function PreEditTab({ onDataReady, onDataReset, onRegisterExport 
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
             <h2 className="text-2xl font-bold">Pre-Edit Results</h2>
-            <p className="text-white/40 text-sm mt-1">Overall score: <span className="text-primary font-bold text-xl">{quality?.score ?? "—"}</span> / 100</p>
+            <p className="text-white/40 text-sm mt-1">Overall score: <span className="text-primary font-bold text-xl">{quality?.score ?? ""}</span> / 100</p>
           </div>
           <div className="flex items-center gap-2">
               <button

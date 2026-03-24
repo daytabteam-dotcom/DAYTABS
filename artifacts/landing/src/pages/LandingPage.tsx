@@ -67,7 +67,7 @@ const steps = [
     icon: Upload,
     num: "01",
     title: "Upload Your Video",
-    desc: "Drop any video up to 2GB — YouTube Long, TikTok, Instagram Reels, LinkedIn or X. We handle all formats.",
+    desc: "Drop any video up to 2GB: YouTube Long, TikTok, Instagram Reels, LinkedIn or X. We handle all formats.",
     visual: (
       <div className="relative h-48 flex items-center justify-center">
         <div className="w-48 h-32 glass rounded-2xl border-2 border-dashed border-violet-500/50 flex flex-col items-center justify-center gap-2">
@@ -112,7 +112,7 @@ const steps = [
     icon: BarChart3,
     num: "03",
     title: "Get Actionable Insights",
-    desc: "Receive a full dashboard with Quality, Content, SEO, and Subtitle tabs — each with specific, actionable recommendations.",
+    desc: "Receive a full dashboard with Quality, Content, SEO, and Subtitle tabs, each with specific, actionable recommendations.",
     visual: (
       <div className="relative h-48 flex flex-col gap-2 items-center justify-center w-full max-w-xs mx-auto">
         {[
@@ -247,7 +247,7 @@ export default function LandingPage() {
             className="text-lg md:text-xl text-white/60 max-w-2xl mx-auto mb-10"
           >
             Upload your video and get instant AI analysis on quality, content, SEO,
-            transcriptions, and multi-language dubbing — all in one platform.
+            transcriptions, and multi-language dubbing, all in one platform.
           </motion.p>
 
           <motion.div

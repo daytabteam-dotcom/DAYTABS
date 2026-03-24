@@ -65,7 +65,7 @@ export function usePdfExport(filename: string) {
 
       const win = window.open("", "_blank", "width=900,height=700");
       if (!win) {
-        alert("Pop-up blocked — please allow pop-ups for this site and try again.");
+        alert("Pop-up blocked: please allow pop-ups for this site and try again.");
         return;
       }
       win.document.open();

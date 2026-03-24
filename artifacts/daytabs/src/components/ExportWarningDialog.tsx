@@ -49,7 +49,7 @@ export function ExportWarningDialog({
               <div>
                 <h3 className="font-bold text-white text-base">Unsaved Analysis Data</h3>
                 <p className="text-sm text-white/50 mt-1 leading-relaxed">
-                  You have generated analysis results in this tab. Switching tabs will clear them — this data is not saved automatically.
+                  You have generated analysis results in this tab. Switching tabs will clear them, as this data is not saved automatically.
                 </p>
               </div>
             </div>

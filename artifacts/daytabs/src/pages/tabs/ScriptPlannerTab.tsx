@@ -3,10 +3,11 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Clapperboard, Send, Loader2, MonitorPlay, Copy, Check,
   Camera, Film, Lightbulb, Lock, ChevronDown, ChevronUp,
-  Pencil, RotateCcw, Bot, User, Sparkles, PenLine, Trash2, MessageSquarePlus,
+  Pencil, Bot, User, Sparkles, PenLine, Trash2, MessageSquarePlus,
 } from "lucide-react";
 import { Teleprompter } from "@/components/Teleprompter";
 import { PlanPickerModal } from "@/components/PlanPickerModal";
+import { useUser } from "@/hooks/use-user";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -88,9 +89,16 @@ const STARTER_PROMPTS = [
   "What I learned posting daily for 30 days",
 ];
 
+const FREE_MESSAGE_LIMIT = 3;
+
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export default function ScriptPlannerTab() {
+  const { user } = useUser();
+  const plan = user?.plan ?? "free";
+  const isFreeUser = plan === "free";
+  const isPremiumUser = plan === "premium";
+
   // Chat state
   const [displayMessages, setDisplayMessages] = useState<DisplayMessage[]>([]);
   const [apiHistory, setApiHistory] = useState<ApiChatMessage[]>([]);
@@ -117,6 +125,12 @@ export default function ScriptPlannerTab() {
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Derived limits
+  const userMessageCount = displayMessages.filter(m => m.role === "user").length;
+  const isAtMessageLimit = isFreeUser && userMessageCount >= FREE_MESSAGE_LIMIT;
+  const canCreateNewChat = !isFreeUser || savedChats.length === 0;
+  const newChatLocked = isFreeUser && savedChats.length >= 1;
 
   // ── Load chat list on mount ─────────────────────────────────────────────
 
@@ -147,7 +161,7 @@ export default function ScriptPlannerTab() {
     scriptResult: ScriptResult,
     currentChatId: number | null,
     title: string,
-  ) => {
+  ): Promise<number | null> => {
     try {
       if (currentChatId) {
         await fetch(`/api/script-planner/chats/${currentChatId}`, {
@@ -158,6 +172,7 @@ export default function ScriptPlannerTab() {
         setSavedChats(prev =>
           prev.map(c => c.id === currentChatId ? { ...c, updatedAt: new Date().toISOString() } : c)
         );
+        return currentChatId;
       } else {
         const res = await fetch("/api/script-planner/chats", {
           method: "POST",
@@ -170,6 +185,10 @@ export default function ScriptPlannerTab() {
           }),
         });
         const data = await res.json();
+        if (res.status === 403 && data.limitReached) {
+          // Chat limit reached silently (frontend already blocked the button)
+          return currentChatId;
+        }
         if (data.chatId) {
           setActiveChatId(data.chatId);
           await loadChatList();
@@ -189,10 +208,8 @@ export default function ScriptPlannerTab() {
       const res = await fetch(`/api/script-planner/chats/${chatId}`, { headers: authHeaders() });
       if (!res.ok) return;
       const { chat } = await res.json();
-
       setDisplayMessages((chat.displayMessages as DisplayMessage[]) ?? []);
       setApiHistory((chat.apiHistory as ApiChatMessage[]) ?? []);
-
       const r = chat.result as ScriptResult | null;
       setResult(r);
       setEditedScript(r?.script ?? "");
@@ -213,9 +230,7 @@ export default function ScriptPlannerTab() {
         method: "DELETE",
         headers: authHeaders(),
       });
-      if (activeChatId === chatId) {
-        handleNewChat();
-      }
+      if (activeChatId === chatId) handleNewChat();
       setSavedChats(prev => prev.filter(c => c.id !== chatId));
     } catch { /* silent */ }
     finally { setDeletingId(null); }
@@ -224,6 +239,7 @@ export default function ScriptPlannerTab() {
   // ── New chat ────────────────────────────────────────────────────────────
 
   const handleNewChat = useCallback(() => {
+    if (newChatLocked) { setShowUpgrade(true); return; }
     setDisplayMessages([]);
     setApiHistory([]);
     setResult(null);
@@ -232,13 +248,13 @@ export default function ScriptPlannerTab() {
     setActiveChatId(null);
     setInput("");
     setTimeout(() => inputRef.current?.focus(), 100);
-  }, []);
+  }, [newChatLocked]);
 
   // ── Send message ────────────────────────────────────────────────────────
 
   const sendMessage = useCallback(async (text: string) => {
     const trimmed = text.trim();
-    if (!trimmed || loading) return;
+    if (!trimmed || loading || isAtMessageLimit) return;
 
     const userMsgId = crypto.randomUUID();
     const asstMsgId = crypto.randomUUID();
@@ -261,6 +277,14 @@ export default function ScriptPlannerTab() {
       });
 
       const data = await res.json();
+
+      if (res.status === 403 && data.limitReached) {
+        setDisplayMessages(prev => prev.filter(m => m.id !== asstMsgId && m.id !== userMsgId));
+        setShowUpgrade(true);
+        setLoading(false);
+        return;
+      }
+
       if (!res.ok) throw new Error(data.error || "Generation failed");
 
       const scriptResult: ScriptResult = {
@@ -280,36 +304,25 @@ export default function ScriptPlannerTab() {
       setApiHistory(finalApiHistory);
 
       const finalDisplay: DisplayMessage[] = updatedDisplay.map(m =>
-        m.id === asstMsgId
-          ? { ...m, summary: data.summary ?? "Script ready." }
-          : m
+        m.id === asstMsgId ? { ...m, summary: data.summary ?? "Script ready." } : m
       );
       setDisplayMessages(finalDisplay);
 
-      // Auto-save
-      const chatTitle = trimmed.slice(0, 80);
-      await persistChat(finalDisplay, finalApiHistory, scriptResult, activeChatId, chatTitle);
+      await persistChat(finalDisplay, finalApiHistory, scriptResult, activeChatId, trimmed.slice(0, 80));
 
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Something went wrong.";
       setDisplayMessages(prev =>
-        prev.map(m =>
-          m.id === asstMsgId
-            ? { ...m, summary: `Error: ${msg}`, content: "error" }
-            : m
-        )
+        prev.map(m => m.id === asstMsgId ? { ...m, summary: `Error: ${msg}`, content: "error" } : m)
       );
     } finally {
       setLoading(false);
       setTimeout(() => inputRef.current?.focus(), 100);
     }
-  }, [loading, displayMessages, apiHistory, activeChatId, persistChat]);
+  }, [loading, isAtMessageLimit, displayMessages, apiHistory, activeChatId, persistChat]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage(input);
-    }
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(input); }
   };
 
   const handleCopy = async () => {
@@ -318,7 +331,7 @@ export default function ScriptPlannerTab() {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const isFree = result ? !result.full_plan : false;
+  const isFreeResult = result ? !result.full_plan : false;
 
   // ── Render ──────────────────────────────────────────────────────────────
 
@@ -336,25 +349,39 @@ export default function ScriptPlannerTab() {
 
         {/* ── Panel 1: Chat List ── */}
         <div className="flex flex-col w-[190px] shrink-0 border-r border-white/8 bg-background/60">
-          {/* Sidebar header */}
           <div className="shrink-0 px-3 py-4 border-b border-white/8">
             <button
               onClick={handleNewChat}
-              className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-primary/15 hover:bg-primary/25 border border-primary/25 text-primary text-xs font-semibold transition-all cursor-pointer"
+              title={newChatLocked ? "Free plan: 1 chat only. Upgrade for more." : "New chat"}
+              className={`w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${
+                newChatLocked
+                  ? "bg-white/3 border-white/8 text-white/25"
+                  : "bg-primary/15 hover:bg-primary/25 border-primary/25 text-primary"
+              }`}
             >
-              <MessageSquarePlus className="w-3.5 h-3.5" />
-              New chat
+              {newChatLocked
+                ? <Lock className="w-3.5 h-3.5" />
+                : <MessageSquarePlus className="w-3.5 h-3.5" />
+              }
+              {newChatLocked ? "Upgrade for more" : "New chat"}
             </button>
+
+            {/* Plan badge */}
+            <p className="text-[9px] text-white/20 text-center mt-2">
+              {isFreeUser
+                ? `${savedChats.length}/1 chat`
+                : isPremiumUser
+                  ? `${savedChats.length}/20 this month`
+                  : "Unlimited chats"
+              }
+            </p>
           </div>
 
-          {/* Chat list */}
           <div className="flex-1 overflow-y-auto py-2 scrollbar-none">
             {savedChats.length === 0 && (
-              <div className="px-3 py-6 text-center">
-                <p className="text-[10px] text-white/20 leading-relaxed">
-                  Your saved chats will appear here
-                </p>
-              </div>
+              <p className="px-3 py-6 text-center text-[10px] text-white/20 leading-relaxed">
+                Your saved chats will appear here
+              </p>
             )}
             {savedChats.map(chat => {
               const isActive = chat.id === activeChatId;
@@ -375,17 +402,12 @@ export default function ScriptPlannerTab() {
                     {chat.title}
                   </p>
                   <p className="text-[9px] text-white/25 mt-1">{relativeTime(chat.updatedAt)}</p>
-
-                  {/* Delete button */}
                   <button
                     onClick={(e) => deleteChat(chat.id, e)}
                     disabled={isDeleting}
                     className="absolute top-2 right-1.5 opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-500/15 text-white/30 hover:text-red-400 transition-all cursor-pointer disabled:opacity-50"
                   >
-                    {isDeleting
-                      ? <Loader2 className="w-3 h-3 animate-spin" />
-                      : <Trash2 className="w-3 h-3" />
-                    }
+                    {isDeleting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
                   </button>
                 </div>
               );
@@ -395,7 +417,7 @@ export default function ScriptPlannerTab() {
 
         {/* ── Panel 2: Chat ── */}
         <div className="flex flex-col w-[310px] shrink-0 border-r border-white/8 bg-background/40">
-          {/* Chat header */}
+          {/* Header */}
           <div className="shrink-0 flex items-center gap-2.5 px-4 py-4 border-b border-white/8">
             <div className="w-7 h-7 rounded-lg bg-primary/20 border border-primary/30 flex items-center justify-center">
               <Bot className="w-3.5 h-3.5 text-primary" />
@@ -435,7 +457,8 @@ export default function ScriptPlannerTab() {
                     <button
                       key={p}
                       onClick={() => sendMessage(p)}
-                      className="w-full text-left px-2.5 py-2 rounded-lg border border-white/8 bg-white/[0.02] hover:bg-white/[0.06] hover:border-primary/25 text-[10px] text-white/40 hover:text-white/70 transition-all cursor-pointer leading-snug"
+                      disabled={isAtMessageLimit}
+                      className="w-full text-left px-2.5 py-2 rounded-lg border border-white/8 bg-white/[0.02] hover:bg-white/[0.06] hover:border-primary/25 text-[10px] text-white/40 hover:text-white/70 transition-all cursor-pointer leading-snug disabled:opacity-30 disabled:cursor-not-allowed"
                     >
                       <Sparkles className="w-2.5 h-2.5 text-primary/50 inline mr-1 mb-0.5" />
                       {p}
@@ -463,7 +486,6 @@ export default function ScriptPlannerTab() {
                     : <Bot className="w-3 h-3 text-white/40" />
                   }
                 </div>
-
                 <div className={`max-w-[82%] rounded-xl px-3 py-2 text-[11px] leading-relaxed ${
                   msg.role === "user"
                     ? "bg-primary/20 border border-primary/20 text-white/90 rounded-tr-sm"
@@ -492,9 +514,25 @@ export default function ScriptPlannerTab() {
             <div ref={chatEndRef} />
           </div>
 
-          {/* Input */}
+          {/* Input area */}
           <div className="shrink-0 px-3 py-3 border-t border-white/8">
-            {result && (
+            {/* Limit reached banner */}
+            {isAtMessageLimit && (
+              <div className="mb-2 rounded-lg bg-amber-500/10 border border-amber-500/20 px-3 py-2 flex items-center justify-between gap-2">
+                <p className="text-[10px] text-amber-300 leading-snug">
+                  3/3 messages used on free plan.
+                </p>
+                <button
+                  onClick={() => setShowUpgrade(true)}
+                  className="shrink-0 text-[10px] text-amber-400 font-semibold hover:text-amber-300 cursor-pointer whitespace-nowrap"
+                >
+                  Upgrade →
+                </button>
+              </div>
+            )}
+
+            {/* Quick chips */}
+            {result && !isAtMessageLimit && (
               <div className="mb-2 flex flex-wrap gap-1">
                 {["Shorter hook", "More energy", "More casual", "Extend to 10 mins"].map(s => (
                   <button
@@ -508,21 +546,29 @@ export default function ScriptPlannerTab() {
                 ))}
               </div>
             )}
+
+            {/* Input row */}
             <div className="flex items-end gap-1.5">
               <textarea
                 ref={inputRef}
                 value={input}
                 onChange={e => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={result ? "Ask for changes…" : "Describe your video idea…"}
-                disabled={loading}
-                className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-[11px] text-white/80 placeholder:text-white/20 resize-none focus:outline-none focus:border-violet-500/40 transition-all leading-relaxed disabled:opacity-50 scrollbar-none"
+                placeholder={
+                  isAtMessageLimit
+                    ? "Upgrade to send more messages…"
+                    : result
+                      ? "Ask for changes…"
+                      : "Describe your video idea…"
+                }
+                disabled={loading || isAtMessageLimit}
+                className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-[11px] text-white/80 placeholder:text-white/20 resize-none focus:outline-none focus:border-violet-500/40 transition-all leading-relaxed disabled:opacity-40 scrollbar-none"
                 rows={2}
                 style={{ maxHeight: "100px" }}
               />
               <button
                 onClick={() => sendMessage(input)}
-                disabled={loading || input.trim().length < 2}
+                disabled={loading || input.trim().length < 2 || isAtMessageLimit}
                 className="shrink-0 w-8 h-8 rounded-lg bg-primary hover:bg-primary/80 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center transition-all shadow-md shadow-primary/20 cursor-pointer"
               >
                 {loading
@@ -531,7 +577,22 @@ export default function ScriptPlannerTab() {
                 }
               </button>
             </div>
-            <p className="text-[9px] text-white/15 mt-1.5">Enter to send · Shift+Enter for new line</p>
+
+            {/* Counter / hint row */}
+            <div className="flex items-center justify-between mt-1.5">
+              <p className="text-[9px] text-white/15">Enter to send · Shift+Enter for new line</p>
+              {isFreeUser && (
+                <span className={`text-[9px] font-semibold tabular-nums ${
+                  userMessageCount >= FREE_MESSAGE_LIMIT
+                    ? "text-red-400"
+                    : userMessageCount >= FREE_MESSAGE_LIMIT - 1
+                      ? "text-amber-400"
+                      : "text-white/25"
+                }`}>
+                  {userMessageCount}/{FREE_MESSAGE_LIMIT}
+                </span>
+              )}
+            </div>
           </div>
         </div>
 
@@ -570,7 +631,7 @@ export default function ScriptPlannerTab() {
                 transition={{ duration: 0.25 }}
                 className="flex flex-col h-full"
               >
-                {/* Results header */}
+                {/* Header */}
                 <div className="shrink-0 px-5 py-3.5 border-b border-white/8 flex items-center justify-between gap-4">
                   <div className="min-w-0 flex-1">
                     {result.title && (
@@ -588,7 +649,7 @@ export default function ScriptPlannerTab() {
                           }`}
                         >
                           {tab === "script" ? "Script" : "Video Plan"}
-                          {tab === "plan" && isFree && (
+                          {tab === "plan" && isFreeResult && (
                             <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400 text-[9px] border border-amber-500/20">
                               Preview
                             </span>
@@ -597,7 +658,6 @@ export default function ScriptPlannerTab() {
                       ))}
                     </div>
                   </div>
-
                   <div className="flex items-center gap-1.5 shrink-0">
                     <button
                       onClick={() => setIsEditing(!isEditing)}
@@ -623,7 +683,7 @@ export default function ScriptPlannerTab() {
                   </div>
                 </div>
 
-                {/* Script tab */}
+                {/* Script */}
                 {rightTab === "script" && (
                   <div className="flex-1 overflow-y-auto px-5 py-5">
                     {isEditing ? (
@@ -654,10 +714,10 @@ export default function ScriptPlannerTab() {
                   </div>
                 )}
 
-                {/* Video Plan tab */}
+                {/* Video Plan */}
                 {rightTab === "plan" && (
                   <div className="flex-1 overflow-y-auto">
-                    {isFree && (
+                    {isFreeResult && (
                       <div className="mx-5 mt-4 rounded-xl border border-violet-500/20 bg-violet-500/5 p-4">
                         <div className="flex items-start gap-3">
                           <Lock className="w-4 h-4 text-violet-400 shrink-0 mt-0.5" />
@@ -687,7 +747,7 @@ export default function ScriptPlannerTab() {
                               className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/3 transition-colors cursor-pointer text-left"
                             >
                               <span className="shrink-0 px-2 py-0.5 rounded-full bg-primary/15 text-primary text-[9px] font-bold border border-primary/20">
-                                {section.start}–{section.end}
+                                {section.start}, {section.end}
                               </span>
                               <span className="text-xs font-medium text-white/60 flex-1 truncate">
                                 {section.label ? `${section.label}: ` : ""}{section.text.slice(0, 65)}{section.text.length > 65 ? "…" : ""}
@@ -697,7 +757,6 @@ export default function ScriptPlannerTab() {
                                 : <ChevronDown className="w-3 h-3 text-white/20 shrink-0" />
                               }
                             </button>
-
                             <AnimatePresence>
                               {isOpen && (
                                 <motion.div
@@ -718,7 +777,7 @@ export default function ScriptPlannerTab() {
                                           <card.icon className={`w-3 h-3 ${card.cls.split(" ")[0]}`} />
                                           <p className={`text-[9px] font-semibold uppercase tracking-wider opacity-60 ${card.cls.split(" ")[0]}`}>{card.label}</p>
                                         </div>
-                                        <p className="text-[10px] text-white/55 leading-relaxed">{card.value || "—"}</p>
+                                        <p className="text-[10px] text-white/55 leading-relaxed">{card.value || ""}</p>
                                       </div>
                                     ))}
                                   </div>

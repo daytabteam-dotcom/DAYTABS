@@ -252,7 +252,7 @@ export function UserProfileMenu() {
                   <div className="space-y-2">
                     <div className="flex items-center gap-1.5 text-xs text-amber-400/70">
                       <XCircle className="w-3 h-3 shrink-0" />
-                      <span>Cancels {cancelsOn} — reverts to Free</span>
+                      <span>Cancels {cancelsOn}, reverts to Free</span>
                     </div>
                     <button
                       onClick={handleReactivate}
