@@ -449,7 +449,7 @@ export default function ScriptPlannerTab() {
                             <p
                               key={i}
                               className={`${line.trim() === "" ? "mb-4" : "mb-1"} ${
-                                isPacingCue ? "text-primary/60 font-mono text-xs italic" : ""
+                                isPacingCue ? "mb-1 font-mono text-xs italic text-[#ffffff99]" : ""
                               }`}
                             >
                               {line || "\u00A0"}
