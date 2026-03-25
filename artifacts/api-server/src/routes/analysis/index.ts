@@ -26,7 +26,6 @@ const execAsync = promisify(exec);
 
 const router: IRouter = Router();
 
-// Apply optional auth to all analysis routes so we can read plan + userId
 router.use(optionalAuth);
 
 const voiceSampleCache = new Map<string, Buffer>();
@@ -40,21 +39,39 @@ const VOICE_SAMPLE_TEXT: Record<string, string> = {
   shimmer: "Hello! I'm Shimmer — clear, friendly, and approachable. I'm ideal for tutorials, how-tos, and educational content.",
 };
 
-// ── Plan limits ───────────────────────────────────────────────────────────────
+// ── Plan normalization (backward compat) ───────────────────────────────────────
+function normalizePlan(plan: string): "free" | "creator" | "pro" | "studio" {
+  if (plan === "premium") return "creator";
+  if (plan === "professional") return "studio";
+  if (plan === "creator" || plan === "pro" || plan === "studio") return plan as "creator" | "pro" | "studio";
+  return "free";
+}
+
+// ── Plan limits ────────────────────────────────────────────────────────────────
 const PLAN_UPLOAD_LIMITS: Record<string, Record<string, number>> = {
-  free:         { "pre-edit": 3, editing: 5, publish: 3 },
-  premium:      { "pre-edit": 30, editing: 50, publish: 30 },
-  professional: { "pre-edit": Infinity, editing: Infinity, publish: Infinity },
+  free:    { "video-analyzer": 3, "pre-edit": 3, editing: 5, publish: 3 },
+  creator: { "video-analyzer": 15, "pre-edit": 15, editing: 25, publish: 15 },
+  pro:     { "video-analyzer": 40, "pre-edit": 40, editing: 60, publish: 40 },
+  studio:  { "video-analyzer": Infinity, "pre-edit": Infinity, editing: Infinity, publish: Infinity },
 };
 
 const PLAN_SIZE_LIMITS: Record<string, number> = {
-  free:         200 * 1024 * 1024,        // 200 MB
-  premium:      500 * 1024 * 1024,        // 500 MB
-  professional: 1024 * 1024 * 1024,      // 1 GB
+  free:    200 * 1024 * 1024,
+  creator: 500 * 1024 * 1024,
+  pro:     1024 * 1024 * 1024,
+  studio:  2 * 1024 * 1024 * 1024,
+};
+
+const PLAN_DURATION_LIMITS: Record<string, number> = {
+  free:    5 * 60,
+  creator: 15 * 60,
+  pro:     30 * 60,
+  studio:  60 * 60,
 };
 
 async function checkUploadLimit(userId: number, plan: string, mode: string): Promise<{ allowed: boolean; used: number; limit: number }> {
-  const limits = PLAN_UPLOAD_LIMITS[plan] ?? PLAN_UPLOAD_LIMITS.free;
+  const n = normalizePlan(plan);
+  const limits = PLAN_UPLOAD_LIMITS[n] ?? PLAN_UPLOAD_LIMITS.free;
   const limit = limits[mode] ?? 3;
 
   if (limit === Infinity) return { allowed: true, used: 0, limit: -1 };
@@ -78,6 +95,33 @@ async function checkUploadLimit(userId: number, plan: string, mode: string): Pro
   return { allowed: used < limit, used, limit };
 }
 
+const uploadDir = path.join(os.tmpdir(), "daytabs-uploads");
+
+const storage = multer.diskStorage({
+  destination: async (_req, _file, cb) => {
+    await fs.mkdir(uploadDir, { recursive: true });
+    cb(null, uploadDir);
+  },
+  filename: (_req, file, cb) => {
+    const ext = path.extname(file.originalname) || ".mp4";
+    cb(null, `${uuidv4()}${ext}`);
+  },
+});
+
+const upload = multer({
+  storage,
+  limits: { fileSize: 2 * 1024 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = ["video/mp4", "video/quicktime", "video/x-msvideo", "video/webm", "video/mpeg", "video/mov"];
+    if (allowed.includes(file.mimetype) || file.originalname.match(/\.(mp4|mov|avi|webm|mpeg|mkv)$/i)) {
+      cb(null, true);
+    } else {
+      cb(new Error("Invalid file type. Only video files are allowed."));
+    }
+  },
+});
+
+// ── Voice preview ─────────────────────────────────────────────────────────────
 router.get("/voice-preview/:voice", async (req, res) => {
   const { voice } = req.params;
   const validVoices = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"];
@@ -98,33 +142,7 @@ router.get("/voice-preview/:voice", async (req, res) => {
   }
 });
 
-const uploadDir = path.join(os.tmpdir(), "daytabs-uploads");
-
-const storage = multer.diskStorage({
-  destination: async (_req, _file, cb) => {
-    await fs.mkdir(uploadDir, { recursive: true });
-    cb(null, uploadDir);
-  },
-  filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname) || ".mp4";
-    cb(null, `${uuidv4()}${ext}`);
-  },
-});
-
-const upload = multer({
-  storage,
-  limits: { fileSize: 1024 * 1024 * 1024 },  // 1 GB (max for any plan)
-  fileFilter: (_req, file, cb) => {
-    const allowed = ["video/mp4", "video/quicktime", "video/x-msvideo", "video/webm", "video/mpeg", "video/mov"];
-    if (allowed.includes(file.mimetype) || file.originalname.match(/\.(mp4|mov|avi|webm|mpeg|mkv)$/i)) {
-      cb(null, true);
-    } else {
-      cb(new Error("Invalid file type. Only video files are allowed."));
-    }
-  },
-});
-
-// ── R2 Direct Upload — Step 1: Get a presigned PUT URL ───────────────────────
+// ── R2 Presign — Step 1 ───────────────────────────────────────────────────────
 router.get("/presign-upload", async (req, res) => {
   if (!isR2Configured()) {
     res.status(503).json({ error: "R2 storage not configured — use the direct /upload endpoint instead" });
@@ -135,13 +153,14 @@ router.get("/presign-upload", async (req, res) => {
   const validExts = ["mp4", "mov", "avi", "webm", "mpeg", "mkv"];
   if (!validExts.includes(ext)) { res.status(400).json({ error: "Invalid file extension" }); return; }
 
-  // Check upload limit if user is authenticated
   const plan = req.auth?.plan ?? "free";
-  const mode = ((req.query.mode as string) || "pre-edit");
+  const mode = ((req.query.mode as string) || "video-analyzer");
+  const validMode = ["video-analyzer", "pre-edit", "editing", "publish"].includes(mode) ? mode : "video-analyzer";
+
   if (req.auth) {
-    const { allowed, used, limit } = await checkUploadLimit(req.auth.user_id, plan, mode);
+    const { allowed, used, limit } = await checkUploadLimit(req.auth.user_id, plan, validMode);
     if (!allowed) {
-      res.status(429).json({ error: `Upload limit reached for this month (${used}/${limit}). Upgrade your plan to upload more.` });
+      res.status(429).json({ error: `Upload limit reached this month (${used}/${limit}). Upgrade your plan to continue.` });
       return;
     }
   }
@@ -161,46 +180,60 @@ router.get("/presign-upload", async (req, res) => {
   }
 });
 
-// ── R2 Direct Upload — Step 2: Start analysis from an already-uploaded R2 key
+// ── R2 Start — Step 2 ─────────────────────────────────────────────────────────
 router.post("/start", async (req, res) => {
   if (!isR2Configured()) { res.status(503).json({ error: "R2 storage not configured" }); return; }
 
-  const { fileKey, mode, platform, translateSubtitles, subtitleLanguage, audioLanguage, audioVoice } = req.body as {
-    fileKey: string; mode?: string; platform?: string; translateSubtitles?: boolean;
-    subtitleLanguage?: string; audioLanguage?: string; audioVoice?: string;
+  const {
+    fileKey, mode, platform, platforms, modules,
+    translateSubtitles, subtitleLanguage, audioLanguage, audioVoice,
+  } = req.body as {
+    fileKey: string;
+    mode?: string;
+    platform?: string;
+    platforms?: string[];
+    modules?: string[];
+    translateSubtitles?: boolean;
+    subtitleLanguage?: string;
+    audioLanguage?: string;
+    audioVoice?: string;
   };
 
   if (!fileKey || typeof fileKey !== "string") { res.status(400).json({ error: "fileKey is required" }); return; }
 
-  const validModes: PipelineMode[] = ["pre-edit", "editing", "publish"];
-  const validatedMode: PipelineMode = validModes.includes(mode as PipelineMode) ? (mode as PipelineMode) : "pre-edit";
+  const validModes: PipelineMode[] = ["video-analyzer", "pre-edit", "editing", "publish"];
+  const validatedMode: PipelineMode = validModes.includes(mode as PipelineMode) ? (mode as PipelineMode) : "video-analyzer";
 
-  // Dubbing is disabled for all users
   if (mode === "dubbing") {
     res.status(403).json({ error: "Dubbing is coming soon and not yet available." });
     return;
   }
 
   const validPlatforms = ["youtube_long", "youtube_shorts", "tiktok", "instagram", "linkedin", "x"];
-  const validatedPlatform = validPlatforms.includes(platform ?? "") ? platform! : "youtube_long";
+  const validatedPlatforms = Array.isArray(platforms)
+    ? platforms.filter(p => validPlatforms.includes(p))
+    : [platform ?? "youtube_long"].filter(p => validPlatforms.includes(p));
+  if (validatedPlatforms.length === 0) validatedPlatforms.push("youtube_long");
 
-  // Plan-based checks
-  const plan = req.auth?.plan ?? "free";
+  const validModules = ["quality", "editing", "publish", "shortClips"];
+  const validatedModules = Array.isArray(modules)
+    ? modules.filter(m => validModules.includes(m))
+    : ["quality", "editing"];
+
+  const rawPlan = req.auth?.plan ?? "free";
+  const plan = rawPlan;
+  const normalizedPlan = normalizePlan(rawPlan);
   const userId = req.auth?.user_id ?? null;
 
   if (userId) {
-    const { allowed, used, limit } = await checkUploadLimit(userId, plan, validatedMode);
+    const { allowed, used, limit } = await checkUploadLimit(userId, rawPlan, validatedMode);
     if (!allowed) {
-      res.status(429).json({ error: `Upload limit reached for this month (${used}/${limit}). Upgrade your plan to upload more.` });
+      res.status(429).json({ error: `Upload limit reached this month (${used}/${limit}). Upgrade your plan to continue.` });
       return;
     }
   }
 
-  // Free users cannot use YouTube Long for publish
-  if (validatedMode === "publish" && validatedPlatform === "youtube_long" && plan === "free") {
-    res.status(403).json({ error: "YouTube Long format requires a Premium or Professional plan." });
-    return;
-  }
+  const maxDurationSeconds = PLAN_DURATION_LIMITS[normalizedPlan] ?? PLAN_DURATION_LIMITS.free;
 
   const jobId = uuidv4();
   const ext = path.extname(fileKey).replace(".", "") || "mp4";
@@ -213,7 +246,7 @@ router.post("/start", async (req, res) => {
     progress: 2,
     currentStep: "Downloading video",
     mode: validatedMode,
-    platform: validatedPlatform,
+    platform: validatedPlatforms[0] ?? "youtube_long",
     translateSubtitles: translateSubtitles ? 1 : 0,
     subtitleLanguage: subtitleLanguage || null,
     replaceAudio: 0,
@@ -237,65 +270,86 @@ router.post("/start", async (req, res) => {
 
     runAnalysisPipeline(jobId, localPath, {
       mode: validatedMode,
-      platform: validatedPlatform,
+      platform: validatedPlatforms[0] ?? "youtube_long",
+      platforms: validatedPlatforms,
+      modules: validatedModules,
       translateSubtitles: Boolean(translateSubtitles),
       subtitleLanguage: subtitleLanguage || undefined,
       audioLanguage: audioLanguage || undefined,
       audioVoice: (audioVoice as "alloy" | "echo" | "fable" | "onyx" | "nova" | "shimmer") || "alloy",
       plan,
+      maxDurationSeconds,
     }).catch((err) => {
       req.log.error({ err, jobId }, "Pipeline error (R2 start)");
     });
   });
 });
 
+// ── Multipart upload fallback ─────────────────────────────────────────────────
 router.post("/upload", upload.single("video"), async (req, res) => {
   try {
     if (!req.file) { res.status(400).json({ error: "No video file uploaded" }); return; }
 
-    const mode = (req.body.mode as PipelineMode) || "pre-edit";
-    const validModes: PipelineMode[] = ["pre-edit", "editing", "publish"];
-    if (!validModes.includes(mode)) { res.status(400).json({ error: "Invalid mode" }); return; }
+    const mode = (req.body.mode as string) || "video-analyzer";
+    const validModes: PipelineMode[] = ["video-analyzer", "pre-edit", "editing", "publish"];
+    const validatedMode: PipelineMode = validModes.includes(mode as PipelineMode) ? (mode as PipelineMode) : "video-analyzer";
 
-    // Dubbing disabled for all users
     if (req.body.mode === "dubbing") {
       await fs.unlink(req.file.path).catch(() => {});
       res.status(403).json({ error: "Dubbing is coming soon and not yet available." });
       return;
     }
 
-    const platform = (req.body.platform as string) || "youtube_long";
     const validPlatforms = ["youtube_long", "youtube_shorts", "tiktok", "instagram", "linkedin", "x"];
-    if (!validPlatforms.includes(platform)) { res.status(400).json({ error: "Invalid platform" }); return; }
 
-    const plan = req.auth?.plan ?? "free";
+    let validatedPlatforms: string[] = [];
+    if (req.body.platforms) {
+      try {
+        const parsed = JSON.parse(req.body.platforms as string);
+        validatedPlatforms = Array.isArray(parsed) ? parsed.filter((p: string) => validPlatforms.includes(p)) : [];
+      } catch {
+        validatedPlatforms = [];
+      }
+    }
+    if (validatedPlatforms.length === 0) {
+      const singlePlatform = (req.body.platform as string) || "youtube_long";
+      validatedPlatforms = validPlatforms.includes(singlePlatform) ? [singlePlatform] : ["youtube_long"];
+    }
+
+    let validatedModules: string[] = ["quality", "editing"];
+    if (req.body.modules) {
+      try {
+        const parsed = JSON.parse(req.body.modules as string);
+        const validModuleList = ["quality", "editing", "publish", "shortClips"];
+        validatedModules = Array.isArray(parsed) ? parsed.filter((m: string) => validModuleList.includes(m)) : ["quality", "editing"];
+      } catch {
+        validatedModules = ["quality", "editing"];
+      }
+    }
+
+    const rawPlan = req.auth?.plan ?? "free";
+    const normalizedPlan = normalizePlan(rawPlan);
     const userId = req.auth?.user_id ?? null;
 
-    // Check plan file size limit
-    const sizeLimit = PLAN_SIZE_LIMITS[plan] ?? PLAN_SIZE_LIMITS.free;
+    const sizeLimit = PLAN_SIZE_LIMITS[normalizedPlan] ?? PLAN_SIZE_LIMITS.free;
     if (req.file.size > sizeLimit) {
       await fs.unlink(req.file.path).catch(() => {});
       const limitMB = Math.round(sizeLimit / 1024 / 1024);
-      res.status(413).json({ error: `File exceeds the ${limitMB} MB limit for your plan. Upgrade to upload larger videos.` });
+      const limitLabel = limitMB >= 1024 ? `${(limitMB / 1024).toFixed(0)} GB` : `${limitMB} MB`;
+      res.status(413).json({ error: `File exceeds the ${limitLabel} limit for your plan. Upgrade to upload larger videos.` });
       return;
     }
 
-    // Check upload count limit
     if (userId) {
-      const { allowed, used, limit } = await checkUploadLimit(userId, plan, mode);
+      const { allowed, used, limit } = await checkUploadLimit(userId, rawPlan, validatedMode);
       if (!allowed) {
         await fs.unlink(req.file.path).catch(() => {});
-        res.status(429).json({ error: `Upload limit reached for this month (${used}/${limit}). Upgrade your plan to upload more.` });
+        res.status(429).json({ error: `Upload limit reached this month (${used}/${limit}). Upgrade your plan to continue.` });
         return;
       }
     }
 
-    // Free users cannot use YouTube Long for publish
-    if (mode === "publish" && platform === "youtube_long" && plan === "free") {
-      await fs.unlink(req.file.path).catch(() => {});
-      res.status(403).json({ error: "YouTube Long format requires a Premium or Professional plan." });
-      return;
-    }
+    const maxDurationSeconds = PLAN_DURATION_LIMITS[normalizedPlan] ?? PLAN_DURATION_LIMITS.free;
 
     const jobId = uuidv4();
     const translateSubtitles = req.body.translateSubtitles === "true" || req.body.translateSubtitles === true;
@@ -308,8 +362,8 @@ router.post("/upload", upload.single("video"), async (req, res) => {
       status: "queued",
       progress: 2,
       currentStep: "Uploading",
-      mode,
-      platform,
+      mode: validatedMode,
+      platform: validatedPlatforms[0] ?? "youtube_long",
       translateSubtitles: translateSubtitles ? 1 : 0,
       subtitleLanguage: req.body.subtitleLanguage || null,
       replaceAudio: 0,
@@ -319,13 +373,16 @@ router.post("/upload", upload.single("video"), async (req, res) => {
 
     setImmediate(() => {
       runAnalysisPipeline(jobId, req.file!.path, {
-        mode,
-        platform,
+        mode: validatedMode,
+        platform: validatedPlatforms[0] ?? "youtube_long",
+        platforms: validatedPlatforms,
+        modules: validatedModules,
         translateSubtitles,
         subtitleLanguage: req.body.subtitleLanguage || undefined,
         audioLanguage: audioLanguage || undefined,
         audioVoice,
-        plan,
+        plan: rawPlan,
+        maxDurationSeconds,
       }).catch((err) => {
         req.log.error({ err, jobId }, "Pipeline error");
       });

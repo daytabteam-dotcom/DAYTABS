@@ -20,8 +20,9 @@ const JWT_SECRET = process.env.JWT_SECRET || "daytabs-dev-secret-change-in-produ
 const WEBHOOK_SECRET = process.env.PADDLE_WEBHOOK_SECRET || "";
 
 const PRICE_TO_PLAN: Record<string, string> = {
-  [process.env.PADDLE_PRICE_PREMIUM || ""]: "premium",
-  [process.env.PADDLE_PRICE_PROFESSIONAL || ""]: "professional",
+  [process.env.PADDLE_PRICE_PREMIUM || ""]: "creator",
+  [process.env.PADDLE_PRICE_PROFESSIONAL || ""]: "studio",
+  [process.env.PADDLE_PRICE_PRO || ""]: "pro",
   [process.env.PADDLE_PRICE_FREE || ""]: "free",
 };
 

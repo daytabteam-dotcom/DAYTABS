@@ -1,5 +1,5 @@
-import { useEffect } from "react";
-import { Globe, Clock, Sparkles } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Globe, Clock, Sparkles, Bell, Check } from "lucide-react";
 
 interface TabProps {
   onDataReady: () => void;
@@ -8,22 +8,30 @@ interface TabProps {
 }
 
 export default function DubbingTab({ onDataReset, onRegisterExport }: TabProps) {
+  const [email, setEmail] = useState("");
+  const [submitted, setSubmitted] = useState(false);
+
   useEffect(() => {
     onDataReset();
     onRegisterExport(null);
   }, [onDataReset, onRegisterExport]);
 
+  const handleNotify = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email.trim()) return;
+    setSubmitted(true);
+  };
+
   const features = [
-    "AI-powered voice cloning & dubbing",
-    "Translate to 12+ languages",
-    "6 professional AI voices",
-    "One-click audio sync & export",
+    { label: "AI voice cloning and dubbing" },
+    { label: "Translate to 12+ languages" },
+    { label: "6 professional AI voices" },
+    { label: "One-click audio sync and export" },
   ];
 
   return (
     <div className="flex flex-col items-center justify-center min-h-[60vh] px-6 py-16">
       <div className="flex flex-col items-center gap-6 max-w-md text-center">
-        {/* Icon */}
         <div className="relative">
           <div className="w-24 h-24 rounded-2xl bg-gradient-to-br from-indigo-600/20 to-purple-600/20 border border-indigo-500/20 flex items-center justify-center shadow-2xl shadow-indigo-500/10">
             <Globe className="w-12 h-12 text-indigo-400/80" />
@@ -33,31 +41,55 @@ export default function DubbingTab({ onDataReset, onRegisterExport }: TabProps) 
           </div>
         </div>
 
-        {/* Badge */}
         <div className="flex items-center gap-2 px-4 py-1.5 bg-indigo-500/10 border border-indigo-500/20 rounded-full">
           <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
           <span className="text-xs font-semibold text-indigo-400 uppercase tracking-wider">Coming Soon</span>
         </div>
 
-        {/* Heading */}
         <div className="space-y-2">
           <h2 className="text-2xl font-bold text-white">AI Dubbing</h2>
           <p className="text-white/50 text-sm leading-relaxed">
-            We're building an incredible AI dubbing experience. Translate and re-voice your videos into any language with natural-sounding voices.
+            Translate and re-voice your videos into any language with natural AI voices. Reach global audiences without re-recording.
           </p>
         </div>
 
-        {/* Feature list */}
-        <ul className="w-full space-y-2 text-left">
-          {features.map((f) => (
-            <li key={f} className="flex items-center gap-3 px-4 py-2.5 rounded-xl bg-white/3 border border-white/6">
-              <div className="w-1.5 h-1.5 rounded-full bg-indigo-400/60 shrink-0" />
-              <span className="text-sm text-white/60">{f}</span>
+        <ul className="w-full space-y-2.5">
+          {features.map(f => (
+            <li key={f.label} className="flex items-center gap-3 text-sm text-white/60">
+              <div className="w-5 h-5 rounded-full bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center shrink-0">
+                <Check className="w-3 h-3 text-indigo-400" />
+              </div>
+              {f.label}
             </li>
           ))}
         </ul>
 
-        <p className="text-xs text-white/25">We'll notify you when Dubbing is available for your account.</p>
+        {submitted ? (
+          <div className="w-full flex items-center justify-center gap-2 px-5 py-3 bg-green-500/10 border border-green-500/20 rounded-xl text-green-400 text-sm font-medium">
+            <Check className="w-4 h-4" />
+            Got it! We'll notify you when dubbing launches.
+          </div>
+        ) : (
+          <form onSubmit={handleNotify} className="w-full space-y-3">
+            <div className="relative">
+              <input
+                type="email"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                placeholder="your@email.com"
+                required
+                className="w-full px-4 py-3 pr-12 bg-white/5 border border-white/10 rounded-xl text-sm text-white placeholder-white/25 focus:outline-none focus:border-indigo-500/50 focus:bg-white/8 transition-colors"
+              />
+            </div>
+            <button
+              type="submit"
+              className="w-full flex items-center justify-center gap-2 px-5 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-sm font-semibold rounded-xl transition-all shadow-lg shadow-indigo-500/20 cursor-pointer"
+            >
+              <Bell className="w-4 h-4" />
+              Notify me when it's ready
+            </button>
+          </form>
+        )}
       </div>
     </div>
   );

@@ -17,10 +17,6 @@ export async function updateJob(jobId: string, updates: Partial<typeof analysisJ
     .where(eq(analysisJobsTable.id, jobId));
 }
 
-/**
- * Get the actual duration of an audio/video file via ffprobe.
- * Returns 0 on failure — callers should treat 0 as "unknown".
- */
 export async function getMediaDuration(filePath: string): Promise<number> {
   try {
     const { stdout } = await execAsync(
@@ -33,11 +29,6 @@ export async function getMediaDuration(filePath: string): Promise<number> {
   }
 }
 
-/**
- * Build approximate segments from plain text by splitting on sentence boundaries.
- * When actualDurationSec is provided (from ffprobe), timestamps are scaled
- * proportionally so they never exceed the real video length.
- */
 export function buildApproximateSegments(
   text: string,
   actualDurationSec = 0
@@ -54,7 +45,6 @@ export function buildApproximateSegments(
     return { start: Math.round(start * 10) / 10, end: Math.round(end * 10) / 10, text: sentence.trim() };
   });
 
-  // Scale proportionally so timestamps never exceed actual video length
   if (actualDurationSec > 0 && currentTime > 0 && Math.abs(currentTime - actualDurationSec) > 1) {
     const scale = actualDurationSec / currentTime;
     return segs.map(s => ({
@@ -69,46 +59,47 @@ export function buildApproximateSegments(
 
 export async function transcribeAudio(audioPath: string): Promise<{ text: string; segments: Array<{ start: number; end: number; text: string }> }> {
   const audioBuffer = await fs.readFile(audioPath);
-
-  // Get real audio duration so approximate segments (fallback) are scaled correctly
   const actualDuration = await getMediaDuration(audioPath);
 
   try {
     const result = await speechToTextVerbose(audioBuffer, "mp3");
     if (result.segments.length > 0) {
-      // Clamp Whisper timestamps to actual duration in case of edge-case overrun
       if (actualDuration > 0) {
-        const clamped = result.segments
-          .filter(s => s.start < actualDuration)
-          .map(s => ({ ...s, end: Math.min(s.end, actualDuration) }));
-        if (clamped.length > 0) return { text: result.text, segments: clamped };
+        result.segments = result.segments.map(s => ({
+          ...s,
+          start: Math.min(s.start, actualDuration),
+          end: Math.min(s.end, actualDuration),
+        }));
       }
       return result;
     }
-    return { text: result.text, segments: buildApproximateSegments(result.text, actualDuration) };
-  } catch {
-    const fullText = await speechToText(audioBuffer, "mp3");
-    return { text: fullText, segments: buildApproximateSegments(fullText, actualDuration) };
+    if (result.text) {
+      return { text: result.text, segments: buildApproximateSegments(result.text, actualDuration) };
+    }
+  } catch (err) {
+    logger.warn({ err }, "speechToTextVerbose failed, trying basic transcription");
   }
+
+  try {
+    const text = await speechToText(audioBuffer, "mp3");
+    if (text) return { text, segments: buildApproximateSegments(text, actualDuration) };
+  } catch (err) {
+    logger.warn({ err }, "Basic speechToText also failed");
+  }
+
+  return { text: "", segments: [] };
 }
 
-export async function extractAudio(videoPath: string, audioPath: string): Promise<void> {
-  await execAsync(`ffmpeg -i "${videoPath}" -q:a 0 -map a "${audioPath}" -y`);
+export async function extractAudio(videoPath: string, outputPath: string): Promise<void> {
+  await execAsync(`ffmpeg -i "${videoPath}" -vn -ar 16000 -ac 1 -c:a libmp3lame -q:a 4 "${outputPath}" -y`);
 }
 
-/**
- * Generate a compressed proxy video for heavy processing (transcription, audio analysis, etc.)
- * Scale to 640px wide, high CRF for fast encoding — not used for output, only for AI processing.
- */
 export async function compressVideo(inputPath: string, outputPath: string): Promise<void> {
   await execAsync(
     `ffmpeg -i "${inputPath}" -vf scale=640:-2 -crf 32 -preset veryfast "${outputPath}" -y`
   );
 }
 
-/**
- * Extract the first 10 frames from the ORIGINAL (uncompressed) video for high-quality visual analysis.
- */
 export async function extractFrames(videoPath: string, framesDir: string, count = 10): Promise<string[]> {
   await execAsync(
     `ffmpeg -i "${videoPath}" -vf "select=lt(n\\,${count})" -vsync vfr "${framesDir}/frame_%03d.jpg" -y`
@@ -150,8 +141,15 @@ export async function analyzeVisuals(frameBase64List: string[], platform: string
     image_url: { url: `data:image/jpeg;base64,${b64}` },
   }));
 
-  const prompt = `You are a professional video quality analyst. Analyze these video frames for a ${platform} video and return STRICT JSON only (no markdown, no explanation).
-Return this exact JSON structure:
+  const prompt = `You are a professional video quality consultant who has reviewed 10,000+ videos for YouTube and social media. You are direct, specific, and give zero generic advice.
+
+Analyze these frames from a ${platform} video. For each dimension:
+- Score 0-100 based on what you actually see
+- Give one-line reasoning that references specifics (e.g. "overexposed top-right corner", "camera drifts left at frame 3", "subject too far from lens")
+- For suggestions: give the exact fix, not vague advice. Say "Move the key light 45 degrees to camera right" not "improve your lighting"
+- Lead your overall assessment with the SINGLE most important fix that will have the biggest viewer retention impact
+
+Return STRICT JSON only (no markdown, no explanation):
 {
   "lighting": {"level": "low/medium/high", "numeric": 0-100, "assessment": "...", "suggestions": ["..."], "effect": "..."},
   "brightness": {"level": "low/medium/high", "numeric": 0-100, "assessment": "...", "suggestions": ["..."], "effect": "..."},
@@ -194,14 +192,20 @@ export async function analyzeAudio(transcript: string, whisperConfidence: number
   const response = await callOpenAI({
     model: "gpt-4o-mini",
     max_completion_tokens: 800,
-    messages: [{ role: "user", content: `Audio quality analyst. Transcript snippet: "${transcript.substring(0, 500)}" Filler words: ${fillerWordCount}/${wordCount}. Whisper confidence: ${clarityNumeric}%. Return STRICT JSON:
-{"audioVolume":{"level":"low/medium/high","numeric":0-100,"assessment":"...","suggestions":["..."],"effect":"..."},"audioClarity":{"level":"poor/acceptable/good","numeric":${clarityNumeric},"assessment":"...","suggestions":["..."],"effect":"..."},"backgroundNoise":{"level":"high/medium/low","numeric":0-100,"assessment":"...","suggestions":["..."],"effect":"..."},"fillerWords":{"level":"${fillerLevel}","numeric":${fillerWordCount},"assessment":"${fillerWordCount} filler words (${Math.round(fillerRatio * 100)}% of speech)","suggestions":["..."],"effect":"..."}}` }],
+    messages: [{ role: "user", content: `You are a professional audio engineer and presentation coach. Analyze this transcript for audio and delivery quality. Be specific — reference actual words or patterns you detect, not generic advice.
+
+Transcript snippet: "${transcript.substring(0, 500)}"
+Filler word count: ${fillerWordCount} out of ${wordCount} words (${Math.round(fillerRatio * 100)}%)
+Whisper transcription confidence: ${clarityNumeric}%
+
+Return STRICT JSON only:
+{"audioVolume":{"level":"low/medium/high","numeric":0-100,"assessment":"...","suggestions":["..."],"effect":"..."},"audioClarity":{"level":"poor/acceptable/good","numeric":${clarityNumeric},"assessment":"...","suggestions":["..."],"effect":"..."},"backgroundNoise":{"level":"high/medium/low","numeric":0-100,"assessment":"...","suggestions":["..."],"effect":"..."},"fillerWords":{"level":"${fillerLevel}","numeric":${fillerWordCount},"assessment":"${fillerWordCount} filler words detected (${Math.round(fillerRatio * 100)}% of speech)","suggestions":["..."],"effect":"..."}}` }],
   });
   return parseJson(response.choices[0]?.message?.content ?? "{}", {
     audioVolume: { level: "medium", numeric: 72, assessment: "Adequate volume", suggestions: [], effect: "Clear dialogue" },
     audioClarity: { level: clarityNumeric > 80 ? "good" : "acceptable", numeric: clarityNumeric, assessment: "Intelligible speech", suggestions: [], effect: "Good comprehension" },
     backgroundNoise: { level: "low", numeric: 20, assessment: "Minimal noise", suggestions: [], effect: "Clear audio" },
-    fillerWords: { level: fillerLevel, numeric: fillerWordCount, assessment: `${fillerWordCount} filler words detected`, suggestions: ["Practice pausing instead of filler words"], effect: "Affects perceived expertise" },
+    fillerWords: { level: fillerLevel, numeric: fillerWordCount, assessment: `${fillerWordCount} filler words detected`, suggestions: ["Pause instead of filler words"], effect: "Affects perceived expertise" },
   });
 }
 
@@ -212,23 +216,28 @@ export async function analyzeScriptFeedback(transcript: string, segments: Array<
     max_completion_tokens: 2000,
     messages: [{
       role: "user",
-      content: `You are a professional video script coach. Analyze this transcript and return STRICT JSON only.
+      content: `You are a senior YouTube consultant who has worked with 500+ creators across all niches. You give brutally honest, specific feedback. No filler. No encouragement. No "Great start!" No "You could try...". You say what needs to change and show exactly how to change it.
 
 Full transcript: "${transcript.substring(0, 2500)}"
-Opening (first 15s): "${first15sec}"
+First 15 seconds: "${first15sec}"
 
-Return:
+Evaluate:
+1. HOOK (first 30 seconds): Does it create a curiosity gap, pattern interrupt, or bold claim? Call out exactly what fails and why. Give 3 alternative hooks that would outperform it.
+2. WEAK SECTIONS: Find 2-4 moments where the viewer would drop off. Quote the exact phrase. Give a direct replacement, not a suggestion.
+3. IMPROVED SCRIPT: Rewrite the full script keeping the creator's authentic voice. Cut every word that doesn't earn its place. Strengthen every transition. Make the hook land harder.
+
+Return STRICT JSON only:
 {
-  "hookSuggestions": ["3 alternative opening hooks that grab attention in the first 3 seconds"],
+  "hookSuggestions": ["hook 1 — opens with a curiosity gap or pattern interrupt", "hook 2", "hook 3"],
   "weakSections": [
-    {"text": "exact quote from transcript", "reason": "why it's weak", "replacement": "improved version"}
+    {"text": "exact quote from transcript", "reason": "specific reason viewer drops off here", "replacement": "improved version that keeps them watching"}
   ],
-  "improvedScript": "rewritten version of the full script with stronger hook, better flow, and removed filler"
+  "improvedScript": "full rewritten script with stronger hook, tighter flow, no filler"
 }`,
     }],
   });
   return parseJson(response.choices[0]?.message?.content ?? "{}", {
-    hookSuggestions: ["Start with a bold question", "Show the end result first", "Use a surprising statistic"],
+    hookSuggestions: ["Open with the most surprising result or outcome", "Ask a question the viewer is already thinking", "Make a bold claim that challenges conventional wisdom"],
     weakSections: [],
     improvedScript: transcript,
   });
@@ -246,10 +255,6 @@ function normText(t: string): string {
   return t.toLowerCase().replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").trim();
 }
 
-/**
- * Find the transcript segment whose text best matches a given AI-returned snippet.
- * Returns the segment and a confidence level based on word-overlap score.
- */
 function matchTextToSegment(
   snippet: string,
   segments: Array<{ start: number; end: number; text: string }>
@@ -284,10 +289,6 @@ function matchTextToSegment(
   return { segment: bestSeg, confidence };
 }
 
-/**
- * Detect silences in an audio file using ffmpeg's silencedetect filter.
- * Returns an array of {start, end} in seconds. Silent errors return [].
- */
 async function detectSilences(
   audioPath: string,
   minDurationSec = 0.8,
@@ -312,14 +313,6 @@ async function detectSilences(
   }
 }
 
-/**
- * Analyze editing points — hooks, removable sections, short clips, and tips.
- *
- * Key rule: OpenAI NEVER generates timestamps. All timestamps come from:
- *   - Whisper segment data (hooks matched by text, filler words by segment)
- *   - ffmpeg silence detection (remove sections)
- *   - Grouped Whisper chunks (short video candidates)
- */
 export async function analyzeEditingPoints(
   transcript: string,
   segments: Array<{ start: number; end: number; text: string }>,
@@ -328,22 +321,25 @@ export async function analyzeEditingPoints(
   const lastSeg = segments[segments.length - 1];
   const totalDuration = lastSeg?.end ?? 0;
 
-  // ── STEP 1: AI returns hook TEXT snippets (NOT timestamps) ────────────────
   const hookResponse = await callOpenAI({
     model: "gpt-4o",
     max_completion_tokens: 1000,
     messages: [{
       role: "user",
-      content: `You are a video editor identifying attention-grabbing moments. Read this transcript and copy 2–4 exact sentences or phrases that work best as hooks (attention-grabbing, surprising, or high-value).
+      content: `You are a professional video editor who has cut 3,000+ YouTube videos. You are surgical and specific.
 
-IMPORTANT: Copy the text EXACTLY as it appears in the transcript. Do NOT invent timestamps.
+Read this transcript. Identify 2-4 moments that would stop a scroll — your strongest openings, unexpected reveals, punchlines, or contrarian takes. Copy the EXACT text from the transcript.
+
+Then give 5 specific editing suggestions. Not "improve pacing". Give actionable notes like "The setup at 0:45 is 30 seconds longer than it needs to be — cut to the punchline immediately" or "Hook lands too late — move the reveal at 2:10 to the first 15 seconds". Reference platform best practices where relevant (TikTok hooks in 2 seconds, YouTube retention cliff at 30%).
+
+CRITICAL: Copy text EXACTLY as written. Do NOT invent timestamps.
 
 Transcript: "${transcript.substring(0, 3000)}"
 
 Return STRICT JSON only:
 {
   "hookTexts": ["exact sentence from transcript", "another exact phrase"],
-  "editingSuggestions": ["specific editing tip 1","tip 2","tip 3","tip 4","tip 5"]
+  "editingSuggestions": ["specific tip referencing the actual content","tip 2","tip 3","tip 4","tip 5"]
 }`,
     }],
   });
@@ -353,7 +349,6 @@ Return STRICT JSON only:
     { hookTexts: [], editingSuggestions: [] }
   );
 
-  // Map AI text snippets → real Whisper timestamps
   const hooks = hookData.hookTexts
     .map((hookText) => {
       const match = matchTextToSegment(hookText, segments);
@@ -362,16 +357,14 @@ Return STRICT JSON only:
         text: hookText,
         start: fmtSecs(match.segment.start),
         end: fmtSecs(match.segment.end),
-        reason: "Strong hook moment identified from transcript",
+        reason: "High-value hook moment",
         confidence: match.confidence,
       };
     })
     .filter(Boolean);
 
-  // ── STEP 2: Remove sections — real data only, no AI timestamps ────────────
   const removeSections: Array<{ start: string; end: string; reason: string }> = [];
 
-  // 2a: Filler-word segments from Whisper timestamps
   const fillerRx = /\b(um+|uh+|er+|ah+|hmm+|like|you know|basically)\b/gi;
   for (const seg of segments) {
     fillerRx.lastIndex = 0;
@@ -384,7 +377,6 @@ Return STRICT JSON only:
     }
   }
 
-  // 2b: Silence gaps from ffmpeg (only if audio file path is provided)
   if (audioPath) {
     const silences = await detectSilences(audioPath);
     for (const s of silences) {
@@ -392,28 +384,27 @@ Return STRICT JSON only:
         removeSections.push({
           start: fmtSecs(s.start),
           end: fmtSecs(s.end),
-          reason: "Silence gap detected",
+          reason: `Dead air / silence gap (${(s.end - s.start).toFixed(1)}s)`,
         });
       }
     }
-    // Sort by start time
-    removeSections.sort((a, b) => a.start.localeCompare(b.start));
   }
 
-  // ── STEP 3: Short video candidates — chunk-based, timestamps from Whisper ──
   const shortVideos: Array<{ start: string; end: string; title?: string; reason: string; confidence: string }> = [];
+  const CHUNK_SEC = 60;
 
-  if (totalDuration > 90 && segments.length > 0) {
-    const CHUNK_SEC = 22; // ~20-25 second chunks
-    const chunks: Array<{ start: number; end: number; texts: string[]; index: number }> = [];
-    let chunkStart = segments[0].start;
+  if (segments.length >= 2) {
+    type Chunk = { start: number; end: number; texts: string[]; index: number };
+    const chunks: Chunk[] = [];
+    let chunkStart = segments[0]!.start;
+    let chunkEnd = segments[0]!.start;
     let chunkTexts: string[] = [];
-    let chunkEnd = segments[0].end;
 
     for (const seg of segments) {
-      if (seg.start - chunkStart > CHUNK_SEC && chunkTexts.length > 0) {
+      if (seg.start - chunkStart >= CHUNK_SEC && chunkTexts.length > 0) {
         chunks.push({ start: chunkStart, end: chunkEnd, texts: chunkTexts, index: chunks.length });
         chunkStart = seg.start;
+        chunkEnd = seg.start;
         chunkTexts = [];
       }
       chunkTexts.push(seg.text);
@@ -435,12 +426,12 @@ Return STRICT JSON only:
         max_completion_tokens: 600,
         messages: [{
           role: "user",
-          content: `You are a short-form video editor. Review these ${CHUNK_SEC}-second transcript chunks and identify which ones would work well as standalone short videos (complete idea, engaging, no abrupt start/end).
+          content: `You are a short-form video strategist. Review these ${CHUNK_SEC}-second transcript chunks. Identify which ones work as standalone short videos (complete idea, natural start/end, no abrupt cut).
 
 Chunks: ${JSON.stringify(chunkSummaries)}
 
-Return STRICT JSON — only use the provided index numbers, do NOT invent timestamps:
-{"goodChunks":[{"index":0,"title":"short title","reason":"why it works as a short video"}]}`,
+Return STRICT JSON using ONLY the provided index numbers — no invented timestamps:
+{"goodChunks":[{"index":0,"title":"short punchy title","reason":"why this works as a standalone short"}]}`,
         }],
       });
 
@@ -463,7 +454,6 @@ Return STRICT JSON — only use the provided index numbers, do NOT invent timest
     }
   }
 
-  // ── FINAL SAFETY CLAMP — filter/fix anything beyond actual video length ──────
   function parseTs(ts: string): number {
     const parts = ts.split(":").map(Number);
     return (parts[0] ?? 0) * 60 + (parts[1] ?? 0);
@@ -497,19 +487,15 @@ Return STRICT JSON — only use the provided index numbers, do NOT invent timest
     editingSuggestions: hookData.editingSuggestions?.length
       ? hookData.editingSuggestions
       : [
-          "Cut pauses longer than 1.5 seconds",
-          "Start with the strongest hook",
-          "Remove filler word segments shown above",
-          "End with a clear call to action",
-          "Keep intro under 15 seconds",
+          "Cut pauses longer than 1.5 seconds for tighter pacing",
+          "Move your strongest moment to within the first 30 seconds",
+          "Remove filler word segments shown in the cut list above",
+          "End with a clear CTA — tell them exactly what to do next",
+          "Your hook needs to land before 15 seconds on YouTube",
         ],
   };
 }
 
-/**
- * Generate real chapter timestamps from Whisper segments by sampling at ~10 evenly-spaced
- * points across the video — avoids AI hallucinating times beyond video length.
- */
 function buildChapterPoints(
   segments: Array<{ start: number; end: number; text: string }>,
   maxChapters = 10
@@ -531,7 +517,6 @@ function buildChapterPoints(
     }
     if (chapters.length >= maxChapters) break;
   }
-  // Ensure first chapter is always 00:00
   if (chapters.length && chapters[0]!.start > 0) {
     chapters.unshift({ start: 0, time: "0:00", text: segments[0]!.text.trim().substring(0, 80) });
   }
@@ -548,19 +533,43 @@ export async function generateSeo(
   };
   const count = hashtagCounts[platform] || 8;
 
-  // Build chapter points from REAL segment timestamps (no hallucination)
   const chapterPoints = buildChapterPoints(segments, 10);
   const chapterHint = chapterPoints.length
-    ? `\n\nReal chapter timestamps (use EXACTLY these times, only change "label"):\n${chapterPoints.map(c => `${c.time} — "${c.text}"`).join("\n")}`
+    ? `\n\nReal chapter timestamps (use EXACTLY these times, only write short labels):\n${chapterPoints.map(c => `${c.time} - "${c.text}"`).join("\n")}`
     : "";
+
+  const platformGuide: Record<string, string> = {
+    youtube_long: "YouTube long-form: titles 60-70 chars, curiosity gap required, keyword in first 3 words",
+    youtube_shorts: "YouTube Shorts: punchy titles under 50 chars, high-energy action verbs",
+    tiktok: "TikTok: trend-aware, conversational, 3-5 hashtags from trending niches",
+    instagram: "Instagram Reels: lifestyle-forward, mix of niche and broad hashtags",
+    linkedin: "LinkedIn: professional framing, thought leadership angle, low hashtag count",
+    x: "X/Twitter: max 2-3 hashtags, punchy and opinionated",
+  };
+
+  const guide = platformGuide[platform] ?? "";
 
   const response = await callOpenAI({
     model: "gpt-4o",
     max_completion_tokens: 1800,
-    messages: [{ role: "user", content: `SEO expert for ${platform}. Transcript: "${transcript.substring(0, 1500)}". Generate ${count} hashtags.${chapterHint}
+    messages: [{ role: "user", content: `You are a ${platform} SEO expert who has helped channels grow from 0 to 100K through search. You write titles that create curiosity gaps, not summaries.
 
-Return STRICT JSON — use the EXACT times provided above for timestamps, only write short labels:
-{"titles":["title 1","title 2","title 3"],"description":"full optimized description","hashtags":[{"tag":"#Tag","effect":"reaches X audience"}],"timestamps":[{"time":"0:00","label":"Introduction"}]}` }],
+Platform rules: ${guide}
+
+Transcript: "${transcript.substring(0, 1500)}"${chapterHint}
+
+Title rules:
+- NEVER write generic titles like "How to [thing]" or "My experience with [topic]"
+- Every title must contain the primary keyword naturally in the first 3 words
+- Format: [keyword] + curiosity gap, contrarian angle, or specific outcome
+
+Tag rules:
+- 40% high-volume tags (broad niche, 1M+ searches)
+- 40% mid-volume tags (specific subtopic, 100K-1M)
+- 20% niche/long-tail tags (very specific, 10K-100K)
+
+Return STRICT JSON — use EXACT times from chapter list above:
+{"titles":["title 1","title 2","title 3"],"description":"2-line hook + body + CTA. First 2 lines must be the hook (visible in search preview).","hashtags":[{"tag":"#Tag","effect":"target audience or reach this tag serves"}],"timestamps":[{"time":"0:00","label":"short label"}]}` }],
   });
 
   const parsed = parseJson<{ titles: string[]; description: string; hashtags: object[]; timestamps: Array<{ time: string; label: string }> }>(
@@ -573,7 +582,6 @@ Return STRICT JSON — use the EXACT times provided above for timestamps, only w
     }
   );
 
-  // Override timestamps with real positions — AI may have ignored our hint
   if (chapterPoints.length) {
     parsed.timestamps = parsed.timestamps.map((t, i) => ({
       time: chapterPoints[i]?.time ?? t.time,
@@ -582,6 +590,125 @@ Return STRICT JSON — use the EXACT times provided above for timestamps, only w
   }
 
   return parsed;
+}
+
+export async function generateShortClipIdeas(
+  transcript: string,
+  segments: Array<{ start: number; end: number; text: string }>,
+  platforms: string[]
+): Promise<object> {
+  if (!segments.length) return { clips: [] };
+
+  const totalDuration = segments[segments.length - 1]!.end;
+
+  const platformLabels: Record<string, string> = {
+    youtube_long: "YouTube Long",
+    youtube_shorts: "YouTube Shorts",
+    tiktok: "TikTok",
+    instagram: "Instagram Reels",
+    linkedin: "LinkedIn",
+    x: "X/Twitter",
+  };
+
+  const targetPlatformList = platforms.map(p => platformLabels[p] ?? p).join(", ");
+
+  const CHUNK_SEC = 90;
+  type Chunk = { start: number; end: number; text: string; index: number };
+  const chunks: Chunk[] = [];
+  let chunkStart = segments[0]!.start;
+  let chunkEnd = segments[0]!.start;
+  let chunkText = "";
+
+  for (const seg of segments) {
+    if (seg.start - chunkStart >= CHUNK_SEC && chunkText) {
+      chunks.push({ start: chunkStart, end: chunkEnd, text: chunkText, index: chunks.length });
+      chunkStart = seg.start;
+      chunkEnd = seg.start;
+      chunkText = "";
+    }
+    chunkText += " " + seg.text;
+    chunkEnd = seg.end;
+  }
+  if (chunkText) {
+    chunks.push({ start: chunkStart, end: chunkEnd, text: chunkText.trim(), index: chunks.length });
+  }
+
+  const chunkSummaries = chunks.map(c => ({
+    index: c.index,
+    startSec: Math.round(c.start),
+    endSec: Math.round(c.end),
+    durationSec: Math.round(c.end - c.start),
+    preview: c.text.trim().substring(0, 250),
+  }));
+
+  const response = await callOpenAI({
+    model: "gpt-4o",
+    max_completion_tokens: 1500,
+    messages: [{
+      role: "user",
+      content: `You are a short-form content strategist who has helped 500+ creators repurpose long videos into viral clips. You know exactly what makes people stop scrolling.
+
+Target platforms: ${targetPlatformList}
+Total video duration: ${Math.round(totalDuration)}s
+
+Below are the video chunks. For each high-value clip moment:
+- Identify the best 3-5 clips that would perform on short-form platforms
+- For each clip: find the chunk it's in, identify the first line that would work as an on-screen hook
+- State which platforms fit and WHY (e.g. "TikTok: contrarian take performs in first 2 seconds")
+- Give ONE tactical production note that increases performance (e.g. "Add captions — 85% of Reels are watched muted", "Cut to the punchline at 1:23 — the setup is 20 seconds too long")
+
+CRITICAL: Use ONLY the index numbers provided. Do NOT invent startSec/endSec — use the provided values.
+
+Chunks: ${JSON.stringify(chunkSummaries)}
+
+Return STRICT JSON:
+{
+  "clips": [
+    {
+      "chunkIndex": 0,
+      "startSec": 45,
+      "endSec": 105,
+      "title": "punchy title for this clip",
+      "hook": "first line / on-screen text that stops the scroll",
+      "platforms": ["TikTok", "Instagram Reels"],
+      "platformReason": "why these platforms specifically",
+      "tacticalNote": "one specific production tip to increase performance",
+      "rewatchability": "high/medium/low"
+    }
+  ]
+}`,
+    }],
+  });
+
+  const raw = parseJson<{ clips: Array<Record<string, unknown>> }>(
+    response.choices[0]?.message?.content ?? "{}",
+    { clips: [] }
+  );
+
+  function fmtSec(s: number): string {
+    const m = Math.floor(s / 60);
+    const sec = Math.floor(s % 60);
+    return `${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+  }
+
+  const clips = (raw.clips ?? []).map(clip => {
+    const chunkIdx = typeof clip.chunkIndex === "number" ? clip.chunkIndex : 0;
+    const chunk = chunks[chunkIdx];
+    const startSec = typeof clip.startSec === "number" ? Math.max(chunk?.start ?? 0, clip.startSec) : (chunk?.start ?? 0);
+    const endSec = typeof clip.endSec === "number" ? Math.min(chunk?.end ?? totalDuration, clip.endSec) : (chunk?.end ?? totalDuration);
+    return {
+      start: fmtSec(Math.min(startSec, totalDuration)),
+      end: fmtSec(Math.min(endSec, totalDuration)),
+      title: clip.title ?? "",
+      hook: clip.hook ?? "",
+      platforms: Array.isArray(clip.platforms) ? clip.platforms : [],
+      platformReason: clip.platformReason ?? "",
+      tacticalNote: clip.tacticalNote ?? "",
+      rewatchability: clip.rewatchability ?? "medium",
+    };
+  });
+
+  return { clips };
 }
 
 export async function translateSegments(

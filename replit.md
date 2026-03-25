@@ -40,39 +40,36 @@ artifacts-monorepo/
 └── package.json
 ```
 
-## 4 Analysis Pipeline Modes
+## Analysis Pipelines
 
-Each uploaded video is processed through ONE of 4 mode-specific pipelines:
+### Primary: Video Analyzer (`video-analyzer`) — NEW unified mode
+- 8-step pipeline: compress → extract audio → duration check → transcribe (single Whisper call) → quality → editing → publish → short clips
+- Accepts `modules[]` and `platforms[]` arrays from the client
+- Result: `{ quality, editing, publish: {[platform]: seoData}, shortClips, transcript }`
+- Duration limits enforced server-side before transcription
 
-### 1. Pre-Edit (`pre-edit`)
-- Extract audio → transcribe → extract frames (max 5) → visual analysis → audio analysis → script feedback
-- Result: `{ quality: { score, lighting, brightness, … audioClarity, fillerWords, … }, scriptFeedback: { hookSuggestions, weakSections, improvedScript } }`
-
-### 2. Editing (`editing`)
-- Extract audio → transcribe → identify editing points (hooks, cuts, short-form segments)
-- Result: `{ hooks, removeSections, shortVideos, editingSuggestions, transcript }`
-
-### 3. Publish (`publish`)
-- Extract audio → transcribe → generate SEO → generate SRT subtitle file → optional translation
-- Result: `{ platform, titles, description, hashtags, timestamps, subtitleFile: { format, language, content } }`
-
-### 4. Dubbing (`dubbing`)
-- Extract audio → transcribe → translate → TTS (chunked) → ffmpeg merge → download link
+### Legacy modes (preserved for backward compat)
+- `pre-edit`: visual/audio quality analysis
+- `editing`: hooks, cut points, short-form segments
+- `publish`: SEO, titles, descriptions, SRT subtitles
+- `dubbing`: translate → TTS → ffmpeg merge
 - Result: `{ translatedLanguage, voice, downloadUrl, filename }`
 
 ## Key Files
 
-- `artifacts/api-server/src/routes/analysis/services.ts` — Shared service functions (extractAudio, extractFrames, transcribeAudio, analyzeVisuals, analyzeAudio, analyzeScriptFeedback, analyzeEditingPoints, generateSeo, generateSrt, translateSegments, computeQualityScore)
-- `artifacts/api-server/src/routes/analysis/pipeline.ts` — Mode dispatcher + 4 sub-pipelines
-- `artifacts/api-server/src/routes/analysis/index.ts` — Upload, status, result, export, voice-preview, download endpoints
-- `artifacts/daytabs/src/pages/Home.tsx` — 4-tab layout (Pre-Edit, Editing, Publish, Dubbing)
-- `artifacts/daytabs/src/pages/tabs/PreEditTab.tsx` — Upload + quality + script feedback results
-- `artifacts/daytabs/src/pages/tabs/EditingTab.tsx` — Upload + hooks/cuts/segments results
-- `artifacts/daytabs/src/pages/tabs/PublishTab.tsx` — Upload + platform + SEO/SRT results
-- `artifacts/daytabs/src/pages/tabs/DubbingTab.tsx` — Upload + language/voice + download
-- `artifacts/daytabs/src/components/TabUpload.tsx` — Shared dropzone upload component
-- `artifacts/daytabs/src/hooks/use-analysis.ts` — useAnalysisPolling, useAnalysisResults hooks
-- `lib/db/src/schema/analysisJobs.ts` — Analysis jobs table (includes `mode` column)
+- `artifacts/api-server/src/routes/analysis/services.ts` — All AI service functions including generateShortClipIdeas, analyzeQuality, analyzeEditing, generatePublishPackage, extractAudio, getMediaDuration
+- `artifacts/api-server/src/routes/analysis/pipeline.ts` — runVideoAnalyzer (8-step) + legacy mode pipelines
+- `artifacts/api-server/src/routes/analysis/index.ts` — Upload, status, result, export endpoints. Plan limits: free=3, creator=15, pro=40, studio=unlimited. Duration limits: free=5min, creator=15min, pro=30min, studio=60min
+- `artifacts/api-server/src/routes/script-planner/index.ts` — Chat limits: free=1 total, creator=15/month, pro=40/month, studio=unlimited. Message limits: 3 for free, 10 for paid. Model: gpt-4o for pro/studio, gpt-4o-mini for free/creator
+- `artifacts/api-server/src/routes/paddle/index.ts` — PRICE_TO_PLAN maps to creator/pro/studio. Webhook + checkout-complete endpoints
+- `artifacts/daytabs/src/pages/Home.tsx` — 5-tab layout: Home (dashboard), Video Analyzer, Script Planner, Teleprompter, Dubbing
+- `artifacts/daytabs/src/pages/tabs/VideoAnalyzerTab.tsx` — NEW: unified video analyzer with platform + module selection
+- `artifacts/daytabs/src/pages/tabs/DubbingTab.tsx` — Coming Soon placeholder with email capture
+- `artifacts/daytabs/src/hooks/use-plan.ts` — Plan definitions: free/creator/pro/studio. normalizePlan, getModeLimits, getDurationLimitLabel, getFileSizeLimitLabel
+- `artifacts/daytabs/src/hooks/use-paddle.ts` — PADDLE_PRICES mapped to creator/pro/studio. openCheckout helper
+- `artifacts/daytabs/src/components/PlanPickerModal.tsx` — 3-plan upgrade modal (Creator/Pro/Studio)
+- `artifacts/daytabs/src/hooks/use-analysis.ts` — useAnalysisPolling (refetchInterval 2s), useAnalysisResults hooks
+- `lib/db/src/schema/analysisJobs.ts` — Analysis jobs table (includes mode, platforms, modules columns)
 
 ## API Endpoints
 
@@ -109,7 +106,22 @@ Table: `analysis_jobs`
 - `JWT_SECRET` — Session token signing
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` — Google OAuth
 - `SMTP_USER`, `SMTP_PASS`, `CONTACT_EMAIL` — Email sending
-- `VITE_PADDLE_CLIENT_TOKEN`, `VITE_PADDLE_PRICE_FREE`, `VITE_PADDLE_PRICE_PREMIUM`, `VITE_PADDLE_PRICE_PRO` — Paddle payments
+- `VITE_PADDLE_CLIENT_TOKEN` — Paddle JS client token
+- `VITE_PADDLE_PRICE_PREMIUM` — Paddle price ID for Creator plan ($19/mo)
+- `VITE_PADDLE_PRICE_PRO` — Paddle price ID for Pro plan ($39/mo)
+- `VITE_PADDLE_PRICE_PROFESSIONAL` — Paddle price ID for Studio plan ($89/mo)
+- `PADDLE_API_KEY` — Server-side Paddle API key (webhooks, cancellation, sync)
+
+## Plans
+
+| Plan    | Price | Analyses/mo | File Size | Duration   | Short Clips | Publish |
+|---------|-------|-------------|-----------|------------|-------------|---------|
+| Free    | $0    | 3           | 200 MB    | 5 min      | No          | No      |
+| Creator | $19   | 15          | 500 MB    | 15 min     | Yes         | Yes     |
+| Pro     | $39   | 40          | 1 GB      | 30 min     | Yes         | Yes     |
+| Studio  | $89   | Unlimited   | 2 GB      | 60 min     | Yes         | Yes     |
+
+DB stores: free / premium (→creator) / professional (→studio) / creator / pro / studio. Always run through `normalizePlan()` before limit checks.
 
 ## TypeScript & Composite Projects
 

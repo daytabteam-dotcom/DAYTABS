@@ -1,80 +1,103 @@
 import { useLocation } from "wouter";
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { Check, Zap, Star, Building, Loader2 } from "lucide-react";
+import { Check, Zap, Star, Flame, Building2, Loader2 } from "lucide-react";
 import Navbar from "../components/Navbar";
 
+type PlanKey = "free" | "creator" | "pro" | "studio";
 type Feature = { text: string; badge?: string };
 
 const plans = [
   {
-    key: "free" as const,
+    key: "free" as PlanKey,
     name: "Free",
     price: "$0",
     period: "forever",
     icon: Zap,
-    description: "Perfect to get started and explore the platform.",
+    description: "Get started and explore what DayTabs can do.",
     color: "from-slate-600 to-slate-500",
     borderColor: "border-white/10",
     popular: false,
     features: [
-      { text: "3 Pre-Edit analyses / month" },
-      { text: "5 Editing analyses / month" },
-      { text: "3 Publish analyses / month" },
+      { text: "3 video analyses / month" },
       { text: "Up to 200 MB per video" },
-      { text: "Quality, Content & SEO reports" },
-      { text: "Basic transcript" },
-      { text: "Teleprompter 🖥️" },
+      { text: "Up to 5 min video duration" },
+      { text: "Quality and editing reports" },
+      { text: "Teleprompter" },
+      { text: "1 script planner chat" },
     ] as Feature[],
-    missing: ["AI Dubbing 🌍", "Priority support"] as string[],
+    missing: ["Publish package", "Short clip ideas", "AI Dubbing"] as string[],
     cta: "Get Started Free",
     ctaStyle: "border border-white/20 hover:border-violet-500/40 hover:bg-white/5",
   },
   {
-    key: "premium" as const,
-    name: "Premium",
-    price: "$25",
+    key: "creator" as PlanKey,
+    name: "Creator",
+    price: "$19",
     period: "per month",
     icon: Star,
-    description: "Everything you need to grow your content channel.",
+    description: "For solo creators ready to grow their channel.",
     color: "from-violet-600 to-purple-500",
     borderColor: "border-violet-500/50",
     popular: true,
     features: [
-      { text: "30 Pre-Edit analyses / month" },
-      { text: "50 Editing analyses / month" },
-      { text: "30 Publish analyses / month" },
+      { text: "15 video analyses / month" },
       { text: "Up to 500 MB per video" },
-      { text: "Full Quality, Content & SEO reports" },
-      { text: "Transcript & Translation" },
-      { text: "Teleprompter 🖥️" },
+      { text: "Up to 15 min video duration" },
+      { text: "Quality and editing reports" },
+      { text: "Publish package (titles, descriptions, tags)" },
+      { text: "Short clip ideas" },
+      { text: "Teleprompter" },
+      { text: "15 script planner chats / month" },
     ] as Feature[],
-    missing: ["AI Dubbing 🌍"] as string[],
-    cta: "Start Premium",
+    missing: ["AI Dubbing"] as string[],
+    cta: "Start Creator",
     ctaStyle: "bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-500 hover:to-purple-400 shadow-lg shadow-violet-500/30",
   },
   {
-    key: "professional" as const,
-    name: "Professional",
+    key: "pro" as PlanKey,
+    name: "Pro",
+    price: "$39",
+    period: "per month",
+    icon: Flame,
+    description: "For serious creators publishing multiple times a week.",
+    color: "from-emerald-600 to-teal-500",
+    borderColor: "border-emerald-500/30",
+    popular: false,
+    features: [
+      { text: "40 video analyses / month" },
+      { text: "Up to 1 GB per video" },
+      { text: "Up to 30 min video duration" },
+      { text: "All Creator features included" },
+      { text: "GPT-4o powered analysis" },
+      { text: "40 script planner chats / month" },
+      { text: "Priority processing" },
+    ] as Feature[],
+    missing: ["AI Dubbing"] as string[],
+    cta: "Start Pro",
+    ctaStyle: "border border-emerald-500/40 hover:bg-emerald-500/10 hover:border-emerald-400",
+  },
+  {
+    key: "studio" as PlanKey,
+    name: "Studio",
     price: "$89",
     period: "per month",
-    icon: Building,
+    icon: Building2,
     description: "For agencies and power creators at scale.",
     color: "from-purple-600 to-pink-500",
     borderColor: "border-white/10",
     popular: false,
     features: [
-      { text: "Unlimited Pre-Edit analyses" },
-      { text: "Unlimited Editing analyses" },
-      { text: "Unlimited Publish analyses" },
-      { text: "Up to 1 GB per video" },
-      { text: "All Premium features included" },
-      { text: "Teleprompter 🖥️" },
-      { text: "AI Dubbing 🌍", badge: "Coming Soon" },
-      { text: "Priority processing & support" },
+      { text: "Unlimited video analyses" },
+      { text: "Up to 2 GB per video" },
+      { text: "Up to 60 min video duration" },
+      { text: "All Pro features included" },
+      { text: "Unlimited script planner chats" },
+      { text: "AI Dubbing", badge: "Coming Soon" },
+      { text: "Priority support" },
     ] as Feature[],
     missing: [] as string[],
-    cta: "Start Professional",
+    cta: "Start Studio",
     ctaStyle: "border border-white/20 hover:border-violet-500/40 hover:bg-white/5",
   },
 ];
@@ -100,7 +123,7 @@ export default function PricingPage() {
       .finally(() => setPricesLoading(false));
   }, []);
 
-  const handlePlanClick = (_key: "free" | "premium" | "professional") => {
+  const handlePlanClick = (_key: PlanKey) => {
     navigate("/signup");
   };
 
@@ -114,7 +137,7 @@ export default function PricingPage() {
           <div className="absolute bottom-1/4 right-1/4 w-80 h-80 bg-purple-500/10 rounded-full blur-3xl" />
         </div>
 
-        <div className="max-w-6xl mx-auto">
+        <div className="max-w-7xl mx-auto">
           <motion.div
             initial={{ opacity: 0, y: 24 }}
             animate={{ opacity: 1, y: 0 }}
@@ -129,62 +152,62 @@ export default function PricingPage() {
             </p>
           </motion.div>
 
-          <div className="grid md:grid-cols-3 gap-8 items-start">
+          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 items-start">
             {plans.map((plan, i) => (
               <motion.div
                 key={plan.name}
                 initial={{ opacity: 0, y: 32 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5, delay: i * 0.12 }}
-                className={`relative glass rounded-3xl p-8 border ${plan.borderColor} ${
-                  plan.popular ? "ring-1 ring-violet-500/50 scale-105 shadow-xl shadow-violet-500/20" : ""
+                transition={{ duration: 0.5, delay: i * 0.1 }}
+                className={`relative glass rounded-3xl p-7 border ${plan.borderColor} ${
+                  plan.popular ? "ring-1 ring-violet-500/50 shadow-xl shadow-violet-500/20" : ""
                 } transition-all hover:scale-[1.02] hover:shadow-xl`}
                 data-testid={`card-plan-${plan.name.toLowerCase()}`}
               >
                 {plan.popular && (
-                  <div className="absolute -top-4 left-1/2 -translate-x-1/2 px-4 py-1.5 bg-gradient-to-r from-violet-600 to-purple-500 rounded-full text-xs font-bold text-white shadow-lg shadow-violet-500/30">
+                  <div className="absolute -top-4 left-1/2 -translate-x-1/2 px-4 py-1.5 bg-gradient-to-r from-violet-600 to-purple-500 rounded-full text-xs font-bold text-white shadow-lg shadow-violet-500/30 whitespace-nowrap">
                     Most Popular
                   </div>
                 )}
 
-                <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${plan.color} flex items-center justify-center mb-6 shadow-lg`}>
-                  <plan.icon className="w-6 h-6 text-white" />
+                <div className={`w-11 h-11 rounded-xl bg-gradient-to-br ${plan.color} flex items-center justify-center mb-5 shadow-lg`}>
+                  <plan.icon className="w-5 h-5 text-white" />
                 </div>
 
-                <h3 className="text-2xl font-bold mb-1">{plan.name}</h3>
-                <p className="text-white/40 text-sm mb-6">{plan.description}</p>
+                <h3 className="text-xl font-bold mb-1">{plan.name}</h3>
+                <p className="text-white/40 text-xs mb-5">{plan.description}</p>
 
-                <div className="mb-8">
+                <div className="mb-6">
                   {plan.key !== "free" && pricesLoading ? (
-                    <Loader2 className="w-8 h-8 text-white/30 animate-spin" />
+                    <Loader2 className="w-7 h-7 text-white/30 animate-spin" />
                   ) : (
                     <>
-                      <span className="text-5xl font-black">
+                      <span className="text-4xl font-black">
                         {plan.key === "free"
                           ? plan.price
                           : (formatLivePrice(livePrices[plan.key]) || plan.price)}
                       </span>
-                      <span className="text-white/40 text-sm ml-2">/{plan.period}</span>
+                      <span className="text-white/40 text-xs ml-2">/{plan.period}</span>
                     </>
                   )}
                 </div>
 
                 <button
                   onClick={() => handlePlanClick(plan.key)}
-                  className={`w-full py-3 rounded-xl text-sm font-semibold text-white transition-all mb-8 cursor-pointer ${plan.ctaStyle}`}
+                  className={`w-full py-2.5 rounded-xl text-sm font-semibold text-white transition-all mb-6 cursor-pointer ${plan.ctaStyle}`}
                   data-testid={`button-plan-${plan.name.toLowerCase()}`}
                 >
                   {plan.cta}
                 </button>
 
-                <div className="space-y-3">
+                <div className="space-y-2.5">
                   {plan.features.map((feature) => (
-                    <div key={feature.text} className="flex items-center gap-3 text-sm text-white/70">
-                      <Check className="w-4 h-4 text-violet-400 shrink-0" />
-                      <span className="flex items-center gap-2 flex-wrap">
+                    <div key={feature.text} className="flex items-start gap-2.5 text-sm text-white/70">
+                      <Check className="w-3.5 h-3.5 text-violet-400 shrink-0 mt-0.5" />
+                      <span className="flex items-center gap-1.5 flex-wrap text-xs leading-relaxed">
                         {feature.text}
                         {feature.badge && (
-                          <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded-md bg-amber-500/15 text-amber-400 border border-amber-500/25 leading-none">
+                          <span className="px-1.5 py-0.5 text-[9px] font-semibold rounded bg-amber-500/15 text-amber-400 border border-amber-500/25 leading-none">
                             {feature.badge}
                           </span>
                         )}
@@ -192,8 +215,8 @@ export default function PricingPage() {
                     </div>
                   ))}
                   {plan.missing.map((feature) => (
-                    <div key={feature} className="flex items-center gap-3 text-sm text-white/25 line-through">
-                      <div className="w-4 h-4 rounded-full border border-white/15 shrink-0" />
+                    <div key={feature} className="flex items-start gap-2.5 text-xs text-white/25 line-through">
+                      <div className="w-3.5 h-3.5 rounded-full border border-white/15 shrink-0 mt-0.5" />
                       {feature}
                     </div>
                   ))}
@@ -209,7 +232,7 @@ export default function PricingPage() {
             className="mt-16 text-center"
           >
             <p className="text-white/30 text-sm">
-              All plans include access to the core analysis dashboard.
+              All plans include access to the full analysis dashboard.
               Questions? <button onClick={() => navigate("/contact")} className="text-violet-400 hover:text-violet-300 transition-colors cursor-pointer">Contact us</button>
             </p>
           </motion.div>

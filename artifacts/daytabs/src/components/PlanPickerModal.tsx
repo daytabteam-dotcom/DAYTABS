@@ -1,56 +1,79 @@
 import { useEffect } from "react";
 import { createPortal } from "react-dom";
-import { X, Star, Building, Check, Loader2 } from "lucide-react";
+import { X, Zap, Star, Building, Check, Loader2 } from "lucide-react";
 import { usePaddle, PADDLE_PRICES } from "@/hooks/use-paddle";
 import { useUser } from "@/hooks/use-user";
 import { usePaddlePrices } from "@/hooks/use-paddle-subscription";
 
 interface PlanPickerModalProps {
   onClose: () => void;
+  highlightPlan?: "creator" | "pro" | "studio";
 }
 
-const PLAN_META = {
-  premium: {
-    key: "premium" as const,
-    name: "Premium",
+const PLAN_META = [
+  {
+    key: "creator" as const,
+    name: "Creator",
+    icon: Zap,
+    color: "from-amber-500 to-orange-500",
+    border: "border-white/10",
+    ring: "",
+    badge: null as string | null,
+    price: "$19",
+    features: [
+      "15 video analyses/month",
+      "Up to 15 min video length",
+      "500 MB upload limit",
+      "Quality, Editing, Publish modules",
+      "Short Clip Ideas",
+      "Full transcript included",
+      "15 Script Planner chats/mo",
+    ],
+    ctaClass: "bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 shadow-lg shadow-amber-500/20",
+  },
+  {
+    key: "pro" as const,
+    name: "Pro",
     icon: Star,
     color: "from-violet-600 to-purple-500",
     border: "border-violet-500/50",
     ring: "ring-1 ring-violet-500/40",
     badge: "Most Popular",
+    price: "$39",
     features: [
-      "30 pre-edit analyses/mo",
-      "50 editing jobs/mo",
-      "30 publish reports/mo",
-      "500 MB upload limit",
-      "Full reports & transcript",
-      "Hashtags & timestamps",
+      "40 video analyses/month",
+      "Up to 30 min video length",
+      "1 GB upload limit",
+      "All modules unlocked",
+      "Advanced AI analysis",
       "Subtitle file download",
+      "40 Script Planner chats/mo",
     ],
     ctaClass: "bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-500 hover:to-purple-400 shadow-lg shadow-violet-500/20",
   },
-  professional: {
-    key: "professional" as const,
-    name: "Professional",
+  {
+    key: "studio" as const,
+    name: "Studio",
     icon: Building,
-    color: "from-purple-600 to-pink-500",
+    color: "from-pink-600 to-rose-500",
     border: "border-white/10",
     ring: "",
-    badge: null,
+    badge: null as string | null,
+    price: "$89",
     features: [
-      "Unlimited analyses",
-      "Unlimited editing jobs",
-      "Unlimited publish reports",
-      "1 GB upload limit",
-      "Everything in Premium",
-      "YouTube optimisation",
+      "100 video analyses/month",
+      "Up to 60 min video length",
+      "2 GB upload limit",
+      "All modules unlocked",
+      "Priority processing",
       "Subtitle translation",
+      "Unlimited Script Planner",
     ],
-    ctaClass: "bg-gradient-to-r from-purple-600 to-pink-500 hover:from-purple-500 hover:to-pink-400 shadow-lg shadow-purple-500/20",
+    ctaClass: "bg-gradient-to-r from-pink-600 to-rose-500 hover:from-pink-500 hover:to-rose-400 shadow-lg shadow-pink-500/20",
   },
-};
+];
 
-export function PlanPickerModal({ onClose }: PlanPickerModalProps) {
+export function PlanPickerModal({ onClose, highlightPlan }: PlanPickerModalProps) {
   const { user } = useUser();
   const { openCheckout } = usePaddle();
   const { formatPrice, loading: pricesLoading } = usePaddlePrices();
@@ -61,7 +84,7 @@ export function PlanPickerModal({ onClose }: PlanPickerModalProps) {
     return () => document.removeEventListener("keydown", handler);
   }, [onClose]);
 
-  const handleSelect = (planKey: "premium" | "professional") => {
+  const handleSelect = (planKey: "creator" | "pro" | "studio") => {
     const priceId = PADDLE_PRICES[planKey];
     if (priceId && user) {
       openCheckout(priceId, user.email);
@@ -69,27 +92,19 @@ export function PlanPickerModal({ onClose }: PlanPickerModalProps) {
     }
   };
 
-  const plans = [PLAN_META.premium, PLAN_META.professional];
-
   return createPortal(
     <div
       className="fixed inset-0 z-[200] flex items-center justify-center p-4"
       data-testid="modal-plan-picker"
     >
-      {/* Backdrop */}
-      <div
-        className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-        onClick={onClose}
-      />
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
 
-      {/* Modal */}
-      <div className="relative z-10 w-full max-w-2xl">
+      <div className="relative z-10 w-full max-w-3xl">
         <div className="bg-[#110d1a] border border-white/10 rounded-2xl shadow-2xl shadow-black/60 overflow-hidden">
-          {/* Header */}
           <div className="flex items-center justify-between px-6 py-5 border-b border-white/8">
             <div>
-              <h2 className="text-lg font-bold text-white">Choose your plan</h2>
-              <p className="text-xs text-white/40 mt-0.5">Upgrade to unlock all features. Cancel anytime.</p>
+              <h2 className="text-lg font-bold text-white">Upgrade your plan</h2>
+              <p className="text-xs text-white/40 mt-0.5">Unlock more analyses, longer videos, and advanced AI. Cancel anytime.</p>
             </div>
             <button
               onClick={onClose}
@@ -99,56 +114,64 @@ export function PlanPickerModal({ onClose }: PlanPickerModalProps) {
             </button>
           </div>
 
-          {/* Plans */}
-          <div className="p-6 grid sm:grid-cols-2 gap-4">
-            {plans.map((plan) => (
-              <div
-                key={plan.key}
-                className={`relative rounded-xl border ${plan.border} ${plan.ring} p-5 bg-white/[0.03] flex flex-col gap-4`}
-              >
-                {plan.badge && (
-                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 bg-gradient-to-r from-violet-600 to-purple-500 rounded-full text-[10px] font-bold text-white shadow-md shadow-violet-500/30 whitespace-nowrap">
-                    {plan.badge}
-                  </div>
-                )}
+          <div className="p-6 grid sm:grid-cols-3 gap-4">
+            {PLAN_META.map((plan) => {
+              const isHighlighted = highlightPlan === plan.key;
+              const priceId = PADDLE_PRICES[plan.key];
+              const hasCheckout = !!priceId;
 
-                <div className="flex items-center gap-3">
-                  <div className={`w-9 h-9 rounded-lg bg-gradient-to-br ${plan.color} flex items-center justify-center shrink-0`}>
-                    <plan.icon className="w-[18px] h-[18px] text-white" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-bold text-white">{plan.name}</p>
-                    <div className="flex items-baseline gap-0.5">
-                      {pricesLoading ? (
-                        <Loader2 className="w-3.5 h-3.5 text-white/30 animate-spin" />
-                      ) : (
-                        <>
-                          <span className="text-xl font-black text-white">{formatPrice(plan.key)}</span>
-                          <span className="text-xs text-white/40">/mo</span>
-                        </>
-                      )}
+              return (
+                <div
+                  key={plan.key}
+                  className={`relative rounded-xl border ${isHighlighted ? plan.border : "border-white/10"} ${isHighlighted ? plan.ring : ""} p-5 bg-white/[0.03] flex flex-col gap-4`}
+                >
+                  {plan.badge && (
+                    <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 bg-gradient-to-r from-violet-600 to-purple-500 rounded-full text-[10px] font-bold text-white shadow-md shadow-violet-500/30 whitespace-nowrap">
+                      {plan.badge}
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-3">
+                    <div className={`w-9 h-9 rounded-lg bg-gradient-to-br ${plan.color} flex items-center justify-center shrink-0`}>
+                      <plan.icon className="w-[18px] h-[18px] text-white" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-bold text-white">{plan.name}</p>
+                      <div className="flex items-baseline gap-0.5">
+                        {pricesLoading ? (
+                          <Loader2 className="w-3.5 h-3.5 text-white/30 animate-spin" />
+                        ) : (
+                          <>
+                            <span className="text-xl font-black text-white">
+                              {formatPrice(plan.key) || plan.price}
+                            </span>
+                            <span className="text-xs text-white/40">/mo</span>
+                          </>
+                        )}
+                      </div>
                     </div>
                   </div>
+
+                  <ul className="space-y-2 flex-1">
+                    {plan.features.map((f) => (
+                      <li key={f} className="flex items-center gap-2 text-xs text-white/65">
+                        <Check className="w-3.5 h-3.5 text-violet-400 shrink-0" />
+                        {f}
+                      </li>
+                    ))}
+                  </ul>
+
+                  <button
+                    onClick={() => handleSelect(plan.key)}
+                    disabled={!hasCheckout}
+                    className={`w-full py-2.5 text-sm font-semibold text-white rounded-lg transition-all cursor-pointer ${plan.ctaClass} disabled:opacity-40 disabled:cursor-not-allowed`}
+                    data-testid={`button-select-plan-${plan.key}`}
+                  >
+                    {hasCheckout ? `Start ${plan.name}` : "Coming Soon"}
+                  </button>
                 </div>
-
-                <ul className="space-y-2 flex-1">
-                  {plan.features.map((f) => (
-                    <li key={f} className="flex items-center gap-2 text-xs text-white/65">
-                      <Check className="w-3.5 h-3.5 text-violet-400 shrink-0" />
-                      {f}
-                    </li>
-                  ))}
-                </ul>
-
-                <button
-                  onClick={() => handleSelect(plan.key)}
-                  className={`w-full py-2.5 text-sm font-semibold text-white rounded-lg transition-all cursor-pointer ${plan.ctaClass}`}
-                  data-testid={`button-select-plan-${plan.key}`}
-                >
-                  Start {plan.name}
-                </button>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           <p className="text-center text-xs text-white/25 pb-5">

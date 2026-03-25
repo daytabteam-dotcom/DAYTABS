@@ -45,7 +45,7 @@ export function usePaddlePrices() {
       .finally(() => setLoading(false));
   }, []);
 
-  function formatPrice(plan: "premium" | "professional"): string {
+  function formatPrice(plan: "premium" | "professional" | "creator" | "pro" | "studio"): string {
     const p = prices[plan];
     if (!p) return "";
     const dollars = p.unitAmount / 100;

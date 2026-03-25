@@ -1,0 +1,185 @@
+You are working on DayTabs — a video analysis SaaS for English-speaking content creators. 
+The app is built with React + Vite and hosted on Replit.
+
+Please implement ALL of the following changes carefully and completely.
+
+─────────────────────────────────────────
+1. MERGE THREE TABS INTO ONE "VIDEO ANALYZER"
+─────────────────────────────────────────
+Remove the three separate tabs: "Pre-Edit", "Editing", and "Publish".
+Replace them with a single tab called "Video Analyzer".
+
+The new Video Analyzer flow works like this:
+- User uploads video ONCE
+- User selects target platforms (multi-select): YouTube Long, YouTube Shorts, Instagram Reels, TikTok, Twitter/X, LinkedIn
+- User selects which analyses they want (multi-select checkboxes):
+    ✅ Video Quality — lighting, audio, framing, pacing score (0–100)
+    ✅ Editing Suggestions — cuts, pacing, B-roll, hook strength
+    ✅ Publish Package — title, description, tags, timestamps per platform
+    ✅ Short Clip Ideas — timestamps + hook suggestions + platform fit (ideas only, no export)
+    🔒 Dubbing — show as "Coming Soon", fully locked, not clickable
+- User clicks "Analyze Video" — ONE Whisper transcription call is made
+- The transcript is stored in session/state and reused for ALL selected modules
+- Video file is deleted from cloud storage immediately after analysis completes
+- Results appear in tabs: Quality / Editing / Publish / Short Ideas
+- User can export the full report as PDF
+
+CRITICAL: Never call Whisper more than once per video upload. Share the transcript across all modules.
+
+─────────────────────────────────────────
+2. KEEP THESE AS SEPARATE TOOLS (do not merge)
+─────────────────────────────────────────
+- Script Planner — keep exactly as is, no changes
+- Teleprompter — keep exactly as is, no changes
+- Dubbing tab — replace entirely with a "Coming Soon" placeholder. No functionality. Just a locked card with a waitlist email capture input and a "Notify me" button.
+
+─────────────────────────────────────────
+3. HOME DASHBOARD (first screen after login)
+─────────────────────────────────────────
+Replace the current landing screen with a home dashboard that shows:
+
+Header:
+- "Good [morning/afternoon/evening], [Name]" greeting based on time of day
+- Plan badge: "[Plan name] · X / Y analyses used"
+
+Main section — "Video Analysis":
+- One large featured card for "Video Analyzer" showing its sub-modules as pills: Quality · Editing · Publish · Short Clip Ideas · Dubbing (coming soon)
+- Clicking it navigates to the Video Analyzer tab
+
+Creation Tools section:
+- Two equal cards side by side: "Script Planner" and "Teleprompter"
+
+This month stats:
+- Videos analyzed: X / limit
+- Scripts created: X
+- Analyses remaining: X
+
+Recent analyses:
+- List of last 3 uploaded videos with filename, date, duration, platforms used
+- "Open report" link for each
+
+─────────────────────────────────────────
+4. NAVIGATION
+─────────────────────────────────────────
+Update the top navigation to:
+Home | Video Analyzer | Script Planner | Teleprompter | Dubbing (locked)
+
+Remove the old sub-labels under tabs (like "Quality + Script", "Cuts & Hooks", etc.)
+
+─────────────────────────────────────────
+5. PRICING — RENAME AND RESTRUCTURE
+─────────────────────────────────────────
+Replace ALL existing plan names and limits with the following. Use these EXACT names:
+
+PLAN 1 — "Free"
+- Price: $0/month
+- Video analyses: 3/month
+- Max video length: 5 minutes
+- Modules: Quality + Editing only (Publish and Short Clip Ideas are locked)
+- Script Planner: 3 messages per session, GPT-4o-mini model
+- Teleprompter: included
+- PDF export: locked
+- Platform targeting: locked
+- Hard cost ceiling target: under $1/month per user
+
+PLAN 2 — "Creator" (replaces any previous Starter/Basic/Premium plan)
+- Price: $19/month
+- Video analyses: 15/month
+- Max video length: 15 minutes
+- All modules unlocked (Quality, Editing, Publish, Short Clip Ideas)
+- Platform targeting: unlocked (all 6 platforms)
+- Script Planner: 15 sessions/month, GPT-4o-mini model
+- Teleprompter: included
+- PDF export: included
+- Dubbing: Coming Soon
+
+PLAN 3 — "Pro" (replaces any previous Pro/Professional plan)
+- Price: $39/month
+- Video analyses: 40/month
+- Max video length: 30 minutes
+- All modules unlocked
+- Platform targeting: unlocked
+- Script Planner: 40 sessions/month, GPT-4o model (not mini)
+- Teleprompter: included
+- PDF export: included
+- Dubbing: early access when launched (5 videos/month)
+
+PLAN 4 — "Studio" (replaces any previous Agency/Business plan)
+- Price: $89/month
+- Video analyses: 100/month
+- Max video length: 60 minutes
+- All modules unlocked
+- Platform targeting: unlocked
+- Script Planner: 80 sessions/month, GPT-4o model
+- Teleprompter: included
+- PDF export: bulk export
+- Dubbing: 20 videos/month when launched
+- Priority support
+
+─────────────────────────────────────────
+6. AI RESPONSE QUALITY — VERY IMPORTANT
+─────────────────────────────────────────
+Update ALL system prompts used in the app to match this style guide:
+
+Tone: Expert content strategist. Confident, specific, direct. Sounds like a senior YouTube consultant who has worked with 500+ creators — not a generic AI assistant. Never say "Great question!" or "Certainly!" or "As an AI...". Never use filler phrases.
+
+For Video Quality analysis:
+- Give specific timestamps for every issue (e.g. "Audio drops at 2:14")
+- Score each dimension 0–100 with one-line reasoning
+- Lead with the single most important fix
+
+For Editing Suggestions:
+- Be specific about what to cut and why (e.g. "Cut 1:20–1:45 — you repeat the same point you made at 0:55")
+- Mention hook strength in first 30 seconds explicitly
+- Reference platform best practices (e.g. "TikTok requires a pattern interrupt in the first 2 seconds")
+
+For Publish Package:
+- Write titles that are curiosity-driven, not generic
+- Include a primary keyword in every title
+- Tags should mix high-volume and niche keywords
+- Timestamps must reflect actual content from the transcript
+
+For Short Clip Ideas:
+- Identify moments with high re-watchability or shareability
+- For each clip: give exact timestamps, a suggested hook line (first spoken words or on-screen text), and which platforms it fits best
+- Add one tactical note per clip (e.g. "Add captions — 85% of Reels are watched muted")
+
+For Script Planner:
+- Write scripts that sound like a real person talking, not an essay being read aloud
+- Include shot directions: [WIDE SHOT], [CLOSE-UP], [CUT TO B-ROLL: ...]
+- Mark hooks, transitions, and CTAs explicitly
+- Match the creator's existing tone if transcript is available
+
+─────────────────────────────────────────
+7. COST CONTROLS (backend enforcement)
+─────────────────────────────────────────
+Enforce these hard limits server-side, not just in the UI:
+
+- Free users: max 3 analyses/month, max 5-min video (reject longer uploads with error message)
+- Creator users: max 15 analyses/month, max 15-min video
+- Pro users: max 40 analyses/month, max 30-min video
+- Studio users: max 100 analyses/month, max 60-min video
+- Script Planner sessions: enforce monthly session cap per plan
+- Script Planner message limit per session: enforce per plan (Free = 3 msg, others = 10 msg)
+- Dubbing: fully disabled for all plans until manually enabled in config
+
+When a user hits their limit, show a friendly upgrade prompt — not a generic error.
+
+─────────────────────────────────────────
+8. VIDEO FILE HANDLING
+─────────────────────────────────────────
+- Upload video to the configured cloud storage
+- Run Whisper transcription + frame extraction
+- Immediately delete the video file from storage after analysis pipeline completes
+- Store ONLY: transcript text, extracted frames (as base64 or URLs), analysis results
+- Session data expires after 48 hours
+- Never store the raw video file longer than necessary for the analysis pipeline
+
+─────────────────────────────────────────
+IMPORTANT NOTES FOR IMPLEMENTATION:
+- Do not break any existing authentication or user management
+- Do not change the visual dark purple theme — keep all existing colors and styles
+- Do not modify Script Planner or Teleprompter functionality
+- Test that Whisper is called exactly once per video upload
+- All plan limits must be enforced both in UI (disabled buttons, lock icons) and backend (API rejection)
+- Dubbing must be completely non-functional — just a visual "Coming Soon" card

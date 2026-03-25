@@ -6,12 +6,13 @@ const ENVIRONMENT = (import.meta.env.VITE_PADDLE_ENVIRONMENT ?? "production") as
 const ADMIN_EMAIL = import.meta.env.VITE_ADMIN_EMAIL as string | undefined;
 
 export const PADDLE_PRICES = {
-  free: import.meta.env.VITE_PADDLE_PRICE_FREE as string,
-  premium: import.meta.env.VITE_PADDLE_PRICE_PREMIUM as string,
+  creator:      import.meta.env.VITE_PADDLE_PRICE_PREMIUM as string,
+  pro:          import.meta.env.VITE_PADDLE_PRICE_PRO as string,
+  studio:       import.meta.env.VITE_PADDLE_PRICE_PROFESSIONAL as string,
+  premium:      import.meta.env.VITE_PADDLE_PRICE_PREMIUM as string,
   professional: import.meta.env.VITE_PADDLE_PRICE_PROFESSIONAL as string,
 } as const;
 
-// Module-level singletons — shared across all hook instances
 let paddleInstance: Paddle | null = null;
 let globalDiscountCode = "";
 const discountListeners = new Set<(code: string) => void>();
@@ -80,19 +81,16 @@ export function usePaddle() {
   const [discountCode, _setDiscountCode] = useState(() => globalDiscountCode);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
 
-  // Sync with the global discount code
   useEffect(() => {
     const listener = (code: string) => _setDiscountCode(code);
     discountListeners.add(listener);
     return () => { discountListeners.delete(listener); };
   }, []);
 
-  // Initialize Paddle once
   useEffect(() => {
     if (paddleInstance) { setPaddle(paddleInstance); return; }
     if (!CLIENT_TOKEN) return;
     ensurePaddleInitialized();
-    // Poll briefly until the instance is ready
     const interval = setInterval(() => {
       if (paddleInstance) { setPaddle(paddleInstance); clearInterval(interval); }
     }, 100);

@@ -8,6 +8,13 @@ const router: IRouter = Router();
 
 router.use(requireAuth);
 
+function normalizePlan(plan: string): "free" | "creator" | "pro" | "studio" {
+  if (plan === "premium") return "creator";
+  if (plan === "professional") return "studio";
+  if (plan === "creator" || plan === "pro" || plan === "studio") return plan as "creator" | "pro" | "studio";
+  return "free";
+}
+
 const SYSTEM_PROMPT_FULL = `You are an expert content strategist and scriptwriter who specialises in high-performing YouTube and social media videos.
 
 CRITICAL: Every reply MUST be valid JSON matching the exact structure below. No extra text, no markdown, no code fences.
@@ -98,26 +105,30 @@ router.post("/generate", async (req, res) => {
     return;
   }
 
-  const plan = req.auth!.plan ?? "free";
+  const rawPlan = req.auth!.plan ?? "free";
+  const plan = normalizePlan(rawPlan);
   const isFree = plan === "free";
-  const isPaid = plan === "premium" || plan === "professional";
+  const isCreator = plan === "creator";
+  const isPremiumAI = plan === "pro" || plan === "studio";
 
-  // Enforce free message limit (max 3 user messages per chat)
-  if (isFree) {
-    const userMessageCount = messages.filter(m => m.role === "user").length;
-    if (userMessageCount > 3) {
-      res.status(403).json({
-        error: "You've used all 3 messages on the free plan. Upgrade to Premium for unlimited messages.",
-        limitReached: true,
-        type: "message_limit",
-      });
-      return;
-    }
+  const planMessageLimit = isFree ? 3 : 10;
+  const userMessageCount = messages.filter(m => m.role === "user").length;
+
+  if (userMessageCount > planMessageLimit) {
+    const upgradeHint = isFree
+      ? "Upgrade to Creator for 10 messages per chat."
+      : "You've reached the 10 message limit for this chat.";
+    res.status(403).json({
+      error: `You've used all ${planMessageLimit} messages on this chat. ${upgradeHint}`,
+      limitReached: true,
+      type: "message_limit",
+    });
+    return;
   }
 
   const systemPrompt = isFree ? SYSTEM_PROMPT_FREE : SYSTEM_PROMPT_FULL;
-  const model = isPaid ? "gpt-4o" : "gpt-4o-mini";
-  const maxTokens = isFree ? 1200 : 4000;
+  const model = isPremiumAI ? "gpt-4o" : "gpt-4o-mini";
+  const maxTokens = isFree ? 1200 : isCreator ? 2500 : 4000;
 
   const history = messages.slice(-10);
 
@@ -173,7 +184,7 @@ router.post("/generate", async (req, res) => {
       summary: parsed.summary ?? "Script updated.",
       raw,
       plan,
-      full_plan: isPaid,
+      full_plan: !isFree,
     });
   } catch (err) {
     req.log.error({ err }, "Script planner generation failed");
@@ -249,39 +260,34 @@ router.post("/chats", async (req, res) => {
     return;
   }
 
-  const plan = req.auth!.plan ?? "free";
+  const rawPlanForChat = req.auth!.plan ?? "free";
+  const plan = normalizePlan(rawPlanForChat);
   const isFree = plan === "free";
-  const isPremium = plan === "premium";
+
+  const CHAT_LIMITS: Record<string, number> = { free: 1, creator: 15, pro: 40, studio: Infinity };
+  const chatLimit = CHAT_LIMITS[plan] ?? 1;
 
   try {
-    // Enforce chat count limits by plan
-    if (isFree) {
-      const [{ total }] = await db
-        .select({ total: count() })
-        .from(scriptPlannerChatsTable)
-        .where(eq(scriptPlannerChatsTable.userId, userId));
-      if (total >= 1) {
-        res.status(403).json({
-          error: "Free plan is limited to 1 saved chat. Upgrade to Premium for 20 chats per month.",
-          limitReached: true,
-          type: "chat_limit",
-        });
-        return;
-      }
-    } else if (isPremium) {
+    if (chatLimit !== Infinity) {
       const startOfMonth = new Date();
       startOfMonth.setDate(1);
       startOfMonth.setHours(0, 0, 0, 0);
+
+      const whereClause = isFree
+        ? eq(scriptPlannerChatsTable.userId, userId)
+        : and(eq(scriptPlannerChatsTable.userId, userId), gte(scriptPlannerChatsTable.createdAt, startOfMonth));
+
       const [{ total }] = await db
         .select({ total: count() })
         .from(scriptPlannerChatsTable)
-        .where(and(
-          eq(scriptPlannerChatsTable.userId, userId),
-          gte(scriptPlannerChatsTable.createdAt, startOfMonth),
-        ));
-      if (total >= 20) {
+        .where(whereClause!);
+
+      if (total >= chatLimit) {
+        const nextPlan = plan === "free" ? "Creator" : plan === "creator" ? "Pro" : "Studio";
         res.status(403).json({
-          error: "You've reached 20 chats this month. Upgrade to Professional for unlimited chats.",
+          error: isFree
+            ? `Free plan is limited to 1 saved chat. Upgrade to Creator for 15 chats per month.`
+            : `You've reached ${chatLimit} chats this month. Upgrade to ${nextPlan} for more.`,
           limitReached: true,
           type: "chat_limit",
         });
