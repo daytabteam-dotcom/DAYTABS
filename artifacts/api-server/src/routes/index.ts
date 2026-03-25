@@ -4,6 +4,7 @@ import analysisRouter from "./analysis/index";
 import authRouter from "./auth/index";
 import paddleRouter from "./paddle/index";
 import scriptPlannerRouter from "./script-planner/index";
+import dubbingRouter from "./dubbing/index";
 
 const router: IRouter = Router();
 
@@ -12,5 +13,6 @@ router.use("/analysis", analysisRouter);
 router.use("/auth", authRouter);
 router.use("/paddle", paddleRouter);
 router.use("/script-planner", scriptPlannerRouter);
+router.use("/dubbing", dubbingRouter);
 
 export default router;

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Globe, Clock, Sparkles, Bell, Check } from "lucide-react";
+import { Globe, Clock, Sparkles, Bell, Check, Loader2 } from "lucide-react";
 
 interface TabProps {
   onDataReady: () => void;
@@ -10,16 +10,39 @@ interface TabProps {
 export default function DubbingTab({ onDataReset, onRegisterExport }: TabProps) {
   const [email, setEmail] = useState("");
   const [submitted, setSubmitted] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     onDataReset();
     onRegisterExport(null);
   }, [onDataReset, onRegisterExport]);
 
-  const handleNotify = (e: React.FormEvent) => {
+  const handleNotify = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email.trim()) return;
-    setSubmitted(true);
+    setLoading(true);
+    setError(null);
+    try {
+      const token = localStorage.getItem("daytabs_token");
+      const res = await fetch("/api/dubbing/notify", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ email: email.trim() }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(data.error || "Failed to submit");
+      }
+      setSubmitted(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const features = [
@@ -78,15 +101,24 @@ export default function DubbingTab({ onDataReset, onRegisterExport }: TabProps) 
                 onChange={e => setEmail(e.target.value)}
                 placeholder="your@email.com"
                 required
-                className="w-full px-4 py-3 pr-12 bg-white/5 border border-white/10 rounded-xl text-sm text-white placeholder-white/25 focus:outline-none focus:border-indigo-500/50 focus:bg-white/8 transition-colors"
+                disabled={loading}
+                className="w-full px-4 py-3 pr-12 bg-white/5 border border-white/10 rounded-xl text-sm text-white placeholder-white/25 focus:outline-none focus:border-indigo-500/50 focus:bg-white/8 transition-colors disabled:opacity-50"
               />
             </div>
+            {error && (
+              <p className="text-xs text-red-400 text-left">{error}</p>
+            )}
             <button
               type="submit"
-              className="w-full flex items-center justify-center gap-2 px-5 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-sm font-semibold rounded-xl transition-all shadow-lg shadow-indigo-500/20 cursor-pointer"
+              disabled={loading}
+              className="w-full flex items-center justify-center gap-2 px-5 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-sm font-semibold rounded-xl transition-all shadow-lg shadow-indigo-500/20 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              <Bell className="w-4 h-4" />
-              Notify me when it's ready
+              {loading ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Bell className="w-4 h-4" />
+              )}
+              {loading ? "Submitting..." : "Notify me when it's ready"}
             </button>
           </form>
         )}
