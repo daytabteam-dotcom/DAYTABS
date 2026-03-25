@@ -97,7 +97,7 @@ const plans = [
       { text: "Priority support" },
     ] as Feature[],
     missing: [] as string[],
-    cta: "Start Studio",
+    cta: "Contact us",
     ctaStyle: "border border-white/20 hover:border-violet-500/40 hover:bg-white/5",
   },
 ];
@@ -123,8 +123,12 @@ export default function PricingPage() {
       .finally(() => setPricesLoading(false));
   }, []);
 
-  const handlePlanClick = (_key: PlanKey) => {
-    navigate("/signup");
+  const handlePlanClick = (key: PlanKey) => {
+    if (key === "studio") {
+      navigate("/contact");
+    } else {
+      navigate("/signup");
+    }
   };
 
   return (

@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { createPortal } from "react-dom";
+import { useLocation } from "wouter";
 import { X, Zap, Star, Building, Check, Loader2 } from "lucide-react";
 import { usePaddle, PADDLE_PRICES } from "@/hooks/use-paddle";
 import { useUser } from "@/hooks/use-user";
@@ -77,6 +78,7 @@ export function PlanPickerModal({ onClose, highlightPlan }: PlanPickerModalProps
   const { user } = useUser();
   const { openCheckout } = usePaddle();
   const { formatPrice, loading: pricesLoading } = usePaddlePrices();
+  const [, navigate] = useLocation();
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -85,6 +87,11 @@ export function PlanPickerModal({ onClose, highlightPlan }: PlanPickerModalProps
   }, [onClose]);
 
   const handleSelect = (planKey: "creator" | "pro" | "studio") => {
+    if (planKey === "studio") {
+      onClose();
+      navigate("/contact");
+      return;
+    }
     const priceId = PADDLE_PRICES[planKey];
     if (priceId && user) {
       openCheckout(priceId, user.email);
@@ -163,11 +170,11 @@ export function PlanPickerModal({ onClose, highlightPlan }: PlanPickerModalProps
 
                   <button
                     onClick={() => handleSelect(plan.key)}
-                    disabled={!hasCheckout}
+                    disabled={plan.key !== "studio" && !hasCheckout}
                     className={`w-full py-2.5 text-sm font-semibold text-white rounded-lg transition-all cursor-pointer ${plan.ctaClass} disabled:opacity-40 disabled:cursor-not-allowed`}
                     data-testid={`button-select-plan-${plan.key}`}
                   >
-                    {hasCheckout ? `Start ${plan.name}` : "Coming Soon"}
+                    {plan.key === "studio" ? "Contact us" : hasCheckout ? `Start ${plan.name}` : "Coming Soon"}
                   </button>
                 </div>
               );
