@@ -6,8 +6,8 @@ import { db } from "@workspace/db";
 import { analysisJobsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { logger } from "../../lib/logger";
-import { openai } from "@workspace/integrations-openai-ai-server";
-import { speechToText, speechToTextVerbose } from "@workspace/integrations-openai-ai-server/audio";
+import { openai } from "../../lib/openai";
+import { toFile } from "openai";
 
 export const execAsync = promisify(exec);
 
@@ -61,30 +61,46 @@ export async function transcribeAudio(audioPath: string): Promise<{ text: string
   const audioBuffer = await fs.readFile(audioPath);
   const actualDuration = await getMediaDuration(audioPath);
 
+  // Attempt verbose transcription with word-level timestamps
   try {
-    const result = await speechToTextVerbose(audioBuffer, "mp3");
-    if (result.segments.length > 0) {
-      if (actualDuration > 0) {
-        result.segments = result.segments.map(s => ({
-          ...s,
-          start: Math.min(s.start, actualDuration),
-          end: Math.min(s.end, actualDuration),
-        }));
-      }
-      return result;
+    const file = await toFile(audioBuffer, "audio.mp3", { type: "audio/mpeg" });
+    const response = await openai.audio.transcriptions.create({
+      file,
+      model: "whisper-1",
+      response_format: "verbose_json",
+    } as Parameters<typeof openai.audio.transcriptions.create>[0]);
+    const r = response as unknown as {
+      text: string;
+      segments?: Array<{ start: number; end: number; text: string }>;
+    };
+    const rawSegments = (r.segments ?? []).map(s => ({
+      start: s.start,
+      end: s.end,
+      text: s.text.trim(),
+    }));
+    if (rawSegments.length > 0) {
+      const segments = actualDuration > 0
+        ? rawSegments.map(s => ({ ...s, start: Math.min(s.start, actualDuration), end: Math.min(s.end, actualDuration) }))
+        : rawSegments;
+      return { text: r.text || "", segments };
     }
-    if (result.text) {
-      return { text: result.text, segments: buildApproximateSegments(result.text, actualDuration) };
+    if (r.text) {
+      return { text: r.text, segments: buildApproximateSegments(r.text, actualDuration) };
     }
   } catch (err) {
-    logger.warn({ err }, "speechToTextVerbose failed, trying basic transcription");
+    logger.warn({ err }, "Whisper verbose transcription failed, falling back to basic");
   }
 
+  // Basic fallback
   try {
-    const text = await speechToText(audioBuffer, "mp3");
-    if (text) return { text, segments: buildApproximateSegments(text, actualDuration) };
+    const file = await toFile(audioBuffer, "audio.mp3", { type: "audio/mpeg" });
+    const response = await openai.audio.transcriptions.create({
+      file,
+      model: "whisper-1",
+    });
+    if (response.text) return { text: response.text, segments: buildApproximateSegments(response.text, actualDuration) };
   } catch (err) {
-    logger.warn({ err }, "Basic speechToText also failed");
+    logger.warn({ err }, "Whisper basic transcription also failed");
   }
 
   return { text: "", segments: [] };

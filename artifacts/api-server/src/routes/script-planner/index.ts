@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { requireAuth } from "../../middlewares/auth";
-import { openai } from "@workspace/integrations-openai-ai-server";
+import { openai } from "../../lib/openai";
 import { db, scriptPlannerChatsTable } from "@workspace/db";
 import { eq, and, desc, count, gte } from "drizzle-orm";
 

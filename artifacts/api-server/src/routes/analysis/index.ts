@@ -11,8 +11,7 @@ import { analysisJobsTable } from "@workspace/db";
 import { eq, and, gte, count } from "drizzle-orm";
 import { runAnalysisPipeline, type PipelineMode } from "./pipeline";
 import { updateJob } from "./services";
-import { openai } from "@workspace/integrations-openai-ai-server";
-import { textToSpeech } from "@workspace/integrations-openai-ai-server/audio";
+import { openai } from "../../lib/openai";
 import {
   GetAnalysisStatusParams,
   GetAnalysisResultParams,
@@ -129,7 +128,13 @@ router.get("/voice-preview/:voice", async (req, res) => {
   try {
     if (!voiceSampleCache.has(voice)) {
       const sampleText = VOICE_SAMPLE_TEXT[voice];
-      const buffer = await textToSpeech(sampleText, voice as "alloy" | "echo" | "fable" | "onyx" | "nova" | "shimmer", "mp3");
+      const resp = await openai.audio.speech.create({
+        model: "tts-1",
+        voice: voice as "alloy" | "echo" | "fable" | "onyx" | "nova" | "shimmer",
+        input: sampleText,
+        response_format: "mp3",
+      });
+      const buffer = Buffer.from(await resp.arrayBuffer());
       voiceSampleCache.set(voice, buffer);
     }
     const buffer = voiceSampleCache.get(voice)!;
