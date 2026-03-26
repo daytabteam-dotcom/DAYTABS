@@ -300,7 +300,7 @@ export default function Home() {
           </div>
         </div>
       </div>
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 md:py-16 relative z-10 pl-[0px] pr-[0px]">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 md:py-16 relative z-10 pl-[32px] pr-[32px]">
         {activeTab === "dashboard"      && <Dashboard onNavigate={handleTabClick} onUpgrade={() => setShowPlanModal(true)} />}
         {activeTab === "video-analyzer" && <VideoAnalyzerTab {...tabCallbacks} />}
         {activeTab === "script-planner" && <ScriptPlannerTab />}
