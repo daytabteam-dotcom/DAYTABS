@@ -18,9 +18,8 @@ import {
   ExportVideoParams,
   ExportVideoBody,
 } from "@workspace/api-zod";
-import { isR2Configured, generatePresignedPutUrl, downloadFromR2, deleteFromR2 } from "../../lib/r2";
 import { optionalAuth } from "../../middlewares/auth";
-import { normalizePlan, getLimits, buildFileTooLargeError, buildVideoTooLongError } from "../../lib/planLimits";
+import { normalizePlan, getLimits, buildFileTooLargeError } from "../../lib/planLimits";
 import { checkAndIncrementVideoAnalysis, decrementVideoAnalysis, getOrCreateUsage } from "../../lib/usageService";
 
 const execAsync = promisify(exec);
@@ -40,11 +39,10 @@ const VOICE_SAMPLE_TEXT: Record<string, string> = {
   shimmer: "Hello! I'm Shimmer — clear, friendly, and approachable. I'm ideal for tutorials, how-tos, and educational content.",
 };
 
-// ── Plan normalization (from shared planLimits module) ─────────────────────────
-// (normalizePlan is imported from ../../lib/planLimits)
-
 const uploadDir = path.join(os.tmpdir(), "daytabs-uploads");
 
+// Multer streams files directly to disk — never buffers in memory.
+// Limit is 2 GB (Studio plan max). Plan-specific size checks happen after upload.
 const storage = multer.diskStorage({
   destination: async (_req, _file, cb) => {
     await fs.mkdir(uploadDir, { recursive: true });
@@ -58,13 +56,13 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: 2 * 1024 * 1024 * 1024 },
+  limits: { fileSize: 2 * 1024 * 1024 * 1024 }, // 2 GB hard cap
   fileFilter: (_req, file, cb) => {
     const allowed = ["video/mp4", "video/quicktime", "video/x-msvideo", "video/webm", "video/mpeg", "video/mov"];
     if (allowed.includes(file.mimetype) || file.originalname.match(/\.(mp4|mov|avi|webm|mpeg|mkv)$/i)) {
       cb(null, true);
     } else {
-      cb(new Error("Invalid file type. Only video files are allowed."));
+      cb(new Error("Invalid file type. Only video files are allowed (MP4, MOV, AVI, WebM)."));
     }
   },
 });
@@ -96,159 +94,18 @@ router.get("/voice-preview/:voice", async (req, res) => {
   }
 });
 
-// ── R2 Presign — Step 1 ───────────────────────────────────────────────────────
-router.get("/presign-upload", async (req, res) => {
-  if (!isR2Configured()) {
-    res.status(503).json({ error: "R2 storage not configured — use the direct /upload endpoint instead" });
-    return;
-  }
-
-  const ext = ((req.query.ext as string) || "mp4").replace(/^\./, "").toLowerCase();
-  const validExts = ["mp4", "mov", "avi", "webm", "mpeg", "mkv"];
-  if (!validExts.includes(ext)) { res.status(400).json({ error: "Invalid file extension" }); return; }
-
-  const rawPlan = req.auth?.plan ?? "free";
-  const plan = normalizePlan(rawPlan);
-  const limits = getLimits(rawPlan);
-
-  // Peek check (no increment — actual increment happens at /start)
-  if (req.auth && limits.video_analyses_per_month !== Infinity) {
-    const usage = await getOrCreateUsage(req.auth.user_id);
-    if (usage.videoAnalysesUsed >= limits.video_analyses_per_month) {
-      const { buildMonthlyLimitError } = await import("../../lib/planLimits");
-      res.status(429).json(buildMonthlyLimitError(plan, usage.videoAnalysesUsed, limits.video_analyses_per_month));
-      return;
-    }
-  }
-
-  const contentTypeMap: Record<string, string> = {
-    mp4: "video/mp4", mov: "video/quicktime", avi: "video/x-msvideo",
-    webm: "video/webm", mpeg: "video/mpeg", mkv: "video/x-matroska",
-  };
-
-  const fileKey = `videos/${uuidv4()}.${ext}`;
-  try {
-    const uploadUrl = await generatePresignedPutUrl(fileKey, contentTypeMap[ext] ?? "video/mp4");
-    res.json({ uploadUrl, fileKey });
-  } catch (err) {
-    req.log.error({ err }, "Failed to generate R2 presigned URL");
-    res.status(500).json({ error: "Failed to generate upload URL" });
-  }
-});
-
-// ── R2 Start — Step 2 ─────────────────────────────────────────────────────────
-router.post("/start", async (req, res) => {
-  if (!isR2Configured()) { res.status(503).json({ error: "R2 storage not configured" }); return; }
-
-  const {
-    fileKey, mode, platform, platforms, modules,
-    translateSubtitles, subtitleLanguage, audioLanguage, audioVoice,
-  } = req.body as {
-    fileKey: string;
-    mode?: string;
-    platform?: string;
-    platforms?: string[];
-    modules?: string[];
-    translateSubtitles?: boolean;
-    subtitleLanguage?: string;
-    audioLanguage?: string;
-    audioVoice?: string;
-  };
-
-  if (!fileKey || typeof fileKey !== "string") { res.status(400).json({ error: "fileKey is required" }); return; }
-
-  const validatedMode: PipelineMode = "video-analyzer";
-
-  if (mode === "dubbing") {
-    res.status(403).json({ error: "Dubbing is coming soon and not yet available." });
-    return;
-  }
-
-  const validPlatforms = ["youtube_long", "youtube_shorts", "tiktok", "instagram", "linkedin", "x"];
-  const validatedPlatforms = Array.isArray(platforms)
-    ? platforms.filter(p => validPlatforms.includes(p))
-    : [platform ?? "youtube_long"].filter(p => validPlatforms.includes(p));
-  if (validatedPlatforms.length === 0) validatedPlatforms.push("youtube_long");
-
-  const validModules = ["quality", "editing", "publish", "shortClips"];
-  const validatedModules = Array.isArray(modules)
-    ? modules.filter(m => validModules.includes(m))
-    : ["quality", "editing"];
-
-  const rawPlan = req.auth?.plan ?? "free";
-  const plan = rawPlan;
-  const normalizedPlan = normalizePlan(rawPlan);
-  const userId = req.auth?.user_id ?? null;
-
-  if (userId) {
-    const limitCheck = await checkAndIncrementVideoAnalysis(userId, rawPlan);
-    if (!limitCheck.allowed) {
-      res.status(429).json(limitCheck.error);
-      return;
-    }
-  }
-
-  const maxDurationSeconds = getLimits(rawPlan).max_video_duration_seconds;
-
-  const jobId = uuidv4();
-  const ext = path.extname(fileKey).replace(".", "") || "mp4";
-  const localPath = path.join(uploadDir, `${jobId}.${ext}`);
-
-  await db.insert(analysisJobsTable).values({
-    id: jobId,
-    userId: userId ?? undefined,
-    status: "queued",
-    progress: 2,
-    currentStep: "Downloading video",
-    mode: validatedMode,
-    platform: validatedPlatforms[0] ?? "youtube_long",
-    translateSubtitles: translateSubtitles ? 1 : 0,
-    subtitleLanguage: subtitleLanguage || null,
-    replaceAudio: 0,
-    audioLanguage: audioLanguage || null,
-    videoPath: localPath,
-  });
-
-  res.json({ jobId, message: "Analysis started." });
-
-  setImmediate(async () => {
-    try {
-      await updateJob(jobId, { status: "queued", progress: 5, currentStep: "Downloading video from cloud storage" });
-      await fs.mkdir(uploadDir, { recursive: true });
-      await downloadFromR2(fileKey, localPath);
-      deleteFromR2(fileKey).catch(() => {});
-    } catch (err) {
-      req.log.error({ err, jobId }, "Failed to download from R2");
-      await updateJob(jobId, { status: "error", error: "Failed to download video from cloud storage. Please try uploading again." });
-      if (userId) await decrementVideoAnalysis(userId);
-      return;
-    }
-
-    runAnalysisPipeline(jobId, localPath, {
-      mode: validatedMode,
-      platform: validatedPlatforms[0] ?? "youtube_long",
-      platforms: validatedPlatforms,
-      modules: validatedModules,
-      translateSubtitles: Boolean(translateSubtitles),
-      subtitleLanguage: subtitleLanguage || undefined,
-      audioLanguage: audioLanguage || undefined,
-      audioVoice: (audioVoice as "alloy" | "echo" | "fable" | "onyx" | "nova" | "shimmer") || "alloy",
-      plan,
-      maxDurationSeconds,
-    }).catch(async (err) => {
-      req.log.error({ err, jobId }, "Pipeline error (R2 start)");
-      if (userId) await decrementVideoAnalysis(userId);
-    });
-  });
-});
-
-// ── Multipart upload fallback ─────────────────────────────────────────────────
+// ── Video upload + analysis ───────────────────────────────────────────────────
+// Files are streamed from the client directly to disk via multer.
+// The pipeline runs on the local file, then deletes it.
 router.post("/upload", (req, res, next) => {
+  // Extend request/response timeout for large file uploads (up to 2 GB)
+  req.socket.setTimeout(60 * 60 * 1000); // 1 hour
+
   upload.single("video")(req, res, (multerErr) => {
     if (multerErr) {
-      // Multer errors are not caught by try/catch — handle them here
       const code = (multerErr as any).code as string | undefined;
       if (code === "LIMIT_FILE_SIZE") {
+        // The hard 2 GB limit was hit — report plan limit for clarity
         const rawPlan = (req as any).auth?.plan ?? "free";
         const norm = normalizePlan(rawPlan);
         const planLimits = getLimits(rawPlan);
@@ -304,12 +161,14 @@ router.post("/upload", (req, res, next) => {
     const userId = req.auth?.user_id ?? null;
     const planLimits = getLimits(rawPlan);
 
+    // Server-side plan size enforcement (client validated first, but server is authoritative)
     if (req.file.size > planLimits.max_video_size_bytes) {
       await fs.unlink(req.file.path).catch(() => {});
       res.status(413).json(buildFileTooLargeError(normalizedPlan, req.file.size));
       return;
     }
 
+    // Monthly analysis limit check + increment
     if (userId) {
       const limitCheck = await checkAndIncrementVideoAnalysis(userId, rawPlan);
       if (!limitCheck.allowed) {
@@ -320,7 +179,6 @@ router.post("/upload", (req, res, next) => {
     }
 
     const maxDurationSeconds = planLimits.max_video_duration_seconds;
-
     const jobId = uuidv4();
     const translateSubtitles = req.body.translateSubtitles === "true" || req.body.translateSubtitles === true;
     const audioLanguage = req.body.audioLanguage || null;
@@ -331,7 +189,7 @@ router.post("/upload", (req, res, next) => {
       userId: userId ?? undefined,
       status: "queued",
       progress: 2,
-      currentStep: "Uploading",
+      currentStep: "Preparing analysis",
       mode: validatedMode,
       platform: validatedPlatforms[0] ?? "youtube_long",
       translateSubtitles: translateSubtitles ? 1 : 0,
@@ -340,6 +198,9 @@ router.post("/upload", (req, res, next) => {
       audioLanguage,
       videoPath: req.file.path,
     });
+
+    // Respond immediately — pipeline runs in background
+    res.json({ jobId, message: "Video uploaded. Analysis started." });
 
     setImmediate(() => {
       runAnalysisPipeline(jobId, req.file!.path, {
@@ -358,14 +219,14 @@ router.post("/upload", (req, res, next) => {
         if (userId) await decrementVideoAnalysis(userId);
       });
     });
-
-    res.json({ jobId, message: "Video uploaded successfully. Analysis started." });
   } catch (err) {
-    req.log.error({ err }, "Upload error");
+    req.log.error({ err }, "Upload handler error");
+    if (req.file?.path) await fs.unlink(req.file.path).catch(() => {});
     res.status(500).json({ error: "Upload failed", details: err instanceof Error ? err.message : String(err) });
   }
 });
 
+// ── Job status polling ────────────────────────────────────────────────────────
 router.get("/:jobId/status", async (req, res) => {
   try {
     const params = GetAnalysisStatusParams.parse(req.params);
@@ -379,6 +240,7 @@ router.get("/:jobId/status", async (req, res) => {
   }
 });
 
+// ── Analysis results ──────────────────────────────────────────────────────────
 router.get("/:jobId/result", async (req, res) => {
   try {
     const params = GetAnalysisResultParams.parse(req.params);
@@ -393,6 +255,7 @@ router.get("/:jobId/result", async (req, res) => {
   }
 });
 
+// ── Video export (re-encode + optional audio dub) ─────────────────────────────
 router.post("/:jobId/export", async (req, res) => {
   try {
     const params = ExportVideoParams.parse(req.params);
@@ -510,6 +373,7 @@ router.post("/:jobId/export", async (req, res) => {
   }
 });
 
+// ── Exported video download ───────────────────────────────────────────────────
 router.get("/download/:filename", async (req, res) => {
   try {
     const { filename } = req.params;

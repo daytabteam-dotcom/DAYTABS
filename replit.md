@@ -42,12 +42,19 @@ artifacts-monorepo/
 
 ## Analysis Pipeline
 
+### Video Upload Flow
+- **Single upload path**: multipart POST to `POST /api/analysis/upload` — Multer streams directly to disk at `/tmp/daytabs-uploads/`, never buffering in memory
+- **No cloud storage**: Cloudflare R2 has been fully removed. Files live on the local filesystem for the duration of analysis only, then deleted
+- **Large file support**: Server timeout set to 1 hour; multer hard cap is 2 GB; XHR on the frontend gives real upload progress
+- **Deleted routes**: `GET /api/analysis/presign-upload` and `POST /api/analysis/start` (R2 two-step flow) are gone
+- **Frontend**: `use-video-upload.ts` uses `XMLHttpRequest` directly to `/api/analysis/upload` for real `upload.onprogress` events
+
 ### Video Analyzer (`video-analyzer`) — sole unified mode
 - 8-step pipeline: compress → extract audio → duration check → transcribe (single Whisper call) → quality → editing → publish → short clips
 - Accepts `modules[]` (quality, editing, publish, shortClips) and `platforms[]` arrays from the client
 - Result: `{ quality, editing, publish: {[platform]: seoData}, shortClips, transcript }`
 - Duration limits enforced server-side before transcription
-- All uploads (presign R2 and multipart fallback) count as `video-analyzer` mode — single unified quota per plan
+- All uploads count as `video-analyzer` mode — single unified quota per plan
 
 ### Dubbing — Coming Soon placeholder
 - DubbingTab renders a waiting-list email capture; backend rejects `mode=dubbing` with 403

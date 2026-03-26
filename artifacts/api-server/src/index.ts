@@ -1,6 +1,5 @@
 import app from "./app";
 import { logger } from "./lib/logger";
-import { isR2Configured, ensureR2Cors } from "./lib/r2";
 
 const rawPort = process.env["PORT"];
 
@@ -16,18 +15,12 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-app.listen(port, async (err) => {
-  if (err) {
-    logger.error({ err }, "Error listening on port");
-    process.exit(1);
-  }
-
+const server = app.listen(port, () => {
   logger.info({ port }, "Server listening");
-
-  if (isR2Configured()) {
-    logger.info("R2 storage configured — direct upload active");
-    ensureR2Cors().catch(() => {
-      logger.warn("R2 CORS setup skipped (token lacks PutBucketCors permission — configure CORS in the Cloudflare dashboard for browser-direct uploads)");
-    });
-  }
 });
+
+// Extend timeouts to support large video uploads (up to 2 GB for Studio plan).
+// Default Node.js socket timeout is 5 s which is far too short for big files.
+server.setTimeout(60 * 60 * 1000);       // 1 hour socket timeout
+server.headersTimeout = 61 * 60 * 1000;  // slightly above socket timeout
+server.requestTimeout = 61 * 60 * 1000;  // same
