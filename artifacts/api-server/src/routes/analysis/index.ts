@@ -243,7 +243,24 @@ router.post("/start", async (req, res) => {
 });
 
 // ── Multipart upload fallback ─────────────────────────────────────────────────
-router.post("/upload", upload.single("video"), async (req, res) => {
+router.post("/upload", (req, res, next) => {
+  upload.single("video")(req, res, (multerErr) => {
+    if (multerErr) {
+      // Multer errors are not caught by try/catch — handle them here
+      const code = (multerErr as any).code as string | undefined;
+      if (code === "LIMIT_FILE_SIZE") {
+        const rawPlan = (req as any).auth?.plan ?? "free";
+        const norm = normalizePlan(rawPlan);
+        const planLimits = getLimits(rawPlan);
+        res.status(413).json(buildFileTooLargeError(norm, planLimits.max_video_size_bytes + 1));
+      } else {
+        res.status(400).json({ error: multerErr.message ?? "File upload error" });
+      }
+      return;
+    }
+    next();
+  });
+}, async (req, res) => {
   try {
     if (!req.file) { res.status(400).json({ error: "No video file uploaded" }); return; }
 

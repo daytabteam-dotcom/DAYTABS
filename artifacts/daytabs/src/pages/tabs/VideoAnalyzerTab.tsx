@@ -10,7 +10,7 @@ import {
 import { useAnalysisPolling, useAnalysisResults } from "@/hooks/use-analysis";
 import { useVideoUpload } from "@/hooks/use-video-upload";
 import { useToast } from "@/hooks/use-toast";
-import { usePlan, getFileSizeLimit, getFileSizeLimitLabel, getDurationLimitLabel } from "@/hooks/use-plan";
+import { usePlan, getFileSizeLimitLabel, getDurationLimitLabel, FILE_SIZE_LIMITS, DURATION_LIMITS_SEC } from "@/hooks/use-plan";
 import { PlanPickerModal } from "@/components/PlanPickerModal";
 import { generateAnalysisPDF } from "@/lib/generateAnalysisPDF";
 import { UpgradeErrorModal, type LimitError } from "@/components/UpgradeErrorModal";
@@ -769,34 +769,64 @@ function LimitReachedModal({ limit, onClose, onUpgrade }: { limit: number; onClo
   );
 }
 
-function UploadZone({ onFile, isPending, maxSizeLabel, durationLabel }: { onFile: (f: File) => void; isPending: boolean; maxSizeLabel?: string; durationLabel?: string }) {
-  const [file, setFile] = useState<File | null>(null);
+/** Loads video metadata and resolves the duration in seconds, or null on failure. */
+function getVideoDuration(file: File): Promise<number | null> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const video = document.createElement("video");
+    video.preload = "metadata";
+    video.onloadedmetadata = () => { URL.revokeObjectURL(url); resolve(video.duration); };
+    video.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
+    video.src = url;
+  });
+}
+
+/** Controlled upload zone — parent manages the accepted file state */
+function UploadZone({ onFile, currentFile, isPending, maxSizeLabel, durationLabel }: {
+  onFile: (f: File) => void;
+  currentFile: File | null;
+  isPending: boolean;
+  maxSizeLabel?: string;
+  durationLabel?: string;
+}) {
   const [preview, setPreview] = useState<string | null>(null);
+
+  // Sync preview with the controlled file
+  useEffect(() => {
+    if (currentFile) {
+      const url = URL.createObjectURL(currentFile);
+      setPreview(url);
+      return () => URL.revokeObjectURL(url);
+    } else {
+      setPreview(null);
+    }
+  }, [currentFile]);
+
   const onDrop = useCallback((accepted: File[]) => {
     const f = accepted[0]; if (!f) return;
-    setFile(f);
-    setPreview(URL.createObjectURL(f));
-    onFile(f);
+    onFile(f); // parent decides whether to accept it
   }, [onFile]);
+
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     accept: { "video/*": [".mp4", ".mov", ".avi", ".webm"] },
     maxFiles: 1,
     disabled: isPending,
   });
+
   return (
     <div
       {...getRootProps()}
-      className={`relative overflow-hidden rounded-2xl cursor-pointer transition-all duration-300 border-2 ${isDragActive ? "border-primary bg-primary/10 scale-[1.01]" : "border-white/10 hover:border-primary/40 bg-primary/3 hover:bg-primary/6"} ${file ? "min-h-[180px] p-2" : "p-8"}`}
+      className={`relative overflow-hidden rounded-2xl cursor-pointer transition-all duration-300 border-2 ${isDragActive ? "border-primary bg-primary/10 scale-[1.01]" : "border-white/10 hover:border-primary/40 bg-primary/3 hover:bg-primary/6"} ${currentFile ? "min-h-[180px] p-2" : "p-8"}`}
     >
       <input {...getInputProps()} />
-      {file && preview ? (
+      {currentFile && preview ? (
         <div className="relative w-full min-h-[160px] rounded-xl overflow-hidden bg-black/50">
           <video src={preview} className="w-full h-full object-cover opacity-40" autoPlay loop muted playsInline />
           <div className="absolute inset-0 flex flex-col items-center justify-center p-6 bg-gradient-to-t from-black/80 via-transparent to-transparent">
             <Film className="w-8 h-8 text-primary mb-2" />
-            <p className="text-sm font-semibold text-white/90 text-center">{file.name}</p>
-            <p className="text-xs text-white/40 mt-1">{(file.size / 1024 / 1024).toFixed(1)} MB — click to change</p>
+            <p className="text-sm font-semibold text-white/90 text-center">{currentFile.name}</p>
+            <p className="text-xs text-white/40 mt-1">{(currentFile.size / 1024 / 1024).toFixed(1)} MB — click to change</p>
           </div>
         </div>
       ) : (
@@ -820,7 +850,7 @@ function UploadZone({ onFile, isPending, maxSizeLabel, durationLabel }: { onFile
 }
 
 export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterExport }: TabProps) {
-  const { plan, getModeLimits } = usePlan();
+  const { plan, loading: planLoading, getModeLimits } = usePlan();
   const { toast } = useToast();
 
   const [file, setFile] = useState<File | null>(null);
@@ -887,6 +917,66 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
     setSelectedModules(prev =>
       prev.includes(id) ? (prev.length > 1 ? prev.filter(m => m !== id) : prev) : [...prev, id]
     );
+  }
+
+  /** Called immediately on file drop — validates size and duration before accepting the file */
+  async function handleFileSelected(f: File) {
+    // If the plan hasn't loaded yet, accept the file optimistically — server will enforce limits
+    if (planLoading) { setFile(f); return; }
+
+    const norm = plan.normalizedPlan;
+    const sizeLimit = FILE_SIZE_LIMITS[norm] ?? FILE_SIZE_LIMITS.free;
+
+    // 1. Instant size check (synchronous)
+    if (f.size > sizeLimit) {
+      const limitLabel = sizeLimit >= 1024 * 1024 * 1024
+        ? `${(sizeLimit / (1024 * 1024 * 1024)).toFixed(0)} GB`
+        : `${Math.round(sizeLimit / (1024 * 1024))} MB`;
+      const fileLabel = `${(f.size / (1024 * 1024)).toFixed(1)} MB`;
+      const upgradeMap: Record<string, { action: string; route: string }> = {
+        free:    { action: "Upgrade to Creator for 500 MB videos", route: "/pricing?highlight=creator" },
+        creator: { action: "Upgrade to Pro for 1 GB videos",       route: "/pricing?highlight=pro" },
+        pro:     { action: "Upgrade to Studio for 2 GB videos",    route: "/pricing?highlight=studio" },
+        studio:  { action: "View Plans",                            route: "/pricing" },
+      };
+      const up = upgradeMap[norm] ?? upgradeMap.free;
+      setLimitError({
+        code: "FILE_TOO_LARGE",
+        title: "Video file is too large",
+        message: `Your ${plan.plan === "free" ? "Free" : norm.charAt(0).toUpperCase() + norm.slice(1)} plan supports videos up to ${limitLabel}. Your file is ${fileLabel}.`,
+        action: { label: up.action, route: up.route },
+        meta: { current_plan: norm },
+      });
+      return; // Reject — don't set the file at all
+    }
+
+    // 2. Accept the file for display immediately
+    setFile(f);
+
+    // 3. Async duration check (very fast — just reads metadata)
+    const duration = await getVideoDuration(f);
+    if (duration !== null && !isNaN(duration) && isFinite(duration)) {
+      const durationLimit = DURATION_LIMITS_SEC[norm] ?? DURATION_LIMITS_SEC.free;
+      if (duration > durationLimit) {
+        setFile(null); // Reject — clear the file
+        const limitMin = Math.round(durationLimit / 60);
+        const durMin = Math.round(duration / 60);
+        const upgradeMap: Record<string, { action: string; route: string }> = {
+          free:    { action: "Upgrade to Creator for 15 min videos", route: "/pricing?highlight=creator" },
+          creator: { action: "Upgrade to Pro for 30 min videos",     route: "/pricing?highlight=pro" },
+          pro:     { action: "Upgrade to Studio for 60 min videos",  route: "/pricing?highlight=studio" },
+          studio:  { action: "View Plans",                           route: "/pricing" },
+        };
+        const up = upgradeMap[norm] ?? upgradeMap.free;
+        setLimitError({
+          code: "VIDEO_TOO_LONG",
+          title: "Video is too long for your plan",
+          message: `Your plan supports videos up to ${limitMin} minutes. Your video is ${durMin} minutes long.`,
+          action: { label: up.action, route: up.route },
+          meta: { current_plan: norm },
+        });
+      }
+    }
   }
 
   async function handleAnalyze() {
@@ -956,7 +1046,8 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
           <div className="grid lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2 space-y-5">
               <UploadZone
-                onFile={setFile}
+                onFile={handleFileSelected}
+                currentFile={file}
                 isPending={isSubmitting}
                 maxSizeLabel={getFileSizeLimitLabel(plan.plan)}
                 durationLabel={getDurationLimitLabel(plan.plan)}
