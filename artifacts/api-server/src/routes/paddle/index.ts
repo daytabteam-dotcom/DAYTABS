@@ -89,14 +89,48 @@ router.get("/subscription", requireAuth, async (req, res) => {
     let syncedPlan: string | null = null;
     let syncedSubscriptionId: string | null = null;
     let syncedCustomerId: string | null = null;
+    let clearCancelsAt = false;
 
     // 1. Try by stored subscription ID first (fastest)
     if (user.paddleSubscriptionId) {
       subscription = await fetchSubscriptionById(user.paddleSubscriptionId);
       if (subscription?.status === "canceled") {
-        subscription = null;
-        syncedPlan = "free";
-        syncedSubscriptionId = "";
+        // Subscription is fully cancelled in Paddle.
+        // Check if user still has access (subscriptionCancelsAt is in the future).
+        const cancelsAt = user.subscriptionCancelsAt;
+        if (cancelsAt && cancelsAt > new Date()) {
+          // Access period still active — keep paid plan, show as "cancels on [date]"
+          // Inject scheduledChange if Paddle didn't return one
+          if (!subscription.scheduledChange) {
+            subscription = {
+              ...subscription,
+              status: "active" as const,
+              scheduledChange: { action: "cancel" as const, effectiveAt: cancelsAt.toISOString() },
+            };
+          } else {
+            // Keep as-is but override status to active so frontend shows correctly
+            subscription = { ...subscription, status: "active" as const };
+          }
+        } else {
+          // Period has ended, downgrade to free
+          subscription = null;
+          syncedPlan = "free";
+          syncedSubscriptionId = "";
+          clearCancelsAt = true;
+        }
+      } else if (subscription?.status === "active" && !subscription.scheduledChange && user.subscriptionCancelsAt) {
+        // Paddle API hasn't reflected the scheduled cancellation yet (eventual consistency).
+        // Fall back to what we stored in the DB.
+        const cancelsAt = user.subscriptionCancelsAt;
+        if (cancelsAt > new Date()) {
+          subscription = {
+            ...subscription,
+            scheduledChange: { action: "cancel" as const, effectiveAt: cancelsAt.toISOString() },
+          };
+        }
+      } else if (subscription?.status === "active" && subscription.scheduledChange?.action !== "cancel") {
+        // Subscription is active without pending cancellation — clear any stale cancelsAt
+        if (user.subscriptionCancelsAt) clearCancelsAt = true;
       }
     }
 
@@ -129,14 +163,16 @@ router.get("/subscription", requireAuth, async (req, res) => {
     const needsUpdate =
       (syncedPlan !== null && syncedPlan !== user.plan) ||
       (syncedSubscriptionId !== null && syncedSubscriptionId !== user.paddleSubscriptionId) ||
-      (syncedCustomerId !== null && syncedCustomerId !== user.paddleCustomerId);
+      (syncedCustomerId !== null && syncedCustomerId !== user.paddleCustomerId) ||
+      clearCancelsAt;
 
     if (needsUpdate) {
       const updates: Record<string, unknown> = { plan: planToStore };
       if (syncedSubscriptionId !== null) updates.paddleSubscriptionId = syncedSubscriptionId || null;
       if (syncedCustomerId !== null) updates.paddleCustomerId = syncedCustomerId;
+      if (clearCancelsAt) updates.subscriptionCancelsAt = null;
       await db.update(usersTable).set(updates as never).where(eq(usersTable.id, user.id));
-      req.log.info({ userId: user.id, planToStore, syncedSubscriptionId }, "Synced plan from Paddle");
+      req.log.info({ userId: user.id, planToStore, syncedSubscriptionId, clearCancelsAt }, "Synced plan from Paddle");
     }
 
     // 5. Return fresh JWT so the client can update its token immediately
@@ -181,6 +217,19 @@ router.post("/cancel-subscription", requireAuth, async (req, res) => {
       return;
     }
 
+    // Store the cancels-at date in DB so we have it even if Paddle API is slow to reflect it
+    if (result.effectiveAt) {
+      try {
+        await db
+          .update(usersTable)
+          .set({ subscriptionCancelsAt: new Date(result.effectiveAt) } as never)
+          .where(eq(usersTable.id, user.id));
+        req.log.info({ userId: user.id, effectiveAt: result.effectiveAt }, "Stored subscriptionCancelsAt");
+      } catch (dbErr) {
+        req.log.error({ dbErr }, "Failed to store subscriptionCancelsAt");
+      }
+    }
+
     res.json({ success: result.success, effectiveAt: result.effectiveAt, requiresPortal: false, portalUrl: null });
   } catch (err) {
     req.log.error({ err }, "Failed to cancel subscription");
@@ -214,6 +263,19 @@ router.post("/reactivate-subscription", requireAuth, async (req, res) => {
       req.log.warn({ userId: user.id }, "Paddle reactivate forbidden — returning portal URL fallback");
       res.json({ success: false, requiresPortal: true, portalUrl });
       return;
+    }
+
+    // Clear the stored cancellation date since the user is keeping their plan
+    if (result.success) {
+      try {
+        await db
+          .update(usersTable)
+          .set({ subscriptionCancelsAt: null } as never)
+          .where(eq(usersTable.id, user.id));
+        req.log.info({ userId: user.id }, "Cleared subscriptionCancelsAt on reactivation");
+      } catch (dbErr) {
+        req.log.error({ dbErr }, "Failed to clear subscriptionCancelsAt");
+      }
     }
 
     res.json({ success: result.success, requiresPortal: false, portalUrl: null });
@@ -306,6 +368,13 @@ router.post("/webhook", async (req, res) => {
       data?.items?.[0]?.price?.id ?? data?.price?.id;
     const plan = priceId ? priceIdToPlan(priceId) : null;
 
+    // If this is a subscription.updated with a scheduled cancellation, store the cancels-at date
+    const scheduledChange = data?.scheduled_change;
+    const isScheduledCancel =
+      eventType === "subscription.updated" &&
+      scheduledChange?.action === "cancel" &&
+      scheduledChange?.effective_at;
+
     if (plan && plan !== "free" && (customerEmail || userId)) {
       try {
         const where = userId
@@ -318,10 +387,16 @@ router.post("/webhook", async (req, res) => {
         // Reset billing cycle anchor to now — subscriber months start from activation date
         if (eventType === "subscription.activated") {
           updates.cycleStartAt = new Date();
+          // Clear any stale cancels-at when subscription activates fresh
+          updates.subscriptionCancelsAt = null;
+        }
+        // If this update has a scheduled cancellation, persist the effective date
+        if (isScheduledCancel) {
+          updates.subscriptionCancelsAt = new Date(scheduledChange.effective_at as string);
         }
 
         await db.update(usersTable).set(updates as never).where(where);
-        req.log.info({ plan, customerEmail, userId, eventType }, "Plan updated via webhook");
+        req.log.info({ plan, customerEmail, userId, eventType, isScheduledCancel }, "Plan updated via webhook");
       } catch (err) {
         req.log.error({ err }, "Failed to update plan via webhook");
       }
@@ -344,7 +419,7 @@ router.post("/webhook", async (req, res) => {
           : eq(usersTable.email, customerEmail!);
         await db
           .update(usersTable)
-          .set({ plan: "free" as string, paddleSubscriptionId: null } as never)
+          .set({ plan: "free" as string, paddleSubscriptionId: null, subscriptionCancelsAt: null } as never)
           .where(where);
         req.log.info({ customerEmail, userId }, "Plan reset to free via webhook");
       } catch (err) {
@@ -385,6 +460,8 @@ router.post("/checkout-complete", requireAuth, async (req, res) => {
     if (subscriptionId) updates.paddleSubscriptionId = subscriptionId;
     // Set cycle anchor to now — subscriber's month starts from checkout date
     updates.cycleStartAt = new Date();
+    // Clear any stale cancellation date on new subscription
+    updates.subscriptionCancelsAt = null;
 
     await db.update(usersTable).set(updates as never).where(eq(usersTable.id, user.id));
 

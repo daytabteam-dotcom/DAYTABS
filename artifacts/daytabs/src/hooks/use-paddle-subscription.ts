@@ -118,7 +118,22 @@ export function usePaddleSubscription() {
     }
     const data = await res.json() as { effectiveAt: string | null; requiresPortal: boolean; portalUrl: string | null };
     if (!data.requiresPortal) {
-      await fetch_();
+      // Optimistically update local state so the UI reflects the cancellation immediately.
+      // Paddle's API may take a few seconds to reflect the scheduledChange; this ensures
+      // the user sees "Cancels on [date]" right away without waiting for a re-fetch.
+      if (data.effectiveAt) {
+        setSubscription((prev) =>
+          prev
+            ? {
+                ...prev,
+                nextBilledAt: null,
+                scheduledChange: { action: "cancel", effectiveAt: data.effectiveAt! },
+              }
+            : prev
+        );
+      }
+      // Also re-fetch in the background to sync with Paddle's actual state
+      fetch_().catch(() => {});
     }
     return { effectiveAt: data.effectiveAt, requiresPortal: data.requiresPortal ?? false, portalUrl: data.portalUrl ?? null };
   }
@@ -135,8 +150,13 @@ export function usePaddleSubscription() {
       throw new Error(err.error ?? "Failed to reactivate subscription");
     }
     const data = await res.json() as { success: boolean; requiresPortal: boolean; portalUrl: string | null };
-    if (!data.requiresPortal) {
-      await fetch_();
+    if (!data.requiresPortal && data.success) {
+      // Optimistically clear the pending cancellation from local state
+      setSubscription((prev) =>
+        prev ? { ...prev, scheduledChange: null } : prev
+      );
+      // Re-fetch in background to get the updated nextBilledAt
+      fetch_().catch(() => {});
     }
     return { success: data.success, requiresPortal: data.requiresPortal ?? false, portalUrl: data.portalUrl ?? null };
   }

@@ -15,6 +15,10 @@ export const usersTable = pgTable("users", {
   // Paid users: updated to now() when a subscription activates.
   // Resets happen exactly 1 month from this date, not on calendar month boundaries.
   cycleStartAt: timestamp("cycle_start_at"),
+  // Set when user cancels — the date their paid access actually ends.
+  // Cleared when they reactivate or when subscription.canceled webhook fires.
+  // Used as a fallback when Paddle API hasn't reflected the scheduledChange yet.
+  subscriptionCancelsAt: timestamp("subscription_cancels_at"),
 });
 
 export type User = typeof usersTable.$inferSelect;
