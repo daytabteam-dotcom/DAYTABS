@@ -5,10 +5,10 @@ import {
   Upload, Film, Wand2, Shield, Scissors, TrendingUp, Sparkles,
   CheckCircle2, AlertTriangle, XCircle, RefreshCcw,
   Volume2, Eye, Zap, Hash, FileText, Lock, Download,
-  Copy, Check, AlignLeft, ChevronRight, FileDown,
+  Copy, Check, AlignLeft, ChevronRight, FileDown, X,
 } from "lucide-react";
 import { useAnalysisPolling, useAnalysisResults } from "@/hooks/use-analysis";
-import { useVideoUpload } from "@/hooks/use-video-upload";
+import { useVideoUpload, type UploadProgressInfo } from "@/hooks/use-video-upload";
 import { useToast } from "@/hooks/use-toast";
 import { usePlan, getFileSizeLimitLabel, getDurationLimitLabel, FILE_SIZE_LIMITS, DURATION_LIMITS_SEC } from "@/hooks/use-plan";
 import { PlanPickerModal } from "@/components/PlanPickerModal";
@@ -674,9 +674,81 @@ function TranscriptPanel({ data, isPaid }: { data: any; isPaid: boolean }) {
   );
 }
 
-function AnalyzingScreen({ progress, currentStep, isSubmitting }: { progress: number; currentStep: string; isSubmitting: boolean }) {
+function AnalyzingScreen({
+  progress,
+  currentStep,
+  isSubmitting,
+  uploadInfo,
+  onCancel,
+}: {
+  progress: number;
+  currentStep: string;
+  isSubmitting: boolean;
+  uploadInfo: UploadProgressInfo | null;
+  onCancel: () => void;
+}) {
+  const isUploading = isSubmitting && uploadInfo !== null;
   const activeIdx = isSubmitting ? 0
     : PROGRESS_STEPS.findIndex(step => step.threshold > progress) - 1;
+
+  if (isUploading && uploadInfo) {
+    const { phase, pct, mbUploaded, totalMb, etaSec, retrying } = uploadInfo;
+    const isAssembling = phase === "assembling";
+
+    let etaLabel = "";
+    if (!isAssembling && etaSec !== null) {
+      if (etaSec < 60) etaLabel = `~${etaSec}s remaining`;
+      else etaLabel = `~${Math.round(etaSec / 60)}m remaining`;
+    }
+
+    return (
+      <div className="max-w-lg mx-auto py-12">
+        <div className="text-center mb-10">
+          <div className="w-16 h-16 rounded-2xl bg-primary/15 border border-primary/25 flex items-center justify-center mx-auto mb-4">
+            <Upload className="w-8 h-8 text-primary animate-pulse" />
+          </div>
+          <h2 className="text-xl font-semibold text-white">
+            {isAssembling ? "Assembling video..." : "Uploading video"}
+          </h2>
+          <p className="text-white/40 text-sm mt-1">
+            {isAssembling
+              ? "Finalizing your upload, almost ready..."
+              : `${mbUploaded.toFixed(1)} MB of ${totalMb.toFixed(1)} MB${etaLabel ? " - " + etaLabel : ""}`}
+          </p>
+        </div>
+
+        <div className="mb-6">
+          <div className="flex justify-between text-xs text-white/40 mb-2">
+            <span>{isAssembling ? "Processing upload..." : retrying ? "Connection issue - retrying..." : `Uploading... ${pct}%`}</span>
+            {!isAssembling && <span>{pct}%</span>}
+          </div>
+          <div className="h-2 bg-white/8 rounded-full overflow-hidden">
+            <motion.div
+              animate={{ width: `${isAssembling ? 100 : pct}%` }}
+              transition={{ duration: 0.4, ease: "easeOut" }}
+              className={`h-full rounded-full ${retrying ? "bg-amber-400" : "bg-gradient-to-r from-primary to-purple-500"}`}
+            />
+          </div>
+          {retrying && (
+            <p className="text-xs text-amber-400/80 mt-2">Connection issue - retrying chunk...</p>
+          )}
+        </div>
+
+        {!isAssembling && (
+          <div className="flex justify-center">
+            <button
+              onClick={onCancel}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold text-white/40 border border-white/10 hover:border-white/25 hover:text-white/60 transition-all"
+            >
+              <X className="w-3.5 h-3.5" />Cancel upload
+            </button>
+          </div>
+        )}
+
+        <p className="text-xs text-white/20 text-center mt-6">Do not close this tab during upload</p>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-lg mx-auto py-12">
@@ -685,7 +757,7 @@ function AnalyzingScreen({ progress, currentStep, isSubmitting }: { progress: nu
           <Wand2 className="w-8 h-8 text-primary animate-pulse" />
         </div>
         <h2 className="text-xl font-semibold text-white">Analyzing your video</h2>
-        <p className="text-white/40 text-sm mt-1">This takes 1–3 minutes depending on length</p>
+        <p className="text-white/40 text-sm mt-1">This takes 1-3 minutes depending on length</p>
       </div>
 
       <div className="mb-8">
@@ -796,9 +868,9 @@ function UploadZone({ onFile, currentFile, isPending, maxSizeLabel, durationLabe
       const url = URL.createObjectURL(currentFile);
       setPreview(url);
       return () => URL.revokeObjectURL(url);
-    } else {
-      setPreview(null);
     }
+    setPreview(null);
+    return undefined;
   }, [currentFile]);
 
   const onDrop = useCallback((accepted: File[]) => {
@@ -862,7 +934,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [limitError, setLimitError] = useState<LimitError | null>(null);
 
-  const { uploadAsync: uploadVideo, isPending: isUploading } = useVideoUpload();
+  const { uploadAsync: uploadVideo, isPending: isUploading, uploadInfo, cancelUpload } = useVideoUpload();
   const { data: pollData } = useAnalysisPolling(jobId);
   const statusData = pollData as { status?: string; progress?: number; currentStep?: string } | undefined;
   const { data: results } = useAnalysisResults(jobId, statusData?.status === "complete");
@@ -997,6 +1069,11 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
       });
       setJobId(id);
     } catch (err: any) {
+      // Silently reset if the user cancelled
+      if (err?.message === "Upload cancelled") {
+        setFile(null);
+        return;
+      }
       // Detect structured limit errors from the server
       const structured = err?.structured ?? err?.response;
       if (structured?.code) {
@@ -1013,6 +1090,10 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
     setFile(null);
     setJobId(null);
     onDataReset();
+  }
+
+  function handleCancel() {
+    cancelUpload();
   }
 
   const progress = statusData?.progress ?? (isSubmitting ? 5 : 0);
@@ -1132,7 +1213,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
       ) : isError ? (
         <ErrorScreen error={errorMessage} onReset={handleReset} />
       ) : showAnalyzing ? (
-        <AnalyzingScreen progress={progress} currentStep={currentStepLabel} isSubmitting={isSubmitting} />
+        <AnalyzingScreen progress={progress} currentStep={currentStepLabel} isSubmitting={isSubmitting} uploadInfo={uploadInfo} onCancel={handleCancel} />
       ) : hasResults ? (
         <div className="space-y-6">
           <div className="flex items-center justify-between gap-3 flex-wrap">

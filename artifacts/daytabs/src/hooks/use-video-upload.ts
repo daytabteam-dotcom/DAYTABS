@@ -1,5 +1,4 @@
-import { useState, useCallback } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useState, useCallback, useRef } from "react";
 
 export interface VideoUploadOptions {
   mode: string;
@@ -12,114 +11,237 @@ export interface VideoUploadOptions {
   audioVoice?: string;
 }
 
+export interface UploadProgressInfo {
+  phase: "uploading" | "assembling";
+  pct: number;
+  mbUploaded: number;
+  totalMb: number;
+  etaSec: number | null;
+  retrying: boolean;
+}
+
 function getAuthToken(): string | null {
   return localStorage.getItem("daytabs_token");
 }
 
+function authHeaders(): Record<string, string> {
+  const token = getAuthToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+const CHUNK_SIZE = 5 * 1024 * 1024;
+
 export function useVideoUpload() {
+  const [isPending, setIsPending] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadInfo, setUploadInfo] = useState<UploadProgressInfo | null>(null);
+  const [error, setError] = useState<Error | null>(null);
 
-  const reset = useCallback(() => setUploadProgress(0), []);
+  const cancelledRef = useRef(false);
+  const uploadIdRef = useRef<string | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
-  const mutation = useMutation({
-    mutationFn: async ({
+  const cancelUpload = useCallback(() => {
+    cancelledRef.current = true;
+    abortControllerRef.current?.abort();
+    const id = uploadIdRef.current;
+    if (id) {
+      fetch(`/api/upload/${id}`, {
+        method: "DELETE",
+        headers: authHeaders(),
+      }).catch(() => {});
+    }
+  }, []);
+
+  const uploadAsync = useCallback(
+    async ({
       file,
       options,
     }: {
       file: File;
       options: VideoUploadOptions;
     }): Promise<{ jobId: string }> => {
-      setUploadProgress(0);
+      cancelledRef.current = false;
+      uploadIdRef.current = null;
+      setIsPending(true);
+      setError(null);
+      setUploadProgress(1);
+      setUploadInfo(null);
 
-      const form = new FormData();
-      form.append("video", file);
-      form.append("mode", options.mode);
-      form.append("platform", options.platforms?.[0] ?? options.platform ?? "youtube_long");
-      form.append("platforms", JSON.stringify(options.platforms ?? (options.platform ? [options.platform] : ["youtube_long"])));
-      form.append("modules", JSON.stringify(options.modules ?? ["quality", "editing"]));
-      if (options.translateSubtitles) form.append("translateSubtitles", "true");
-      if (options.subtitleLanguage) form.append("subtitleLanguage", options.subtitleLanguage);
-      if (options.audioLanguage) form.append("audioLanguage", options.audioLanguage);
-      if (options.audioVoice) form.append("audioVoice", options.audioVoice);
+      try {
+        const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+        const totalMb = file.size / (1024 * 1024);
 
-      return new Promise<{ jobId: string }>((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
+        const initBody = {
+          filename: file.name,
+          fileSize: file.size,
+          mimeType: file.type || "video/mp4",
+          totalChunks,
+          mode: options.mode,
+          platforms: JSON.stringify(
+            options.platforms ?? (options.platform ? [options.platform] : ["youtube_long"])
+          ),
+          modules: JSON.stringify(options.modules ?? ["quality", "editing"]),
+          translateSubtitles: options.translateSubtitles ?? false,
+          subtitleLanguage: options.subtitleLanguage ?? null,
+          audioLanguage: options.audioLanguage ?? null,
+          audioVoice: options.audioVoice ?? "alloy",
+        };
 
-        // Real upload progress, maps the upload phase to 0–92%
-        xhr.upload.addEventListener("progress", (e) => {
-          if (e.lengthComputable) {
-            setUploadProgress(Math.round((e.loaded / e.total) * 92));
-          }
+        const initRes = await fetch("/api/upload/init", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...authHeaders() },
+          body: JSON.stringify(initBody),
         });
 
-        xhr.addEventListener("load", () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            setUploadProgress(100);
-            try {
-              resolve(JSON.parse(xhr.responseText) as { jobId: string });
-            } catch {
-              reject(new Error("Invalid response from server"));
+        if (!initRes.ok) {
+          const body = await initRes.json().catch(() => ({}));
+          const err = new Error(
+            body.message ?? body.error ?? `Upload init failed (HTTP ${initRes.status})`
+          );
+          if (body.code) (err as any).structured = body;
+          throw err;
+        }
+
+        const { uploadId } = await initRes.json();
+        uploadIdRef.current = uploadId;
+
+        if (cancelledRef.current) throw new Error("Upload cancelled");
+
+        const startTime = Date.now();
+        let bytesUploaded = 0;
+
+        for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+          if (cancelledRef.current) throw new Error("Upload cancelled");
+
+          const start = chunkIndex * CHUNK_SIZE;
+          const end = Math.min(start + CHUNK_SIZE, file.size);
+          const chunk = file.slice(start, end);
+
+          let attempts = 0;
+          let success = false;
+
+          while (attempts < 3 && !success) {
+            if (cancelledRef.current) throw new Error("Upload cancelled");
+
+            if (attempts > 0) {
+              setUploadInfo((prev) => prev ? { ...prev, retrying: true } : null);
+              await new Promise((r) => setTimeout(r, 1000));
             }
-          } else {
+
+            const ac = new AbortController();
+            abortControllerRef.current = ac;
+
             try {
-              const body = JSON.parse(xhr.responseText) as {
-                error?: string;
-                code?: string;
-                title?: string;
-                message?: string;
-                action?: unknown;
-                meta?: unknown;
-              };
-              if (body.code) {
-                const err = new Error(body.message ?? body.error ?? `Upload failed (HTTP ${xhr.status})`);
-                (err as any).structured = body;
-                reject(err);
-              } else {
-                reject(new Error(body.error ?? `Upload failed (HTTP ${xhr.status})`));
+              const form = new FormData();
+              form.append("uploadId", uploadId);
+              form.append("chunkIndex", String(chunkIndex));
+              form.append("totalChunks", String(totalChunks));
+              form.append("chunk", chunk, `chunk_${chunkIndex}`);
+
+              const chunkRes = await fetch("/api/upload/chunk", {
+                method: "POST",
+                headers: authHeaders(),
+                body: form,
+                signal: ac.signal,
+              });
+
+              if (!chunkRes.ok) {
+                const body = await chunkRes.json().catch(() => ({}));
+                throw new Error(body.error ?? `Chunk ${chunkIndex} failed (HTTP ${chunkRes.status})`);
               }
-            } catch {
-              reject(new Error(`Upload failed (HTTP ${xhr.status})`));
+
+              success = true;
+            } catch (fetchErr: any) {
+              if (fetchErr.name === "AbortError" || cancelledRef.current) {
+                throw new Error("Upload cancelled");
+              }
+              attempts++;
+              if (attempts >= 3) {
+                throw new Error(
+                  `Upload failed after 3 attempts on chunk ${chunkIndex + 1}. Check your connection and try again.`
+                );
+              }
             }
           }
+
+          bytesUploaded += chunk.size;
+          const pct = Math.round(((chunkIndex + 1) / totalChunks) * 100);
+          setUploadProgress(pct);
+
+          const elapsed = (Date.now() - startTime) / 1000;
+          const speed = elapsed > 0 ? bytesUploaded / elapsed : 0;
+          const remaining = file.size - bytesUploaded;
+          const etaSec = speed > 0 ? Math.round(remaining / speed) : null;
+
+          setUploadInfo({
+            phase: "uploading",
+            pct,
+            mbUploaded: bytesUploaded / (1024 * 1024),
+            totalMb,
+            etaSec,
+            retrying: false,
+          });
+        }
+
+        if (cancelledRef.current) throw new Error("Upload cancelled");
+
+        setUploadInfo({
+          phase: "assembling",
+          pct: 100,
+          mbUploaded: totalMb,
+          totalMb,
+          etaSec: null,
+          retrying: false,
         });
 
-        xhr.addEventListener("error", () => {
-          reject(new Error("Network error during upload. Check your connection and try again."));
+        const completeRes = await fetch("/api/upload/complete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...authHeaders() },
+          body: JSON.stringify({ uploadId }),
         });
 
-        xhr.addEventListener("abort", () => {
-          reject(new Error("Upload was cancelled."));
-        });
+        if (!completeRes.ok) {
+          const body = await completeRes.json().catch(() => ({}));
+          const err = new Error(
+            body.message ?? body.error ?? `Assembly failed (HTTP ${completeRes.status})`
+          );
+          if (body.code) (err as any).structured = body;
+          throw err;
+        }
 
-        xhr.addEventListener("timeout", () => {
-          reject(new Error("Upload timed out. The file may be too large or your connection is too slow."));
-        });
-
-        // 60 minute timeout, supports up to 2GB on slow connections
-        xhr.timeout = 60 * 60 * 1000;
-
-        xhr.open("POST", "/api/analysis/upload");
-
-        const token = getAuthToken();
-        if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
-
-        xhr.send(form);
-      });
+        const { jobId } = await completeRes.json();
+        uploadIdRef.current = null;
+        return { jobId };
+      } catch (err: any) {
+        setError(err);
+        throw err;
+      } finally {
+        setIsPending(false);
+        setUploadInfo(null);
+        abortControllerRef.current = null;
+      }
     },
+    []
+  );
 
-    onMutate: () => setUploadProgress(1),
-  });
+  const resetUpload = useCallback(() => {
+    setIsPending(false);
+    setUploadProgress(0);
+    setUploadInfo(null);
+    setError(null);
+    cancelledRef.current = false;
+    uploadIdRef.current = null;
+  }, []);
 
   return {
-    upload: mutation.mutate,
-    uploadAsync: mutation.mutateAsync,
-    isPending: mutation.isPending,
-    isError: mutation.isError,
-    error: mutation.error,
+    uploadAsync,
+    isPending,
+    isError: !!error,
+    error,
     uploadProgress,
-    resetUpload: () => {
-      mutation.reset();
-      reset();
-    },
+    uploadInfo,
+    cancelUpload,
+    resetUpload,
   };
 }

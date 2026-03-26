@@ -1,0 +1,300 @@
+The video upload is failing with HTTP 430/timeout errors on large files.
+The entire upload pipeline needs to be rebuilt using chunked uploading.
+Read all existing upload route and frontend upload code carefully first.
+
+─────────────────────────────────────────
+1. ROOT CAUSE
+─────────────────────────────────────────
+The current upload sends the entire video file in one HTTP request.
+This fails because:
+- Replit has a request timeout (~30 seconds)
+- Large files exceed memory buffer limits
+- A single failed request means starting over completely
+
+The fix is to split the file into small chunks on the frontend,
+upload each chunk separately, then reassemble on the server.
+This way no single request is large or slow enough to timeout.
+
+─────────────────────────────────────────
+2. FRONTEND — CHUNKED UPLOAD
+─────────────────────────────────────────
+Replace the current upload logic with this chunked approach:
+
+CHUNK SIZE: 5MB per chunk (5 * 1024 * 1024 bytes)
+This is small enough to never timeout even on slow connections.
+
+Implementation:
+
+const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB
+
+async function uploadVideoInChunks(file, onProgress) {
+  const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+  
+  // Step 1: Initialize upload session on server
+  const initRes = await fetch('/api/upload/init', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      filename: file.name,
+      fileSize: file.size,
+      mimeType: file.type,
+      totalChunks: totalChunks
+    })
+  });
+  const { uploadId } = await initRes.json();
+
+  // Step 2: Upload each chunk sequentially
+  for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+    const start = chunkIndex * CHUNK_SIZE;
+    const end = Math.min(start + CHUNK_SIZE, file.size);
+    const chunk = file.slice(start, end);
+
+    const formData = new FormData();
+    formData.append('chunk', chunk);
+    formData.append('uploadId', uploadId);
+    formData.append('chunkIndex', chunkIndex.toString());
+    formData.append('totalChunks', totalChunks.toString());
+
+    let attempts = 0;
+    let success = false;
+
+    // Retry each chunk up to 3 times on failure
+    while (attempts < 3 && !success) {
+      try {
+        const res = await fetch('/api/upload/chunk', {
+          method: 'POST',
+          body: formData
+        });
+        if (!res.ok) throw new Error('Chunk failed');
+        success = true;
+      } catch (err) {
+        attempts++;
+        if (attempts === 3) throw new Error(
+          `Chunk ${chunkIndex} failed after 3 attempts`
+        );
+        // Wait 1 second before retry
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    }
+
+    // Report progress
+    const progress = Math.round(((chunkIndex + 1) / totalChunks) * 100);
+    onProgress(progress);
+  }
+
+  // Step 3: Tell server to assemble chunks
+  const completeRes = await fetch('/api/upload/complete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ uploadId })
+  });
+  const { filePath } = await completeRes.json();
+  return { uploadId, filePath };
+}
+
+PROGRESS UI during upload:
+Show a progress bar with percentage and current status:
+- 0-100%: "Uploading... X%"
+- After 100%: "Processing video..." (while analysis runs)
+- Never reset to upload screen during this entire flow
+- Show estimated time remaining:
+  Calculate MB/s from elapsed time and bytes uploaded
+  Display: "~X seconds remaining"
+- If a chunk fails and retries: show "Connection issue — retrying..."
+  in amber, then continue without alarming the user
+- If all 3 retries fail: show error modal with "Try again" button
+  that resumes from the last successful chunk (not from scratch)
+
+─────────────────────────────────────────
+3. BACKEND — THREE NEW UPLOAD ROUTES
+─────────────────────────────────────────
+Create these three routes to handle chunked uploads:
+
+POST /api/upload/init
+  Body: { filename, fileSize, mimeType, totalChunks }
+  
+  Actions:
+  - Run plan limit checks (auth, file size, monthly limit)
+  - Generate a unique uploadId (uuid)
+  - Create a temp directory: /tmp/uploads/{uploadId}/
+  - Store upload metadata in memory or DB:
+    { uploadId, userId, filename, totalChunks, 
+      chunksReceived: 0, createdAt: Date.now() }
+  - Return: { uploadId }
+  
+  Reject immediately if:
+  - File size exceeds plan limit → FILE_TOO_LARGE error
+  - User has no analyses remaining → MONTHLY_LIMIT_REACHED error
+  - File type not allowed (only mp4, mov, avi, webm, mkv)
+    → { error: 'INVALID_FILE_TYPE', 
+        message: 'Please upload a video file (MP4, MOV, AVI, WebM)' }
+
+POST /api/upload/chunk
+  Body: FormData with { chunk (binary), uploadId, 
+                        chunkIndex, totalChunks }
+  
+  Actions:
+  - Validate uploadId exists and belongs to current user
+  - Write chunk to: /tmp/uploads/{uploadId}/chunk_{chunkIndex}
+  - Update chunksReceived counter
+  - Return: { received: chunkIndex, total: totalChunks }
+  
+  Constraints:
+  - Max chunk size: 6MB (reject anything larger)
+  - Validate chunkIndex is a valid number
+  - If uploadId doesn't exist: return 404 
+    (session expired or invalid)
+
+POST /api/upload/complete
+  Body: { uploadId }
+  
+  Actions:
+  - Verify all chunks received 
+    (chunksReceived === totalChunks)
+  - Assemble chunks in order:
+    Read chunk_0, chunk_1, ... chunk_N
+    Write to: /tmp/uploads/{uploadId}/{filename}
+    Delete individual chunk files after assembly
+  - Get video duration using ffprobe:
+    ffprobe -v quiet -print_format json 
+            -show_format /tmp/uploads/{uploadId}/{filename}
+  - Check duration against plan limit → VIDEO_TOO_LONG if exceeded
+  - Hand off to existing analysis pipeline with the file path
+  - Increment video_analyses_used counter NOW 
+    (after duration check passes, before pipeline starts)
+  - Return: { uploadId, filePath, duration }
+
+─────────────────────────────────────────
+4. CLEANUP — PREVENT DISK FILLING UP
+─────────────────────────────────────────
+Add automatic cleanup for abandoned uploads:
+
+Run a cleanup job every 30 minutes:
+  - Find all directories in /tmp/uploads/ 
+    older than 2 hours
+  - Delete them completely
+  - Log: "Cleaned up X abandoned upload sessions"
+
+Also clean up immediately after:
+  - Analysis pipeline completes (success or failure)
+  - User explicitly cancels upload (add cancel button to UI)
+
+Cancel button behavior:
+  - Show "Cancel" button during upload progress
+  - On click: call DELETE /api/upload/{uploadId}
+  - Server deletes /tmp/uploads/{uploadId}/ directory
+  - Frontend resets to upload screen
+  - Do NOT increment the analysis counter if cancelled
+
+─────────────────────────────────────────
+5. UPLOAD UI — COMPLETE STATES
+─────────────────────────────────────────
+The upload UI must handle these states clearly:
+
+STATE 1 — idle:
+  Show upload zone with drag-and-drop
+  Show plan limits: "Up to X min · Up to Y MB"
+
+STATE 2 — file selected (before upload starts):
+  Show filename, file size, duration (if readable)
+  Show selected platforms and analysis modules
+  Show "Analyze video" button
+  Show estimated cost (for transparency)
+
+STATE 3 — uploading (0-100%):
+  Show progress bar with percentage
+  Show "X MB of Y MB uploaded"
+  Show estimated time remaining
+  Show cancel button
+  NEVER allow navigation away without confirmation
+
+STATE 4 — processing (after upload completes):
+  Show step-by-step pipeline progress 
+  (existing loading steps from previous implementation)
+  Hide cancel button
+  Show "This usually takes 1-3 minutes"
+
+STATE 5 — complete:
+  Transition to results view
+  Show "Analysis complete" briefly before showing tabs
+
+STATE 6 — error:
+  Show specific error message (from structured errors)
+  Show "Try again" button
+  If upload was partially complete, offer to resume
+  Never lose the user's platform/module selections on error
+
+─────────────────────────────────────────
+6. FILE VALIDATION — CLIENT SIDE FIRST
+─────────────────────────────────────────
+Validate before upload even starts to save time:
+
+const ALLOWED_TYPES = [
+  'video/mp4', 'video/quicktime', 'video/x-msvideo',
+  'video/webm', 'video/x-matroska'
+];
+
+const PLAN_SIZE_LIMITS = {
+  free: 200 * 1024 * 1024,      // 200MB
+  creator: 500 * 1024 * 1024,   // 500MB
+  pro: 1024 * 1024 * 1024,      // 1GB
+  studio: 2048 * 1024 * 1024    // 2GB
+};
+
+Check on file selection (not on submit):
+1. File type → show error immediately if not video
+2. File size → show error immediately if over plan limit
+3. Show file info: name, size in MB, estimated upload time
+   Estimate: assume 2 MB/s average upload speed
+   Display: "Estimated upload time: ~X minutes"
+
+─────────────────────────────────────────
+7. CONNECTION QUALITY HANDLING
+─────────────────────────────────────────
+Handle poor connections gracefully:
+
+- If a chunk takes more than 30 seconds: consider it timed out,
+  retry automatically
+- If 3 consecutive chunks fail: pause and show:
+  "Upload paused — check your connection"
+  with a "Resume" button that continues from last good chunk
+- Track upload speed in real time:
+  If speed drops below 100KB/s: show warning
+  "Slow connection detected — upload may take longer than usual"
+- Never silently fail — always tell the user what's happening
+
+─────────────────────────────────────────
+8. SERVER CONFIGURATION
+─────────────────────────────────────────
+Update server config to handle chunked uploads properly:
+
+Express/Node settings:
+  - Set body-parser limit to 10MB for chunk route only:
+    app.use('/api/upload/chunk', express.raw({ limit: '10mb' }))
+  - For other routes keep existing limits
+  - Set timeout for chunk route to 60 seconds:
+    req.setTimeout(60000)
+  - For complete route (assembly): 120 seconds timeout
+
+Make sure /tmp directory is writable on Replit:
+  On startup, run:
+  if (!fs.existsSync('/tmp/uploads')) {
+    fs.mkdirSync('/tmp/uploads', { recursive: true });
+  }
+
+─────────────────────────────────────────
+IMPORTANT NOTES:
+- Remove the old single-request upload route after this works
+- Do not change Script Planner or Teleprompter
+- Do not change the visual theme
+- Test with these specific cases before marking complete:
+    1. Upload a 50MB video — should complete in ~25 seconds
+    2. Upload a 300MB video — should complete without timeout
+    3. Simulate network drop mid-upload — should retry chunks
+    4. Upload wrong file type (PDF) — should reject instantly
+    5. Free user uploads 250MB file — should reject before upload
+    6. Cancel mid-upload — counter should NOT increment
+- Make sure the analysis pipeline receives the assembled file 
+  path correctly and continues to work exactly as before
+- ffprobe must be available on the Replit instance — 
+  if not, install it: exec('apt-get install -y ffmpeg')
