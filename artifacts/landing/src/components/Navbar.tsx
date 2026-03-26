@@ -13,7 +13,7 @@ const navLinks = [
 export default function Navbar() {
   const [scrolled, setScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [, navigate] = useLocation();
+  const [currentPath, navigate] = useLocation();
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 20);
@@ -24,11 +24,15 @@ export default function Navbar() {
   const handleNavClick = (href: string) => {
     setMenuOpen(false);
     if (href.startsWith("#")) {
-      if (location === "/") {
+      if (currentPath === "/") {
         const el = document.querySelector(href);
         el?.scrollIntoView({ behavior: "smooth" });
       } else {
-        navigate("/" + href);
+        navigate("/");
+        // Give the home page a moment to mount before scrolling
+        setTimeout(() => {
+          document.querySelector(href)?.scrollIntoView({ behavior: "smooth" });
+        }, 100);
       }
     } else {
       navigate(href);
