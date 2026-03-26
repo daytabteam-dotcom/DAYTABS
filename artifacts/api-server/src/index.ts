@@ -1,5 +1,22 @@
 import app from "./app";
 import { logger } from "./lib/logger";
+import { db } from "@workspace/db";
+import { sql } from "drizzle-orm";
+
+/**
+ * Apply any pending schema changes that couldn't run via drizzle-kit during the build phase.
+ * Each statement uses IF NOT EXISTS / IF EXISTS so it is fully idempotent.
+ */
+async function runStartupMigrations() {
+  try {
+    await db.execute(
+      sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_cancels_at TIMESTAMP`
+    );
+    logger.info("Startup migrations applied");
+  } catch (err) {
+    logger.warn({ err }, "Startup migrations warning (non-fatal)");
+  }
+}
 
 const rawPort = process.env["PORT"];
 
@@ -14,6 +31,8 @@ const port = Number(rawPort);
 if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
+
+await runStartupMigrations();
 
 const server = app.listen(port, () => {
   logger.info({ port }, "Server listening");
