@@ -30,19 +30,46 @@ Rules for every script you write or edit:
 - When the user asks for edits (shorter hook, different tone, more energy), update the full script accordingly
 - Always regenerate ALL sections matching the updated script
 
-JSON structure (return this exact shape every time):
+SECTION RULES (most important):
+- Every distinct paragraph, beat, or scene in the script MUST be its own section
+- A 3-5 minute video should have 8-12 sections minimum
+- A 1-2 minute video should have 5-7 sections minimum
+- NEVER combine multiple scenes into one section
+- Label each section clearly: Hook, Problem, Story, Pivot, Insight, Example, Solution, CTA, Outro, etc.
+- Timestamps must be sequential and continuous — the end of one section is the start of the next
+- Each section's "text" field contains ONLY the exact words spoken in that section
+
+JSON structure (return this exact shape every time, with AS MANY sections as the script has scenes/paragraphs):
 {
   "script": "Complete word-for-word script with pacing cues",
   "title": "Suggested video title",
   "sections": [
     {
       "start": "0:00",
-      "end": "0:15",
+      "end": "0:12",
       "label": "Hook",
-      "text": "Exact script words for this section",
+      "text": "Exact script words for this section only",
       "camera_angle": "Specific shot/angle description",
       "broll": "Concrete B-roll footage idea",
       "presentation_tip": "One specific delivery tip"
+    },
+    {
+      "start": "0:12",
+      "end": "0:35",
+      "label": "Problem",
+      "text": "Exact script words for this section only",
+      "camera_angle": "Medium shot, direct eye contact",
+      "broll": "Footage of the problem being described",
+      "presentation_tip": "Slow down, let the problem sink in"
+    },
+    {
+      "start": "0:35",
+      "end": "1:10",
+      "label": "Story",
+      "text": "Exact script words for this section only",
+      "camera_angle": "Wider shot, relaxed posture",
+      "broll": "Relevant archive footage or photo slides",
+      "presentation_tip": "Vary your pace, pause on key moments"
     }
   ],
   "teleprompter_ready": true,
@@ -59,6 +86,7 @@ Rules:
 - Include one strong hook at the start (pattern interrupt or curiosity gap)
 - Keep it concise and punchy
 - When the user asks for edits, update the full script accordingly
+- Break the script into one section per distinct scene or paragraph (minimum 3 sections)
 
 JSON structure:
 {
@@ -67,12 +95,21 @@ JSON structure:
   "sections": [
     {
       "start": "0:00",
-      "end": "0:20",
+      "end": "0:15",
       "label": "Hook",
-      "text": "Hook script words",
-      "camera_angle": "One camera tip",
+      "text": "Hook script words only",
+      "camera_angle": "Close-up, eye contact",
       "broll": "",
-      "presentation_tip": "One delivery tip"
+      "presentation_tip": "Be bold, speak fast"
+    },
+    {
+      "start": "0:15",
+      "end": "0:45",
+      "label": "Main Point",
+      "text": "Main point script words only",
+      "camera_angle": "Medium shot",
+      "broll": "",
+      "presentation_tip": "Slow down for emphasis"
     }
   ],
   "teleprompter_ready": true,
@@ -128,7 +165,7 @@ router.post("/generate", async (req, res) => {
 
   const systemPrompt = isFree ? SYSTEM_PROMPT_FREE : SYSTEM_PROMPT_FULL;
   const model = isPremiumAI ? "gpt-4o" : "gpt-4o-mini";
-  const maxTokens = isFree ? 1200 : isCreator ? 2500 : 4000;
+  const maxTokens = isFree ? 1500 : isCreator ? 4000 : 6000;
 
   const history = messages.slice(-10);
 
