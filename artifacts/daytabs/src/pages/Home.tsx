@@ -250,7 +250,6 @@ export default function Home() {
         onCancel={handleCancel}
       />
       {showPlanModal && <PlanPickerModal onClose={() => setShowPlanModal(false)} />}
-
       <div className="fixed inset-0 pointer-events-none z-[-1] overflow-hidden">
         <img
           src={`${import.meta.env.BASE_URL}images/hero-bg.png`}
@@ -260,7 +259,6 @@ export default function Home() {
         <div className="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] bg-primary/20 blur-[150px] rounded-full" />
         <div className="absolute bottom-[-20%] right-[-10%] w-[50%] h-[50%] bg-purple-600/10 blur-[150px] rounded-full" />
       </div>
-
       <header className="w-full border-b border-white/5 bg-background/50 backdrop-blur-xl sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
           <div className="flex items-center gap-3 cursor-pointer" onClick={() => window.location.href = "/"}>
@@ -270,7 +268,6 @@ export default function Home() {
           <UserProfileMenu />
         </div>
       </header>
-
       <div className="w-full border-b border-white/5 bg-background/30 backdrop-blur-md sticky top-20 z-40">
         <div className="max-w-7xl mx-auto px-4 sm:px-6">
           <div className="flex items-center gap-1 overflow-x-auto scrollbar-none py-1">
@@ -303,8 +300,7 @@ export default function Home() {
           </div>
         </div>
       </div>
-
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 md:py-16 relative z-10">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 md:py-16 relative z-10 pl-[0px] pr-[0px]">
         {activeTab === "dashboard"      && <Dashboard onNavigate={handleTabClick} onUpgrade={() => setShowPlanModal(true)} />}
         {activeTab === "video-analyzer" && <VideoAnalyzerTab {...tabCallbacks} />}
         {activeTab === "script-planner" && <ScriptPlannerTab />}
