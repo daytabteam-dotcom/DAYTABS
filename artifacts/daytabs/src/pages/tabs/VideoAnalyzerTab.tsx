@@ -3,8 +3,9 @@ import { useDropzone } from "react-dropzone";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Upload, Film, Wand2, Shield, Scissors, TrendingUp, Sparkles,
-  CheckCircle2, AlertTriangle, XCircle,
-  Volume2, Eye, Zap, Hash, FileText, Lock
+  CheckCircle2, AlertTriangle, XCircle, RefreshCcw,
+  Volume2, Eye, Zap, Hash, FileText, Lock, Download,
+  Copy, Check, AlignLeft, ChevronRight,
 } from "lucide-react";
 import { useAnalysisPolling, useAnalysisResults } from "@/hooks/use-analysis";
 import { useVideoUpload } from "@/hooks/use-video-upload";
@@ -28,38 +29,10 @@ const PLATFORMS = [
 ];
 
 const MODULES = [
-  {
-    id: "quality",
-    label: "Quality Check",
-    icon: Shield,
-    desc: "Lighting, audio, framing, and pacing scores",
-    color: "blue",
-    freeIncluded: true,
-  },
-  {
-    id: "editing",
-    label: "Editing Suggestions",
-    icon: Scissors,
-    desc: "Hook moments, cut points, and B-roll cues",
-    color: "yellow",
-    freeIncluded: true,
-  },
-  {
-    id: "publish",
-    label: "Publish Package",
-    icon: TrendingUp,
-    desc: "Titles, descriptions, and tags per platform",
-    color: "green",
-    freeIncluded: false,
-  },
-  {
-    id: "shortClips",
-    label: "Short Clip Ideas",
-    icon: Sparkles,
-    desc: "Best moments for Shorts, TikTok, and Reels",
-    color: "violet",
-    freeIncluded: false,
-  },
+  { id: "quality",    label: "Quality Check",       icon: Shield,    desc: "Lighting, audio, framing, and pacing scores",    color: "blue",   freeIncluded: true  },
+  { id: "editing",    label: "Editing Suggestions",  icon: Scissors,  desc: "Hook moments, cut points, and B-roll cues",      color: "yellow", freeIncluded: true  },
+  { id: "publish",    label: "Publish Package",      icon: TrendingUp, desc: "Titles, descriptions, and tags per platform",  color: "green",  freeIncluded: false },
+  { id: "shortClips", label: "Short Clip Ideas",    icon: Sparkles,  desc: "Best moments for Shorts, TikTok, and Reels",     color: "violet", freeIncluded: false },
 ];
 
 const MODULE_COLORS: Record<string, string> = {
@@ -70,11 +43,61 @@ const MODULE_COLORS: Record<string, string> = {
 };
 
 const RESULT_TABS = [
-  { id: "quality",    label: "Quality",        icon: Shield },
-  { id: "editing",    label: "Editing",        icon: Scissors },
-  { id: "publish",    label: "Publish",        icon: TrendingUp },
-  { id: "shortClips", label: "Short Clips",   icon: Sparkles },
+  { id: "quality",    label: "Quality",      icon: Shield },
+  { id: "editing",    label: "Editing",      icon: Scissors },
+  { id: "publish",    label: "Publish",      icon: TrendingUp },
+  { id: "shortClips", label: "Short Clips",  icon: Sparkles },
+  { id: "transcript", label: "Transcript",   icon: AlignLeft },
 ];
+
+const PROGRESS_STEPS = [
+  { label: "Uploading video",             statuses: [] as string[],          threshold: 10  },
+  { label: "Extracting audio & frames",   statuses: ["extracting_audio"],    threshold: 25  },
+  { label: "Transcribing with Whisper",   statuses: ["transcribing"],        threshold: 35  },
+  { label: "Analyzing quality",           statuses: ["analyzing_visual"],    threshold: 55  },
+  { label: "Generating suggestions",      statuses: ["analyzing_content"],   threshold: 82  },
+  { label: "Building publish package",    statuses: ["generating_seo"],      threshold: 92  },
+  { label: "Finalizing report",           statuses: [],                      threshold: 100 },
+];
+
+const TERMINAL_STATUSES = new Set(["complete", "error"]);
+
+function navigateToPricing(feature?: string) {
+  const params = new URLSearchParams({ highlight: "creator" });
+  if (feature) params.set("feature", feature);
+  window.location.href = `/pricing?${params.toString()}`;
+}
+
+function UpgradeOverlay({ feature, label }: { feature: string; label: string }) {
+  return (
+    <div className="absolute inset-0 flex flex-col items-center justify-center z-10 bg-background/60 backdrop-blur-[2px] rounded-xl p-4">
+      <div className="flex flex-col items-center gap-3 max-w-[220px] text-center">
+        <div className="w-9 h-9 rounded-xl bg-primary/15 border border-primary/25 flex items-center justify-center">
+          <Lock className="w-4 h-4 text-primary" />
+        </div>
+        <p className="text-xs text-white/70 leading-snug">{label}</p>
+        <button
+          onClick={() => navigateToPricing(feature)}
+          className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-gradient-to-r from-primary to-purple-500 text-white hover:opacity-90 transition-opacity whitespace-nowrap"
+        >
+          Upgrade to Creator — $19/mo
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function BlurSection({ children, feature, label, blur }: { children: React.ReactNode; feature: string; label: string; blur: boolean }) {
+  if (!blur) return <>{children}</>;
+  return (
+    <div className="relative rounded-xl overflow-hidden">
+      <div style={{ filter: "blur(4px)", userSelect: "none", pointerEvents: "none" }}>
+        {children}
+      </div>
+      <UpgradeOverlay feature={feature} label={label} />
+    </div>
+  );
+}
 
 function ScoreBar({ score }: { score: number }) {
   const color = score >= 70 ? "bg-green-400" : score >= 45 ? "bg-yellow-400" : "bg-red-400";
@@ -90,18 +113,25 @@ function ScoreBar({ score }: { score: number }) {
   );
 }
 
+function SeverityBadge({ severity, numeric }: { severity?: string; numeric?: number }) {
+  const s = severity ?? (numeric !== undefined ? (numeric >= 80 ? "excellent" : numeric >= 60 ? "good" : numeric >= 40 ? "needs work" : "critical") : "good");
+  const cls = s === "excellent" ? "text-green-400 border-green-400/20 bg-green-400/5"
+    : s === "good" ? "text-blue-400 border-blue-400/20 bg-blue-400/5"
+    : s === "needs work" ? "text-yellow-400 border-yellow-400/20 bg-yellow-400/5"
+    : "text-red-400 border-red-400/20 bg-red-400/5";
+  return (
+    <span className={`px-2 py-0.5 rounded-full text-xs font-semibold border capitalize ${cls}`}>{s}</span>
+  );
+}
+
 function MetricCard({ title, metric }: { title: string; metric: any }) {
   if (!metric) return null;
   const numVal = metric.numeric ?? 0;
-  const color = numVal >= 70 ? "text-green-400 border-green-400/20 bg-green-400/5" : numVal >= 45 ? "text-yellow-400 border-yellow-400/20 bg-yellow-400/5" : "text-red-400 border-red-400/20 bg-red-400/5";
-  const Icon = numVal >= 70 ? CheckCircle2 : numVal >= 45 ? AlertTriangle : XCircle;
   return (
     <div className="bg-background/60 rounded-xl p-4 border border-white/8 hover:border-primary/20 transition-all">
       <div className="flex justify-between items-start mb-2">
         <p className="text-xs text-white/40 uppercase tracking-wider">{title}</p>
-        <div className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold border ${color}`}>
-          <Icon className="w-3 h-3" />{metric.level}
-        </div>
+        <SeverityBadge severity={metric.severity} numeric={numVal} />
       </div>
       <span className="text-3xl font-bold font-mono">{numVal}</span>
       <span className="text-xs text-white/40 ml-1">/ 100</span>
@@ -115,8 +145,6 @@ function MetricCard({ title, metric }: { title: string; metric: any }) {
 function FillerCard({ metric }: { metric: any }) {
   if (!metric) return null;
   const numVal = metric.numeric ?? 0;
-  const color = numVal >= 70 ? "text-green-400 border-green-400/20 bg-green-400/5" : numVal >= 45 ? "text-yellow-400 border-yellow-400/20 bg-yellow-400/5" : "text-red-400 border-red-400/20 bg-red-400/5";
-  const Icon = numVal >= 70 ? CheckCircle2 : numVal >= 45 ? AlertTriangle : XCircle;
   const words: string[] = metric.words ?? [];
   return (
     <div className="bg-background/60 rounded-xl p-4 border border-white/8 hover:border-primary/20 transition-all col-span-2">
@@ -125,16 +153,12 @@ function FillerCard({ metric }: { metric: any }) {
           <Volume2 className="w-4 h-4 text-white/40" />
           <p className="text-xs text-white/40 uppercase tracking-wider">Filler Words</p>
         </div>
-        <div className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold border ${color}`}>
-          <Icon className="w-3 h-3" />{metric.level}
-        </div>
+        <SeverityBadge severity={metric.severity} numeric={metric.level === "high" ? 30 : metric.level === "medium" ? 60 : 85} />
       </div>
       <div className="flex items-end gap-3 mb-2">
         <span className="text-3xl font-bold font-mono">{numVal}</span>
-        <span className="text-xs text-white/40 mb-1">/ 100</span>
-        {metric.count != null && <span className="text-sm text-white/40 mb-1">{metric.count} instance{metric.count !== 1 ? "s" : ""}</span>}
+        <span className="text-xs text-white/40 mb-1">instances</span>
       </div>
-      <ScoreBar score={numVal} />
       {metric.assessment && <p className="text-xs text-white/50 mt-2">{metric.assessment}</p>}
       {words.length > 0 && (
         <div className="mt-3 flex flex-wrap gap-1.5">
@@ -145,12 +169,23 @@ function FillerCard({ metric }: { metric: any }) {
   );
 }
 
-function QualityPanel({ data }: { data: any }) {
+function QualityPanel({ data, isPaid }: { data: any; isPaid: boolean }) {
   if (!data) return <p className="text-white/40 text-sm">No quality data.</p>;
-  const overallScore = data.score ?? data.overallScore ?? 0;
+  const overallScore = data.score ?? data.overallScore ?? data.overallVisualScore ?? 0;
   const scoreColor = overallScore >= 70 ? "text-green-400" : overallScore >= 45 ? "text-yellow-400" : "text-red-400";
+
   return (
     <div className="space-y-6">
+      {data.topFix && (
+        <div className="flex items-start gap-3 p-4 rounded-xl bg-amber-400/8 border border-amber-400/20">
+          <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
+          <div>
+            <p className="text-xs text-amber-400/70 uppercase tracking-wider mb-0.5 font-semibold">Most Important Fix</p>
+            <p className="text-sm text-white/80">{data.topFix}</p>
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center gap-4 p-5 rounded-2xl border border-white/8 bg-background/40">
         <div className="text-center min-w-[80px]">
           <span className={`text-5xl font-bold font-mono ${scoreColor}`}>{overallScore}</span>
@@ -166,44 +201,89 @@ function QualityPanel({ data }: { data: any }) {
             />
           </div>
           <p className="text-xs text-white/40 mt-2">
-            {overallScore >= 70 ? "Strong video — ready to publish." : overallScore >= 45 ? "Good foundation — a few improvements recommended." : "Needs attention before publishing."}
+            {overallScore >= 70 ? "Strong video — ready to publish." : overallScore >= 45 ? "Good foundation — a few improvements needed." : "Needs attention before publishing."}
           </p>
         </div>
       </div>
+
       <div className="grid grid-cols-2 gap-3">
         {data.lighting && <MetricCard title="Lighting" metric={data.lighting} />}
-        {data.audioQuality && <MetricCard title="Audio Quality" metric={data.audioQuality} />}
-        {data.motionStability && <MetricCard title="Motion Stability" metric={data.motionStability} />}
-        {data.framingComposition && <MetricCard title="Framing" metric={data.framingComposition} />}
-        {data.pacing && <MetricCard title="Pacing" metric={data.pacing} />}
+        {data.audioClarity && <MetricCard title="Audio Clarity" metric={data.audioClarity} />}
+
+        <BlurSection blur={!isPaid} feature="visual-quality" label="Get detailed scores for contrast, color, framing, and background">
+          <div className="grid grid-cols-1 gap-3">
+            {data.brightness    && <MetricCard title="Brightness"    metric={data.brightness} />}
+            {data.contrast      && <MetricCard title="Contrast"      metric={data.contrast} />}
+            {data.colorTemperature && <MetricCard title="Color Temperature" metric={{ numeric: 75, assessment: data.colorTemperature?.assessment, suggestions: data.colorTemperature?.suggestions, severity: data.colorTemperature?.severity }} />}
+            {data.background    && <MetricCard title="Background"    metric={data.background} />}
+            {data.framing       && <MetricCard title="Framing"       metric={data.framing} />}
+            {data.sharpness     && <MetricCard title="Sharpness"     metric={data.sharpness} />}
+            {data.stability     && <MetricCard title="Stability"     metric={data.stability} />}
+          </div>
+        </BlurSection>
+
+        {data.audioVolume && <MetricCard title="Audio Volume" metric={data.audioVolume} />}
+        {data.backgroundNoise && <MetricCard title="Background Noise" metric={data.backgroundNoise} />}
         {data.fillerWords && <FillerCard metric={data.fillerWords} />}
       </div>
+
+      {data.colorGradingRecommendation && isPaid && (
+        <div className="p-4 rounded-xl bg-background/60 border border-white/8">
+          <p className="text-xs text-white/40 uppercase tracking-wider mb-2 flex items-center gap-1.5"><Eye className="w-3.5 h-3.5" />Color Grading Recommendation</p>
+          <p className="text-sm text-white/70">{data.colorGradingRecommendation}</p>
+        </div>
+      )}
     </div>
   );
 }
 
-function EditingPanel({ data }: { data: any }) {
+function EditingPanel({ data, isPaid }: { data: any; isPaid: boolean }) {
   if (!data) return <p className="text-white/40 text-sm">No editing data.</p>;
+  const hooks = data.hooks ?? [];
+  const suggestions = data.editingSuggestions ?? [];
+  const firstSuggestion = suggestions[0];
+  const extraSuggestions = suggestions.slice(1);
+
   return (
     <div className="space-y-6">
-      {data.hooks?.length > 0 && (
+      {data.rewrittenHook && isPaid && (
+        <div className="p-4 rounded-xl bg-primary/8 border border-primary/20">
+          <p className="text-xs text-primary/70 uppercase tracking-wider mb-2 flex items-center gap-1.5"><Wand2 className="w-3.5 h-3.5" />Rewritten Hook</p>
+          <p className="text-sm text-white/90 font-medium leading-relaxed">"{data.rewrittenHook}"</p>
+        </div>
+      )}
+
+      {hooks.length > 0 && (
         <div>
           <h3 className="text-sm font-semibold text-white/60 uppercase tracking-wider mb-3 flex items-center gap-2"><Zap className="w-4 h-4 text-yellow-400" />Hook Moments</h3>
           <div className="space-y-2">
-            {data.hooks.map((h: any, i: number) => (
+            {[hooks[0]].filter(Boolean).map((h: any, i: number) => (
               <div key={i} className="flex items-start gap-3 p-3 rounded-xl bg-yellow-400/5 border border-yellow-400/15">
-                <span className="text-xs font-mono text-yellow-400 mt-0.5 min-w-[50px]">{h.timestamp ?? h.time ?? `#${i + 1}`}</span>
-                <p className="text-sm text-white/70">{h.description ?? h.text ?? h}</p>
+                <span className="text-xs font-mono text-yellow-400 mt-0.5 min-w-[50px]">{h.start ?? `#${i + 1}`}</span>
+                <p className="text-sm text-white/70">{h.text ?? h.description ?? h}</p>
               </div>
             ))}
+            {hooks.length > 1 && (
+              <BlurSection blur={!isPaid} feature="hook-moments" label="Unlock all hook moments — see every high-value clip opportunity in your video">
+                <div className="space-y-2">
+                  {hooks.slice(1).map((h: any, i: number) => (
+                    <div key={i} className="flex items-start gap-3 p-3 rounded-xl bg-yellow-400/5 border border-yellow-400/15">
+                      <span className="text-xs font-mono text-yellow-400 mt-0.5 min-w-[50px]">{h.start ?? `#${i + 2}`}</span>
+                      <p className="text-sm text-white/70">{h.text ?? h.description ?? h}</p>
+                    </div>
+                  ))}
+                </div>
+              </BlurSection>
+            )}
           </div>
         </div>
       )}
+
       {data.removeSections?.length > 0 && (
         <div>
           <h3 className="text-sm font-semibold text-white/60 uppercase tracking-wider mb-3 flex items-center gap-2"><XCircle className="w-4 h-4 text-red-400" />Sections to Cut</h3>
           <div className="space-y-2">
-            {data.removeSections.map((s: any, i: number) => (
+            {data.removeSections.slice(0, 8).map((s: any, i: number) => (
               <div key={i} className="flex items-start gap-3 p-3 rounded-xl bg-red-400/5 border border-red-400/15">
                 {(s.start || s.end) && <span className="text-xs font-mono text-red-400 mt-0.5 min-w-[80px]">{s.start} → {s.end}</span>}
                 <p className="text-sm text-white/70">{s.reason ?? s.description ?? s}</p>
@@ -212,16 +292,29 @@ function EditingPanel({ data }: { data: any }) {
           </div>
         </div>
       )}
-      {data.editingSuggestions?.length > 0 && (
+
+      {suggestions.length > 0 && (
         <div>
           <h3 className="text-sm font-semibold text-white/60 uppercase tracking-wider mb-3 flex items-center gap-2"><Scissors className="w-4 h-4 text-primary" />Editing Tips</h3>
           <div className="grid gap-2">
-            {data.editingSuggestions.map((s: string, i: number) => (
-              <div key={i} className="flex items-start gap-2 p-3 rounded-xl bg-primary/5 border border-primary/15">
+            {firstSuggestion && (
+              <div className="flex items-start gap-2 p-3 rounded-xl bg-primary/5 border border-primary/15">
                 <span className="text-primary/60 text-sm mt-0.5">→</span>
-                <p className="text-sm text-white/70">{s}</p>
+                <p className="text-sm text-white/70">{firstSuggestion}</p>
               </div>
-            ))}
+            )}
+            {extraSuggestions.length > 0 && (
+              <BlurSection blur={!isPaid} feature="editing-suggestions" label={`Unlock ${extraSuggestions.length} more editing tips with specific timestamps and cuts`}>
+                <div className="grid gap-2">
+                  {extraSuggestions.map((s: string, i: number) => (
+                    <div key={i} className="flex items-start gap-2 p-3 rounded-xl bg-primary/5 border border-primary/15">
+                      <span className="text-primary/60 text-sm mt-0.5">→</span>
+                      <p className="text-sm text-white/70">{s}</p>
+                    </div>
+                  ))}
+                </div>
+              </BlurSection>
+            )}
           </div>
         </div>
       )}
@@ -229,8 +322,9 @@ function EditingPanel({ data }: { data: any }) {
   );
 }
 
-function PublishPanel({ data, platforms }: { data: any; platforms: string[] }) {
+function PublishPanel({ data, platforms, isPaid }: { data: any; platforms: string[]; isPaid: boolean }) {
   const [activePlatform, setActivePlatform] = useState<string>("");
+  const [copiedSection, setCopiedSection] = useState<string | null>(null);
   const publishKeys = data ? Object.keys(data) : [];
 
   useEffect(() => {
@@ -241,6 +335,23 @@ function PublishPanel({ data, platforms }: { data: any; platforms: string[] }) {
 
   const pData = data[activePlatform];
   const platformLabel = PLATFORMS.find(p => p.id === activePlatform)?.label ?? activePlatform;
+  const isYouTube = activePlatform === "youtube_long" || activePlatform === "youtube_shorts";
+
+  function copyText(text: string, key: string) {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedSection(key);
+      setTimeout(() => setCopiedSection(null), 2000);
+    });
+  }
+
+  const titles: string[] = pData?.titles ?? [];
+  const firstTitle = titles[0];
+  const extraTitles = titles.slice(1);
+  const hashtags: Array<{ tag: string; effect?: string }> = pData?.hashtags ?? [];
+  const firstTags = hashtags.slice(0, 3);
+  const extraTags = hashtags.slice(3);
+
+  const titleStrategies: string[] = pData?.titleStrategies ?? ["Curiosity gap", "How-to", "Number-based", "Problem/solution", "Bold claim"];
 
   return (
     <div className="space-y-4">
@@ -258,45 +369,124 @@ function PublishPanel({ data, platforms }: { data: any; platforms: string[] }) {
           );
         })}
       </div>
+
       {pData && (
         <div className="space-y-4">
-          {pData.titles?.length > 0 && (
+          {firstTitle && (
             <div className="p-4 rounded-xl bg-background/60 border border-white/8">
-              <p className="text-xs text-white/40 uppercase tracking-wider mb-3 flex items-center gap-1.5"><FileText className="w-3.5 h-3.5" />Titles for {platformLabel}</p>
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-xs text-white/40 uppercase tracking-wider flex items-center gap-1.5"><FileText className="w-3.5 h-3.5" />Titles for {platformLabel}</p>
+                <button onClick={() => copyText(titles.join("\n"), "titles")} className="text-white/30 hover:text-white/60 transition-colors">
+                  {copiedSection === "titles" ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
+                </button>
+              </div>
               <div className="space-y-2">
-                {pData.titles.map((t: string, i: number) => (
-                  <div key={i} className="flex items-start gap-2 group">
-                    <span className="text-xs font-mono text-white/25 mt-0.5">{i + 1}.</span>
-                    <p className="text-sm text-white/80 flex-1">{t}</p>
+                <div className="flex items-start gap-2 group">
+                  <div className="flex-1">
+                    {isPaid && titleStrategies[0] && (
+                      <p className="text-[10px] text-primary/50 uppercase tracking-wider mb-0.5">{titleStrategies[0]}</p>
+                    )}
+                    <p className="text-sm text-white/80">{firstTitle}</p>
                   </div>
-                ))}
+                </div>
+                {extraTitles.length > 0 && (
+                  <BlurSection blur={!isPaid} feature="title-options" label={`Get ${extraTitles.length} more title strategies: how-to, number-based, problem/solution, bold claim`}>
+                    <div className="space-y-2 mt-2">
+                      {extraTitles.map((t: string, i: number) => (
+                        <div key={i} className="flex items-start gap-2">
+                          <div className="flex-1">
+                            {titleStrategies[i + 1] && <p className="text-[10px] text-primary/50 uppercase tracking-wider mb-0.5">{titleStrategies[i + 1]}</p>}
+                            <p className="text-sm text-white/80">{t}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </BlurSection>
+                )}
               </div>
             </div>
           )}
+
           {pData.description && (
             <div className="p-4 rounded-xl bg-background/60 border border-white/8">
-              <p className="text-xs text-white/40 uppercase tracking-wider mb-2 flex items-center gap-1.5"><FileText className="w-3.5 h-3.5" />Description</p>
-              <p className="text-sm text-white/70 whitespace-pre-line leading-relaxed">{pData.description}</p>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs text-white/40 uppercase tracking-wider flex items-center gap-1.5"><FileText className="w-3.5 h-3.5" />Description</p>
+                {isPaid && (
+                  <button onClick={() => copyText(pData.description, "desc")} className="text-white/30 hover:text-white/60 transition-colors">
+                    {copiedSection === "desc" ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
+                  </button>
+                )}
+              </div>
+              {isPaid ? (
+                <p className="text-sm text-white/70 whitespace-pre-line leading-relaxed">{pData.description}</p>
+              ) : (
+                <>
+                  <p className="text-sm text-white/70 leading-relaxed">
+                    {pData.description.split(/[.!?]/).slice(0, 2).join(". ") + "."}
+                  </p>
+                  <BlurSection blur feature="full-description" label="Get the full description with chapters, links section, and CTA — 150-400 words">
+                    <p className="text-sm text-white/70 whitespace-pre-line leading-relaxed mt-2">{pData.description}</p>
+                  </BlurSection>
+                </>
+              )}
             </div>
           )}
-          {pData.tags?.length > 0 && (
+
+          {hashtags.length > 0 && (
             <div className="p-4 rounded-xl bg-background/60 border border-white/8">
-              <p className="text-xs text-white/40 uppercase tracking-wider mb-3 flex items-center gap-1.5"><Hash className="w-3.5 h-3.5" />Tags</p>
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-xs text-white/40 uppercase tracking-wider flex items-center gap-1.5"><Hash className="w-3.5 h-3.5" />Tags</p>
+                {isPaid && (
+                  <button onClick={() => copyText(hashtags.map(t => t.tag).join(", "), "tags")} className="text-white/30 hover:text-white/60 transition-colors">
+                    {copiedSection === "tags" ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
+                  </button>
+                )}
+              </div>
               <div className="flex flex-wrap gap-1.5">
-                {pData.tags.map((tag: string, i: number) => (
-                  <span key={i} className="px-2.5 py-1 bg-primary/10 border border-primary/20 text-primary/80 rounded-lg text-xs font-mono">#{tag.replace(/^#/, "")}</span>
+                {firstTags.map((tag: { tag: string; effect?: string }, i: number) => (
+                  <span key={i} title={tag.effect} className="px-2.5 py-1 bg-primary/10 border border-primary/20 text-primary/80 rounded-lg text-xs font-mono cursor-help">
+                    {tag.tag?.replace(/^#/, "#") ?? tag}
+                  </span>
                 ))}
               </div>
+              {extraTags.length > 0 && (
+                <BlurSection blur={!isPaid} feature="tags" label={`Get ${extraTags.length + 3} more tags optimized for your niche — from broad to long-tail`}>
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {extraTags.map((tag: { tag: string }, i: number) => (
+                      <span key={i} className="px-2.5 py-1 bg-primary/10 border border-primary/20 text-primary/80 rounded-lg text-xs font-mono">
+                        {tag.tag?.replace(/^#/, "#") ?? tag}
+                      </span>
+                    ))}
+                  </div>
+                </BlurSection>
+              )}
             </div>
           )}
-          {pData.thumbnailIdeas?.length > 0 && (
+
+          {isYouTube && (
             <div className="p-4 rounded-xl bg-background/60 border border-white/8">
-              <p className="text-xs text-white/40 uppercase tracking-wider mb-3 flex items-center gap-1.5"><Eye className="w-3.5 h-3.5" />Thumbnail Ideas</p>
-              <div className="space-y-2">
-                {pData.thumbnailIdeas.map((idea: string, i: number) => (
-                  <div key={i} className="flex items-start gap-2">
-                    <span className="text-primary/50 text-sm">→</span>
-                    <p className="text-sm text-white/70">{idea}</p>
+              <p className="text-xs text-white/40 uppercase tracking-wider mb-3 flex items-center gap-1.5"><Download className="w-3.5 h-3.5" />Subtitle File (.srt)</p>
+              {isPaid ? (
+                <p className="text-xs text-white/40 italic">SRT file generated when using Publish module with a paid plan. Available in your analysis results.</p>
+              ) : (
+                <BlurSection blur feature="subtitle-file" label="Download subtitle file — Creator plan and above. YouTube-compatible .srt format.">
+                  <div className="py-6 text-center">
+                    <Download className="w-6 h-6 text-white/30 mx-auto mb-2" />
+                    <p className="text-sm text-white/40">Download .srt subtitle file</p>
+                  </div>
+                </BlurSection>
+              )}
+            </div>
+          )}
+
+          {pData.timestamps?.length > 0 && (
+            <div className="p-4 rounded-xl bg-background/60 border border-white/8">
+              <p className="text-xs text-white/40 uppercase tracking-wider mb-3 flex items-center gap-1.5"><Eye className="w-3.5 h-3.5" />Chapter Timestamps</p>
+              <div className="space-y-1.5">
+                {pData.timestamps.map((ts: { time: string; label: string }, i: number) => (
+                  <div key={i} className="flex items-center gap-3">
+                    <span className="text-xs font-mono text-primary/70 min-w-[48px]">{ts.time}</span>
+                    <span className="text-xs text-white/50">{ts.label}</span>
                   </div>
                 ))}
               </div>
@@ -308,38 +498,247 @@ function PublishPanel({ data, platforms }: { data: any; platforms: string[] }) {
   );
 }
 
-function ShortClipsPanel({ data }: { data: any }) {
+function ShortClipsPanel({ data, isPaid }: { data: any; isPaid: boolean }) {
   const clips = data?.clips ?? data ?? [];
   if (!clips.length) return <p className="text-white/40 text-sm">No short clip ideas generated.</p>;
-  return (
-    <div className="space-y-3">
-      {clips.map((clip: any, i: number) => (
-        <div key={i} className="p-4 rounded-xl bg-background/60 border border-white/8 hover:border-primary/20 transition-all">
-          <div className="flex items-start justify-between gap-3 mb-2">
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-lg bg-violet-500/20 border border-violet-500/30 flex items-center justify-center">
-                <span className="text-xs font-bold text-violet-300">{i + 1}</span>
-              </div>
-              <h4 className="text-sm font-semibold text-white/90">{clip.title ?? `Clip ${i + 1}`}</h4>
+
+  const firstClip = clips[0];
+  const extraClips = clips.slice(1);
+
+  function ClipCard({ clip, index }: { clip: any; index: number }) {
+    return (
+      <div className="p-4 rounded-xl bg-background/60 border border-white/8 hover:border-primary/20 transition-all">
+        <div className="flex items-start justify-between gap-3 mb-3">
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg bg-violet-500/20 border border-violet-500/30 flex items-center justify-center">
+              <span className="text-xs font-bold text-violet-300">{index + 1}</span>
             </div>
-            {(clip.start || clip.end || clip.duration) && (
-              <span className="text-xs font-mono text-white/40 bg-white/5 px-2 py-0.5 rounded">
-                {clip.start && clip.end ? `${clip.start} - ${clip.end}` : clip.duration ?? ""}
-              </span>
-            )}
+            <h4 className="text-sm font-semibold text-white/90">{clip.title ?? `Clip ${index + 1}`}</h4>
           </div>
-          {clip.hook && <p className="text-sm text-violet-300/80 mb-2 pl-9">"{clip.hook}"</p>}
-          {clip.reason && <p className="text-xs text-white/50 pl-9">{clip.reason}</p>}
-          {clip.platforms?.length > 0 && (
-            <div className="flex gap-1.5 mt-2 pl-9">
-              {clip.platforms.map((p: string, pi: number) => {
-                const pl = PLATFORMS.find(x => x.id === p);
-                return <span key={pi} className="text-xs px-2 py-0.5 bg-white/5 border border-white/10 rounded text-white/50">{pl?.shortLabel ?? p}</span>;
-              })}
-            </div>
+          {(clip.start || clip.end) && (
+            <span className="text-xs font-mono text-white/40 bg-white/5 px-2 py-0.5 rounded">
+              {clip.start} – {clip.end}
+            </span>
           )}
         </div>
-      ))}
+        {clip.hook && <p className="text-sm text-violet-300/80 mb-2 pl-9 italic">"{clip.hook}"</p>}
+        {clip.whyItWorks && <p className="text-xs text-white/50 pl-9 mb-2">{clip.whyItWorks}</p>}
+        {clip.platforms?.length > 0 && (
+          <div className="flex gap-1.5 pl-9 mb-2 flex-wrap">
+            {clip.platforms.map((p: string, pi: number) => {
+              const pl = PLATFORMS.find(x => x.label === p || x.id === p);
+              return <span key={pi} className="text-xs px-2 py-0.5 bg-white/5 border border-white/10 rounded text-white/50">{pl?.shortLabel ?? p}</span>;
+            })}
+            {clip.platformReason && <span className="text-xs text-white/30 self-center">{clip.platformReason}</span>}
+          </div>
+        )}
+        {isPaid && clip.tacticalNote && (
+          <div className="flex items-start gap-2 pl-9 mt-2 p-2 rounded-lg bg-white/3 border border-white/8">
+            <ChevronRight className="w-3.5 h-3.5 text-primary/60 mt-0.5 shrink-0" />
+            <p className="text-xs text-white/60">{clip.tacticalNote}</p>
+          </div>
+        )}
+        {isPaid && clip.engagementPotential && (
+          <div className="pl-9 mt-2">
+            <span className={`text-xs px-2 py-0.5 rounded font-semibold border ${clip.engagementPotential === "High" ? "bg-green-500/10 border-green-500/20 text-green-400" : clip.engagementPotential === "Medium" ? "bg-yellow-500/10 border-yellow-500/20 text-yellow-400" : "bg-white/5 border-white/15 text-white/40"}`}>
+              {clip.engagementPotential} Engagement
+            </span>
+            {clip.engagementReason && <span className="text-xs text-white/30 ml-2">{clip.engagementReason}</span>}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {firstClip && <ClipCard clip={firstClip} index={0} />}
+      {extraClips.length > 0 && (
+        <BlurSection blur={!isPaid} feature="short-clips" label={`Unlock ${extraClips.length} more clip ideas with tactical notes and engagement potential ratings`}>
+          <div className="space-y-3">
+            {extraClips.map((clip: any, i: number) => (
+              <ClipCard key={i} clip={clip} index={i + 1} />
+            ))}
+          </div>
+        </BlurSection>
+      )}
+    </div>
+  );
+}
+
+const FILLER_WORDS_RX = /\b(um+|uh+|er+|ah+|hmm+|like|you know|basically|literally|actually|so|right)\b/gi;
+
+function TranscriptPanel({ data, isPaid }: { data: any; isPaid: boolean }) {
+  const [copied, setCopied] = useState(false);
+  const segments: Array<{ start: number; end: number; text: string }> = data?.segments ?? [];
+  const fullText: string = data?.fullText ?? "";
+  const FREE_CUTOFF_SEC = 60;
+
+  if (!segments.length && !fullText) {
+    return <p className="text-white/40 text-sm">No transcript available.</p>;
+  }
+
+  const visibleSegments = isPaid ? segments : segments.filter(s => s.start < FREE_CUTOFF_SEC);
+  const hasMoreContent = !isPaid && segments.some(s => s.start >= FREE_CUTOFF_SEC);
+
+  function fmtSec(s: number): string {
+    const m = Math.floor(s / 60);
+    const sec = Math.floor(s % 60);
+    return `${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+  }
+
+  function highlightFillers(text: string): React.ReactNode {
+    const parts = text.split(FILLER_WORDS_RX);
+    const matches = text.match(FILLER_WORDS_RX) ?? [];
+    return parts.map((part, i) => (
+      <React.Fragment key={i}>
+        {part}
+        {matches[i] && <mark className="bg-amber-400/20 text-amber-300 rounded px-0.5 not-italic">{matches[i]}</mark>}
+      </React.Fragment>
+    ));
+  }
+
+  let lastStampAt = -30;
+  const fullCopyText = segments.map(s => `[${fmtSec(s.start)}] ${s.text}`).join("\n");
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-white/40 uppercase tracking-wider flex items-center gap-2"><AlignLeft className="w-3.5 h-3.5" />Transcript</p>
+        {isPaid && (
+          <button
+            onClick={() => { navigator.clipboard.writeText(fullCopyText); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+            className="flex items-center gap-1.5 text-xs text-white/40 hover:text-white/70 transition-colors"
+          >
+            {copied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
+            {copied ? "Copied!" : "Copy all"}
+          </button>
+        )}
+      </div>
+
+      <div className="p-4 rounded-xl bg-background/60 border border-white/8 space-y-3 max-h-[500px] overflow-y-auto">
+        {visibleSegments.map((seg, i) => {
+          const showStamp = seg.start - lastStampAt >= 30;
+          if (showStamp) lastStampAt = seg.start;
+          return (
+            <div key={i}>
+              {showStamp && (
+                <p className="text-xs font-mono text-primary/50 mb-1 sticky top-0 bg-background/80">{fmtSec(seg.start)}</p>
+              )}
+              <p className="text-sm text-white/70 leading-relaxed">{highlightFillers(seg.text)}</p>
+            </div>
+          );
+        })}
+        {hasMoreContent && (
+          <div className="relative">
+            <div className="absolute inset-x-0 top-0 h-12 bg-gradient-to-b from-transparent to-background/95 pointer-events-none" />
+            <BlurSection blur feature="full-transcript" label="Full transcript available on Creator plan — includes timestamps every 30 seconds">
+              <div className="py-8 text-center text-sm text-white/40">
+                [Transcript continues beyond 1 minute]
+              </div>
+            </BlurSection>
+          </div>
+        )}
+      </div>
+
+      <p className="text-xs text-white/25 flex items-center gap-1.5">
+        <span className="w-2.5 h-2.5 rounded-sm inline-block bg-amber-400/20 border border-amber-400/20" />
+        Amber highlights indicate filler words
+      </p>
+    </div>
+  );
+}
+
+function AnalyzingScreen({ progress, currentStep, isSubmitting }: { progress: number; currentStep: string; isSubmitting: boolean }) {
+  const activeIdx = isSubmitting ? 0
+    : PROGRESS_STEPS.findIndex(step => step.threshold > progress) - 1;
+
+  return (
+    <div className="max-w-lg mx-auto py-12">
+      <div className="text-center mb-10">
+        <div className="w-16 h-16 rounded-2xl bg-primary/15 border border-primary/25 flex items-center justify-center mx-auto mb-4">
+          <Wand2 className="w-8 h-8 text-primary animate-pulse" />
+        </div>
+        <h2 className="text-xl font-semibold text-white">Analyzing your video</h2>
+        <p className="text-white/40 text-sm mt-1">This takes 1–3 minutes depending on length</p>
+      </div>
+
+      <div className="mb-8">
+        <div className="flex justify-between text-xs text-white/40 mb-2">
+          <span>{currentStep || "Processing..."}</span>
+          <span>{Math.round(progress)}%</span>
+        </div>
+        <div className="h-2 bg-white/8 rounded-full overflow-hidden">
+          <motion.div
+            animate={{ width: `${progress}%` }}
+            transition={{ duration: 0.5, ease: "easeOut" }}
+            className="h-full bg-gradient-to-r from-primary to-purple-500 rounded-full"
+          />
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        {PROGRESS_STEPS.map((step, i) => {
+          const completed = i < activeIdx || (i === activeIdx && progress >= step.threshold);
+          const active = i === activeIdx && !completed;
+          return (
+            <div key={i} className={`flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all ${active ? "bg-primary/10 border border-primary/25" : completed ? "opacity-50" : "opacity-20"}`}>
+              <div className={`w-5 h-5 rounded-full border flex items-center justify-center shrink-0 ${completed ? "bg-green-500 border-green-500" : active ? "border-primary bg-primary/20" : "border-white/20"}`}>
+                {completed ? <Check className="w-3 h-3 text-white" /> : active ? <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" /> : <span className="text-[9px] text-white/30">{i + 1}</span>}
+              </div>
+              <span className={`text-sm ${active ? "text-white font-medium" : completed ? "text-white/50" : "text-white/25"}`}>{step.label}</span>
+            </div>
+          );
+        })}
+      </div>
+      <p className="text-xs text-white/20 text-center mt-6">Do not close this tab while analyzing</p>
+    </div>
+  );
+}
+
+function ErrorScreen({ error, onReset }: { error: string; onReset: () => void }) {
+  return (
+    <div className="max-w-md mx-auto py-12 text-center">
+      <div className="w-16 h-16 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-center mx-auto mb-4">
+        <XCircle className="w-8 h-8 text-red-400" />
+      </div>
+      <h2 className="text-xl font-semibold text-white mb-2">Analysis failed</h2>
+      <p className="text-sm text-white/50 mb-6 leading-relaxed">{error}</p>
+      <button
+        onClick={onReset}
+        className="flex items-center gap-2 mx-auto px-5 py-2.5 rounded-xl text-sm font-semibold bg-primary/15 border border-primary/30 text-primary hover:bg-primary/25 transition-all"
+      >
+        <RefreshCcw className="w-4 h-4" />Try again
+      </button>
+    </div>
+  );
+}
+
+function LimitReachedModal({ limit, onClose, onUpgrade }: { limit: number; onClose: () => void; onUpgrade: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="bg-[#1a1025] border border-white/10 rounded-2xl p-8 max-w-sm mx-4 text-center"
+      >
+        <div className="w-14 h-14 rounded-2xl bg-primary/15 border border-primary/25 flex items-center justify-center mx-auto mb-4">
+          <Shield className="w-7 h-7 text-primary" />
+        </div>
+        <h2 className="text-xl font-semibold text-white mb-2">Monthly limit reached</h2>
+        <p className="text-sm text-white/50 mb-6">
+          You've used all {limit} free {limit === 1 ? "analysis" : "analyses"} this month. Upgrade to Creator for 15 analyses per month, or go Pro for 40.
+        </p>
+        <button
+          onClick={onUpgrade}
+          className="w-full py-3 rounded-xl text-sm font-semibold bg-gradient-to-r from-primary to-purple-500 text-white hover:opacity-90 transition-opacity mb-3"
+        >
+          View Plans — from $19/mo
+        </button>
+        <button onClick={onClose} className="text-xs text-white/30 hover:text-white/50 transition-colors">
+          Maybe later
+        </button>
+      </motion.div>
     </div>
   );
 }
@@ -403,6 +802,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
   const [selectedModules, setSelectedModules] = useState<string[]>(["quality", "editing"]);
   const [activeResultTab, setActiveResultTab] = useState<string>("quality");
   const [showPlanModal, setShowPlanModal] = useState(false);
+  const [showLimitModal, setShowLimitModal] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -414,20 +814,27 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
   const limits = getModeLimits("video-analyzer");
   const isPaid = plan.isPaid;
   const uploadsRemaining = limits.uploadsRemaining;
-  const isAnalyzing = isUploading || isSubmitting || (!!jobId && (statusData?.status === "processing" || statusData?.status === "queued"));
+
+  // Fix: check all non-terminal statuses, not just "processing"/"queued"
+  const isAnalyzing = isUploading || isSubmitting || (!!jobId && !!statusData && !TERMINAL_STATUSES.has(statusData.status ?? ""));
+  const isError = statusData?.status === "error";
   const isDone = statusData?.status === "complete";
   const hasResults = isDone && !!results;
 
   useEffect(() => {
     if (hasResults) {
       onDataReady();
-      setActiveResultTab(selectedModules[0] ?? "quality");
+      const firstModule = selectedModules.find(m => (results as any)?.[m]);
+      setActiveResultTab(firstModule ?? "quality");
     }
   }, [hasResults]);
 
   useEffect(() => {
     onRegisterExport(null);
   }, []);
+
+  // Show the processing screen as soon as a jobId exists, even before first poll
+  const showAnalyzing = isAnalyzing || (!!jobId && !isDone && !isError);
 
   function togglePlatform(id: string) {
     setSelectedPlatforms(prev =>
@@ -444,16 +851,13 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
 
   async function handleAnalyze() {
     if (!file) { toast({ title: "No video selected", description: "Please drop or select a video first.", variant: "destructive" }); return; }
-    if (limits.uploadsRemaining === 0) { setShowPlanModal(true); return; }
+    if (uploadsRemaining === 0) { setShowLimitModal(true); return; }
 
     const sizeLimit = getFileSizeLimit(plan.plan);
     if (file.size > sizeLimit) {
       toast({ title: "File too large", description: `Your plan allows up to ${getFileSizeLimitLabel(plan.plan)} per video.`, variant: "destructive" });
       return;
     }
-
-    const needsPublish = selectedModules.includes("publish");
-    if (!isPaid && needsPublish) { setShowPlanModal(true); return; }
 
     setIsSubmitting(true);
     try {
@@ -481,14 +885,25 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
 
   const progress = statusData?.progress ?? (isSubmitting ? 5 : 0);
   const currentStepLabel = statusData?.currentStep ?? (isSubmitting ? "Uploading video..." : "");
+  const errorMessage = (pollData as any)?.error ?? "An unexpected error occurred during analysis.";
 
-  const availableResultTabs = RESULT_TABS.filter(t => selectedModules.includes(t.id) && results?.[t.id]);
+  const availableResultTabs = RESULT_TABS.filter(t => {
+    if (t.id === "transcript") return !!(results as any)?.transcript;
+    return selectedModules.includes(t.id) && !!(results as any)?.[t.id];
+  });
 
   return (
     <div className="space-y-8">
       {showPlanModal && <PlanPickerModal onClose={() => setShowPlanModal(false)} />}
+      {showLimitModal && (
+        <LimitReachedModal
+          limit={limits.uploadLimit}
+          onClose={() => setShowLimitModal(false)}
+          onUpgrade={() => navigateToPricing("monthly-limit")}
+        />
+      )}
 
-      {!hasResults && !isAnalyzing ? (
+      {!hasResults && !showAnalyzing && !isError ? (
         <>
           <div className="text-center">
             <h1 className="text-3xl font-display font-bold text-white">Video Analyzer</h1>
@@ -566,14 +981,14 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
                 )}
                 <button
                   onClick={handleAnalyze}
-                  disabled={!file || isSubmitting || uploadsRemaining === 0}
+                  disabled={!file || isSubmitting}
                   className="w-full py-3.5 rounded-xl font-semibold text-sm transition-all bg-gradient-to-r from-primary to-purple-500 hover:from-primary/90 hover:to-purple-500/90 text-white disabled:opacity-40 disabled:cursor-not-allowed shadow-lg shadow-primary/25 flex items-center justify-center gap-2"
                 >
                   <Wand2 className="w-4 h-4" />
                   {isSubmitting ? "Uploading..." : "Analyze Video"}
                 </button>
                 {uploadsRemaining === 0 && (
-                  <button onClick={() => setShowPlanModal(true)} className="w-full mt-2 py-2.5 rounded-xl text-xs font-semibold text-primary border border-primary/30 hover:bg-primary/10 transition-all">
+                  <button onClick={() => setShowLimitModal(true)} className="w-full mt-2 py-2.5 rounded-xl text-xs font-semibold text-primary border border-primary/30 hover:bg-primary/10 transition-all">
                     Upgrade for more analyses
                   </button>
                 )}
@@ -581,30 +996,10 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
             </div>
           </div>
         </>
-      ) : isAnalyzing ? (
-        <div className="max-w-lg mx-auto py-12">
-          <div className="text-center mb-8">
-            <div className="w-16 h-16 rounded-2xl bg-primary/15 border border-primary/25 flex items-center justify-center mx-auto mb-4">
-              <Wand2 className="w-8 h-8 text-primary animate-pulse" />
-            </div>
-            <h2 className="text-xl font-semibold text-white">Analyzing your video</h2>
-            <p className="text-white/40 text-sm mt-1">This takes 1-3 minutes depending on length</p>
-          </div>
-          <div className="space-y-4">
-            <div className="flex justify-between text-xs text-white/40 mb-1">
-              <span>{currentStepLabel || "Processing..."}</span>
-              <span>{progress}%</span>
-            </div>
-            <div className="h-2 bg-white/8 rounded-full overflow-hidden">
-              <motion.div
-                animate={{ width: `${progress}%` }}
-                transition={{ duration: 0.5, ease: "easeOut" }}
-                className="h-full bg-gradient-to-r from-primary to-purple-500 rounded-full"
-              />
-            </div>
-            <p className="text-xs text-white/25 text-center">Do not close this tab while analyzing</p>
-          </div>
-        </div>
+      ) : isError ? (
+        <ErrorScreen error={errorMessage} onReset={handleReset} />
+      ) : showAnalyzing ? (
+        <AnalyzingScreen progress={progress} currentStep={currentStepLabel} isSubmitting={isSubmitting} />
       ) : hasResults ? (
         <div className="space-y-6">
           <div className="flex items-center justify-between">
@@ -619,7 +1014,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
 
           {availableResultTabs.length > 0 && (
             <>
-              <div className="flex gap-1 border-b border-white/8">
+              <div className="flex gap-1 border-b border-white/8 overflow-x-auto">
                 {availableResultTabs.map(tab => {
                   const Icon = tab.icon;
                   const isActive = activeResultTab === tab.id;
@@ -627,7 +1022,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
                     <button
                       key={tab.id}
                       onClick={() => setActiveResultTab(tab.id)}
-                      className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold transition-all border-b-2 -mb-px ${isActive ? "text-primary border-primary" : "text-white/40 border-transparent hover:text-white/70"}`}
+                      className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold transition-all border-b-2 -mb-px whitespace-nowrap ${isActive ? "text-primary border-primary" : "text-white/40 border-transparent hover:text-white/70"}`}
                     >
                       <Icon className="w-4 h-4" />{tab.label}
                     </button>
@@ -636,10 +1031,11 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
               </div>
               <AnimatePresence mode="wait">
                 <motion.div key={activeResultTab} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
-                  {activeResultTab === "quality"    && <QualityPanel data={results.quality} />}
-                  {activeResultTab === "editing"    && <EditingPanel data={results.editing} />}
-                  {activeResultTab === "publish"    && <PublishPanel data={results.publish} platforms={selectedPlatforms} />}
-                  {activeResultTab === "shortClips" && <ShortClipsPanel data={results.shortClips} />}
+                  {activeResultTab === "quality"    && <QualityPanel    data={(results as any).quality}    isPaid={isPaid} />}
+                  {activeResultTab === "editing"    && <EditingPanel    data={(results as any).editing}    isPaid={isPaid} />}
+                  {activeResultTab === "publish"    && <PublishPanel    data={(results as any).publish}    platforms={selectedPlatforms} isPaid={isPaid} />}
+                  {activeResultTab === "shortClips" && <ShortClipsPanel data={(results as any).shortClips} isPaid={isPaid} />}
+                  {activeResultTab === "transcript" && <TranscriptPanel data={(results as any).transcript} isPaid={isPaid} />}
                 </motion.div>
               </AnimatePresence>
             </>

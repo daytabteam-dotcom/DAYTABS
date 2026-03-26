@@ -1,0 +1,282 @@
+You are working on DayTabs — a video analysis SaaS for English-speaking content 
+creators. The app is built with React + Vite and hosted on Replit.
+
+Please implement ALL of the following changes carefully and completely.
+
+─────────────────────────────────────────
+1. FIX CRITICAL UX BUG — LOADING STATE
+─────────────────────────────────────────
+Currently after uploading a video, the page resets to the upload screen 
+while analysis is running. This is wrong.
+
+Fix it so that:
+- Immediately after upload, show a full loading/processing screen
+- Display a step-by-step progress indicator showing what's happening:
+    Step 1: Uploading video...
+    Step 2: Extracting audio & frames...
+    Step 3: Transcribing with Whisper...
+    Step 4: Analyzing quality...
+    Step 5: Generating suggestions...
+    Step 6: Building publish package...
+    Step 7: Finalizing report...
+- Each step lights up as it completes
+- Never navigate away or reset to upload screen during processing
+- Only show results when ALL selected modules are complete
+- If analysis fails, show a clear error message with a "Try again" button
+
+─────────────────────────────────────────
+2. FREE PLAN — PARTIAL REPORT + SMART BLUR
+─────────────────────────────────────────
+Free users should receive enough to be genuinely impressed, but not 
+the full report. This serves two purposes: reduce token/API cost, and 
+create a strong incentive to upgrade.
+
+WHAT FREE USERS GET (generate fully, no blur):
+- Overall quality score (single number + one sentence)
+- Lighting score only (one dimension, not all)
+- Top 1 editing suggestion (just the single most impactful one)
+- Top 1 hook moment from transcript
+- 1 title option for their selected platform
+- Short description (2 sentences only)
+- 3 tags only
+- 1 short clip idea (timestamp + hook line only, no tactical note)
+- Transcript tab: first 60 seconds only, rest blurred
+
+WHAT FREE USERS SEE BLURRED (render the UI element, blur the content):
+- All other quality dimensions (contrast, color, framing, background, 
+  per-frame analysis) — show the section headers and score bars but 
+  blur the text and lock the scores behind an overlay
+- Editing suggestions #2 onwards — show faded/blurred cards with lock icon
+- All title options except #1 — blur title text, show "4 more title 
+  options" with upgrade prompt
+- Full YouTube description — blur after first 2 lines
+- Tags — show 3 tags clearly, blur the rest with "22 more tags" label
+- .srt subtitle file — show the section exists but replace content 
+  with a locked overlay: "Download subtitle file — Creator plan and above"
+- Short clip ideas #2 and #3 — blurred cards with lock overlay
+- Transcript beyond 60 seconds — fade out with "Full transcript available 
+  on Creator plan"
+
+BLUR IMPLEMENTATION:
+- Use CSS: filter: blur(4px); user-select: none; pointer-events: none;
+- Over every blurred section, show an upgrade overlay card:
+    - Small lock icon
+    - One-line value proposition specific to that section 
+      (e.g. "Get 25 more tags optimized for your niche")
+    - "Upgrade to Creator — $19/mo" button that links to pricing page
+- The overlay should feel helpful, not aggressive. 
+  Use the existing purple theme colors.
+- Never show a paywall before the report — always show the report first, 
+  then blur sections within it
+
+COST IMPACT FOR FREE PLAN:
+By only generating partial content for free users, the AI calls are reduced:
+- Skip per-frame visual analysis (saves ~$0.018 per video)
+- Skip full description generation (saves ~$0.004)
+- Skip tags generation beyond 3 (saves ~$0.002)
+- Skip subtitle file generation (saves ~$0.003)
+- Limit transcript processing to 60 seconds (saves ~$0.020 on longer videos)
+- Total target: under $0.08 per free analysis (down from $0.164)
+- Hard ceiling: never exceed $0.10 per free user per analysis
+
+FREE PLAN PIPELINE LOGIC:
+In the backend pipeline, check the user's plan BEFORE running each module:
+  if (plan === 'free') {
+    // Only run: basic quality (1 frame only), top hook, 1 suggestion,
+    // 1 title, short description, 3 tags, 1 clip idea
+    // Skip: full frame analysis, full tags, subtitle generation,
+    // full description, rewritten hook section
+  }
+Do NOT generate content and then hide it — skip the generation entirely 
+for blurred sections to save API cost.
+
+─────────────────────────────────────────
+3. IMPROVE VIDEO QUALITY ANALYSIS
+─────────────────────────────────────────
+Extract exactly 5 frames from the video at evenly spaced intervals.
+For each frame, use GPT-4o vision to analyze:
+- Brightness level (0-100) with specific observation
+- Contrast (0-100) — separation between subject and background
+- Color temperature — warm/cool/neutral, whether it suits the content
+- Color correction suggestion — specific actionable fix
+- Background — what's visible, is it distracting, how to improve
+- Subject framing — rule of thirds, headroom, looking room
+- Lighting setup — key light position, shadows, fill light needed
+- Overall visual quality score for that frame
+
+Combined quality report must include:
+- Overall visual score (weighted average across frames)
+- Audio score — filler words, clarity, pace, background noise
+- The single most important fix displayed prominently at top
+- Specific timestamps for issues detected
+- Color grading recommendation (one specific suggestion)
+
+Format each dimension with: score / 100, severity badge 
+(critical / needs work / good / excellent), and one actionable fix.
+
+For FREE plan: analyze 1 frame only, show overall score + lighting only.
+
+─────────────────────────────────────────
+4. IMPROVE EDITING SUGGESTIONS
+─────────────────────────────────────────
+Update the system prompt for editing analysis:
+
+"""
+You are a senior video editor and YouTube strategist with 10 years experience 
+working with creators across YouTube, TikTok, and Instagram. You watch videos 
+with a critical eye and give feedback like a professional editor reviewing a 
+client's rough cut — specific, direct, and actionable. Never give vague advice.
+
+Rules:
+- Always reference exact timestamps or quote exact words from the transcript
+- If something should be cut, say exactly what and why in one sentence
+- If the hook is weak, rewrite it with a specific alternative
+- Reference platform-specific best practices
+- Never say "consider" or "you might want to" — be direct
+- Keep each suggestion to 1-2 sentences maximum
+"""
+
+Add a "Rewritten Hook" section — take the best moment from the transcript 
+and rewrite it as an optimized opening hook.
+
+For FREE plan: generate top 1 suggestion + top 1 hook moment only.
+Skip rewritten hook section entirely for free users.
+
+─────────────────────────────────────────
+5. IMPROVE PUBLISH PACKAGE
+─────────────────────────────────────────
+When YouTube Long or YouTube Shorts is selected:
+
+TITLES — generate 5 options using different strategies:
+  Option 1: Curiosity gap
+  Option 2: How-to / tutorial
+  Option 3: Number-based
+  Option 4: Problem/solution direct
+  Option 5: Bold claim or result-driven
+  Each title: include primary keyword, under 70 characters.
+
+DESCRIPTION:
+  - First 2 lines compelling (shown before "Show more")
+  - Primary keyword in first sentence
+  - Timestamps section (## Chapters) from actual transcript
+  - Links placeholder section
+  - Call to action
+  - 150-400 words
+
+TAGS — 25-30 tags:
+  - 5 high-volume broad tags
+  - 10 medium-competition niche tags
+  - 5 long-tail specific tags
+  - 5 brand/product specific tags
+  - Comma-separated, ready to paste
+
+SUBTITLE FILE (.srt):
+  - Use Whisper verbose transcript with word-level timestamps
+  - Correct format: sequence number, timestamp, text
+  - Max 2 lines per card, max 42 characters per line
+  - Download button for .srt file
+  - YouTube-compatible only (shown when YouTube is selected)
+
+For FREE plan:
+  - Generate title option #1 only (skip options 2-5, do not generate them)
+  - Generate 2-sentence description only (skip full description generation)
+  - Generate 3 tags only (skip remaining tags generation)
+  - Skip subtitle file generation entirely
+  - Blur remaining sections in UI with upgrade prompts
+
+─────────────────────────────────────────
+6. IMPROVE SHORT CLIP IDEAS
+─────────────────────────────────────────
+Each clip idea must include:
+- Exact timestamp range
+- Suggested clip title
+- Opening hook: exact words from transcript
+- Why it works: one sentence
+- Platform fit with reason
+- Tactical note (captions, pacing, format advice)
+- Engagement potential: High / Medium / Low with reason
+
+System prompt addition:
+"""
+For each clip, identify the moment with highest re-watchability or 
+shareability. A great short clip has a strong first 2 seconds, a clear 
+single idea, and a satisfying end. Quote the exact words that should open 
+the clip and explain why this moment works as a short.
+"""
+
+For FREE plan: generate 1 clip idea only (timestamp + hook line).
+Skip tactical note and engagement potential for free users.
+Blur clips #2 and #3 in UI.
+
+─────────────────────────────────────────
+7. ADD TRANSCRIPT TAB
+─────────────────────────────────────────
+Add a "Transcript" tab in results showing:
+- Full transcript text with timestamps every 30 seconds
+- Filler words highlighted in amber
+- Copy to clipboard button
+
+For FREE plan: show first 60 seconds only. 
+Fade out after 60 seconds with upgrade overlay.
+Do NOT process or store the full transcript for display beyond what 
+Whisper already returns — just limit what is shown.
+
+─────────────────────────────────────────
+8. IMPROVE AI TONE — ALL OUTPUTS
+─────────────────────────────────────────
+Update the base system prompt for ALL analysis modules:
+
+"""
+You are an expert content strategist and video consultant. You have personally 
+reviewed over 1,000 YouTube, TikTok, and Instagram videos. You give feedback 
+the way a senior consultant would in a paid review session — specific, 
+confident, and focused on what actually moves the needle.
+
+Never use: "Great job!", "Consider trying", "You might want to", 
+"As a content creator", "In conclusion", or any filler phrase.
+Every sentence must contain a specific observation or action.
+Write in second person ("your video", "you open with").
+Be direct but not harsh.
+Lead every section with the most important insight first.
+If something is genuinely good, say so in one word and move on.
+"""
+
+─────────────────────────────────────────
+9. WHISPER VERBOSE TIMESTAMPS
+─────────────────────────────────────────
+Call Whisper with:
+  response_format: "verbose_json"
+  timestamp_granularities: ["word", "segment"]
+
+Store both plain transcript and verbose transcript in the analysis result.
+Use verbose transcript for:
+- Accurate .srt subtitle generation
+- Accurate short clip timestamp suggestions  
+- Filler word highlighting in transcript tab
+
+─────────────────────────────────────────
+10. UPGRADE PROMPT BEHAVIOR
+─────────────────────────────────────────
+When a free user clicks any upgrade overlay button:
+- Navigate to the pricing page
+- Highlight the Creator plan ($19/mo) as recommended
+- Pre-fill or remember what feature triggered the upgrade 
+  (e.g. show "You tried to access: Full tag optimization")
+
+When a free user hits their monthly analysis limit (3 videos):
+- Show a friendly full-screen modal — not an error
+- Message: "You've used all 3 free analyses this month."
+- Show plan comparison with upgrade CTA
+- Never show a generic API error to the user
+
+─────────────────────────────────────────
+IMPORTANT NOTES:
+- Do not break existing authentication or plan limit enforcement
+- Do not change the dark purple visual theme
+- Fix the loading state bug first — highest priority
+- Free plan cost target: under $0.08 per analysis
+- The .srt download must work as an actual file download
+- All pipeline optimizations for free plan must happen server-side
+  (do not generate content and hide it — skip generation entirely)
+- Keep Script Planner and Teleprompter completely untouched
+- Test with a free account and a paid account to verify blur behavior

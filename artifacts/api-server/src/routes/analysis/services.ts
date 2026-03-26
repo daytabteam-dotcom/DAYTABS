@@ -68,6 +68,7 @@ export async function transcribeAudio(audioPath: string): Promise<{ text: string
       file,
       model: "whisper-1",
       response_format: "verbose_json",
+      timestamp_granularities: ["word", "segment"],
     } as Parameters<typeof openai.audio.transcriptions.create>[0]);
     const r = response as unknown as {
       text: string;
@@ -116,10 +117,18 @@ export async function compressVideo(inputPath: string, outputPath: string): Prom
   );
 }
 
-export async function extractFrames(videoPath: string, framesDir: string, count = 10): Promise<string[]> {
-  await execAsync(
-    `ffmpeg -i "${videoPath}" -vf "select=lt(n\\,${count})" -vsync vfr "${framesDir}/frame_%03d.jpg" -y`
-  );
+export async function extractFrames(videoPath: string, framesDir: string, count = 5): Promise<string[]> {
+  const duration = await getMediaDuration(videoPath);
+  if (duration <= 0) {
+    await execAsync(`ffmpeg -i "${videoPath}" -vf "select=lt(n\\,${count})" -vsync vfr "${framesDir}/frame_%03d.jpg" -y`);
+  } else {
+    const interval = duration / (count + 1);
+    for (let i = 1; i <= count; i++) {
+      const ts = (interval * i).toFixed(2);
+      const outPath = path.join(framesDir, `frame_${String(i).padStart(3, "0")}.jpg`);
+      await execAsync(`ffmpeg -ss ${ts} -i "${videoPath}" -frames:v 1 -q:v 3 "${outPath}" -y`).catch(() => {});
+    }
+  }
   const files = await fs.readdir(framesDir);
   const jpgs = files.filter(f => f.endsWith(".jpg")).sort().slice(0, count);
   return Promise.all(jpgs.map(async (f) => {
@@ -151,31 +160,63 @@ function parseJson<T>(raw: string, fallback: T): T {
   }
 }
 
-export async function analyzeVisuals(frameBase64List: string[], platform: string): Promise<object> {
+const BASE_SYSTEM_PROMPT = `You are an expert content strategist and video consultant. You have personally reviewed over 1,000 YouTube, TikTok, and Instagram videos. You give feedback the way a senior consultant would in a paid review session: specific, confident, and focused on what actually moves the needle.
+
+Never use: "Great job!", "Consider trying", "You might want to", "As a content creator", "In conclusion", or any filler phrase. Every sentence must contain a specific observation or action. Write in second person ("your video", "you open with"). Be direct but not harsh. Lead every section with the most important insight first. If something is genuinely good, say so in one word and move on.`;
+
+export async function analyzeVisuals(frameBase64List: string[], platform: string, plan = "free"): Promise<object> {
   const imageContent = frameBase64List.map(b64 => ({
     type: "image_url",
     image_url: { url: `data:image/jpeg;base64,${b64}` },
   }));
 
-  const prompt = `You are a professional video quality consultant who has reviewed 10,000+ videos for YouTube and social media. You are direct, specific, and give zero generic advice.
+  const isFree = plan === "free";
 
-Analyze these frames from a ${platform} video. For each dimension:
-- Score 0-100 based on what you actually see
-- Give one-line reasoning that references specifics (e.g. "overexposed top-right corner", "camera drifts left at frame 3", "subject too far from lens")
-- For suggestions: give the exact fix, not vague advice. Say "Move the key light 45 degrees to camera right" not "improve your lighting"
-- Lead your overall assessment with the SINGLE most important fix that will have the biggest viewer retention impact
+  if (isFree) {
+    const freePrompt = `${BASE_SYSTEM_PROMPT}
 
-Return STRICT JSON only (no markdown, no explanation):
+Analyze this single frame from a ${platform} video. Give one specific observation for each dimension.
+
+Return STRICT JSON only:
 {
-  "lighting": {"level": "low/medium/high", "numeric": 0-100, "assessment": "...", "suggestions": ["..."], "effect": "..."},
-  "brightness": {"level": "low/medium/high", "numeric": 0-100, "assessment": "...", "suggestions": ["..."], "effect": "..."},
-  "contrast": {"level": "low/medium/high", "numeric": 0-100, "assessment": "...", "suggestions": ["..."], "effect": "..."},
-  "sharpness": {"level": "blurry/acceptable/sharp", "numeric": 0-100, "assessment": "...", "suggestions": ["..."], "effect": "..."},
-  "stability": {"level": "shaky/acceptable/stable", "numeric": 0-100, "assessment": "...", "suggestions": ["..."], "effect": "..."},
-  "colorBalance": {"level": "poor/acceptable/good", "numeric": 0-100, "assessment": "...", "suggestions": ["..."], "effect": "..."},
-  "background": {"level": "distracting/normal/clean", "numeric": 0-100, "assessment": "...", "suggestions": ["..."], "effect": "..."},
-  "framing": {"level": "poor/acceptable/good", "numeric": 0-100, "assessment": "...", "suggestions": ["..."], "effect": "..."},
-  "pacing": {"level": "slow/moderate/fast", "numeric": 0-100, "assessment": "...", "suggestions": ["..."], "effect": "..."}
+  "overallVisualScore": 0-100,
+  "topFix": "the single most important visual fix that will increase viewer retention",
+  "lighting": {"level": "low/medium/high", "numeric": 0-100, "assessment": "one specific observation", "suggestions": ["one exact fix"], "severity": "critical/needs work/good/excellent"}
+}`;
+
+    const response = await callOpenAI({
+      model: "gpt-4o",
+      max_completion_tokens: 500,
+      messages: [{ role: "user", content: [{ type: "text", text: freePrompt }, ...imageContent] }],
+    });
+    return parseJson(response.choices[0]?.message?.content ?? "{}", {
+      overallVisualScore: 70,
+      topFix: "Ensure your key light is positioned at 45 degrees to camera right to eliminate flat lighting.",
+      lighting: { level: "medium", numeric: 70, assessment: "Acceptable lighting", suggestions: ["Reposition key light"], severity: "needs work" },
+    });
+  }
+
+  const prompt = `${BASE_SYSTEM_PROMPT}
+
+Analyze these ${frameBase64List.length} evenly-spaced frames from a ${platform} video. For each dimension:
+- Score 0-100 based on what you actually see
+- Give one-line reasoning referencing specifics (e.g. "overexposed top-right corner at frame 3", "subject drifts left")
+- For suggestions: give the exact fix ("Move key light 45 degrees to camera right", not "improve lighting")
+- Lead with the SINGLE most important fix for viewer retention
+
+Return STRICT JSON only (no markdown):
+{
+  "overallVisualScore": 0-100,
+  "topFix": "the single most impactful fix for this video",
+  "colorGradingRecommendation": "one specific color grading suggestion",
+  "lighting": {"level": "low/medium/high", "numeric": 0-100, "assessment": "...", "suggestions": ["specific fix"], "severity": "critical/needs work/good/excellent"},
+  "brightness": {"level": "low/medium/high", "numeric": 0-100, "assessment": "...", "suggestions": ["..."], "severity": "critical/needs work/good/excellent"},
+  "contrast": {"level": "low/medium/high", "numeric": 0-100, "assessment": "...", "suggestions": ["..."], "severity": "critical/needs work/good/excellent"},
+  "colorTemperature": {"value": "warm/cool/neutral", "assessment": "...", "suggestions": ["..."], "severity": "critical/needs work/good/excellent"},
+  "background": {"level": "distracting/normal/clean", "numeric": 0-100, "assessment": "...", "suggestions": ["..."], "severity": "critical/needs work/good/excellent"},
+  "framing": {"level": "poor/acceptable/good", "numeric": 0-100, "assessment": "...", "suggestions": ["..."], "severity": "critical/needs work/good/excellent"},
+  "sharpness": {"level": "blurry/acceptable/sharp", "numeric": 0-100, "assessment": "...", "suggestions": ["..."], "severity": "critical/needs work/good/excellent"},
+  "stability": {"level": "shaky/acceptable/stable", "numeric": 0-100, "assessment": "...", "suggestions": ["..."], "severity": "critical/needs work/good/excellent"}
 }`;
 
   const response = await callOpenAI({
@@ -184,15 +225,17 @@ Return STRICT JSON only (no markdown, no explanation):
     messages: [{ role: "user", content: [{ type: "text", text: prompt }, ...imageContent] }],
   });
   return parseJson(response.choices[0]?.message?.content ?? "{}", {
-    lighting: { level: "medium", numeric: 70, assessment: "Acceptable lighting", suggestions: [], effect: "Neutral" },
-    brightness: { level: "medium", numeric: 65, assessment: "Good brightness", suggestions: [], effect: "Clear" },
-    contrast: { level: "medium", numeric: 70, assessment: "Adequate contrast", suggestions: [], effect: "Readable" },
-    sharpness: { level: "acceptable", numeric: 75, assessment: "Clear image", suggestions: [], effect: "Professional" },
-    stability: { level: "stable", numeric: 80, assessment: "Stable footage", suggestions: [], effect: "Comfortable" },
-    colorBalance: { level: "good", numeric: 75, assessment: "Natural colors", suggestions: [], effect: "Appealing" },
-    background: { level: "normal", numeric: 70, assessment: "Background ok", suggestions: [], effect: "Not distracting" },
-    framing: { level: "good", numeric: 78, assessment: "Good framing", suggestions: [], effect: "Professional" },
-    pacing: { level: "moderate", numeric: 72, assessment: "Good pacing", suggestions: [], effect: "Maintains attention" },
+    overallVisualScore: 70,
+    topFix: "Position your key light at 45 degrees camera right to eliminate flat lighting.",
+    colorGradingRecommendation: "Add a slight warm tone (+10 temperature) to make skin tones more appealing.",
+    lighting: { level: "medium", numeric: 70, assessment: "Acceptable lighting", suggestions: [], severity: "needs work" },
+    brightness: { level: "medium", numeric: 65, assessment: "Good brightness", suggestions: [], severity: "good" },
+    contrast: { level: "medium", numeric: 70, assessment: "Adequate contrast", suggestions: [], severity: "needs work" },
+    colorTemperature: { value: "neutral", assessment: "Neutral color temperature", suggestions: [], severity: "good" },
+    background: { level: "normal", numeric: 70, assessment: "Background ok", suggestions: [], severity: "good" },
+    framing: { level: "good", numeric: 78, assessment: "Good framing", suggestions: [], severity: "good" },
+    sharpness: { level: "acceptable", numeric: 75, assessment: "Clear image", suggestions: [], severity: "good" },
+    stability: { level: "stable", numeric: 80, assessment: "Stable footage", suggestions: [], severity: "good" },
   });
 }
 
@@ -332,30 +375,45 @@ async function detectSilences(
 export async function analyzeEditingPoints(
   transcript: string,
   segments: Array<{ start: number; end: number; text: string }>,
-  audioPath?: string
+  audioPath?: string,
+  plan = "free"
 ): Promise<object> {
   const lastSeg = segments[segments.length - 1];
   const totalDuration = lastSeg?.end ?? 0;
+  const isFree = plan === "free";
+
+  const editingSystemPrompt = `You are a senior video editor and YouTube strategist with 10 years experience working with creators across YouTube, TikTok, and Instagram. You watch videos with a critical eye and give feedback like a professional editor reviewing a client's rough cut: specific, direct, and actionable. Never give vague advice.
+
+Rules:
+- Always reference exact timestamps or quote exact words from the transcript
+- If something should be cut, say exactly what and why in one sentence
+- If the hook is weak, rewrite it with a specific alternative
+- Reference platform-specific best practices
+- Never say "consider" or "you might want to": be direct
+- Keep each suggestion to 1-2 sentences maximum`;
+
+  const hookCount = isFree ? 1 : 4;
+  const suggestionCount = isFree ? 1 : 5;
 
   const hookResponse = await callOpenAI({
     model: "gpt-4o",
-    max_completion_tokens: 1000,
+    max_completion_tokens: isFree ? 600 : 1200,
     messages: [{
       role: "user",
-      content: `You are a professional video editor who has cut 3,000+ YouTube videos. You are surgical and specific.
+      content: `${editingSystemPrompt}
 
-Read this transcript. Identify 2-4 moments that would stop a scroll — your strongest openings, unexpected reveals, punchlines, or contrarian takes. Copy the EXACT text from the transcript.
+Read this transcript. Identify the ${hookCount} strongest moment(s) that would stop a scroll: unexpected reveals, punchlines, or contrarian takes. Copy the EXACT text from the transcript.
 
-Then give 5 specific editing suggestions. Not "improve pacing". Give actionable notes like "The setup at 0:45 is 30 seconds longer than it needs to be — cut to the punchline immediately" or "Hook lands too late — move the reveal at 2:10 to the first 15 seconds". Reference platform best practices where relevant (TikTok hooks in 2 seconds, YouTube retention cliff at 30%).
+Then give ${suggestionCount} specific editing suggestion(s). Not "improve pacing". Give actionable notes like "The setup at 0:45 is 30 seconds longer than it needs to be, cut to the punchline immediately" or "Hook lands too late, move the reveal at 2:10 to the first 15 seconds". Reference platform best practices where relevant (TikTok hooks in 2 seconds, YouTube retention cliff at 30%).
 
 CRITICAL: Copy text EXACTLY as written. Do NOT invent timestamps.
 
-Transcript: "${transcript.substring(0, 3000)}"
+Transcript: "${transcript.substring(0, isFree ? 1500 : 3000)}"
 
 Return STRICT JSON only:
 {
-  "hookTexts": ["exact sentence from transcript", "another exact phrase"],
-  "editingSuggestions": ["specific tip referencing the actual content","tip 2","tip 3","tip 4","tip 5"]
+  "hookTexts": ["exact sentence from transcript"],
+  "editingSuggestions": ["specific tip referencing the actual content"]
 }`,
     }],
   });
@@ -496,19 +554,47 @@ Return STRICT JSON using ONLY the provided index numbers — no invented timesta
         .map(sv => ({ ...sv, end: clampTs(sv.end) }))
     : shortVideos;
 
+  const defaultSuggestions = [
+    "Cut pauses longer than 1.5 seconds for tighter pacing",
+    "Move your strongest moment to within the first 30 seconds",
+    "Remove filler word segments shown in the cut list above",
+    "End with a clear CTA: tell them exactly what to do next",
+    "Your hook needs to land before 15 seconds on YouTube",
+  ];
+
+  let rewrittenHook: string | undefined;
+  if (!isFree && clampedHooks.length > 0) {
+    try {
+      const hookText = (clampedHooks[0] as { text: string })?.text ?? transcript.substring(0, 200);
+      const hookRewriteResponse = await callOpenAI({
+        model: "gpt-4o",
+        max_completion_tokens: 400,
+        messages: [{
+          role: "user",
+          content: `${editingSystemPrompt}
+
+Take this opening moment from the video transcript and rewrite it as an optimized hook that would perform on YouTube or TikTok. The rewrite must: open with the payoff first, create a curiosity gap in the first sentence, and be under 30 words.
+
+Original: "${hookText}"
+
+Return STRICT JSON only: {"rewrittenHook": "your optimized opening hook here"}`,
+        }],
+      });
+      const parsed = parseJson<{ rewrittenHook: string }>(hookRewriteResponse.choices[0]?.message?.content ?? "{}", { rewrittenHook: "" });
+      rewrittenHook = parsed.rewrittenHook || undefined;
+    } catch (err) {
+      logger.warn({ err }, "Rewritten hook generation failed");
+    }
+  }
+
   return {
     hooks: clampedHooks,
     removeSections: clampedRemovals.slice(0, 12),
     shortVideos: clampedShortVideos,
+    rewrittenHook,
     editingSuggestions: hookData.editingSuggestions?.length
-      ? hookData.editingSuggestions
-      : [
-          "Cut pauses longer than 1.5 seconds for tighter pacing",
-          "Move your strongest moment to within the first 30 seconds",
-          "Remove filler word segments shown in the cut list above",
-          "End with a clear CTA — tell them exactly what to do next",
-          "Your hook needs to land before 15 seconds on YouTube",
-        ],
+      ? hookData.editingSuggestions.slice(0, isFree ? 1 : 5)
+      : defaultSuggestions.slice(0, isFree ? 1 : 5),
   };
 }
 
@@ -542,20 +628,17 @@ function buildChapterPoints(
 export async function generateSeo(
   transcript: string,
   platform: string,
-  segments: Array<{ start: number; end: number; text: string }> = []
+  segments: Array<{ start: number; end: number; text: string }> = [],
+  plan = "free"
 ): Promise<object> {
-  const hashtagCounts: Record<string, number> = {
-    youtube_long: 15, youtube_shorts: 10, tiktok: 8, instagram: 12, linkedin: 5, x: 3,
-  };
-  const count = hashtagCounts[platform] || 8;
-
+  const isFree = plan === "free";
   const chapterPoints = buildChapterPoints(segments, 10);
   const chapterHint = chapterPoints.length
     ? `\n\nReal chapter timestamps (use EXACTLY these times, only write short labels):\n${chapterPoints.map(c => `${c.time} - "${c.text}"`).join("\n")}`
     : "";
 
   const platformGuide: Record<string, string> = {
-    youtube_long: "YouTube long-form: titles 60-70 chars, curiosity gap required, keyword in first 3 words",
+    youtube_long: "YouTube long-form: titles 60-70 chars, curiosity gap required, keyword in first 3 words. Strategy options: curiosity gap, how-to, number-based, problem/solution, bold claim.",
     youtube_shorts: "YouTube Shorts: punchy titles under 50 chars, high-energy action verbs",
     tiktok: "TikTok: trend-aware, conversational, 3-5 hashtags from trending niches",
     instagram: "Instagram Reels: lifestyle-forward, mix of niche and broad hashtags",
@@ -565,34 +648,79 @@ export async function generateSeo(
 
   const guide = platformGuide[platform] ?? "";
 
-  const response = await callOpenAI({
-    model: "gpt-4o",
-    max_completion_tokens: 1800,
-    messages: [{ role: "user", content: `You are a ${platform} SEO expert who has helped channels grow from 0 to 100K through search. You write titles that create curiosity gaps, not summaries.
+  if (isFree) {
+    const response = await callOpenAI({
+      model: "gpt-4o",
+      max_completion_tokens: 500,
+      messages: [{ role: "user", content: `${BASE_SYSTEM_PROMPT}
+
+You are a ${platform} SEO expert. Generate ONE strong title using a curiosity gap strategy (keyword in first 3 words, under 70 chars). Write TWO compelling sentences for the description hook (these appear before "Show more"). Generate 3 high-relevance tags.
 
 Platform rules: ${guide}
 
-Transcript: "${transcript.substring(0, 1500)}"${chapterHint}
+Transcript: "${transcript.substring(0, 800)}"
 
-Title rules:
-- NEVER write generic titles like "How to [thing]" or "My experience with [topic]"
-- Every title must contain the primary keyword naturally in the first 3 words
-- Format: [keyword] + curiosity gap, contrarian angle, or specific outcome
+Return STRICT JSON only:
+{"titles":["one title only"],"description":"Two compelling sentences maximum.","hashtags":[{"tag":"#Tag","effect":"why this tag"},{"tag":"#Tag2","effect":"..."},{"tag":"#Tag3","effect":"..."}],"timestamps":[{"time":"0:00","label":"Intro"}]}` }],
+    });
 
-Tag rules:
-- 40% high-volume tags (broad niche, 1M+ searches)
-- 40% mid-volume tags (specific subtopic, 100K-1M)
-- 20% niche/long-tail tags (very specific, 10K-100K)
+    const parsed = parseJson<{ titles: string[]; description: string; hashtags: object[]; timestamps: Array<{ time: string; label: string }> }>(
+      response.choices[0]?.message?.content ?? "{}",
+      {
+        titles: ["Your Video Title — Creator Plan Unlocks 4 More Options"],
+        description: "Your video covers important content your audience needs to see.",
+        hashtags: [{ tag: "#VideoContent", effect: "Broad reach" }, { tag: "#YouTube", effect: "Platform" }, { tag: "#Creator", effect: "Niche" }],
+        timestamps: [{ time: "0:00", label: "Introduction" }],
+      }
+    );
+    return parsed;
+  }
 
-Return STRICT JSON — use EXACT times from chapter list above:
-{"titles":["title 1","title 2","title 3"],"description":"2-line hook + body + CTA. First 2 lines must be the hook (visible in search preview).","hashtags":[{"tag":"#Tag","effect":"target audience or reach this tag serves"}],"timestamps":[{"time":"0:00","label":"short label"}]}` }],
+  const isYouTube = platform === "youtube_long" || platform === "youtube_shorts";
+
+  const response = await callOpenAI({
+    model: "gpt-4o",
+    max_completion_tokens: 2500,
+    messages: [{ role: "user", content: `${BASE_SYSTEM_PROMPT}
+
+You are a ${platform} SEO expert who has helped channels grow from 0 to 100K through search. You write titles that create curiosity gaps, not summaries.
+
+Platform rules: ${guide}
+
+Transcript: "${transcript.substring(0, 2000)}"${chapterHint}
+
+${isYouTube ? `Generate exactly 5 title options using these named strategies:
+1. Curiosity gap (create a knowledge gap the viewer must close)
+2. How-to / tutorial (clear instruction promise)
+3. Number-based (specific number in the title)
+4. Problem/solution direct (name the pain, promise the fix)
+5. Bold claim or result-driven (contrarian or surprising outcome)
+Each title: include primary keyword naturally, under 70 characters.` : `Generate 3 title options following platform best practices.`}
+
+Description must:
+- First 2 lines be a compelling hook visible before "Show more"
+- Include primary keyword in first sentence
+- Include chapter timestamps section as ## Chapters
+- Include [Links] placeholder section
+- End with a clear call to action
+- 150-400 words total
+
+Tags: generate 25-30 tags total:
+- 5 high-volume broad tags (1M+ monthly searches)
+- 10 medium-competition niche tags (100K-1M)
+- 5 long-tail specific tags (very specific, 10K-100K)
+- 5 brand/product/creator-specific tags
+- Comma-separated, ready to paste into YouTube
+
+Return STRICT JSON — use EXACT times from chapter list:
+{"titles":["title 1","title 2","title 3","title 4","title 5"],"description":"full description with chapters and CTA","hashtags":[{"tag":"#Tag","effect":"audience this serves"}],"timestamps":[{"time":"0:00","label":"short label"}],"titleStrategies":["curiosity gap","how-to","number-based","problem/solution","bold claim"]}` }],
   });
 
-  const parsed = parseJson<{ titles: string[]; description: string; hashtags: object[]; timestamps: Array<{ time: string; label: string }> }>(
+  const parsed = parseJson<{ titles: string[]; description: string; hashtags: object[]; timestamps: Array<{ time: string; label: string }>; titleStrategies?: string[] }>(
     response.choices[0]?.message?.content ?? "{}",
     {
-      titles: ["Engaging title for your video", "Alternative title with keywords", "Third option"],
-      description: "Video description with keywords and call to action.",
+      titles: ["Engaging title for your video", "How-to title with keywords", "5 Things About Your Topic", "The Problem Solved in One Video", "The Result You Actually Get"],
+      description: "Your video description with chapters and call to action.\n\n## Chapters\n0:00 Introduction\n\n[Links]\nSubscribe: \n\nStart creating better content today.",
       hashtags: [{ tag: "#VideoContent", effect: "Broad reach" }],
       timestamps: [{ time: "0:00", label: "Introduction" }],
     }
@@ -611,9 +739,11 @@ Return STRICT JSON — use EXACT times from chapter list above:
 export async function generateShortClipIdeas(
   transcript: string,
   segments: Array<{ start: number; end: number; text: string }>,
-  platforms: string[]
+  platforms: string[],
+  plan = "free"
 ): Promise<object> {
   if (!segments.length) return { clips: [] };
+  const isFree = plan === "free";
 
   const totalDuration = segments[segments.length - 1]!.end;
 
@@ -657,23 +787,30 @@ export async function generateShortClipIdeas(
     preview: c.text.trim().substring(0, 250),
   }));
 
+  const clipCount = isFree ? 1 : 5;
+
   const response = await callOpenAI({
     model: "gpt-4o",
-    max_completion_tokens: 1500,
+    max_completion_tokens: isFree ? 600 : 2000,
     messages: [{
       role: "user",
-      content: `You are a short-form content strategist who has helped 500+ creators repurpose long videos into viral clips. You know exactly what makes people stop scrolling.
+      content: `${BASE_SYSTEM_PROMPT}
+
+You are a short-form content strategist who has helped 500+ creators repurpose long videos into viral clips. You know exactly what makes people stop scrolling.
+
+For each clip, identify the moment with highest re-watchability or shareability. A great short clip has a strong first 2 seconds, a clear single idea, and a satisfying end. Quote the exact words that should open the clip and explain why this moment works as a short.
 
 Target platforms: ${targetPlatformList}
 Total video duration: ${Math.round(totalDuration)}s
 
-Below are the video chunks. For each high-value clip moment:
-- Identify the best 3-5 clips that would perform on short-form platforms
-- For each clip: find the chunk it's in, identify the first line that would work as an on-screen hook
+Identify the best ${clipCount} clip(s) that would perform on short-form platforms.
+For each clip:
+- Find the chunk it's in, quote the exact opening line from the transcript
 - State which platforms fit and WHY (e.g. "TikTok: contrarian take performs in first 2 seconds")
-- Give ONE tactical production note that increases performance (e.g. "Add captions — 85% of Reels are watched muted", "Cut to the punchline at 1:23 — the setup is 20 seconds too long")
+${!isFree ? `- Give ONE tactical production note (e.g. "Add captions: 85% of Reels are watched muted", "Cut to the punchline immediately: the setup is 20 seconds too long")
+- Assess engagement potential: High / Medium / Low with a one-sentence reason` : ""}
 
-CRITICAL: Use ONLY the index numbers provided. Do NOT invent startSec/endSec — use the provided values.
+CRITICAL: Use ONLY the index numbers provided. Do NOT invent startSec/endSec.
 
 Chunks: ${JSON.stringify(chunkSummaries)}
 
@@ -684,12 +821,14 @@ Return STRICT JSON:
       "chunkIndex": 0,
       "startSec": 45,
       "endSec": 105,
-      "title": "punchy title for this clip",
-      "hook": "first line / on-screen text that stops the scroll",
+      "title": "punchy clip title",
+      "hook": "exact opening words that stop the scroll",
+      "whyItWorks": "one sentence on what makes this clip work",
       "platforms": ["TikTok", "Instagram Reels"],
-      "platformReason": "why these platforms specifically",
-      "tacticalNote": "one specific production tip to increase performance",
-      "rewatchability": "high/medium/low"
+      "platformReason": "why these platforms specifically"${!isFree ? `,
+      "tacticalNote": "one specific production tip",
+      "engagementPotential": "High/Medium/Low",
+      "engagementReason": "why"` : ""}
     }
   ]
 }`,
@@ -717,14 +856,16 @@ Return STRICT JSON:
       end: fmtSec(Math.min(endSec, totalDuration)),
       title: clip.title ?? "",
       hook: clip.hook ?? "",
+      whyItWorks: clip.whyItWorks ?? "",
       platforms: Array.isArray(clip.platforms) ? clip.platforms : [],
       platformReason: clip.platformReason ?? "",
       tacticalNote: clip.tacticalNote ?? "",
-      rewatchability: clip.rewatchability ?? "medium",
+      engagementPotential: clip.engagementPotential ?? "",
+      engagementReason: clip.engagementReason ?? "",
     };
   });
 
-  return { clips };
+  return { clips: clips.slice(0, isFree ? 1 : 5) };
 }
 
 export async function translateSegments(

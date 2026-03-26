@@ -109,17 +109,18 @@ async function runVideoAnalyzer(
       transcript: { segments: transcriptSegments, fullText: transcriptText },
     };
 
+    const isFree = plan === "free";
+
     // Step 5: Quality module
     if (runQuality) {
       await updateJob(jobId, { status: "analyzing_visual", progress, currentStep: "Extracting video frames" });
-      const isFree = plan === "free";
-      const frameCount = isFree ? 5 : 10;
+      const frameCount = isFree ? 1 : 5;
       const frameBase64List = await extractFrames(videoPath, framesDir, frameCount);
 
       progress = 45;
       await updateJob(jobId, { status: "analyzing_visual", progress, currentStep: "Analyzing video quality" });
       const primaryPlatform = platforms[0] ?? "youtube_long";
-      const visualAnalysis = await analyzeVisuals(frameBase64List, primaryPlatform);
+      const visualAnalysis = await analyzeVisuals(frameBase64List, primaryPlatform, plan);
       const audioAnalysis = await analyzeAudio(transcriptText, 0.9);
       const qualityScore = computeQualityScore(visualAnalysis, audioAnalysis);
 
@@ -134,7 +135,7 @@ async function runVideoAnalyzer(
     // Step 6: Editing module
     if (runEditing) {
       await updateJob(jobId, { status: "analyzing_content", progress, currentStep: "Analyzing editing points" });
-      const editingData = await analyzeEditingPoints(transcriptText, transcriptSegments, audioPath);
+      const editingData = await analyzeEditingPoints(transcriptText, transcriptSegments, audioPath, plan);
       result.editing = editingData;
       progress = 68;
     }
@@ -145,7 +146,7 @@ async function runVideoAnalyzer(
       const publishResults: Record<string, unknown> = {};
       for (const platform of platforms) {
         try {
-          const seoResult = await generateSeo(transcriptText, platform, transcriptSegments);
+          const seoResult = await generateSeo(transcriptText, platform, transcriptSegments, plan);
           publishResults[platform] = seoResult;
         } catch (err) {
           logger.warn({ err, platform, jobId }, "SEO generation failed for platform");
@@ -153,29 +154,32 @@ async function runVideoAnalyzer(
         }
       }
 
-      let subtitleSegments = transcriptSegments;
-      if (plan !== "free" && options.translateSubtitles && options.subtitleLanguage) {
-        try {
-          subtitleSegments = await translateSegments(transcriptSegments, options.subtitleLanguage);
-        } catch (err) {
-          logger.warn({ err, jobId }, "Subtitle translation failed");
-        }
-      }
-      const srtContent = generateSrt(subtitleSegments);
-
       result.publish = publishResults;
-      result.subtitleFile = {
-        format: "srt",
-        language: plan !== "free" && options.translateSubtitles && options.subtitleLanguage ? options.subtitleLanguage : "original",
-        content: srtContent,
-      };
+
+      // SRT only for paid users
+      if (!isFree) {
+        let subtitleSegments = transcriptSegments;
+        if (options.translateSubtitles && options.subtitleLanguage) {
+          try {
+            subtitleSegments = await translateSegments(transcriptSegments, options.subtitleLanguage);
+          } catch (err) {
+            logger.warn({ err, jobId }, "Subtitle translation failed");
+          }
+        }
+        const srtContent = generateSrt(subtitleSegments);
+        result.subtitleFile = {
+          format: "srt",
+          language: options.translateSubtitles && options.subtitleLanguage ? options.subtitleLanguage : "original",
+          content: srtContent,
+        };
+      }
       progress = 82;
     }
 
     // Step 8: Short clips module
     if (runShortClips) {
       await updateJob(jobId, { status: "analyzing_content", progress, currentStep: "Finding best short clip moments" });
-      const shortClipsData = await generateShortClipIdeas(transcriptText, transcriptSegments, platforms);
+      const shortClipsData = await generateShortClipIdeas(transcriptText, transcriptSegments, platforms, plan);
       result.shortClips = shortClipsData;
       progress = 95;
     }
