@@ -84,12 +84,11 @@ function Dashboard({ onNavigate, onUpgrade }: { onNavigate: (tab: TabId) => void
         <h1 className="text-3xl font-display font-bold text-white">Welcome back, {firstName}</h1>
         <p className="text-white/40 mt-1">Here's what's ready for you today.</p>
       </div>
-
       <div className="flex items-center gap-3 p-4 rounded-2xl border border-white/8 bg-background/40">
         <div className={`px-3 py-1 rounded-full text-xs font-bold border ${badgeClass}`}>{displayName}</div>
         <div className="flex-1">
           {isUnlimited ? (
-            <p className="text-sm text-white/60">Unlimited video analyses — no restrictions.</p>
+            <p className="text-sm text-white/60">Unlimited video analyses, no restrictions.</p>
           ) : (
             <div>
               <div className="flex items-center justify-between mb-1">
@@ -114,14 +113,12 @@ function Dashboard({ onNavigate, onUpgrade }: { onNavigate: (tab: TabId) => void
           </button>
         )}
       </div>
-
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <StatCard label="Analyses used" value={used} sublabel="this month" />
         <StatCard label="Analyses left" value={isUnlimited ? "∞" : remaining} sublabel="this month" color={remaining === 0 ? "text-red-400" : "text-primary"} />
         <StatCard label="Script chats" value={isSpUnlimited ? "∞" : spLimits.chatsUsed} sublabel={isSpUnlimited ? "unlimited" : `of ${spChatLimit} this month`} />
         <StatCard label="Max duration" value={getDurationLimitLabel(norm)} sublabel="per video" />
       </div>
-
       <div>
         <p className="text-xs text-white/40 uppercase tracking-wider mb-4">Quick Actions</p>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -165,7 +162,6 @@ function Dashboard({ onNavigate, onUpgrade }: { onNavigate: (tab: TabId) => void
           )}
         </div>
       </div>
-
       <div className="p-5 rounded-2xl border border-white/8 bg-gradient-to-r from-primary/5 to-purple-500/5">
         <p className="text-xs text-white/40 uppercase tracking-wider mb-3">What DayTabs can do</p>
         <div className="grid sm:grid-cols-2 gap-3">
