@@ -1,17 +1,18 @@
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback, useEffect, useRef } from "react";
 import { useDropzone } from "react-dropzone";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Upload, Film, Wand2, Shield, Scissors, TrendingUp, Sparkles,
   CheckCircle2, AlertTriangle, XCircle, RefreshCcw,
   Volume2, Eye, Zap, Hash, FileText, Lock, Download,
-  Copy, Check, AlignLeft, ChevronRight,
+  Copy, Check, AlignLeft, ChevronRight, FileDown,
 } from "lucide-react";
 import { useAnalysisPolling, useAnalysisResults } from "@/hooks/use-analysis";
 import { useVideoUpload } from "@/hooks/use-video-upload";
 import { useToast } from "@/hooks/use-toast";
 import { usePlan, getFileSizeLimit, getFileSizeLimitLabel, getDurationLimitLabel } from "@/hooks/use-plan";
 import { PlanPickerModal } from "@/components/PlanPickerModal";
+import { generateAnalysisPDF } from "@/lib/generateAnalysisPDF";
 
 interface TabProps {
   onDataReady: () => void;
@@ -845,17 +846,30 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
   const isDone = statusData?.status === "complete";
   const hasResults = isDone && !!results;
 
+  // Keep refs so the PDF export closure always has the latest values
+  const resultsRef = useRef<any>(null);
+  const fileNameRef = useRef<string>("analysis");
+  const [isPdfExporting, setIsPdfExporting] = useState(false);
+
+  useEffect(() => { resultsRef.current = results ?? null; }, [results]);
+  useEffect(() => { if (file?.name) fileNameRef.current = file.name; }, [file]);
+
   useEffect(() => {
     if (hasResults) {
       onDataReady();
       const firstModule = selectedModules.find(m => (results as any)?.[m]);
       setActiveResultTab(firstModule ?? "quality");
+
+      // Register real PDF export so ExportWarningDialog can trigger it
+      const exportFn = async () => {
+        if (!resultsRef.current) return;
+        await generateAnalysisPDF(resultsRef.current, fileNameRef.current);
+      };
+      onRegisterExport(exportFn);
+    } else {
+      onRegisterExport(null);
     }
   }, [hasResults]);
-
-  useEffect(() => {
-    onRegisterExport(null);
-  }, []);
 
   // Show the processing screen as soon as a jobId exists, even before first poll
   const showAnalyzing = isAnalyzing || (!!jobId && !isDone && !isError);
@@ -1026,14 +1040,41 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
         <AnalyzingScreen progress={progress} currentStep={currentStepLabel} isSubmitting={isSubmitting} />
       ) : hasResults ? (
         <div className="space-y-6">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
             <div>
               <h2 className="text-2xl font-display font-bold text-white">Analysis Complete</h2>
               <p className="text-white/40 text-sm mt-0.5">Here's what we found in your video</p>
             </div>
-            <button onClick={handleReset} className="px-4 py-2 rounded-xl text-xs font-semibold text-white/60 border border-white/15 hover:border-white/30 hover:text-white transition-all flex items-center gap-1.5">
-              <Upload className="w-3.5 h-3.5" />Analyze New Video
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={async () => {
+                  if (!results) return;
+                  setIsPdfExporting(true);
+                  try {
+                    await generateAnalysisPDF(results as any, file?.name ?? "analysis");
+                  } finally {
+                    setIsPdfExporting(false);
+                  }
+                }}
+                disabled={isPdfExporting}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-primary border border-primary/30 bg-primary/10 hover:bg-primary/20 transition-all flex items-center gap-1.5 disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {isPdfExporting ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+                    Exporting…
+                  </>
+                ) : (
+                  <>
+                    <FileDown className="w-3.5 h-3.5" />
+                    Download Report
+                  </>
+                )}
+              </button>
+              <button onClick={handleReset} className="px-4 py-2 rounded-xl text-xs font-semibold text-white/60 border border-white/15 hover:border-white/30 hover:text-white transition-all flex items-center gap-1.5">
+                <Upload className="w-3.5 h-3.5" />Analyze New Video
+              </button>
+            </div>
           </div>
 
           {availableResultTabs.length > 0 && (
