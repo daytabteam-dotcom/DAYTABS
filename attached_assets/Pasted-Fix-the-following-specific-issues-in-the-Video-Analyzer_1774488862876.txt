@@ -1,0 +1,176 @@
+Fix the following specific issues in the Video Analyzer output. 
+Read the current code carefully before making changes.
+
+─────────────────────────────────────────
+1. FIX: NEVER REFERENCE FRAME NUMBERS
+─────────────────────────────────────────
+The quality analysis currently says things like "frames 2 and 3" or 
+"frame 4 shows". Users never see the frames — they have no idea what 
+this means.
+
+Replace ALL frame number references with either:
+- Time-based references using actual timestamps 
+  (e.g. "around 0:45", "in the second half of the video")
+- Descriptive references 
+  (e.g. "in the segment where you're demonstrating the spreadsheet", 
+  "when the red lamp is visible behind you")
+
+Update the system prompt for quality analysis to include this rule:
+"""
+Never reference frame numbers (frame 1, frame 2, etc.) in your output. 
+The user cannot see the frames. Instead, reference approximate timestamps 
+(e.g. "at around 0:45") or describe what is happening on screen 
+(e.g. "in the segment where you demonstrate the product"). 
+Always write as if you are describing what the viewer sees in the video.
+"""
+
+─────────────────────────────────────────
+2. FIX: INVERTED SCORING LOGIC
+─────────────────────────────────────────
+Background Noise is currently scoring 10/100 with a "critical" badge 
+but the description says the noise level is excellent. The score is inverted.
+
+For Background Noise specifically — and check all other audio metrics — 
+make sure the score reflects quality, not quantity:
+- Low background noise = HIGH score (good thing)
+- High background noise = LOW score (bad thing)
+- A score of 10/100 for background noise should mean "extremely noisy"
+- A score of 90/100 should mean "very clean audio"
+
+Audit ALL scoring logic across quality dimensions to make sure 
+higher score always means better quality. Fix any inverted metrics.
+
+─────────────────────────────────────────
+3. FIX: SUBTITLE FILE NOT GENERATING
+─────────────────────────────────────────
+The .srt subtitle file is not being generated or made downloadable. 
+Currently it shows: "SRT file generated when using Publish module 
+with a paid plan" — this is wrong, it should actually generate and 
+allow download.
+
+Fix this completely:
+- Use the verbose Whisper transcript (with segment timestamps) to 
+  generate a properly formatted .srt file
+- Format:
+    1
+    00:00:00,000 --> 00:00:04,500
+    First subtitle line here
+
+    2
+    00:00:04,500 --> 00:00:08,200
+    Second subtitle line here
+
+- Rules: max 2 lines per card, max 42 characters per line
+- When generation is complete, show a real download button that 
+  triggers a file download of the .srt file named after the video
+- Only generate and show this when YouTube Long or YouTube Shorts 
+  is selected as a target platform
+- Available for Creator plan and above (locked with blur overlay for Free)
+- If verbose timestamps are not available from Whisper, fall back to 
+  segment-level timestamps
+
+─────────────────────────────────────────
+4. FIX: DESCRIPTION QUALITY
+─────────────────────────────────────────
+The current description is too short and ends with generic phrases 
+like "Embrace simplicity and regain your time" and 
+"Skip the chaos, get organized now."
+
+Update the description generation system prompt:
+"""
+Write a YouTube description that sounds like it was written by a 
+creator who knows their audience — not a marketing copywriter.
+
+Rules:
+- First 2 lines must clearly state what the video is about and 
+  who it's for. No hype, no fluff.
+- Use the primary keyword naturally in the first sentence.
+- Chapters section must use actual content from the transcript — 
+  never generic labels like "Sell Online" or "Use It". 
+  Use descriptive chapter names that tell the viewer what they 
+  will learn (e.g. "Why updating 5 platforms wastes your Tuesday")
+- Links section: add a placeholder that says 
+  "🔗 [Add your links here]"
+- End with one genuine call to action — either a question to 
+  comment on, or a subscribe prompt. One sentence only.
+- Minimum 150 words. No filler closing lines.
+- Never end with phrases like "Embrace simplicity", "Get organized now", 
+  "Transform your workflow", or any generic motivational closer.
+"""
+
+─────────────────────────────────────────
+5. FIX: TAGS FORMAT
+─────────────────────────────────────────
+YouTube tags must NOT include the # symbol. 
+Currently some tags have # and some don't — this is inconsistent 
+and incorrect for the YouTube tags field.
+
+Fix: strip all # symbols from generated tags. 
+Output as plain comma-separated text, ready to paste directly 
+into the YouTube tags field.
+
+Example correct output:
+Google Sheets, productivity, ecommerce, business tools, 
+spreadsheet sync, Facebook catalog, inventory management
+
+─────────────────────────────────────────
+6. FIX: REWRITTEN HOOK TONE
+─────────────────────────────────────────
+The current rewritten hook sounds like spam:
+"Lose your entire Tuesday afternoon? Discover the secret to 
+updating them all in minutes!"
+
+Update the system prompt for the rewritten hook:
+"""
+Rewrite the hook as a creator would actually say it on camera — 
+natural, direct, and confident. It should sound like the creator 
+is talking to a friend, not writing an ad headline.
+
+Good example: "If you sell products on more than one platform, 
+you already know how painful it is to keep everything in sync. 
+This is how I fixed it."
+
+Bad example: "Discover the secret trick that transforms your 
+Tuesday forever!"
+
+Rules:
+- No exclamation marks
+- No words like "discover", "secret", "unlock", "transform", 
+  "game-changer", "revolutionary"
+- Must reference something specific from the actual video content
+- Should feel like the natural first sentence of the video
+- Maximum 2 sentences
+"""
+
+─────────────────────────────────────────
+7. FIX: EDITING TIPS SPECIFICITY
+─────────────────────────────────────────
+Some editing tips are still too vague or wrong. For example:
+"Cut the phrase 'And if you miss one...' as it unnecessarily 
+lengthens the description" — this is actually one of the strongest 
+lines in the video and should NOT be cut.
+
+Update the editing analysis system prompt to add:
+"""
+Before suggesting to cut any line, ask yourself: does this line 
+create tension, establish a problem, or advance the story? 
+If yes, do not suggest cutting it — suggest repositioning it instead.
+
+Strong problem-framing lines are assets, not waste. 
+Only suggest cutting genuinely redundant content — 
+repeated points, filler transitions, or off-topic tangents.
+
+When suggesting a cut, always explain what specific value is lost 
+vs gained by cutting, in one sentence.
+"""
+
+─────────────────────────────────────────
+IMPORTANT NOTES:
+- Do not change anything in Script Planner or Teleprompter
+- Do not change the visual theme
+- Test subtitle download with an actual video before marking complete
+- Test scoring logic with a noisy audio sample to verify background 
+  noise score is no longer inverted
+- The frame number fix must be applied to the system prompt, 
+  not just post-processed — the model should never generate 
+  frame references in the first place

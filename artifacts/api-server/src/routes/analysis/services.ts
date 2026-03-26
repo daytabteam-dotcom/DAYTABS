@@ -145,7 +145,45 @@ export function generateSrt(segments: Array<{ start: number; end: number; text: 
     const hrs = Math.floor(s / 3600);
     return `${String(hrs).padStart(2, "0")}:${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")},${String(ms).padStart(3, "0")}`;
   };
-  return segments.map((seg, i) => `${i + 1}\n${fmt(seg.start)} --> ${fmt(seg.end)}\n${seg.text.trim()}`).join("\n\n");
+
+  // Split text into lines of max 42 chars, max 2 lines per card
+  function splitToLines(text: string): string[] {
+    const words = text.trim().split(/\s+/);
+    const lines: string[] = [];
+    let current = "";
+    for (const word of words) {
+      const candidate = current ? `${current} ${word}` : word;
+      if (candidate.length > 42 && current) {
+        lines.push(current);
+        current = word;
+      } else {
+        current = candidate;
+      }
+    }
+    if (current) lines.push(current);
+    return lines;
+  }
+
+  const cards: Array<{ start: number; end: number; lines: string[] }> = [];
+  for (const seg of segments) {
+    const lines = splitToLines(seg.text);
+    const segDur = seg.end - seg.start;
+    // If more than 2 lines, split into multiple cards proportionally
+    for (let i = 0; i < lines.length; i += 2) {
+      const chunk = lines.slice(i, i + 2);
+      const ratio = (i / Math.max(lines.length, 1));
+      const endRatio = (Math.min(i + 2, lines.length) / Math.max(lines.length, 1));
+      cards.push({
+        start: seg.start + ratio * segDur,
+        end: seg.start + endRatio * segDur,
+        lines: chunk,
+      });
+    }
+  }
+
+  return cards.map((card, i) =>
+    `${i + 1}\n${fmt(card.start)} --> ${fmt(card.end)}\n${card.lines.join("\n")}`
+  ).join("\n\n");
 }
 
 async function callOpenAI(body: object): Promise<{ choices: Array<{ message: { content: string } }> }> {
@@ -175,13 +213,15 @@ export async function analyzeVisuals(frameBase64List: string[], platform: string
   if (isFree) {
     const freePrompt = `${BASE_SYSTEM_PROMPT}
 
-Analyze this single frame from a ${platform} video. Give one specific observation for each dimension.
+Analyze this frame from a ${platform} video. Give one specific observation for each dimension.
+
+CRITICAL RULE: Never reference frame numbers (frame 1, frame 2, etc.) in your output. The user cannot see the frames. Instead, reference approximate timestamps (e.g. "at around 0:45") or describe what is happening on screen (e.g. "in the segment where you demonstrate the product"). Always write as if you are describing what the viewer sees in the video.
 
 Return STRICT JSON only:
 {
   "overallVisualScore": 0-100,
   "topFix": "the single most important visual fix that will increase viewer retention",
-  "lighting": {"level": "low/medium/high", "numeric": 0-100, "assessment": "one specific observation", "suggestions": ["one exact fix"], "severity": "critical/needs work/good/excellent"}
+  "lighting": {"level": "low/medium/high", "numeric": 0-100, "assessment": "one specific observation using descriptive references not frame numbers", "suggestions": ["one exact fix"], "severity": "critical/needs work/good/excellent"}
 }`;
 
     const response = await callOpenAI({
@@ -199,17 +239,19 @@ Return STRICT JSON only:
   const prompt = `${BASE_SYSTEM_PROMPT}
 
 Analyze these ${frameBase64List.length} evenly-spaced frames from a ${platform} video. For each dimension:
-- Score 0-100 based on what you actually see
-- Give one-line reasoning referencing specifics (e.g. "overexposed top-right corner at frame 3", "subject drifts left")
+- Score 0-100 based on what you actually see (100 = excellent quality, 0 = critical problem)
+- Give one-line reasoning describing what you see (e.g. "overexposed in the upper-right corner during the opening segment", "subject drifts left in the second half")
 - For suggestions: give the exact fix ("Move key light 45 degrees to camera right", not "improve lighting")
 - Lead with the SINGLE most important fix for viewer retention
+
+CRITICAL RULE: Never reference frame numbers (frame 1, frame 2, etc.) in any field. The user cannot see the frames. Instead reference approximate time positions (e.g. "in the opening segment", "around the midpoint", "in the closing section") or describe what is happening on screen (e.g. "when the speaker moves to the whiteboard", "during the product demonstration"). Always write as if describing what the viewer sees in the final video.
 
 Return STRICT JSON only (no markdown):
 {
   "overallVisualScore": 0-100,
-  "topFix": "the single most impactful fix for this video",
+  "topFix": "the single most impactful fix — describe the issue using on-screen context, not frame numbers",
   "colorGradingRecommendation": "one specific color grading suggestion",
-  "lighting": {"level": "low/medium/high", "numeric": 0-100, "assessment": "...", "suggestions": ["specific fix"], "severity": "critical/needs work/good/excellent"},
+  "lighting": {"level": "low/medium/high", "numeric": 0-100, "assessment": "describe using on-screen context", "suggestions": ["specific fix"], "severity": "critical/needs work/good/excellent"},
   "brightness": {"level": "low/medium/high", "numeric": 0-100, "assessment": "...", "suggestions": ["..."], "severity": "critical/needs work/good/excellent"},
   "contrast": {"level": "low/medium/high", "numeric": 0-100, "assessment": "...", "suggestions": ["..."], "severity": "critical/needs work/good/excellent"},
   "colorTemperature": {"value": "warm/cool/neutral", "assessment": "...", "suggestions": ["..."], "severity": "critical/needs work/good/excellent"},
@@ -257,13 +299,19 @@ Transcript snippet: "${transcript.substring(0, 500)}"
 Filler word count: ${fillerWordCount} out of ${wordCount} words (${Math.round(fillerRatio * 100)}%)
 Whisper transcription confidence: ${clarityNumeric}%
 
+SCORING RULE: All numeric scores represent QUALITY (not quantity or severity).
+- audioVolume.numeric: 100 = perfectly leveled, 0 = too quiet or too loud
+- audioClarity.numeric: 100 = crystal clear, 0 = totally unintelligible
+- backgroundNoise.numeric: 100 = perfectly clean/silent background, 0 = extremely noisy/distracting
+  (low noise level = HIGH score; high noise level = LOW score)
+
 Return STRICT JSON only:
-{"audioVolume":{"level":"low/medium/high","numeric":0-100,"assessment":"...","suggestions":["..."],"effect":"..."},"audioClarity":{"level":"poor/acceptable/good","numeric":${clarityNumeric},"assessment":"...","suggestions":["..."],"effect":"..."},"backgroundNoise":{"level":"high/medium/low","numeric":0-100,"assessment":"...","suggestions":["..."],"effect":"..."},"fillerWords":{"level":"${fillerLevel}","numeric":${fillerWordCount},"assessment":"${fillerWordCount} filler words detected (${Math.round(fillerRatio * 100)}% of speech)","suggestions":["..."],"effect":"..."}}` }],
+{"audioVolume":{"level":"low/medium/high","numeric":0-100,"assessment":"...","suggestions":["..."],"effect":"..."},"audioClarity":{"level":"poor/acceptable/good","numeric":${clarityNumeric},"assessment":"...","suggestions":["..."],"effect":"..."},"backgroundNoise":{"level":"high/medium/low","numeric":0-100 where 100=clean and 0=very noisy,"assessment":"...","suggestions":["..."],"effect":"..."},"fillerWords":{"level":"${fillerLevel}","numeric":${fillerWordCount},"assessment":"${fillerWordCount} filler words detected (${Math.round(fillerRatio * 100)}% of speech)","suggestions":["..."],"effect":"..."}}` }],
   });
   return parseJson(response.choices[0]?.message?.content ?? "{}", {
     audioVolume: { level: "medium", numeric: 72, assessment: "Adequate volume", suggestions: [], effect: "Clear dialogue" },
     audioClarity: { level: clarityNumeric > 80 ? "good" : "acceptable", numeric: clarityNumeric, assessment: "Intelligible speech", suggestions: [], effect: "Good comprehension" },
-    backgroundNoise: { level: "low", numeric: 20, assessment: "Minimal noise", suggestions: [], effect: "Clear audio" },
+    backgroundNoise: { level: "low", numeric: 88, assessment: "Minimal background noise", suggestions: [], effect: "Clear audio" },
     fillerWords: { level: fillerLevel, numeric: fillerWordCount, assessment: `${fillerWordCount} filler words detected`, suggestions: ["Pause instead of filler words"], effect: "Affects perceived expertise" },
   });
 }
@@ -387,6 +435,9 @@ export async function analyzeEditingPoints(
 Rules:
 - Always reference exact timestamps or quote exact words from the transcript
 - If something should be cut, say exactly what and why in one sentence
+- Before suggesting to cut any line, ask yourself: does this line create tension, establish a problem, or advance the story? If yes, do NOT suggest cutting it — suggest repositioning it instead. Strong problem-framing lines are assets, not waste.
+- Only suggest cutting genuinely redundant content — repeated points, filler transitions, or off-topic tangents
+- When suggesting a cut, always explain what specific value is lost vs gained by cutting, in one sentence
 - If the hook is weak, rewrite it with a specific alternative
 - Reference platform-specific best practices
 - Never say "consider" or "you might want to": be direct
@@ -573,11 +624,22 @@ Return STRICT JSON using ONLY the provided index numbers — no invented timesta
           role: "user",
           content: `${editingSystemPrompt}
 
-Take this opening moment from the video transcript and rewrite it as an optimized hook that would perform on YouTube or TikTok. The rewrite must: open with the payoff first, create a curiosity gap in the first sentence, and be under 30 words.
+Rewrite this opening as a creator would actually say it on camera — natural, direct, and confident. It should sound like the creator is talking to a friend, not writing an ad headline.
+
+Good example: "If you sell products on more than one platform, you already know how painful it is to keep everything in sync. This is how I fixed it."
+Bad example: "Discover the secret trick that transforms your Tuesday forever!"
+
+Rules:
+- No exclamation marks
+- No words like "discover", "secret", "unlock", "transform", "game-changer", "revolutionary"
+- Must reference something specific from the actual video content below
+- Should feel like the natural first sentence of the video
+- Maximum 2 sentences
+- Write as if the creator is speaking directly to camera
 
 Original: "${hookText}"
 
-Return STRICT JSON only: {"rewrittenHook": "your optimized opening hook here"}`,
+Return STRICT JSON only: {"rewrittenHook": "your rewritten opening here"}`,
         }],
       });
       const parsed = parseJson<{ rewrittenHook: string }>(hookRewriteResponse.choices[0]?.message?.content ?? "{}", { rewrittenHook: "" });
@@ -660,19 +722,26 @@ Platform rules: ${guide}
 
 Transcript: "${transcript.substring(0, 800)}"
 
+TAGS RULE: YouTube tags must NOT include the # symbol. Output plain tag text only, ready to paste directly into the YouTube tags field. Example: "Google Sheets, productivity, ecommerce" not "#GoogleSheets, #productivity"
+
 Return STRICT JSON only:
-{"titles":["one title only"],"description":"Two compelling sentences maximum.","hashtags":[{"tag":"#Tag","effect":"why this tag"},{"tag":"#Tag2","effect":"..."},{"tag":"#Tag3","effect":"..."}],"timestamps":[{"time":"0:00","label":"Intro"}]}` }],
+{"titles":["one title only"],"description":"Two compelling sentences maximum.","hashtags":[{"tag":"Tag without hash symbol","effect":"why this tag"},{"tag":"Tag2","effect":"..."},{"tag":"Tag3","effect":"..."}],"timestamps":[{"time":"0:00","label":"Intro"}]}` }],
     });
 
-    const parsed = parseJson<{ titles: string[]; description: string; hashtags: object[]; timestamps: Array<{ time: string; label: string }> }>(
+    const parsed = parseJson<{ titles: string[]; description: string; hashtags: Array<{ tag: string; effect?: string }>; timestamps: Array<{ time: string; label: string }> }>(
       response.choices[0]?.message?.content ?? "{}",
       {
         titles: ["Your Video Title — Creator Plan Unlocks 4 More Options"],
         description: "Your video covers important content your audience needs to see.",
-        hashtags: [{ tag: "#VideoContent", effect: "Broad reach" }, { tag: "#YouTube", effect: "Platform" }, { tag: "#Creator", effect: "Niche" }],
+        hashtags: [{ tag: "VideoContent", effect: "Broad reach" }, { tag: "YouTube", effect: "Platform" }, { tag: "Creator", effect: "Niche" }],
         timestamps: [{ time: "0:00", label: "Introduction" }],
       }
     );
+    // Safety net: strip any # symbols the model added despite instructions
+    parsed.hashtags = (parsed.hashtags ?? []).map(h => ({
+      ...h,
+      tag: typeof h.tag === "string" ? h.tag.replace(/^#+/, "") : h.tag,
+    }));
     return parsed;
   }
 
@@ -697,23 +766,27 @@ ${isYouTube ? `Generate exactly 5 title options using these named strategies:
 5. Bold claim or result-driven (contrarian or surprising outcome)
 Each title: include primary keyword naturally, under 70 characters.` : `Generate 3 title options following platform best practices.`}
 
-Description must:
-- First 2 lines be a compelling hook visible before "Show more"
-- Include primary keyword in first sentence
-- Include chapter timestamps section as ## Chapters
-- Include [Links] placeholder section
-- End with a clear call to action
+Description rules — write like a creator who knows their audience, not a marketing copywriter:
+- First 2 lines must clearly state what the video is about and who it's for. No hype, no fluff.
+- Use the primary keyword naturally in the first sentence.
+- Include a ## Chapters section — use actual content from the transcript for chapter names. Never use generic labels like "Introduction", "Part 1", or "Sell Online". Use descriptive names that tell the viewer what they will learn (e.g. "Why updating 5 platforms wastes your Tuesday", "The Google Sheets trick that fixed everything").
+- Include a links section with placeholder text: "🔗 [Add your links here]"
+- End with ONE genuine call to action — either a question for viewers to comment on, or a subscribe prompt. One sentence only.
+- Minimum 150 words. No filler closing lines.
+- Never end with phrases like "Embrace simplicity", "Get organized now", "Transform your workflow", or any generic motivational closer.
 - 150-400 words total
+
+TAGS RULE: YouTube tags must NOT include the # symbol. Output plain tag text only, ready to paste directly into the YouTube tags field. Example: "Google Sheets, productivity, ecommerce" not "#GoogleSheets, #productivity"
 
 Tags: generate 25-30 tags total:
 - 5 high-volume broad tags (1M+ monthly searches)
 - 10 medium-competition niche tags (100K-1M)
 - 5 long-tail specific tags (very specific, 10K-100K)
 - 5 brand/product/creator-specific tags
-- Comma-separated, ready to paste into YouTube
+- No # symbols on any tag
 
 Return STRICT JSON — use EXACT times from chapter list:
-{"titles":["title 1","title 2","title 3","title 4","title 5"],"description":"full description with chapters and CTA","hashtags":[{"tag":"#Tag","effect":"audience this serves"}],"timestamps":[{"time":"0:00","label":"short label"}],"titleStrategies":["curiosity gap","how-to","number-based","problem/solution","bold claim"]}` }],
+{"titles":["title 1","title 2","title 3","title 4","title 5"],"description":"full description with chapters and CTA","hashtags":[{"tag":"Tag without hash symbol","effect":"audience this serves"}],"timestamps":[{"time":"0:00","label":"short label"}],"titleStrategies":["curiosity gap","how-to","number-based","problem/solution","bold claim"]}` }],
   });
 
   const parsed = parseJson<{ titles: string[]; description: string; hashtags: object[]; timestamps: Array<{ time: string; label: string }>; titleStrategies?: string[] }>(
@@ -732,6 +805,12 @@ Return STRICT JSON — use EXACT times from chapter list:
       label: t.label,
     }));
   }
+
+  // Safety net: strip any # symbols the model added despite instructions
+  parsed.hashtags = (parsed.hashtags ?? []).map((h: any) => ({
+    ...h,
+    tag: typeof h.tag === "string" ? h.tag.replace(/^#+/, "") : h.tag,
+  }));
 
   return parsed;
 }

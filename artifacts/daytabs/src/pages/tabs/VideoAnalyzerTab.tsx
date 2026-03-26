@@ -322,7 +322,7 @@ function EditingPanel({ data, isPaid }: { data: any; isPaid: boolean }) {
   );
 }
 
-function PublishPanel({ data, platforms, isPaid }: { data: any; platforms: string[]; isPaid: boolean }) {
+function PublishPanel({ data, platforms, isPaid, subtitleFile, videoFileName }: { data: any; platforms: string[]; isPaid: boolean; subtitleFile?: { content: string; format: string; language: string }; videoFileName?: string }) {
   const [activePlatform, setActivePlatform] = useState<string>("");
   const [copiedSection, setCopiedSection] = useState<string | null>(null);
   const publishKeys = data ? Object.keys(data) : [];
@@ -437,7 +437,7 @@ function PublishPanel({ data, platforms, isPaid }: { data: any; platforms: strin
               <div className="flex items-center justify-between mb-3">
                 <p className="text-xs text-white/40 uppercase tracking-wider flex items-center gap-1.5"><Hash className="w-3.5 h-3.5" />Tags</p>
                 {isPaid && (
-                  <button onClick={() => copyText(hashtags.map(t => t.tag).join(", "), "tags")} className="text-white/30 hover:text-white/60 transition-colors">
+                  <button onClick={() => copyText(hashtags.map(t => String(t.tag ?? "").replace(/^#+/, "")).join(", "), "tags")} className="text-white/30 hover:text-white/60 transition-colors">
                     {copiedSection === "tags" ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
                   </button>
                 )}
@@ -445,7 +445,7 @@ function PublishPanel({ data, platforms, isPaid }: { data: any; platforms: strin
               <div className="flex flex-wrap gap-1.5">
                 {firstTags.map((tag: { tag: string; effect?: string }, i: number) => (
                   <span key={i} title={tag.effect} className="px-2.5 py-1 bg-primary/10 border border-primary/20 text-primary/80 rounded-lg text-xs font-mono cursor-help">
-                    {tag.tag?.replace(/^#/, "#") ?? tag}
+                    {String(tag.tag ?? "").replace(/^#+/, "")}
                   </span>
                 ))}
               </div>
@@ -454,7 +454,7 @@ function PublishPanel({ data, platforms, isPaid }: { data: any; platforms: strin
                   <div className="flex flex-wrap gap-1.5 mt-2">
                     {extraTags.map((tag: { tag: string }, i: number) => (
                       <span key={i} className="px-2.5 py-1 bg-primary/10 border border-primary/20 text-primary/80 rounded-lg text-xs font-mono">
-                        {tag.tag?.replace(/^#/, "#") ?? tag}
+                        {String(tag.tag ?? "").replace(/^#+/, "")}
                       </span>
                     ))}
                   </div>
@@ -467,7 +467,31 @@ function PublishPanel({ data, platforms, isPaid }: { data: any; platforms: strin
             <div className="p-4 rounded-xl bg-background/60 border border-white/8">
               <p className="text-xs text-white/40 uppercase tracking-wider mb-3 flex items-center gap-1.5"><Download className="w-3.5 h-3.5" />Subtitle File (.srt)</p>
               {isPaid ? (
-                <p className="text-xs text-white/40 italic">SRT file generated when using Publish module with a paid plan. Available in your analysis results.</p>
+                subtitleFile?.content ? (
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-white/70">YouTube-compatible subtitle file</p>
+                      <p className="text-xs text-white/30 mt-0.5">Max 42 chars per line, 2 lines per card</p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        const blob = new Blob([subtitleFile.content], { type: "text/srt;charset=utf-8" });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement("a");
+                        a.href = url;
+                        const baseName = (videoFileName ?? "subtitles").replace(/\.[^.]+$/, "");
+                        a.download = `${baseName}.srt`;
+                        a.click();
+                        URL.revokeObjectURL(url);
+                      }}
+                      className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold bg-primary/15 border border-primary/30 text-primary hover:bg-primary/25 transition-all"
+                    >
+                      <Download className="w-3.5 h-3.5" />Download .srt
+                    </button>
+                  </div>
+                ) : (
+                  <p className="text-xs text-white/30 italic">Run analysis with the Publish module enabled to generate subtitle file.</p>
+                )
               ) : (
                 <BlurSection blur feature="subtitle-file" label="Download subtitle file — Creator plan and above. YouTube-compatible .srt format.">
                   <div className="py-6 text-center">
@@ -1033,7 +1057,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
                 <motion.div key={activeResultTab} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
                   {activeResultTab === "quality"    && <QualityPanel    data={(results as any).quality}    isPaid={isPaid} />}
                   {activeResultTab === "editing"    && <EditingPanel    data={(results as any).editing}    isPaid={isPaid} />}
-                  {activeResultTab === "publish"    && <PublishPanel    data={(results as any).publish}    platforms={selectedPlatforms} isPaid={isPaid} />}
+                  {activeResultTab === "publish"    && <PublishPanel    data={(results as any).publish}    platforms={selectedPlatforms} isPaid={isPaid} subtitleFile={(results as any).subtitleFile} videoFileName={file?.name} />}
                   {activeResultTab === "shortClips" && <ShortClipsPanel data={(results as any).shortClips} isPaid={isPaid} />}
                   {activeResultTab === "transcript" && <TranscriptPanel data={(results as any).transcript} isPaid={isPaid} />}
                 </motion.div>
