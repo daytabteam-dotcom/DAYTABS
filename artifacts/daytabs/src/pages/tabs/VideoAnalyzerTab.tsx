@@ -907,9 +907,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
   const showAnalyzing = isAnalyzing || (!!jobId && !isDone && !isError);
 
   function togglePlatform(id: string) {
-    setSelectedPlatforms(prev =>
-      prev.includes(id) ? (prev.length > 1 ? prev.filter(p => p !== id) : prev) : [...prev, id]
-    );
+    setSelectedPlatforms([id]);
   }
 
   function toggleModule(id: string, locked: boolean) {
@@ -1055,7 +1053,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
 
               <div>
                 <p className="text-xs text-white/40 uppercase tracking-wider mb-3 flex items-center gap-2">
-                  <TrendingUp className="w-3.5 h-3.5" />Target Platforms
+                  <TrendingUp className="w-3.5 h-3.5" />Target Platform
                 </p>
                 <div className="flex flex-wrap gap-2">
                   {PLATFORMS.map(pl => {

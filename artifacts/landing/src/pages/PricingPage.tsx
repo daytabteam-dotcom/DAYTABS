@@ -19,7 +19,7 @@ const plans = [
     borderColor: "border-white/10",
     popular: false,
     features: [
-      { text: "3 video analyses / month" },
+      { text: "2 video analyses / month" },
       { text: "Up to 200 MB per video" },
       { text: "Up to 5 min video duration" },
       { text: "Quality and editing reports" },
