@@ -1,38 +1,76 @@
-import { db, userUsageTable, analysisJobsTable, scriptPlannerChatsTable } from "@workspace/db";
+import { db, userUsageTable, analysisJobsTable, scriptPlannerChatsTable, usersTable } from "@workspace/db";
 import { eq, and, gte, count } from "drizzle-orm";
 import { normalizePlan, PLAN_LIMITS, buildMonthlyLimitError, buildChatLimitError, type NormalizedPlan } from "./planLimits";
 
-// ─── Period helpers ────────────────────────────────────────────────────────────
-function currentPeriodStart(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
-}
+// ─── Per-user billing cycle helpers ────────────────────────────────────────────
 
-function currentPeriodEnd(): string {
-  const d = new Date();
-  const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0);
-  return `${lastDay.getFullYear()}-${String(lastDay.getMonth() + 1).padStart(2, "0")}-${String(lastDay.getDate()).padStart(2, "0")}`;
-}
-
-function isPeriodStale(periodStart: string): boolean {
-  const [year, month] = periodStart.split("-").map(Number);
+/**
+ * Compute the start of the user's current billing cycle.
+ *
+ * The cycle day-of-month is taken from `baseDate` (signup or subscription date).
+ * If the cycle day has already passed this month, the cycle started this month.
+ * Otherwise it started last month (i.e. the user is in the tail of the previous cycle).
+ *
+ * Edge case: months shorter than the cycle day (e.g. cycle day = 31, February)
+ * use the last day of that month instead.
+ */
+function getCurrentCycleStart(baseDate: Date): Date {
   const now = new Date();
-  return year < now.getFullYear() || (year === now.getFullYear() && month < now.getMonth() + 1);
+  const cycleDay = baseDate.getDate();
+
+  const year = now.getFullYear();
+  const month = now.getMonth(); // 0-indexed
+
+  const daysThisMonth = new Date(year, month + 1, 0).getDate();
+  const dayThisMonth = Math.min(cycleDay, daysThisMonth);
+  const cycleThisMonth = new Date(year, month, dayThisMonth, 0, 0, 0, 0);
+
+  if (cycleThisMonth <= now) {
+    return cycleThisMonth;
+  }
+
+  // Still before the cycle start this month — we're in the previous month's cycle
+  const prevMonth = month === 0 ? 11 : month - 1;
+  const prevYear = month === 0 ? year - 1 : year;
+  const daysPrevMonth = new Date(prevYear, prevMonth + 1, 0).getDate();
+  const dayPrevMonth = Math.min(cycleDay, daysPrevMonth);
+  return new Date(prevYear, prevMonth, dayPrevMonth, 0, 0, 0, 0);
 }
 
-/** Count existing analysis jobs and script chats for a user in the current month. */
-async function countCurrentMonthUsage(userId: number): Promise<{ videoAnalyses: number; scriptChats: number }> {
-  const startOfMonth = new Date();
-  startOfMonth.setDate(1);
-  startOfMonth.setHours(0, 0, 0, 0);
+/**
+ * Returns true if the stored period start is before the current cycle start,
+ * meaning the usage row needs to be reset.
+ */
+function isPeriodStale(storedPeriodStart: string, cycleStart: Date): boolean {
+  const stored = new Date(storedPeriodStart + "T00:00:00");
+  // Cycle start is midnight local — compare dates only
+  const cycleStartMidnight = new Date(
+    cycleStart.getFullYear(),
+    cycleStart.getMonth(),
+    cycleStart.getDate(),
+  );
+  return stored < cycleStartMidnight;
+}
 
+function dateToISODate(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+// ─── Seed helper ───────────────────────────────────────────────────────────────
+
+/**
+ * Count existing successful analysis jobs and script chats since a given date.
+ * Used to seed the counter on first access.
+ */
+async function countUsageSince(userId: number, since: Date): Promise<{ videoAnalyses: number; scriptChats: number }> {
   const [uploadRow] = await db
     .select({ cnt: count() })
     .from(analysisJobsTable)
     .where(and(
       eq(analysisJobsTable.userId, userId),
       eq(analysisJobsTable.mode, "video-analyzer"),
-      gte(analysisJobsTable.createdAt, startOfMonth),
+      eq(analysisJobsTable.status, "complete"),
+      gte(analysisJobsTable.createdAt, since),
     ));
 
   const [chatRow] = await db
@@ -40,7 +78,7 @@ async function countCurrentMonthUsage(userId: number): Promise<{ videoAnalyses: 
     .from(scriptPlannerChatsTable)
     .where(and(
       eq(scriptPlannerChatsTable.userId, userId),
-      gte(scriptPlannerChatsTable.createdAt, startOfMonth),
+      gte(scriptPlannerChatsTable.createdAt, since),
     ));
 
   return {
@@ -49,13 +87,38 @@ async function countCurrentMonthUsage(userId: number): Promise<{ videoAnalyses: 
   };
 }
 
+// ─── Get or create usage row ───────────────────────────────────────────────────
+
 /**
- * Get or create a user's usage row. Handles monthly reset automatically.
- * On first access, initializes from existing analysis_jobs and script_planner_chats.
+ * Get or create a user's usage row. Handles cycle-based reset automatically.
+ *
+ * Billing cycles are anchored to the user's cycleStartAt timestamp:
+ *   - Free users:  cycleStartAt = createdAt (set on first usage access)
+ *   - Paid users:  cycleStartAt = subscription activation date
+ *
+ * Resets happen exactly 1 month from the anchor date, not on calendar boundaries.
  */
 export async function getOrCreateUsage(userId: number) {
-  const periodStart = currentPeriodStart();
-  const periodEnd = currentPeriodEnd();
+  // Fetch user to get billing cycle anchor
+  const [user] = await db
+    .select({ createdAt: usersTable.createdAt, cycleStartAt: usersTable.cycleStartAt })
+    .from(usersTable)
+    .where(eq(usersTable.id, userId))
+    .limit(1);
+
+  // Determine the anchor date: paid subscription date or signup date
+  const anchorDate = user?.cycleStartAt ?? user?.createdAt ?? new Date();
+
+  // If the user has no cycleStartAt, set it to createdAt now (one-time migration)
+  if (user && !user.cycleStartAt) {
+    await db
+      .update(usersTable)
+      .set({ cycleStartAt: user.createdAt } as never)
+      .where(eq(usersTable.id, userId));
+  }
+
+  const cycleStart = getCurrentCycleStart(anchorDate);
+  const periodStartStr = dateToISODate(cycleStart);
 
   const [existing] = await db
     .select()
@@ -64,14 +127,14 @@ export async function getOrCreateUsage(userId: number) {
     .limit(1);
 
   if (!existing) {
-    // First access — initialize from existing data
-    const { videoAnalyses, scriptChats } = await countCurrentMonthUsage(userId);
+    // First access — seed from completed jobs in this cycle
+    const { videoAnalyses, scriptChats } = await countUsageSince(userId, cycleStart);
     const [row] = await db
       .insert(userUsageTable)
       .values({
         userId,
-        periodStart,
-        periodEnd,
+        periodStart: periodStartStr,
+        periodEnd: dateToISODate(new Date(cycleStart.getFullYear(), cycleStart.getMonth() + 1, cycleStart.getDate())),
         videoAnalysesUsed: videoAnalyses,
         scriptPlannerChatsUsed: scriptChats,
         lastUpdated: new Date(),
@@ -80,15 +143,16 @@ export async function getOrCreateUsage(userId: number) {
     return row;
   }
 
-  if (isPeriodStale(existing.periodStart)) {
-    // New month — reset counters
+  if (isPeriodStale(existing.periodStart, cycleStart)) {
+    // New cycle started — reset counters, seed from completed jobs this cycle
+    const { videoAnalyses, scriptChats } = await countUsageSince(userId, cycleStart);
     const [row] = await db
       .update(userUsageTable)
       .set({
-        periodStart,
-        periodEnd,
-        videoAnalysesUsed: 0,
-        scriptPlannerChatsUsed: 0,
+        periodStart: periodStartStr,
+        periodEnd: dateToISODate(new Date(cycleStart.getFullYear(), cycleStart.getMonth() + 1, cycleStart.getDate())),
+        videoAnalysesUsed: videoAnalyses,
+        scriptPlannerChatsUsed: scriptChats,
         lastUpdated: new Date(),
       })
       .where(eq(userUsageTable.userId, userId))
@@ -99,8 +163,13 @@ export async function getOrCreateUsage(userId: number) {
   return existing;
 }
 
-// ─── Video Analysis limit check + increment ────────────────────────────────────
-export async function checkAndIncrementVideoAnalysis(userId: number, rawPlan: string): Promise<{
+// ─── Video Analysis — check only (no increment) ───────────────────────────────
+
+/**
+ * Check whether the user is within their video analysis limit for the current cycle.
+ * Does NOT increment the counter. Call incrementVideoAnalysis() after a successful pipeline.
+ */
+export async function checkVideoAnalysisLimit(userId: number, rawPlan: string): Promise<{
   allowed: boolean;
   used: number;
   limit: number;
@@ -120,32 +189,39 @@ export async function checkAndIncrementVideoAnalysis(userId: number, rawPlan: st
     return { allowed: false, used, limit: planLimit, error: buildMonthlyLimitError(plan, used, planLimit) };
   }
 
-  // Increment
-  await db
-    .update(userUsageTable)
-    .set({ videoAnalysesUsed: used + 1, lastUpdated: new Date() })
-    .where(eq(userUsageTable.userId, userId));
-
-  return { allowed: true, used: used + 1, limit: planLimit };
+  return { allowed: true, used, limit: planLimit };
 }
 
-/** Decrement video analyses used (rollback on pipeline failure). Minimum 0. */
-export async function decrementVideoAnalysis(userId: number): Promise<void> {
+// ─── Video Analysis — increment after successful pipeline ─────────────────────
+
+/**
+ * Increment the video analysis counter. Call this only after the pipeline
+ * completes successfully and the report is generated.
+ */
+export async function incrementVideoAnalysis(userId: number): Promise<void> {
   const [existing] = await db
     .select()
     .from(userUsageTable)
     .where(eq(userUsageTable.userId, userId))
     .limit(1);
 
-  if (!existing || existing.videoAnalysesUsed <= 0) return;
+  if (!existing) {
+    // Safety: create the row first
+    await getOrCreateUsage(userId);
+    const [fresh] = await db.select().from(userUsageTable).where(eq(userUsageTable.userId, userId)).limit(1);
+    if (!fresh) return;
+    await db.update(userUsageTable).set({ videoAnalysesUsed: 1, lastUpdated: new Date() }).where(eq(userUsageTable.userId, userId));
+    return;
+  }
 
   await db
     .update(userUsageTable)
-    .set({ videoAnalysesUsed: existing.videoAnalysesUsed - 1, lastUpdated: new Date() })
+    .set({ videoAnalysesUsed: existing.videoAnalysesUsed + 1, lastUpdated: new Date() })
     .where(eq(userUsageTable.userId, userId));
 }
 
 // ─── Script Chat limit check + increment ──────────────────────────────────────
+
 export async function checkAndIncrementScriptChat(userId: number, rawPlan: string): Promise<{
   allowed: boolean;
   used: number;
@@ -166,7 +242,6 @@ export async function checkAndIncrementScriptChat(userId: number, rawPlan: strin
     return { allowed: false, used, limit: planLimit, error: buildChatLimitError(plan, used, planLimit) };
   }
 
-  // Increment
   await db
     .update(userUsageTable)
     .set({ scriptPlannerChatsUsed: used + 1, lastUpdated: new Date() })

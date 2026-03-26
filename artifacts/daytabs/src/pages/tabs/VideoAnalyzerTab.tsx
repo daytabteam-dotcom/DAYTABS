@@ -371,7 +371,6 @@ function PublishPanel({ data, platforms, isPaid, subtitleFile, videoFileName }: 
           );
         })}
       </div>
-
       {pData && (
         <div className="space-y-4">
           {firstTitle && (
@@ -1036,12 +1035,11 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
           onUpgrade={() => navigateToPricing("monthly-limit")}
         />
       )}
-
       {!hasResults && !showAnalyzing && !isError ? (
         <>
           <div className="text-center">
             <h1 className="text-3xl font-display font-bold text-white">Video Analyzer</h1>
-            <p className="text-white/50 mt-2">Upload your video and get a full AI analysis — quality, editing, publishing, and more.</p>
+            <p className="text-white/50 mt-2">Upload your video and get a full AI analysis; quality, editing, publishing, and more.</p>
           </div>
 
           <div className="grid lg:grid-cols-3 gap-6">

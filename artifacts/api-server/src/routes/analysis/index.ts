@@ -20,7 +20,7 @@ import {
 } from "@workspace/api-zod";
 import { optionalAuth } from "../../middlewares/auth";
 import { normalizePlan, getLimits, buildFileTooLargeError } from "../../lib/planLimits";
-import { checkAndIncrementVideoAnalysis, decrementVideoAnalysis, getOrCreateUsage } from "../../lib/usageService";
+import { checkVideoAnalysisLimit, incrementVideoAnalysis, getOrCreateUsage } from "../../lib/usageService";
 
 const execAsync = promisify(exec);
 
@@ -168,9 +168,9 @@ router.post("/upload", (req, res, next) => {
       return;
     }
 
-    // Monthly analysis limit check + increment
+    // Check analysis limit (does NOT increment — counter only moves on successful pipeline completion)
     if (userId) {
-      const limitCheck = await checkAndIncrementVideoAnalysis(userId, rawPlan);
+      const limitCheck = await checkVideoAnalysisLimit(userId, rawPlan);
       if (!limitCheck.allowed) {
         await fs.unlink(req.file.path).catch(() => {});
         res.status(429).json(limitCheck.error);
@@ -214,9 +214,12 @@ router.post("/upload", (req, res, next) => {
         audioVoice,
         plan: rawPlan,
         maxDurationSeconds,
-      }).catch(async (err) => {
+      }).then(async () => {
+        // Only count analyses that produced a successful report
+        if (userId) await incrementVideoAnalysis(userId);
+      }).catch((err) => {
         req.log.error({ err, jobId }, "Pipeline error");
-        if (userId) await decrementVideoAnalysis(userId);
+        // Counter is NOT incremented on failure — no rollback needed
       });
     });
   } catch (err) {

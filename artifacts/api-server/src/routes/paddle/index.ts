@@ -315,9 +315,13 @@ router.post("/webhook", async (req, res) => {
         const updates: Record<string, unknown> = { plan: plan as string };
         if (customerId) updates.paddleCustomerId = customerId;
         if (subscriptionId) updates.paddleSubscriptionId = subscriptionId;
+        // Reset billing cycle anchor to now — subscriber months start from activation date
+        if (eventType === "subscription.activated") {
+          updates.cycleStartAt = new Date();
+        }
 
         await db.update(usersTable).set(updates as never).where(where);
-        req.log.info({ plan, customerEmail, userId }, "Plan updated via webhook");
+        req.log.info({ plan, customerEmail, userId, eventType }, "Plan updated via webhook");
       } catch (err) {
         req.log.error({ err }, "Failed to update plan via webhook");
       }
@@ -379,6 +383,8 @@ router.post("/checkout-complete", requireAuth, async (req, res) => {
     const updates: Record<string, unknown> = { plan: plan as string };
     if (customerId) updates.paddleCustomerId = customerId;
     if (subscriptionId) updates.paddleSubscriptionId = subscriptionId;
+    // Set cycle anchor to now — subscriber's month starts from checkout date
+    updates.cycleStartAt = new Date();
 
     await db.update(usersTable).set(updates as never).where(eq(usersTable.id, user.id));
 
