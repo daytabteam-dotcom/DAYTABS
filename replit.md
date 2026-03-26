@@ -40,20 +40,17 @@ artifacts-monorepo/
 └── package.json
 ```
 
-## Analysis Pipelines
+## Analysis Pipeline
 
-### Primary: Video Analyzer (`video-analyzer`) — NEW unified mode
+### Video Analyzer (`video-analyzer`) — sole unified mode
 - 8-step pipeline: compress → extract audio → duration check → transcribe (single Whisper call) → quality → editing → publish → short clips
-- Accepts `modules[]` and `platforms[]` arrays from the client
+- Accepts `modules[]` (quality, editing, publish, shortClips) and `platforms[]` arrays from the client
 - Result: `{ quality, editing, publish: {[platform]: seoData}, shortClips, transcript }`
 - Duration limits enforced server-side before transcription
+- All uploads (presign R2 and multipart fallback) count as `video-analyzer` mode — single unified quota per plan
 
-### Legacy modes (preserved for backward compat)
-- `pre-edit`: visual/audio quality analysis
-- `editing`: hooks, cut points, short-form segments
-- `publish`: SEO, titles, descriptions, SRT subtitles
-- `dubbing`: translate → TTS → ffmpeg merge
-- Result: `{ translatedLanguage, voice, downloadUrl, filename }`
+### Dubbing — Coming Soon placeholder
+- DubbingTab renders a waiting-list email capture; backend rejects `mode=dubbing` with 403
 
 ## Key Files
 

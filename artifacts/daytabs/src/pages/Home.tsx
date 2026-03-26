@@ -7,7 +7,7 @@ import TeleprompterTab from "./tabs/TeleprompterTab";
 import ScriptPlannerTab from "./tabs/ScriptPlannerTab";
 import { ExportWarningDialog } from "@/components/ExportWarningDialog";
 import { PlanPickerModal } from "@/components/PlanPickerModal";
-import { usePlan, getPlanBadgeColor, getPlanLabel, PLAN_DISPLAY_NAMES, getDurationLimitLabel, getFileSizeLimitLabel } from "@/hooks/use-plan";
+import { usePlan, getPlanBadgeColor, getPlanLabel, PLAN_DISPLAY_NAMES, getDurationLimitLabel, getFileSizeLimitLabel, getScriptPlannerChatLimit } from "@/hooks/use-plan";
 import { useUser } from "@/hooks/use-user";
 
 const TABS = [
@@ -64,13 +64,16 @@ function StatCard({ label, value, sublabel, color }: { label: string; value: str
 
 function Dashboard({ onNavigate, onUpgrade }: { onNavigate: (tab: TabId) => void; onUpgrade: () => void }) {
   const { user } = useUser();
-  const { plan, getModeLimits } = usePlan();
+  const { plan, getModeLimits, getScriptPlannerLimits } = usePlan();
   const norm = plan.normalizedPlan;
   const limits = getModeLimits("video-analyzer");
   const used = limits.uploadUsed;
   const remaining = limits.uploadsRemaining;
   const total = limits.uploadLimit;
   const isUnlimited = total === -1;
+  const spLimits = getScriptPlannerLimits();
+  const spChatLimit = getScriptPlannerChatLimit(norm);
+  const isSpUnlimited = spChatLimit === -1;
   const badgeClass = getPlanBadgeColor(norm);
   const displayName = PLAN_DISPLAY_NAMES[norm] ?? "Free";
   const firstName = user?.name?.split(" ")[0] ?? user?.email?.split("@")[0] ?? "there";
@@ -115,7 +118,7 @@ function Dashboard({ onNavigate, onUpgrade }: { onNavigate: (tab: TabId) => void
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <StatCard label="Analyses used" value={used} sublabel="this month" />
         <StatCard label="Analyses left" value={isUnlimited ? "∞" : remaining} sublabel="this month" color={remaining === 0 ? "text-red-400" : "text-primary"} />
-        <StatCard label="Max video size" value={getFileSizeLimitLabel(norm)} sublabel="per upload" />
+        <StatCard label="Script chats" value={isSpUnlimited ? "∞" : spLimits.chatsUsed} sublabel={isSpUnlimited ? "unlimited" : `of ${spChatLimit} this month`} />
         <StatCard label="Max duration" value={getDurationLimitLabel(norm)} sublabel="per video" />
       </div>
 

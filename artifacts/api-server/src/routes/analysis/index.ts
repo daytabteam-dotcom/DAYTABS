@@ -47,11 +47,11 @@ function normalizePlan(plan: string): "free" | "creator" | "pro" | "studio" {
 }
 
 // ── Plan limits ────────────────────────────────────────────────────────────────
-const PLAN_UPLOAD_LIMITS: Record<string, Record<string, number>> = {
-  free:    { "video-analyzer": 3, "pre-edit": 3, editing: 5, publish: 3 },
-  creator: { "video-analyzer": 15, "pre-edit": 15, editing: 25, publish: 15 },
-  pro:     { "video-analyzer": 40, "pre-edit": 40, editing: 60, publish: 40 },
-  studio:  { "video-analyzer": Infinity, "pre-edit": Infinity, editing: Infinity, publish: Infinity },
+const PLAN_UPLOAD_LIMITS: Record<string, number> = {
+  free:    3,
+  creator: 15,
+  pro:     40,
+  studio:  Infinity,
 };
 
 const PLAN_SIZE_LIMITS: Record<string, number> = {
@@ -68,10 +68,9 @@ const PLAN_DURATION_LIMITS: Record<string, number> = {
   studio:  60 * 60,
 };
 
-async function checkUploadLimit(userId: number, plan: string, mode: string): Promise<{ allowed: boolean; used: number; limit: number }> {
+async function checkUploadLimit(userId: number, plan: string): Promise<{ allowed: boolean; used: number; limit: number }> {
   const n = normalizePlan(plan);
-  const limits = PLAN_UPLOAD_LIMITS[n] ?? PLAN_UPLOAD_LIMITS.free;
-  const limit = limits[mode] ?? 3;
+  const limit = PLAN_UPLOAD_LIMITS[n] ?? PLAN_UPLOAD_LIMITS.free;
 
   if (limit === Infinity) return { allowed: true, used: 0, limit: -1 };
 
@@ -85,7 +84,7 @@ async function checkUploadLimit(userId: number, plan: string, mode: string): Pro
     .where(
       and(
         eq(analysisJobsTable.userId, userId),
-        eq(analysisJobsTable.mode, mode),
+        eq(analysisJobsTable.mode, "video-analyzer"),
         gte(analysisJobsTable.createdAt, startOfMonth)
       )
     );
@@ -159,11 +158,9 @@ router.get("/presign-upload", async (req, res) => {
   if (!validExts.includes(ext)) { res.status(400).json({ error: "Invalid file extension" }); return; }
 
   const plan = req.auth?.plan ?? "free";
-  const mode = ((req.query.mode as string) || "video-analyzer");
-  const validMode = ["video-analyzer", "pre-edit", "editing", "publish"].includes(mode) ? mode : "video-analyzer";
 
   if (req.auth) {
-    const { allowed, used, limit } = await checkUploadLimit(req.auth.user_id, plan, validMode);
+    const { allowed, used, limit } = await checkUploadLimit(req.auth.user_id, plan);
     if (!allowed) {
       res.status(429).json({ error: `Upload limit reached this month (${used}/${limit}). Upgrade your plan to continue.` });
       return;
@@ -206,8 +203,7 @@ router.post("/start", async (req, res) => {
 
   if (!fileKey || typeof fileKey !== "string") { res.status(400).json({ error: "fileKey is required" }); return; }
 
-  const validModes: PipelineMode[] = ["video-analyzer", "pre-edit", "editing", "publish"];
-  const validatedMode: PipelineMode = validModes.includes(mode as PipelineMode) ? (mode as PipelineMode) : "video-analyzer";
+  const validatedMode: PipelineMode = "video-analyzer";
 
   if (mode === "dubbing") {
     res.status(403).json({ error: "Dubbing is coming soon and not yet available." });
@@ -231,7 +227,7 @@ router.post("/start", async (req, res) => {
   const userId = req.auth?.user_id ?? null;
 
   if (userId) {
-    const { allowed, used, limit } = await checkUploadLimit(userId, rawPlan, validatedMode);
+    const { allowed, used, limit } = await checkUploadLimit(userId, rawPlan);
     if (!allowed) {
       res.status(429).json({ error: `Upload limit reached this month (${used}/${limit}). Upgrade your plan to continue.` });
       return;
@@ -295,9 +291,7 @@ router.post("/upload", upload.single("video"), async (req, res) => {
   try {
     if (!req.file) { res.status(400).json({ error: "No video file uploaded" }); return; }
 
-    const mode = (req.body.mode as string) || "video-analyzer";
-    const validModes: PipelineMode[] = ["video-analyzer", "pre-edit", "editing", "publish"];
-    const validatedMode: PipelineMode = validModes.includes(mode as PipelineMode) ? (mode as PipelineMode) : "video-analyzer";
+    const validatedMode: PipelineMode = "video-analyzer";
 
     if (req.body.mode === "dubbing") {
       await fs.unlink(req.file.path).catch(() => {});
@@ -346,7 +340,7 @@ router.post("/upload", upload.single("video"), async (req, res) => {
     }
 
     if (userId) {
-      const { allowed, used, limit } = await checkUploadLimit(userId, rawPlan, validatedMode);
+      const { allowed, used, limit } = await checkUploadLimit(userId, rawPlan);
       if (!allowed) {
         await fs.unlink(req.file.path).catch(() => {});
         res.status(429).json({ error: `Upload limit reached this month (${used}/${limit}). Upgrade your plan to continue.` });

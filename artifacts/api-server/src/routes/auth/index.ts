@@ -6,7 +6,7 @@ import nodemailer from "nodemailer";
 import { db } from "@workspace/db";
 import { usersTable } from "@workspace/db";
 import { eq, and, gte, count } from "drizzle-orm";
-import { analysisJobsTable } from "@workspace/db";
+import { analysisJobsTable, scriptPlannerChatsTable } from "@workspace/db";
 import { requireAuth } from "../../middlewares/auth";
 
 const router = Router();
@@ -67,26 +67,37 @@ function createMailTransport() {
   });
 }
 
-/** Monthly upload count per user per tab mode */
-async function getMonthlyUploadCounts(userId: number): Promise<Record<string, number>> {
+/** Monthly usage counts for the dashboard */
+async function getMonthlyUsageCounts(userId: number): Promise<{ uploadCounts: Record<string, number>; scriptPlannerChats: number }> {
   const startOfMonth = new Date();
   startOfMonth.setDate(1);
   startOfMonth.setHours(0, 0, 0, 0);
 
-  const rows = await db
-    .select({ mode: analysisJobsTable.mode, cnt: count() })
+  const [uploadRow] = await db
+    .select({ cnt: count() })
     .from(analysisJobsTable)
     .where(
       and(
         eq(analysisJobsTable.userId, userId),
+        eq(analysisJobsTable.mode, "video-analyzer"),
         gte(analysisJobsTable.createdAt, startOfMonth)
       )
-    )
-    .groupBy(analysisJobsTable.mode);
+    );
 
-  const result: Record<string, number> = {};
-  for (const row of rows) result[row.mode] = Number(row.cnt);
-  return result;
+  const [chatRow] = await db
+    .select({ cnt: count() })
+    .from(scriptPlannerChatsTable)
+    .where(
+      and(
+        eq(scriptPlannerChatsTable.userId, userId),
+        gte(scriptPlannerChatsTable.createdAt, startOfMonth)
+      )
+    );
+
+  return {
+    uploadCounts: { "video-analyzer": Number(uploadRow?.cnt ?? 0) },
+    scriptPlannerChats: Number(chatRow?.cnt ?? 0),
+  };
 }
 
 router.post("/signup", async (req, res) => {
@@ -125,13 +136,14 @@ router.get("/me", requireAuth, async (req, res) => {
   try {
     const [user] = await db.select().from(usersTable).where(eq(usersTable.id, req.auth!.user_id)).limit(1);
     if (!user) { res.status(404).json({ error: "User not found" }); return; }
-    const uploadCounts = await getMonthlyUploadCounts(user.id);
+    const { uploadCounts, scriptPlannerChats } = await getMonthlyUsageCounts(user.id);
     res.json({
       id: user.id,
       email: user.email,
       name: user.name,
       plan: user.plan,
       uploadCounts,
+      scriptPlannerChats,
     });
   } catch (err) {
     req.log.error({ err }, "Get me error");

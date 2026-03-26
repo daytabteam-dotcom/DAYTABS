@@ -62,7 +62,7 @@ const PLAN_META = [
     badge: null as string | null,
     price: "$89",
     features: [
-      "100 video analyses/month",
+      "Unlimited video analyses",
       "Up to 60 min video length",
       "2 GB upload limit",
       "All modules unlocked",

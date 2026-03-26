@@ -7,6 +7,7 @@ export interface PlanInfo {
   plan: PlanName;
   normalizedPlan: "free" | "creator" | "pro" | "studio";
   uploadCounts: Record<string, number>;
+  scriptPlannerChats: number;
   isPaid: boolean;
   isCreator: boolean;
   isPro: boolean;
@@ -19,6 +20,12 @@ export interface PlanLimits {
   uploadsRemaining: number;
 }
 
+export interface ScriptPlannerLimits {
+  chatLimit: number;
+  chatsUsed: number;
+  chatsRemaining: number;
+}
+
 function normalizePlan(plan: string): "free" | "creator" | "pro" | "studio" {
   if (plan === "premium") return "creator";
   if (plan === "professional") return "studio";
@@ -26,11 +33,18 @@ function normalizePlan(plan: string): "free" | "creator" | "pro" | "studio" {
   return "free";
 }
 
-const UPLOAD_LIMITS: Record<string, Record<string, number>> = {
-  free:    { "video-analyzer": 3, "pre-edit": 3, editing: 5, publish: 3 },
-  creator: { "video-analyzer": 15, "pre-edit": 15, editing: 25, publish: 15 },
-  pro:     { "video-analyzer": 40, "pre-edit": 40, editing: 60, publish: 40 },
-  studio:  { "video-analyzer": -1, "pre-edit": -1, editing: -1, publish: -1 },
+const UPLOAD_LIMITS: Record<string, number> = {
+  free:    3,
+  creator: 15,
+  pro:     40,
+  studio:  -1,
+};
+
+const SCRIPT_PLANNER_CHAT_LIMITS: Record<string, number> = {
+  free:    1,
+  creator: 15,
+  pro:     40,
+  studio:  -1,
 };
 
 export const FILE_SIZE_LIMITS: Record<string, number> = {
@@ -92,9 +106,12 @@ export function getDurationLimitLabel(plan: string): string {
   return `${Math.round(secs / 60)} min`;
 }
 
-export function getUploadLimitForMode(plan: string, mode: string): number {
-  const n = normalizePlan(plan);
-  return UPLOAD_LIMITS[n]?.[mode] ?? UPLOAD_LIMITS.free[mode] ?? 3;
+export function getUploadLimit(plan: string): number {
+  return UPLOAD_LIMITS[normalizePlan(plan)] ?? UPLOAD_LIMITS.free;
+}
+
+export function getScriptPlannerChatLimit(plan: string): number {
+  return SCRIPT_PLANNER_CHAT_LIMITS[normalizePlan(plan)] ?? SCRIPT_PLANNER_CHAT_LIMITS.free;
 }
 
 export function usePlan() {
@@ -111,13 +128,18 @@ export function usePlan() {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (resp.ok) {
-        const data = await resp.json() as { plan: string; uploadCounts: Record<string, number> };
+        const data = await resp.json() as {
+          plan: string;
+          uploadCounts: Record<string, number>;
+          scriptPlannerChats?: number;
+        };
         const rawPlan = (data.plan || "free") as PlanName;
         const norm = normalizePlan(rawPlan);
         setPlanInfo({
           plan: rawPlan,
           normalizedPlan: norm,
           uploadCounts: data.uploadCounts || {},
+          scriptPlannerChats: data.scriptPlannerChats ?? 0,
           isPaid: norm !== "free",
           isCreator: norm === "creator",
           isPro: norm === "pro",
@@ -147,6 +169,7 @@ export function usePlan() {
     plan: rawPlan,
     normalizedPlan: norm,
     uploadCounts: {},
+    scriptPlannerChats: 0,
     isPaid: norm !== "free",
     isCreator: norm === "creator",
     isPro: norm === "pro",
@@ -154,8 +177,8 @@ export function usePlan() {
   };
 
   function getModeLimits(mode: string): PlanLimits {
-    const limit = getUploadLimitForMode(effectiveInfo.plan, mode);
-    const used = effectiveInfo.uploadCounts[mode] ?? 0;
+    const limit = getUploadLimit(effectiveInfo.plan);
+    const used = effectiveInfo.uploadCounts[mode] ?? effectiveInfo.uploadCounts["video-analyzer"] ?? 0;
     return {
       uploadLimit: limit,
       uploadUsed: used,
@@ -163,10 +186,21 @@ export function usePlan() {
     };
   }
 
+  function getScriptPlannerLimits(): ScriptPlannerLimits {
+    const limit = getScriptPlannerChatLimit(effectiveInfo.plan);
+    const used = effectiveInfo.scriptPlannerChats;
+    return {
+      chatLimit: limit,
+      chatsUsed: used,
+      chatsRemaining: limit === -1 ? Infinity : Math.max(0, limit - used),
+    };
+  }
+
   return {
     plan: effectiveInfo,
     loading,
     getModeLimits,
+    getScriptPlannerLimits,
     refetch: fetchPlanInfo,
   };
 }
