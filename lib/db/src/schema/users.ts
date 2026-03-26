@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp } from "drizzle-orm/pg-core";
+import { boolean, pgTable, serial, text, timestamp } from "drizzle-orm/pg-core";
 
 export const usersTable = pgTable("users", {
   id: serial("id").primaryKey(),
@@ -19,6 +19,10 @@ export const usersTable = pgTable("users", {
   // Cleared when they reactivate or when subscription.canceled webhook fires.
   // Used as a fallback when Paddle API hasn't reflected the scheduledChange yet.
   subscriptionCancelsAt: timestamp("subscription_cancels_at"),
+  // Set true when Paddle reports subscription.past_due (payment failed).
+  // Does NOT downgrade the plan — Paddle retries automatically.
+  // Cleared when subscription.resumed or subscription.activated fires.
+  subscriptionPastDue: boolean("subscription_past_due").default(false),
 });
 
 export type User = typeof usersTable.$inferSelect;

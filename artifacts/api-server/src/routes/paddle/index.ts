@@ -355,6 +355,7 @@ router.post("/webhook", async (req, res) => {
 
   if (
     eventType === "subscription.activated" ||
+    eventType === "subscription.resumed" ||
     eventType === "subscription.updated" ||
     eventType === "transaction.completed"
   ) {
@@ -384,11 +385,16 @@ router.post("/webhook", async (req, res) => {
         const updates: Record<string, unknown> = { plan: plan as string };
         if (customerId) updates.paddleCustomerId = customerId;
         if (subscriptionId) updates.paddleSubscriptionId = subscriptionId;
-        // Reset billing cycle anchor to now — subscriber months start from activation date
+        // Reset billing cycle anchor and clear flags on fresh activation
         if (eventType === "subscription.activated") {
           updates.cycleStartAt = new Date();
-          // Clear any stale cancels-at when subscription activates fresh
           updates.subscriptionCancelsAt = null;
+          updates.subscriptionPastDue = false;
+        }
+        // resumed = payment recovered after past_due; clear the past-due flag and any pending cancel
+        if (eventType === "subscription.resumed") {
+          updates.subscriptionCancelsAt = null;
+          updates.subscriptionPastDue = false;
         }
         // If this update has a scheduled cancellation, persist the effective date
         if (isScheduledCancel) {
@@ -399,6 +405,30 @@ router.post("/webhook", async (req, res) => {
         req.log.info({ plan, customerEmail, userId, eventType, isScheduledCancel }, "Plan updated via webhook");
       } catch (err) {
         req.log.error({ err }, "Failed to update plan via webhook");
+      }
+    }
+  }
+
+  // subscription.past_due — payment failed, Paddle will retry automatically.
+  // Flag the user without downgrading their plan.
+  if (eventType === "subscription.past_due") {
+    const customerEmail: string | undefined =
+      data?.customer?.email ?? data?.custom_data?.user_email;
+    const userId: number | undefined =
+      data?.custom_data?.user_id ? Number(data.custom_data.user_id) : undefined;
+
+    if (customerEmail || userId) {
+      try {
+        const where = userId
+          ? eq(usersTable.id, userId)
+          : eq(usersTable.email, customerEmail!);
+        await db
+          .update(usersTable)
+          .set({ subscriptionPastDue: true } as never)
+          .where(where);
+        req.log.info({ customerEmail, userId }, "Subscription past_due flagged");
+      } catch (err) {
+        req.log.error({ err }, "Failed to flag subscription past_due");
       }
     }
   }
@@ -419,7 +449,7 @@ router.post("/webhook", async (req, res) => {
           : eq(usersTable.email, customerEmail!);
         await db
           .update(usersTable)
-          .set({ plan: "free" as string, paddleSubscriptionId: null, subscriptionCancelsAt: null } as never)
+          .set({ plan: "free" as string, paddleSubscriptionId: null, subscriptionCancelsAt: null, subscriptionPastDue: false } as never)
           .where(where);
         req.log.info({ customerEmail, userId }, "Plan reset to free via webhook");
       } catch (err) {

@@ -12,6 +12,9 @@ async function runStartupMigrations() {
     await db.execute(
       sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_cancels_at TIMESTAMP`
     );
+    await db.execute(
+      sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_past_due BOOLEAN DEFAULT FALSE`
+    );
     logger.info("Startup migrations applied");
   } catch (err) {
     logger.warn({ err }, "Startup migrations warning (non-fatal)");
