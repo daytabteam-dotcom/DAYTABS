@@ -22,12 +22,8 @@ interface TabProps {
 }
 
 const PLATFORMS = [
-  { id: "youtube_long",   label: "YouTube",      shortLabel: "YT",      color: "red" },
-  { id: "youtube_shorts", label: "YT Shorts",    shortLabel: "Shorts",  color: "red" },
-  { id: "tiktok",         label: "TikTok",       shortLabel: "TikTok",  color: "pink" },
-  { id: "instagram",      label: "Instagram",    shortLabel: "IG",      color: "orange" },
-  { id: "linkedin",       label: "LinkedIn",     shortLabel: "LI",      color: "blue" },
-  { id: "x",              label: "X (Twitter)",  shortLabel: "X",       color: "slate" },
+  { id: "youtube_long",   label: "Long Video",          shortLabel: "Long",   color: "red" },
+  { id: "youtube_shorts", label: "Short Video / Reels", shortLabel: "Short",  color: "red" },
 ];
 
 const MODULES = [
