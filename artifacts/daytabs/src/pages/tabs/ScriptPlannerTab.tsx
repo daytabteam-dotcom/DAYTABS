@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Clapperboard, Send, Loader2, MonitorPlay, Copy, Check,
   Camera, Film, Lightbulb, Lock, ChevronDown, ChevronUp,
-  Pencil, Bot, User, Sparkles, PenLine, Trash2, MessageSquarePlus,
+  Pencil, Bot, User, Sparkles, PenLine, Trash2, MessageSquarePlus, Plus,
 } from "lucide-react";
 import { Teleprompter } from "@/components/Teleprompter";
 import { PlanPickerModal } from "@/components/PlanPickerModal";
@@ -69,13 +69,13 @@ function authHeaders(): HeadersInit {
 
 function TypingDots() {
   return (
-    <div className="flex items-center gap-1 py-1">
+    <div className="flex items-center gap-1.5 py-0.5">
       {[0, 1, 2].map(i => (
         <motion.div
           key={i}
-          className="w-1.5 h-1.5 rounded-full bg-white/40"
-          animate={{ opacity: [0.3, 1, 0.3], y: [0, -3, 0] }}
-          transition={{ duration: 1, repeat: Infinity, delay: i * 0.2 }}
+          className="w-2 h-2 rounded-full bg-violet-400/60"
+          animate={{ opacity: [0.3, 1, 0.3], y: [0, -4, 0] }}
+          transition={{ duration: 1, repeat: Infinity, delay: i * 0.18 }}
         />
       ))}
     </div>
@@ -129,7 +129,6 @@ export default function ScriptPlannerTab() {
   // Derived limits
   const userMessageCount = displayMessages.filter(m => m.role === "user").length;
   const isAtMessageLimit = isFreeUser && userMessageCount >= FREE_MESSAGE_LIMIT;
-  const canCreateNewChat = !isFreeUser || savedChats.length === 0;
   const newChatLocked = isFreeUser && savedChats.length >= 1;
 
   // ── Load chat list on mount ─────────────────────────────────────────────
@@ -143,17 +142,13 @@ export default function ScriptPlannerTab() {
     } catch { /* silent */ }
   }, []);
 
-  useEffect(() => {
-    loadChatList();
-  }, [loadChatList]);
-
-  // ── Auto-scroll chat ────────────────────────────────────────────────────
+  useEffect(() => { loadChatList(); }, [loadChatList]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [displayMessages]);
 
-  // ── Save / update chat in DB ────────────────────────────────────────────
+  // ── Persist chat ─────────────────────────────────────────────────────────
 
   const persistChat = useCallback(async (
     msgs: DisplayMessage[],
@@ -177,18 +172,10 @@ export default function ScriptPlannerTab() {
         const res = await fetch("/api/script-planner/chats", {
           method: "POST",
           headers: authHeaders(),
-          body: JSON.stringify({
-            title: title.slice(0, 80),
-            displayMessages: msgs,
-            apiHistory: hist,
-            result: scriptResult,
-          }),
+          body: JSON.stringify({ title: title.slice(0, 80), displayMessages: msgs, apiHistory: hist, result: scriptResult }),
         });
         const data = await res.json();
-        if (res.status === 403 && data.limitReached) {
-          // Chat limit reached silently (frontend already blocked the button)
-          return currentChatId;
-        }
+        if (res.status === 403 && data.limitReached) return currentChatId;
         if (data.chatId) {
           setActiveChatId(data.chatId);
           await loadChatList();
@@ -200,7 +187,7 @@ export default function ScriptPlannerTab() {
     return currentChatId;
   }, [loadChatList]);
 
-  // ── Load a specific chat ────────────────────────────────────────────────
+  // ── Load a chat ──────────────────────────────────────────────────────────
 
   const loadChat = useCallback(async (chatId: number) => {
     setChatsLoading(true);
@@ -220,23 +207,20 @@ export default function ScriptPlannerTab() {
     finally { setChatsLoading(false); }
   }, []);
 
-  // ── Delete a chat ───────────────────────────────────────────────────────
+  // ── Delete a chat ────────────────────────────────────────────────────────
 
   const deleteChat = useCallback(async (chatId: number, e: React.MouseEvent) => {
     e.stopPropagation();
     setDeletingId(chatId);
     try {
-      await fetch(`/api/script-planner/chats/${chatId}`, {
-        method: "DELETE",
-        headers: authHeaders(),
-      });
+      await fetch(`/api/script-planner/chats/${chatId}`, { method: "DELETE", headers: authHeaders() });
       if (activeChatId === chatId) handleNewChat();
       setSavedChats(prev => prev.filter(c => c.id !== chatId));
     } catch { /* silent */ }
     finally { setDeletingId(null); }
   }, [activeChatId]);
 
-  // ── New chat ────────────────────────────────────────────────────────────
+  // ── New chat ─────────────────────────────────────────────────────────────
 
   const handleNewChat = useCallback(() => {
     if (newChatLocked) { setShowUpgrade(true); return; }
@@ -250,7 +234,7 @@ export default function ScriptPlannerTab() {
     setTimeout(() => inputRef.current?.focus(), 100);
   }, [newChatLocked]);
 
-  // ── Send message ────────────────────────────────────────────────────────
+  // ── Send message ─────────────────────────────────────────────────────────
 
   const sendMessage = useCallback(async (text: string) => {
     const trimmed = text.trim();
@@ -345,43 +329,49 @@ export default function ScriptPlannerTab() {
       )}
       {showUpgrade && <PlanPickerModal onClose={() => setShowUpgrade(false)} />}
 
-      <div className="-mx-4 sm:-mx-6 lg:-mx-8 -mt-12 md:-mt-16 flex" style={{ height: "calc(100vh - 152px)" }}>
+      {/* Full-bleed 3-column layout */}
+      <div
+        className="-mx-4 sm:-mx-6 lg:-mx-8 -mt-12 md:-mt-16 flex"
+        style={{ height: "calc(100vh - 152px)" }}
+      >
 
-        {/* ── Panel 1: Chat List ── */}
-        <div className="flex flex-col w-[190px] shrink-0 border-r border-white/8 bg-background/60">
-          <div className="shrink-0 px-3 py-4 border-b border-white/8">
-            <button
-              onClick={handleNewChat}
-              title={newChatLocked ? "Free plan: 1 chat only. Upgrade for more." : "New chat"}
-              className={`w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${
-                newChatLocked
-                  ? "bg-white/3 border-white/8 text-white/25"
-                  : "bg-primary/15 hover:bg-primary/25 border-primary/25 text-primary"
-              }`}
-            >
-              {newChatLocked
-                ? <Lock className="w-3.5 h-3.5" />
-                : <MessageSquarePlus className="w-3.5 h-3.5" />
-              }
-              {newChatLocked ? "Upgrade for more" : "New chat"}
-            </button>
+        {/* ══ Panel 1: Chat History ══════════════════════════════════════════ */}
+        <div className="flex flex-col w-[220px] shrink-0 border-r border-white/8 bg-[#0c0816]">
 
-            {/* Plan badge */}
-            <p className="text-[9px] text-white/20 text-center mt-2">
-              {isFreeUser
-                ? `${savedChats.length}/1 chat`
-                : isPremiumUser
-                  ? `${savedChats.length}/20 this month`
-                  : "Unlimited chats"
-              }
-            </p>
+          {/* Header */}
+          <div className="shrink-0 px-4 pt-5 pb-4 border-b border-white/6">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-xs font-semibold text-white/50 uppercase tracking-widest">Chats</p>
+              <button
+                onClick={handleNewChat}
+                title={newChatLocked ? "Upgrade for more chats" : "New chat"}
+                className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all cursor-pointer ${
+                  newChatLocked
+                    ? "bg-white/4 text-white/20 cursor-not-allowed"
+                    : "bg-violet-600/20 hover:bg-violet-600/35 text-violet-400 border border-violet-500/20"
+                }`}
+              >
+                {newChatLocked ? <Lock className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
+              </button>
+            </div>
+
+            {isFreeUser && (
+              <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-white/4 border border-white/6">
+                <div className="w-1.5 h-1.5 rounded-full bg-amber-400/70 shrink-0" />
+                <p className="text-[11px] text-white/35">
+                  {savedChats.length}/1 chat · Free plan
+                </p>
+              </div>
+            )}
           </div>
 
-          <div className="flex-1 overflow-y-auto py-2 scrollbar-none">
+          {/* Chat list */}
+          <div className="flex-1 overflow-y-auto py-3 space-y-0.5 scrollbar-none px-2">
             {savedChats.length === 0 && (
-              <p className="px-3 py-6 text-center text-[10px] text-white/20 leading-relaxed">
-                Your saved chats will appear here
-              </p>
+              <div className="flex flex-col items-center gap-2 py-10 px-3 text-center">
+                <MessageSquarePlus className="w-6 h-6 text-white/10" />
+                <p className="text-xs text-white/20 leading-relaxed">Start a conversation to see your chats here</p>
+              </div>
             )}
             {savedChats.map(chat => {
               const isActive = chat.id === activeChatId;
@@ -390,22 +380,22 @@ export default function ScriptPlannerTab() {
                 <div
                   key={chat.id}
                   onClick={() => !isActive && loadChat(chat.id)}
-                  className={`group relative mx-2 mb-0.5 rounded-lg px-2.5 py-2.5 cursor-pointer transition-all ${
+                  className={`group relative rounded-xl px-3 py-3 cursor-pointer transition-all ${
                     isActive
-                      ? "bg-primary/15 border border-primary/25"
+                      ? "bg-violet-600/15 border border-violet-500/25"
                       : "hover:bg-white/5 border border-transparent"
                   }`}
                 >
-                  <p className={`text-xs font-medium leading-tight line-clamp-2 pr-5 ${
-                    isActive ? "text-white" : "text-white/55 group-hover:text-white/80"
+                  <p className={`text-[12px] font-medium leading-snug line-clamp-2 pr-6 ${
+                    isActive ? "text-white" : "text-white/50 group-hover:text-white/75"
                   }`}>
                     {chat.title}
                   </p>
-                  <p className="text-[9px] text-white/25 mt-1">{relativeTime(chat.updatedAt)}</p>
+                  <p className="text-[10px] text-white/25 mt-1">{relativeTime(chat.updatedAt)}</p>
                   <button
                     onClick={(e) => deleteChat(chat.id, e)}
                     disabled={isDeleting}
-                    className="absolute top-2 right-1.5 opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-500/15 text-white/30 hover:text-red-400 transition-all cursor-pointer disabled:opacity-50"
+                    className="absolute top-2.5 right-2 opacity-0 group-hover:opacity-100 p-1 rounded-md hover:bg-red-500/15 text-white/25 hover:text-red-400 transition-all cursor-pointer disabled:opacity-50"
                   >
                     {isDeleting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
                   </button>
@@ -415,52 +405,54 @@ export default function ScriptPlannerTab() {
           </div>
         </div>
 
-        {/* ── Panel 2: Chat ── */}
-        <div className="flex flex-col w-[310px] shrink-0 border-r border-white/8 bg-background/40">
+        {/* ══ Panel 2: Chat ══════════════════════════════════════════════════ */}
+        <div className="flex flex-col w-[360px] shrink-0 border-r border-white/8 bg-[#0e0a1a]">
+
           {/* Header */}
-          <div className="shrink-0 flex items-center gap-2.5 px-4 py-4 border-b border-white/8">
-            <div className="w-7 h-7 rounded-lg bg-primary/20 border border-primary/30 flex items-center justify-center">
-              <Bot className="w-3.5 h-3.5 text-primary" />
+          <div className="shrink-0 flex items-center gap-3 px-5 py-4 border-b border-white/6">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-600/30 to-purple-600/20 border border-violet-500/25 flex items-center justify-center shrink-0">
+              <Bot className="w-4.5 h-4.5 text-violet-300" />
             </div>
             <div className="min-w-0 flex-1">
-              <p className="text-xs font-semibold text-white truncate">
+              <p className="text-sm font-semibold text-white truncate">
                 {activeChatId
                   ? (savedChats.find(c => c.id === activeChatId)?.title ?? "AI Content Strategist")
-                  : "AI Content Strategist"
-                }
+                  : "AI Content Strategist"}
               </p>
-              <p className="text-[9px] text-white/25">GPT-4o · auto-saved</p>
+              <p className="text-[11px] text-white/30 mt-0.5">GPT-4o · auto-saved</p>
             </div>
           </div>
 
           {/* Messages */}
-          <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3 scrollbar-none">
+          <div className="flex-1 overflow-y-auto px-4 py-5 space-y-4 scrollbar-none">
             {chatsLoading && (
-              <div className="flex items-center justify-center py-8">
+              <div className="flex items-center justify-center py-12">
                 <Loader2 className="w-5 h-5 text-white/20 animate-spin" />
               </div>
             )}
 
+            {/* Empty state with starters */}
             {!chatsLoading && displayMessages.length === 0 && (
-              <div className="flex flex-col items-center justify-center h-full gap-5 px-1 pb-4">
-                <div className="text-center space-y-1.5">
-                  <div className="w-10 h-10 rounded-2xl bg-primary/15 border border-primary/25 flex items-center justify-center mx-auto">
-                    <Clapperboard className="w-5 h-5 text-primary" />
+              <div className="flex flex-col items-center justify-center h-full gap-6 px-2">
+                <div className="text-center space-y-2">
+                  <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-600/20 to-purple-600/15 border border-violet-500/20 flex items-center justify-center mx-auto shadow-lg shadow-violet-500/10">
+                    <Clapperboard className="w-7 h-7 text-violet-300" />
                   </div>
-                  <p className="text-xs font-semibold text-white">What's your video idea?</p>
-                  <p className="text-[10px] text-white/30 leading-relaxed">
-                    Describe it and I'll write a full script with a camera plan. Refine through conversation.
+                  <p className="text-sm font-semibold text-white">What's your video idea?</p>
+                  <p className="text-xs text-white/35 leading-relaxed max-w-[220px] mx-auto">
+                    Describe it and I'll write a full script with camera plan and B-roll cues.
                   </p>
                 </div>
-                <div className="w-full space-y-1.5">
+
+                <div className="w-full space-y-2">
                   {STARTER_PROMPTS.map(p => (
                     <button
                       key={p}
                       onClick={() => sendMessage(p)}
                       disabled={isAtMessageLimit}
-                      className="w-full text-left px-2.5 py-2 rounded-lg border border-white/8 bg-white/[0.02] hover:bg-white/[0.06] hover:border-primary/25 text-[10px] text-white/40 hover:text-white/70 transition-all cursor-pointer leading-snug disabled:opacity-30 disabled:cursor-not-allowed"
+                      className="w-full text-left px-3.5 py-2.5 rounded-xl border border-white/8 bg-white/[0.025] hover:bg-white/[0.06] hover:border-violet-500/25 text-[12px] text-white/45 hover:text-white/75 transition-all cursor-pointer leading-snug disabled:opacity-30 disabled:cursor-not-allowed"
                     >
-                      <Sparkles className="w-2.5 h-2.5 text-primary/50 inline mr-1 mb-0.5" />
+                      <Sparkles className="w-3 h-3 text-violet-400/50 inline mr-1.5 mb-0.5 shrink-0" />
                       {p}
                     </button>
                   ))}
@@ -468,40 +460,41 @@ export default function ScriptPlannerTab() {
               </div>
             )}
 
+            {/* Messages */}
             {!chatsLoading && displayMessages.map(msg => (
               <motion.div
                 key={msg.id}
-                initial={{ opacity: 0, y: 6 }}
+                initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.18 }}
-                className={`flex gap-2 ${msg.role === "user" ? "flex-row-reverse" : "flex-row"}`}
+                transition={{ duration: 0.2 }}
+                className={`flex gap-2.5 ${msg.role === "user" ? "flex-row-reverse" : "flex-row"}`}
               >
-                <div className={`shrink-0 w-6 h-6 rounded-md flex items-center justify-center mt-0.5 ${
+                <div className={`shrink-0 w-7 h-7 rounded-lg flex items-center justify-center mt-0.5 ${
                   msg.role === "user"
-                    ? "bg-primary/20 border border-primary/30"
-                    : "bg-white/8 border border-white/10"
+                    ? "bg-violet-600/25 border border-violet-500/30"
+                    : "bg-white/6 border border-white/10"
                 }`}>
                   {msg.role === "user"
-                    ? <User className="w-3 h-3 text-primary" />
-                    : <Bot className="w-3 h-3 text-white/40" />
+                    ? <User className="w-3.5 h-3.5 text-violet-300" />
+                    : <Bot className="w-3.5 h-3.5 text-white/40" />
                   }
                 </div>
-                <div className={`max-w-[82%] rounded-xl px-3 py-2 text-[11px] leading-relaxed ${
+                <div className={`max-w-[80%] rounded-2xl px-3.5 py-2.5 text-[12.5px] leading-relaxed ${
                   msg.role === "user"
-                    ? "bg-primary/20 border border-primary/20 text-white/90 rounded-tr-sm"
+                    ? "bg-violet-600/20 border border-violet-500/20 text-white/90 rounded-tr-sm"
                     : msg.content === "error"
                       ? "bg-red-500/10 border border-red-500/20 text-red-400 rounded-tl-sm"
-                      : "bg-white/[0.04] border border-white/8 text-white/65 rounded-tl-sm"
+                      : "bg-white/[0.04] border border-white/8 text-white/70 rounded-tl-sm"
                 }`}>
                   {!msg.summary && msg.role === "assistant" && msg.content !== "error"
                     ? <TypingDots />
                     : msg.role === "user"
                       ? msg.content
                       : (
-                        <div className="flex items-start gap-1.5">
+                        <div className="flex items-start gap-2">
                           {msg.content !== "error" && (
-                            <div className="w-3 h-3 rounded-full bg-green-400/20 border border-green-400/30 flex items-center justify-center shrink-0 mt-0.5">
-                              <div className="w-1 h-1 rounded-full bg-green-400" />
+                            <div className="w-4 h-4 rounded-full bg-emerald-400/20 border border-emerald-400/30 flex items-center justify-center shrink-0 mt-0.5">
+                              <Check className="w-2.5 h-2.5 text-emerald-400" />
                             </div>
                           )}
                           <span>{msg.summary}</span>
@@ -515,31 +508,32 @@ export default function ScriptPlannerTab() {
           </div>
 
           {/* Input area */}
-          <div className="shrink-0 px-3 py-3 border-t border-white/8">
-            {/* Limit reached banner */}
+          <div className="shrink-0 px-4 pb-4 pt-3 border-t border-white/6">
+
+            {/* Limit banner */}
             {isAtMessageLimit && (
-              <div className="mb-2 rounded-lg bg-amber-500/10 border border-amber-500/20 px-3 py-2 flex items-center justify-between gap-2">
-                <p className="text-[10px] text-amber-300 leading-snug">
+              <div className="mb-3 rounded-xl bg-amber-500/10 border border-amber-500/20 px-4 py-2.5 flex items-center justify-between gap-3">
+                <p className="text-xs text-amber-300 leading-snug">
                   3/3 messages used on free plan.
                 </p>
                 <button
                   onClick={() => setShowUpgrade(true)}
-                  className="shrink-0 text-[10px] text-amber-400 font-semibold hover:text-amber-300 cursor-pointer whitespace-nowrap"
+                  className="shrink-0 text-xs text-amber-400 font-semibold hover:text-amber-300 cursor-pointer whitespace-nowrap"
                 >
                   Upgrade →
                 </button>
               </div>
             )}
 
-            {/* Quick chips */}
+            {/* Quick refinement chips */}
             {result && !isAtMessageLimit && (
-              <div className="mb-2 flex flex-wrap gap-1">
+              <div className="mb-3 flex flex-wrap gap-1.5">
                 {["Shorter hook", "More energy", "More casual", "Extend to 10 mins"].map(s => (
                   <button
                     key={s}
                     onClick={() => sendMessage(s)}
                     disabled={loading}
-                    className="px-2 py-1 rounded-md bg-white/5 border border-white/8 hover:border-primary/30 hover:bg-primary/8 text-[9px] text-white/35 hover:text-white/65 transition-all cursor-pointer disabled:opacity-40"
+                    className="px-2.5 py-1 rounded-lg bg-white/5 border border-white/10 hover:border-violet-500/30 hover:bg-violet-500/8 text-[11px] text-white/40 hover:text-white/70 transition-all cursor-pointer disabled:opacity-40"
                   >
                     {s}
                   </button>
@@ -547,8 +541,8 @@ export default function ScriptPlannerTab() {
               </div>
             )}
 
-            {/* Input row */}
-            <div className="flex items-end gap-1.5">
+            {/* Textarea + send */}
+            <div className="flex items-end gap-2">
               <textarea
                 ref={inputRef}
                 value={input}
@@ -556,68 +550,72 @@ export default function ScriptPlannerTab() {
                 onKeyDown={handleKeyDown}
                 placeholder={
                   isAtMessageLimit
-                    ? "Upgrade to send more messages…"
+                    ? "Upgrade to continue…"
                     : result
                       ? "Ask for changes…"
                       : "Describe your video idea…"
                 }
                 disabled={loading || isAtMessageLimit}
-                className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-[11px] text-white/80 placeholder:text-white/20 resize-none focus:outline-none focus:border-violet-500/40 transition-all leading-relaxed disabled:opacity-40 scrollbar-none"
+                className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-[13px] text-white/85 placeholder:text-white/25 resize-none focus:outline-none focus:border-violet-500/40 focus:bg-white/7 transition-all leading-relaxed disabled:opacity-40 scrollbar-none"
                 rows={2}
-                style={{ maxHeight: "100px" }}
+                style={{ maxHeight: "120px" }}
               />
               <button
                 onClick={() => sendMessage(input)}
                 disabled={loading || input.trim().length < 2 || isAtMessageLimit}
-                className="shrink-0 w-8 h-8 rounded-lg bg-primary hover:bg-primary/80 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center transition-all shadow-md shadow-primary/20 cursor-pointer"
+                className="shrink-0 w-10 h-10 rounded-xl bg-gradient-to-br from-violet-600 to-purple-600 hover:from-violet-500 hover:to-purple-500 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center transition-all shadow-lg shadow-violet-500/20 cursor-pointer"
               >
                 {loading
-                  ? <Loader2 className="w-3.5 h-3.5 text-white animate-spin" />
-                  : <Send className="w-3.5 h-3.5 text-white" />
+                  ? <Loader2 className="w-4 h-4 text-white animate-spin" />
+                  : <Send className="w-4 h-4 text-white" />
                 }
               </button>
             </div>
 
-            {/* Counter / hint row */}
-            <div className="flex items-center justify-between mt-1.5">
-              <p className="text-[9px] text-white/15">Enter to send · Shift+Enter for new line</p>
+            <div className="flex items-center justify-between mt-2">
+              <p className="text-[10px] text-white/15">Enter to send · Shift+Enter for newline</p>
               {isFreeUser && (
-                <span className={`text-[9px] font-semibold tabular-nums ${
+                <span className={`text-[11px] font-semibold tabular-nums ${
                   userMessageCount >= FREE_MESSAGE_LIMIT
                     ? "text-red-400"
                     : userMessageCount >= FREE_MESSAGE_LIMIT - 1
                       ? "text-amber-400"
                       : "text-white/25"
                 }`}>
-                  {userMessageCount}/{FREE_MESSAGE_LIMIT}
+                  {userMessageCount}/{FREE_MESSAGE_LIMIT} messages
                 </span>
               )}
             </div>
           </div>
         </div>
 
-        {/* ── Panel 3: Results ── */}
-        <div className="flex flex-col flex-1 min-w-0 bg-background/20">
+        {/* ══ Panel 3: Script / Video Plan ══════════════════════════════════ */}
+        <div className="flex flex-col flex-1 min-w-0 bg-[#090615]">
           {!result ? (
-            <div className="flex flex-col items-center justify-center h-full gap-4 px-8 text-center">
-              <div className="w-14 h-14 rounded-2xl bg-white/4 border border-white/8 flex items-center justify-center">
-                <PenLine className="w-7 h-7 text-white/15" />
+            /* Empty state */
+            <div className="flex flex-col items-center justify-center h-full gap-6 px-12 text-center">
+              <div className="w-16 h-16 rounded-2xl bg-white/4 border border-white/8 flex items-center justify-center shadow-xl">
+                <PenLine className="w-8 h-8 text-white/15" />
               </div>
-              <div>
-                <p className="text-sm font-semibold text-white/30">Your script will appear here</p>
-                <p className="text-xs text-white/15 max-w-xs leading-relaxed mt-1">
+              <div className="space-y-2">
+                <p className="text-base font-semibold text-white/30">Your script will appear here</p>
+                <p className="text-sm text-white/18 max-w-xs leading-relaxed mx-auto">
                   Start by describing your video idea in the chat. Refine it with follow-up messages.
                 </p>
               </div>
-              <div className="grid grid-cols-3 gap-3 mt-2 w-full max-w-md">
+
+              <div className="grid grid-cols-3 gap-4 mt-2 w-full max-w-lg">
                 {[
-                  { icon: Camera, label: "Camera Plan", cls: "text-blue-400 bg-blue-500/5 border-blue-500/10" },
-                  { icon: Film, label: "B-Roll Ideas", cls: "text-purple-400 bg-purple-500/5 border-purple-500/10" },
-                  { icon: Lightbulb, label: "Delivery Tips", cls: "text-yellow-400 bg-yellow-500/5 border-yellow-500/10" },
+                  { icon: Camera, label: "Camera Plan", sub: "Shot angles for every scene", cls: "text-blue-400", bg: "bg-blue-500/8 border-blue-500/15" },
+                  { icon: Film, label: "B-Roll Ideas", sub: "Visual suggestions per section", cls: "text-purple-400", bg: "bg-purple-500/8 border-purple-500/15" },
+                  { icon: Lightbulb, label: "Delivery Tips", sub: "How to deliver each line", cls: "text-amber-400", bg: "bg-amber-500/8 border-amber-500/15" },
                 ].map(item => (
-                  <div key={item.label} className={`rounded-xl border p-4 flex flex-col items-center gap-2 ${item.cls}`}>
-                    <item.icon className={`w-5 h-5 ${item.cls.split(" ")[0]}`} />
-                    <p className="text-xs text-white/30 font-medium">{item.label}</p>
+                  <div key={item.label} className={`rounded-2xl border p-5 flex flex-col gap-2.5 ${item.bg}`}>
+                    <item.icon className={`w-5 h-5 ${item.cls}`} />
+                    <div>
+                      <p className={`text-sm font-semibold ${item.cls}`}>{item.label}</p>
+                      <p className="text-[11px] text-white/30 mt-0.5 leading-snug">{item.sub}</p>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -628,24 +626,25 @@ export default function ScriptPlannerTab() {
                 key="result"
                 initial={{ opacity: 0, x: 16 }}
                 animate={{ opacity: 1, x: 0 }}
-                transition={{ duration: 0.25 }}
+                transition={{ duration: 0.22 }}
                 className="flex flex-col h-full"
               >
-                {/* Header */}
-                <div className="shrink-0 px-5 py-3.5 border-b border-white/8 flex items-center justify-between gap-4">
-                  <div className="min-w-0 flex-1">
+                {/* Toolbar */}
+                <div className="shrink-0 px-6 py-4 border-b border-white/6 flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3 min-w-0">
                     {result.title && (
-                      <p className="text-[10px] text-primary/70 font-medium truncate mb-1">{result.title}</p>
+                      <p className="text-sm font-medium text-violet-300/80 truncate max-w-[240px]">{result.title}</p>
                     )}
-                    <div className="flex gap-1 bg-white/5 rounded-xl p-1 border border-white/8 w-fit">
+                    {/* Tab switcher */}
+                    <div className="flex gap-1 bg-white/5 rounded-xl p-1 border border-white/8 shrink-0">
                       {(["script", "plan"] as const).map(tab => (
                         <button
                           key={tab}
                           onClick={() => setRightTab(tab)}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+                          className={`px-4 py-1.5 rounded-lg text-[12px] font-medium transition-all cursor-pointer ${
                             rightTab === tab
-                              ? "bg-primary/20 text-primary border border-primary/30"
-                              : "text-white/35 hover:text-white/65"
+                              ? "bg-violet-600/25 text-violet-200 border border-violet-500/30 shadow-sm"
+                              : "text-white/40 hover:text-white/65"
                           }`}
                         >
                           {tab === "script" ? "Script" : "Video Plan"}
@@ -658,51 +657,55 @@ export default function ScriptPlannerTab() {
                       ))}
                     </div>
                   </div>
+
+                  {/* Action buttons */}
                   <div className="flex items-center gap-1.5 shrink-0">
                     <button
                       onClick={() => setIsEditing(!isEditing)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] text-white/35 hover:text-white/65 hover:bg-white/6 transition-all cursor-pointer"
+                      className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[12px] text-white/40 hover:text-white/70 hover:bg-white/6 border border-transparent hover:border-white/8 transition-all cursor-pointer"
                     >
-                      <Pencil className="w-3 h-3" />
+                      <Pencil className="w-3.5 h-3.5" />
                       {isEditing ? "Done" : "Edit"}
                     </button>
                     <button
                       onClick={handleCopy}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] text-white/35 hover:text-white/65 hover:bg-white/6 transition-all cursor-pointer"
+                      className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[12px] text-white/40 hover:text-white/70 hover:bg-white/6 border border-transparent hover:border-white/8 transition-all cursor-pointer"
                     >
-                      {copied ? <Check className="w-3 h-3 text-green-400" /> : <Copy className="w-3 h-3" />}
+                      {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
                       {copied ? "Copied!" : "Copy"}
                     </button>
                     <button
                       onClick={() => setTeleprompterOpen(true)}
-                      className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-gradient-to-r from-primary to-purple-500 hover:from-primary/90 hover:to-purple-400 text-white text-[11px] font-semibold transition-all shadow-sm shadow-primary/15 cursor-pointer"
+                      className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-500 hover:to-purple-500 text-white text-[12px] font-semibold transition-all shadow-lg shadow-violet-500/20 cursor-pointer"
                     >
-                      <MonitorPlay className="w-3.5 h-3.5" />
+                      <MonitorPlay className="w-4 h-4" />
                       Teleprompter
                     </button>
                   </div>
                 </div>
 
-                {/* Script */}
+                {/* Script view */}
                 {rightTab === "script" && (
-                  <div className="flex-1 overflow-y-auto px-5 py-5">
+                  <div className="flex-1 overflow-y-auto px-8 py-7 scrollbar-none">
                     {isEditing ? (
                       <textarea
                         value={editedScript}
                         onChange={e => setEditedScript(e.target.value)}
-                        className="w-full h-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white/85 resize-none focus:outline-none focus:border-violet-500/40 transition-all leading-relaxed font-mono"
+                        className="w-full h-full bg-white/4 border border-white/10 rounded-2xl px-6 py-5 text-[14px] text-white/85 resize-none focus:outline-none focus:border-violet-500/40 transition-all leading-[1.9] font-mono scrollbar-none"
                         spellCheck
                         autoFocus
                       />
                     ) : (
-                      <div className="text-sm text-white/80 leading-[1.85] whitespace-pre-wrap">
+                      <div className="max-w-2xl text-[14px] text-white/78 leading-[1.9] whitespace-pre-wrap">
                         {editedScript.split("\n").map((line, i) => {
                           const isPacingCue = /\[([A-Z ]+)\]/.test(line);
                           return (
                             <p
                               key={i}
-                              className={`${line.trim() === "" ? "mb-4" : "mb-1"} ${
-                                isPacingCue ? "mb-1 font-mono text-xs italic text-[#ffffff99]" : ""
+                              className={`${line.trim() === "" ? "mb-5" : "mb-1"} ${
+                                isPacingCue
+                                  ? "font-mono text-[12px] italic text-violet-300/50 tracking-wide"
+                                  : ""
                               }`}
                             >
                               {line || "\u00A0"}
@@ -714,49 +717,53 @@ export default function ScriptPlannerTab() {
                   </div>
                 )}
 
-                {/* Video Plan */}
+                {/* Video Plan view */}
                 {rightTab === "plan" && (
-                  <div className="flex-1 overflow-y-auto">
+                  <div className="flex-1 overflow-y-auto scrollbar-none">
                     {isFreeResult && (
-                      <div className="mx-5 mt-4 rounded-xl border border-violet-500/20 bg-violet-500/5 p-4">
-                        <div className="flex items-start gap-3">
-                          <Lock className="w-4 h-4 text-violet-400 shrink-0 mt-0.5" />
-                          <div className="flex-1">
-                            <p className="text-xs font-semibold text-white">Full Video Plan is a Premium feature</p>
-                            <p className="text-[11px] text-white/35 mt-0.5">Upgrade to unlock all camera angles, B-roll, and delivery tips.</p>
+                      <div className="mx-6 mt-5 rounded-2xl border border-violet-500/20 bg-gradient-to-br from-violet-600/8 to-purple-600/5 p-5">
+                        <div className="flex items-start gap-3.5">
+                          <div className="w-9 h-9 rounded-xl bg-violet-500/15 border border-violet-500/20 flex items-center justify-center shrink-0">
+                            <Lock className="w-4 h-4 text-violet-400" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-white">Full Video Plan is a paid feature</p>
+                            <p className="text-xs text-white/40 mt-1 leading-relaxed">Upgrade to unlock all camera angles, B-roll suggestions, and delivery tips for every section.</p>
                           </div>
                           <button
                             onClick={() => setShowUpgrade(true)}
-                            className="shrink-0 px-3 py-1.5 rounded-lg bg-gradient-to-r from-violet-600 to-purple-500 text-white text-[11px] font-semibold cursor-pointer"
+                            className="shrink-0 px-4 py-2 rounded-xl bg-gradient-to-r from-violet-600 to-purple-500 text-white text-xs font-semibold shadow-md shadow-violet-500/20 cursor-pointer whitespace-nowrap"
                           >
                             Upgrade
                           </button>
                         </div>
                       </div>
                     )}
-                    <div className="px-5 py-4 space-y-2.5">
+
+                    <div className="px-6 py-5 space-y-3">
                       {result.sections.length === 0 && (
-                        <p className="text-sm text-white/25 text-center py-8">No sections generated yet.</p>
+                        <p className="text-sm text-white/25 text-center py-10">No sections generated yet.</p>
                       )}
                       {result.sections.map((section, i) => {
                         const isOpen = sectionsExpanded[i] !== false;
                         return (
-                          <div key={i} className="rounded-xl border border-white/8 bg-white/[0.02] overflow-hidden">
+                          <div key={i} className="rounded-2xl border border-white/8 bg-white/[0.02] overflow-hidden">
                             <button
                               onClick={() => setSectionsExpanded(prev => ({ ...prev, [i]: !isOpen }))}
-                              className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/3 transition-colors cursor-pointer text-left"
+                              className="w-full flex items-center gap-3.5 px-5 py-3.5 hover:bg-white/3 transition-colors cursor-pointer text-left"
                             >
-                              <span className="shrink-0 px-2 py-0.5 rounded-full bg-primary/15 text-primary text-[9px] font-bold border border-primary/20">
-                                {section.start}, {section.end}
+                              <span className="shrink-0 px-2.5 py-1 rounded-full bg-violet-600/15 text-violet-300 text-[10px] font-bold border border-violet-500/20 whitespace-nowrap">
+                                {section.start} – {section.end}
                               </span>
-                              <span className="text-xs font-medium text-white/60 flex-1 truncate">
-                                {section.label ? `${section.label}: ` : ""}{section.text.slice(0, 65)}{section.text.length > 65 ? "…" : ""}
+                              <span className="text-sm font-medium text-white/60 flex-1 truncate">
+                                {section.label ? `${section.label}: ` : ""}{section.text.slice(0, 70)}{section.text.length > 70 ? "…" : ""}
                               </span>
                               {isOpen
-                                ? <ChevronUp className="w-3 h-3 text-white/20 shrink-0" />
-                                : <ChevronDown className="w-3 h-3 text-white/20 shrink-0" />
+                                ? <ChevronUp className="w-4 h-4 text-white/20 shrink-0" />
+                                : <ChevronDown className="w-4 h-4 text-white/20 shrink-0" />
                               }
                             </button>
+
                             <AnimatePresence>
                               {isOpen && (
                                 <motion.div
@@ -766,18 +773,18 @@ export default function ScriptPlannerTab() {
                                   transition={{ duration: 0.15 }}
                                   className="overflow-hidden"
                                 >
-                                  <div className="px-4 pb-4 grid sm:grid-cols-3 gap-2 border-t border-white/5 pt-3">
+                                  <div className="px-5 pb-5 grid sm:grid-cols-3 gap-3 border-t border-white/5 pt-4">
                                     {[
-                                      { icon: Camera, label: "Camera Angle", value: section.camera_angle, cls: "text-blue-400 bg-blue-500/5 border-blue-500/10" },
-                                      { icon: Film, label: "B-Roll", value: section.broll, cls: "text-purple-400 bg-purple-500/5 border-purple-500/10" },
-                                      { icon: Lightbulb, label: "Delivery Tip", value: section.presentation_tip, cls: "text-yellow-400 bg-yellow-500/5 border-yellow-500/10" },
+                                      { icon: Camera, label: "Camera Angle", value: section.camera_angle, cls: "text-blue-400", bg: "bg-blue-500/8 border-blue-500/15" },
+                                      { icon: Film, label: "B-Roll", value: section.broll, cls: "text-purple-400", bg: "bg-purple-500/8 border-purple-500/15" },
+                                      { icon: Lightbulb, label: "Delivery Tip", value: section.presentation_tip, cls: "text-amber-400", bg: "bg-amber-500/8 border-amber-500/15" },
                                     ].map(card => (
-                                      <div key={card.label} className={`rounded-lg border p-2.5 ${card.cls}`}>
-                                        <div className="flex items-center gap-1.5 mb-1.5">
-                                          <card.icon className={`w-3 h-3 ${card.cls.split(" ")[0]}`} />
-                                          <p className={`text-[9px] font-semibold uppercase tracking-wider opacity-60 ${card.cls.split(" ")[0]}`}>{card.label}</p>
+                                      <div key={card.label} className={`rounded-xl border p-3.5 ${card.bg}`}>
+                                        <div className="flex items-center gap-2 mb-2">
+                                          <card.icon className={`w-3.5 h-3.5 ${card.cls}`} />
+                                          <p className={`text-[10px] font-bold uppercase tracking-wider opacity-70 ${card.cls}`}>{card.label}</p>
                                         </div>
-                                        <p className="text-[10px] text-white/55 leading-relaxed">{card.value || ""}</p>
+                                        <p className="text-[12px] text-white/60 leading-relaxed">{card.value || "—"}</p>
                                       </div>
                                     ))}
                                   </div>
