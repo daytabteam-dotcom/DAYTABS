@@ -28,7 +28,7 @@ export const blogPosts: BlogPost[] = [
 
 <h2>Why Keyword-Stuffed Titles No Longer Work</h2>
 <p>In 2023, you could rank a video titled "YouTube SEO Tips 2023 | YouTube Algorithm | How to Grow YouTube Channel Fast." That same title in 2026 gets suppressed.</p>
-<p>YouTube's title analysis now prioritizes clarity and click-worthiness over keyword density. The algorithm matches viewer search intent against the full context of your video — not just your title. A title with one strong keyword phrase, written to compel a click, outperforms a pipe-separated keyword dump every time.</p>
+<p>YouTube's title analysis now prioritizes clarity and click-worthiness over keyword density. The algorithm matches viewer search intent against the full context of your video, not just your title. A title with one strong keyword phrase, written to compel a click, outperforms a pipe-separated keyword dump every time.</p>
 <h3>What actually works:</h3>
 <ul>
   <li>One clear primary keyword placed in the first half of the title</li>
