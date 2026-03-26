@@ -1,11 +1,13 @@
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { motion, useInView } from "framer-motion";
+import { Helmet } from "react-helmet-async";
 import {
   Upload, Brain, BarChart3, Globe, Mic, Star,
-  ChevronRight, Play, CheckCircle, Sparkles, Zap, Shield
+  ChevronRight, Play, CheckCircle, Sparkles, Zap, Shield, Plus, Minus
 } from "lucide-react";
 import Navbar from "../components/Navbar";
+import { blogPosts } from "../data/blogPosts";
 
 function FadeIn({ children, delay = 0, className = "" }: { children: React.ReactNode; delay?: number; className?: string }) {
   const ref = useRef(null);
@@ -71,7 +73,7 @@ const steps = [
     visual: (
       <div className="relative h-48 flex items-center justify-center">
         <div className="w-48 h-32 glass rounded-2xl border-2 border-dashed border-violet-500/50 flex flex-col items-center justify-center gap-2">
-          <Upload className="w-8 h-8 text-violet-400" />
+          <Upload className="w-8 h-8 text-violet-400" aria-hidden="true" />
           <span className="text-xs text-white/50">Drop video here</span>
         </div>
         <motion.div
@@ -79,7 +81,7 @@ const steps = [
           transition={{ repeat: Infinity, duration: 2, ease: "easeInOut" }}
           className="absolute -top-2 -right-2 w-10 h-10 bg-gradient-to-br from-violet-500 to-purple-600 rounded-xl flex items-center justify-center shadow-lg shadow-violet-500/40"
         >
-          <Zap className="w-5 h-5 text-white" />
+          <Zap className="w-5 h-5 text-white" aria-hidden="true" />
         </motion.div>
       </div>
     ),
@@ -91,7 +93,7 @@ const steps = [
     desc: "Our AI extracts audio, transcribes speech, analyzes frames, and generates comprehensive insights in minutes.",
     visual: (
       <div className="relative h-48 flex items-center justify-center">
-        <div className="flex gap-1 items-end h-24">
+        <div className="flex gap-1 items-end h-24" aria-label="Audio waveform visualization — DayTabs Video Analyzer">
           {[40, 65, 30, 80, 55, 90, 45, 70, 35, 85, 60, 95].map((h, i) => (
             <motion.div
               key={i}
@@ -114,7 +116,7 @@ const steps = [
     title: "Get Actionable Insights",
     desc: "Receive a full dashboard with Quality, Content, SEO, and Subtitle tabs, each with specific, actionable recommendations.",
     visual: (
-      <div className="relative h-48 flex flex-col gap-2 items-center justify-center w-full max-w-xs mx-auto">
+      <div className="relative h-48 flex flex-col gap-2 items-center justify-center w-full max-w-xs mx-auto" aria-label="Video analysis scores dashboard — DayTabs Video Analyzer">
         {[
           { label: "Quality Score", val: 87, color: "from-violet-500 to-purple-400" },
           { label: "Content Score", val: 92, color: "from-purple-500 to-pink-400" },
@@ -145,7 +147,7 @@ const languages = ["Hello!", "Hola!", "Bonjour!", "Ciao!", "Hallo!", "こんに�
 
 function LanguageAnimate() {
   return (
-    <div className="relative h-48 flex items-center justify-center overflow-hidden">
+    <div className="relative h-48 flex items-center justify-center overflow-hidden" aria-label="AI dubbing in multiple languages — DayTabs AI Dubbing">
       <div className="glass rounded-2xl px-8 py-4 text-center min-w-[160px]">
         <motion.div
           key="lang"
@@ -184,8 +186,77 @@ const platforms = [
   { name: "X", color: "#ffffff" },
 ];
 
+const faqs = [
+  {
+    q: "How does DayTabs analyze my video?",
+    a: "DayTabs extracts the audio from your video, transcribes every word with timestamps, analyzes individual frames for lighting and visual quality, and sends the full context to our AI pipeline. The result is a complete report covering quality scores, content feedback, SEO-optimized titles and tags, chapter timestamps, and short clip suggestions — all in one upload.",
+  },
+  {
+    q: "Is my video stored on your servers?",
+    a: "No. Videos are deleted immediately after analysis completes. Only your transcript and report results are saved so you can access them later. Your raw video file is never retained.",
+  },
+  {
+    q: "Which platforms does DayTabs support?",
+    a: "DayTabs supports YouTube (Long-form and Shorts), Instagram Reels, TikTok, Twitter/X, and LinkedIn. Platform selection gives you tailored title suggestions, hashtag recommendations, and format-specific feedback.",
+  },
+  {
+    q: "How is DayTabs different from ChatGPT?",
+    a: "ChatGPT requires you to know what to ask and how to upload frames manually. DayTabs handles the entire pipeline — upload once, get a complete report with quality scores, edit suggestions, platform-specific titles, tags, timestamps, and short clip ideas. No prompting required.",
+  },
+  {
+    q: "Can I use DayTabs for free?",
+    a: "Yes. DayTabs offers a free plan with 2 video analyses per month, teleprompter access, and basic quality reports. No credit card required. Upgrade to Creator, Pro, or Studio for more analyses, publish packages, and subtitle downloads.",
+  },
+  {
+    q: "Does DayTabs generate subtitle files?",
+    a: "Yes. Creator, Pro, and Studio plans include a downloadable .srt subtitle file for every analysis. The subtitle file is generated from your transcript and is formatted for direct upload to YouTube, TikTok, or any video platform that accepts .srt.",
+  },
+];
+
+function FAQItem({ q, a }: { q: string; a: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="border border-white/8 rounded-2xl overflow-hidden">
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center justify-between p-6 text-left cursor-pointer hover:bg-white/3 transition-colors"
+        aria-expanded={open}
+      >
+        <h3 className="font-semibold text-white/90 pr-4">{q}</h3>
+        {open ? <Minus className="w-5 h-5 text-violet-400 shrink-0" /> : <Plus className="w-5 h-5 text-violet-400 shrink-0" />}
+      </button>
+      {open && (
+        <div className="px-6 pb-6 text-white/50 text-sm leading-relaxed border-t border-white/8 pt-4">
+          {a}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const softwareSchema = {
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  name: "DayTabs",
+  applicationCategory: "MultimediaApplication",
+  operatingSystem: "Web",
+  description:
+    "AI-powered video analysis platform for content creators. Analyzes video quality, suggests edits, generates SEO-optimized titles and descriptions.",
+  offers: {
+    "@type": "Offer",
+    price: "0",
+    priceCurrency: "USD",
+  },
+  aggregateRating: {
+    "@type": "AggregateRating",
+    ratingValue: "4.8",
+    reviewCount: "124",
+  },
+};
+
 export default function LandingPage() {
   const [, navigate] = useLocation();
+  const firstPost = blogPosts[0];
 
   useEffect(() => {
     const hash = window.location.hash;
@@ -199,11 +270,43 @@ export default function LandingPage() {
 
   return (
     <div className="min-h-screen bg-background text-foreground overflow-x-hidden">
+      <Helmet>
+        <title>DayTabs — AI Video Analysis for Content Creators</title>
+        <meta
+          name="description"
+          content="Upload your video and get instant AI feedback on quality, editing, SEO titles, tags, and short clip ideas. Built for YouTube, TikTok, and Instagram creators."
+        />
+        <meta name="robots" content="index, follow" />
+        <link rel="canonical" href="https://daytabs.com/" />
+        <meta name="author" content="DayTabs" />
+        <meta
+          name="keywords"
+          content="AI video analysis, YouTube SEO, video editing tool, content creator tools, video quality checker, TikTok video analyzer, Instagram Reels optimizer"
+        />
+        <meta property="og:title" content="DayTabs — AI Video Analysis for Content Creators" />
+        <meta
+          property="og:description"
+          content="Upload your video and get instant AI feedback on quality, editing, SEO titles, tags, and short clip ideas. Built for YouTube, TikTok, and Instagram creators."
+        />
+        <meta property="og:image" content="https://daytabs.com/opengraph.jpg" />
+        <meta property="og:url" content="https://daytabs.com/" />
+        <meta property="og:type" content="website" />
+        <meta property="og:site_name" content="DayTabs" />
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content="DayTabs — AI Video Analysis for Content Creators" />
+        <meta
+          name="twitter:description"
+          content="Upload your video and get instant AI feedback on quality, editing, SEO titles, tags, and short clip ideas. Built for YouTube, TikTok, and Instagram creators."
+        />
+        <meta name="twitter:image" content="https://daytabs.com/opengraph.jpg" />
+        <script type="application/ld+json">{JSON.stringify(softwareSchema)}</script>
+      </Helmet>
+
       <Navbar />
 
       {/* HERO */}
       <section className="relative min-h-screen flex items-center justify-center pt-16 overflow-hidden">
-        <div className="absolute inset-0 -z-10">
+        <div className="absolute inset-0 -z-10" aria-hidden="true">
           <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-violet-600/20 rounded-full blur-3xl" />
           <div className="absolute bottom-1/4 right-1/4 w-80 h-80 bg-purple-500/15 rounded-full blur-3xl" />
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-violet-900/10 rounded-full blur-3xl" />
@@ -225,7 +328,7 @@ export default function LandingPage() {
             transition={{ duration: 0.5 }}
             className="inline-flex items-center gap-2 glass rounded-full px-4 py-2 text-sm text-violet-300 mb-8 border border-violet-500/20"
           >
-            <Sparkles className="w-4 h-4" />
+            <Sparkles className="w-4 h-4" aria-hidden="true" />
             AI-Powered Video Analysis Platform
           </motion.div>
 
@@ -235,9 +338,8 @@ export default function LandingPage() {
             transition={{ duration: 0.7, delay: 0.1 }}
             className="text-5xl md:text-7xl font-bold leading-tight mb-6"
           >
-            Turn Any Video Into{" "}
-            <span className="gradient-text">Actionable Insights</span>{" "}
-            with AI
+            AI Video Analysis for{" "}
+            <span className="gradient-text">Content Creators</span>
           </motion.h1>
 
           <motion.p
@@ -246,8 +348,9 @@ export default function LandingPage() {
             transition={{ duration: 0.7, delay: 0.2 }}
             className="text-lg md:text-xl text-white/60 max-w-2xl mx-auto mb-10"
           >
-            Upload your video and get instant AI analysis on quality, content, SEO,
-            transcriptions, and multi-language dubbing, all in one platform.
+            Upload your video and get instant feedback on quality, editing, SEO optimization,
+            and short clip ideas — all in one place. Built for YouTube, TikTok, Instagram,
+            LinkedIn, and Twitter.
           </motion.p>
 
           <motion.div
@@ -268,7 +371,7 @@ export default function LandingPage() {
               className="px-8 py-4 text-base font-medium glass text-white rounded-2xl border border-white/10 hover:border-violet-500/40 transition-all flex items-center gap-2 justify-center cursor-pointer"
               data-testid="button-hero-how"
             >
-              <Play className="w-4 h-4" />
+              <Play className="w-4 h-4" aria-hidden="true" />
               See How It Works
             </button>
           </motion.div>
@@ -281,7 +384,7 @@ export default function LandingPage() {
           >
             {platforms.map((p) => (
               <div key={p.name} className="flex items-center gap-1.5">
-                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: p.color }} />
+                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: p.color }} aria-hidden="true" />
                 {p.name}
               </div>
             ))}
@@ -292,6 +395,7 @@ export default function LandingPage() {
           animate={{ y: [0, 10, 0] }}
           transition={{ repeat: Infinity, duration: 2.5, ease: "easeInOut" }}
           className="absolute bottom-10 left-1/2 -translate-x-1/2 text-white/30"
+          aria-hidden="true"
         >
           <ChevronRight className="w-5 h-5 rotate-90" />
         </motion.div>
@@ -302,10 +406,16 @@ export default function LandingPage() {
         <div className="max-w-6xl mx-auto">
           <FadeIn className="text-center mb-16">
             <h2 className="text-4xl md:text-5xl font-bold mb-4">
-              How It <span className="gradient-text">Works</span>
+              How <span className="gradient-text">DayTabs Works</span>
             </h2>
             <p className="text-white/50 text-lg max-w-2xl mx-auto">
-              From upload to insight in three simple steps
+              From upload to insight in three simple steps.{" "}
+              <button
+                onClick={() => document.querySelector("#how-it-works")?.scrollIntoView({ behavior: "smooth" })}
+                className="text-violet-400 hover:text-violet-300 transition-colors cursor-pointer"
+              >
+                How it works →
+              </button>
             </p>
           </FadeIn>
 
@@ -326,9 +436,9 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* STEP 4 — ADVANCED FEATURES */}
+      {/* ADVANCED CAPABILITIES */}
       <section className="py-24 px-6 relative overflow-hidden">
-        <div className="absolute inset-0 -z-10">
+        <div className="absolute inset-0 -z-10" aria-hidden="true">
           <div className="absolute top-0 left-1/2 -translate-x-1/2 w-96 h-96 bg-violet-600/10 rounded-full blur-3xl" />
         </div>
         <div className="max-w-6xl mx-auto">
@@ -360,9 +470,9 @@ export default function LandingPage() {
                     transition={{ duration: 0.5, delay: i * 0.15 }}
                     className="flex gap-4 glass rounded-2xl p-5 border border-white/8"
                   >
-                    <div className="text-2xl">{item.icon}</div>
+                    <div className="text-2xl" aria-hidden="true">{item.icon}</div>
                     <div>
-                      <h4 className="font-semibold mb-1">{item.title}</h4>
+                      <h3 className="font-semibold mb-1">{item.title}</h3>
                       <p className="text-sm text-white/50">{item.desc}</p>
                     </div>
                   </motion.div>
@@ -378,10 +488,14 @@ export default function LandingPage() {
         <div className="max-w-6xl mx-auto">
           <FadeIn className="text-center mb-16">
             <h2 className="text-4xl md:text-5xl font-bold mb-4">
-              Everything You <span className="gradient-text">Need</span>
+              Everything You Need to{" "}
+              <span className="gradient-text">Grow Your Channel</span>
             </h2>
             <p className="text-white/50 text-lg max-w-2xl mx-auto">
-              A complete toolkit for serious content creators
+              A complete toolkit for serious content creators.{" "}
+              <button onClick={() => navigate("/pricing")} className="text-violet-400 hover:text-violet-300 transition-colors cursor-pointer">
+                See all features →
+              </button>
             </p>
           </FadeIn>
 
@@ -390,7 +504,7 @@ export default function LandingPage() {
               <FadeIn key={i} delay={i * 0.08}>
                 <div className="glass rounded-2xl p-6 border border-white/8 card-glow transition-all h-full group">
                   <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${f.color} flex items-center justify-center mb-4 shadow-lg`}>
-                    <f.icon className="w-6 h-6 text-white" />
+                    <f.icon className="w-6 h-6 text-white" aria-hidden="true" />
                   </div>
                   <h3 className="font-bold text-lg mb-2 group-hover:text-violet-300 transition-colors">{f.title}</h3>
                   <p className="text-sm text-white/50 leading-relaxed">{f.desc}</p>
@@ -401,21 +515,85 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* PLATFORM SECTION */}
+      <section className="py-16 px-6">
+        <div className="max-w-4xl mx-auto text-center">
+          <FadeIn>
+            <h2 className="text-3xl md:text-4xl font-bold mb-4">
+              Built for <span className="gradient-text">Every Platform</span>
+            </h2>
+            <p className="text-white/50 text-lg max-w-2xl mx-auto mb-8">
+              Whether you publish long-form on YouTube or short-form on TikTok, Instagram Reels, LinkedIn, or Twitter —
+              DayTabs gives you tailored recommendations for each platform in a single analysis.
+            </p>
+            <div className="flex flex-wrap items-center justify-center gap-6">
+              {platforms.map((p) => (
+                <div key={p.name} className="flex items-center gap-2 glass rounded-full px-4 py-2 border border-white/8 text-sm">
+                  <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: p.color }} aria-hidden="true" />
+                  <span className="text-white/70">{p.name}</span>
+                </div>
+              ))}
+            </div>
+          </FadeIn>
+        </div>
+      </section>
+
+      {/* BLOG LINK */}
+      {firstPost && (
+        <section className="py-12 px-6">
+          <div className="max-w-4xl mx-auto">
+            <FadeIn>
+              <div className="glass rounded-2xl border border-white/8 p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div>
+                  <p className="text-xs text-violet-400 font-semibold uppercase tracking-wider mb-1">From the blog</p>
+                  <p className="font-semibold text-white/80">{firstPost.title}</p>
+                </div>
+                <Link href={`/blog/${firstPost.slug}`}>
+                  <button className="shrink-0 px-5 py-2.5 text-sm font-medium glass text-white rounded-xl border border-violet-500/30 hover:border-violet-500/60 transition-all cursor-pointer whitespace-nowrap">
+                    Read our YouTube SEO guide →
+                  </button>
+                </Link>
+              </div>
+            </FadeIn>
+          </div>
+        </section>
+      )}
+
+      {/* FAQ SECTION */}
+      <section className="py-24 px-6">
+        <div className="max-w-3xl mx-auto">
+          <FadeIn className="text-center mb-12">
+            <h2 className="text-4xl md:text-5xl font-bold mb-4">
+              Frequently Asked <span className="gradient-text">Questions</span>
+            </h2>
+            <p className="text-white/50 text-lg">Everything you need to know before getting started.</p>
+          </FadeIn>
+
+          <FadeIn delay={0.1}>
+            <div className="flex flex-col gap-3">
+              {faqs.map((item, i) => (
+                <FAQItem key={i} q={item.q} a={item.a} />
+              ))}
+            </div>
+          </FadeIn>
+        </div>
+      </section>
+
       {/* FINAL CTA */}
       <section className="py-24 px-6 relative overflow-hidden">
-        <div className="absolute inset-0 -z-10">
+        <div className="absolute inset-0 -z-10" aria-hidden="true">
           <div className="absolute inset-0 bg-gradient-to-b from-transparent via-violet-900/20 to-transparent" />
         </div>
         <div className="max-w-3xl mx-auto text-center">
           <FadeIn>
             <div className="glass rounded-3xl p-12 border border-violet-500/20 purple-glow">
-              <Star className="w-10 h-10 text-violet-400 mx-auto mb-6" />
+              <Star className="w-10 h-10 text-violet-400 mx-auto mb-6" aria-hidden="true" />
               <h2 className="text-4xl md:text-5xl font-bold mb-4">
-                Start Growing Your{" "}
-                <span className="gradient-text">Content Today</span>
+                Simple, Transparent{" "}
+                <span className="gradient-text">Pricing</span>
               </h2>
               <p className="text-white/50 text-lg mb-8 max-w-xl mx-auto">
-                Join thousands of creators who use DayTabs to understand their audience and make better videos.
+                Start free. No credit card required. Upgrade only when you're ready to publish more.
               </p>
               <div className="flex flex-col sm:flex-row gap-4 justify-center">
                 <button
@@ -435,7 +613,7 @@ export default function LandingPage() {
               <div className="mt-6 flex flex-wrap items-center justify-center gap-4 text-sm text-white/40">
                 {["No credit card required", "Free plan available", "Cancel anytime"].map((t) => (
                   <div key={t} className="flex items-center gap-1.5">
-                    <CheckCircle className="w-3.5 h-3.5 text-violet-400" />
+                    <CheckCircle className="w-3.5 h-3.5 text-violet-400" aria-hidden="true" />
                     {t}
                   </div>
                 ))}
@@ -450,12 +628,13 @@ export default function LandingPage() {
         <div className="max-w-6xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4 text-sm text-white/40">
           <div className="flex items-center gap-2">
             <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center">
-              <Zap className="w-3 h-3 text-white" />
+              <Zap className="w-3 h-3 text-white" aria-hidden="true" />
             </div>
             <span className="font-semibold text-white/60">DayTabs</span>
           </div>
           <p>© {new Date().getFullYear()} DayTabs. All rights reserved.</p>
           <div className="flex gap-6">
+            <button onClick={() => navigate("/blog")} className="hover:text-white transition-colors cursor-pointer">Blog</button>
             <button onClick={() => navigate("/pricing")} className="hover:text-white transition-colors cursor-pointer">Pricing</button>
             <button onClick={() => navigate("/contact")} className="hover:text-white transition-colors cursor-pointer">Contact</button>
             <button onClick={() => navigate("/privacy")} className="hover:text-white transition-colors cursor-pointer">Privacy Policy</button>

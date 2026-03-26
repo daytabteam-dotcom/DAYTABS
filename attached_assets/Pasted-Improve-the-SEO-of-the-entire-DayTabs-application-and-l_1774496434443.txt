@@ -1,0 +1,379 @@
+Improve the SEO of the entire DayTabs application and landing page, 
+and add a blog section to drive organic traffic. Read all existing 
+landing page, routing, and metadata files carefully before starting.
+
+─────────────────────────────────────────
+1. TECHNICAL SEO — FOUNDATION
+─────────────────────────────────────────
+Implement all of the following technical SEO improvements:
+
+META TAGS — add to every page:
+  <title> — unique per page, 50-60 characters, includes primary keyword
+  <meta name="description"> — unique per page, 140-160 characters, 
+    includes CTA
+  <meta name="robots" content="index, follow">
+  <link rel="canonical"> — self-referencing canonical on every page
+  <meta name="author" content="DayTabs">
+
+OPEN GRAPH — for social sharing:
+  <meta property="og:title">
+  <meta property="og:description">
+  <meta property="og:image"> — use a 1200x630 branded image
+  <meta property="og:url">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="DayTabs">
+
+TWITTER CARD:
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title">
+  <meta name="twitter:description">
+  <meta name="twitter:image">
+
+PAGE-SPECIFIC META — use these exact values:
+
+  Landing page (/):
+    title: "DayTabs — AI Video Analysis for Content Creators"
+    description: "Upload your video and get instant AI feedback on 
+      quality, editing, SEO titles, tags, and short clip ideas. 
+      Built for YouTube, TikTok, and Instagram creators."
+    keywords: "AI video analysis, YouTube SEO, video editing tool, 
+      content creator tools, video quality checker, TikTok video 
+      analyzer, Instagram Reels optimizer"
+
+  Pricing page (/pricing):
+    title: "DayTabs Pricing — Free, Creator, Pro & Studio Plans"
+    description: "Start free with 2 video analyses per month. 
+      Upgrade for more analyses, publish packages, subtitle 
+      downloads, and script planning. No contracts."
+
+  Blog index (/blog):
+    title: "DayTabs Blog — Video Strategy, SEO & Creator Tips"
+    description: "Actionable guides for content creators on YouTube 
+      SEO, video editing, short-form content strategy, and growing 
+      your channel with AI tools."
+
+  Individual blog posts (/blog/[slug]):
+    title: "[Post Title] — DayTabs Blog"
+    description: first 155 characters of the post intro
+    <meta property="article:published_time">
+    <meta property="article:author" content="DayTabs Team">
+
+STRUCTURED DATA — add JSON-LD schema:
+
+  On landing page:
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "DayTabs",
+    "applicationCategory": "MultimediaApplication",
+    "operatingSystem": "Web",
+    "description": "AI-powered video analysis platform for content 
+      creators. Analyzes video quality, suggests edits, generates 
+      SEO-optimized titles and descriptions.",
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "USD"
+    },
+    "aggregateRating": {
+      "@type": "AggregateRating",
+      "ratingValue": "4.8",
+      "reviewCount": "124"
+    }
+  }
+
+  On pricing page — add FAQ schema with these Q&As:
+  Q: "Is DayTabs free to use?"
+  A: "Yes. DayTabs offers a free plan with 2 video analyses per 
+     month, teleprompter access, and basic quality reports. 
+     No credit card required."
+  
+  Q: "What platforms does DayTabs support?"
+  A: "DayTabs supports YouTube (Long and Shorts), Instagram Reels, 
+     TikTok, Twitter/X, and LinkedIn."
+  
+  Q: "Does DayTabs store my videos?"
+  A: "No. Videos are deleted immediately after analysis completes. 
+     Only your transcript and results are saved."
+
+  Q: "What is included in the publish package?"
+  A: "The publish package generates 5 title options, a full SEO 
+     description, 25-30 optimized tags, chapter timestamps, and 
+     a downloadable .srt subtitle file for YouTube."
+
+  On blog posts — add Article schema:
+  {
+    "@type": "Article",
+    "headline": "[post title]",
+    "datePublished": "[date]",
+    "author": { "@type": "Organization", "name": "DayTabs" },
+    "publisher": { "@type": "Organization", "name": "DayTabs" }
+  }
+
+SITEMAP — generate /sitemap.xml automatically:
+  Include: /, /pricing, /blog, /blog/[each-slug]
+  Priority: / = 1.0, /pricing = 0.8, /blog = 0.8, posts = 0.6
+  changefreq: / = weekly, blog posts = monthly
+  Regenerate sitemap whenever a new blog post is added
+
+ROBOTS.TXT — create /robots.txt:
+  User-agent: *
+  Allow: /
+  Disallow: /panel/
+  Disallow: /api/
+  Sitemap: https://[your-domain]/sitemap.xml
+
+PAGE SPEED:
+  - Add loading="lazy" to all images below the fold
+  - Add width and height attributes to all img tags
+  - Preload the hero image: <link rel="preload" as="image">
+  - Make sure Google Fonts has display=swap parameter (already 
+    in the link if using Google Fonts)
+
+─────────────────────────────────────────
+2. LANDING PAGE SEO IMPROVEMENTS
+─────────────────────────────────────────
+Update the landing page HTML structure for better SEO:
+
+HEADING HIERARCHY — must follow this exact structure:
+  One <h1> only: "AI Video Analysis for Content Creators"
+  <h2> for each major section:
+    "How DayTabs Works"
+    "Everything You Need to Grow Your Channel"  
+    "Built for Every Platform"
+    "Simple, Transparent Pricing"
+    "What Creators Are Saying"
+    "Frequently Asked Questions"
+  <h3> for feature names and FAQ questions
+
+HERO SECTION — update copy for SEO:
+  h1: "AI Video Analysis for Content Creators"
+  Subheading (p tag): "Upload your video and get instant feedback 
+    on quality, editing, SEO optimization, and short clip ideas — 
+    all in one place. Built for YouTube, TikTok, Instagram, 
+    LinkedIn, and Twitter."
+  
+  Keep the existing design — only update the text content.
+
+ADD FAQ SECTION to landing page (above footer):
+  Use <details> and <summary> HTML tags for accordion — 
+  these are natively crawlable by Google.
+  
+  Include these questions:
+  1. "How does DayTabs analyze my video?"
+  2. "Is my video stored on your servers?"
+  3. "Which platforms does DayTabs support?"
+  4. "How is DayTabs different from ChatGPT?"
+     Answer: "ChatGPT requires you to know what to ask and how to 
+     upload frames manually. DayTabs handles the entire pipeline — 
+     upload once, get a complete report with quality scores, edit 
+     suggestions, platform-specific titles, tags, timestamps, and 
+     short clip ideas. No prompting required."
+  5. "Can I use DayTabs for free?"
+  6. "Does DayTabs generate subtitle files?"
+
+ALT TEXT — add descriptive alt text to every image:
+  Format: "[what the image shows] — DayTabs [feature name]"
+  Example: "Video quality analysis dashboard showing lighting 
+    and audio scores — DayTabs Video Analyzer"
+
+INTERNAL LINKS — add these links to the landing page:
+  - "Read our YouTube SEO guide →" linking to first blog post
+  - "See all features →" linking to pricing page
+  - "How it works →" linking to #how-it-works section
+
+─────────────────────────────────────────
+3. BLOG PAGE — ROUTE AND DESIGN
+─────────────────────────────────────────
+Create a /blog route on the landing page (not inside /panel).
+
+BLOG INDEX PAGE (/blog):
+  - Same header and footer as landing page
+  - Hero: "Creator Playbook" as h1, subtitle: 
+    "Guides on video SEO, editing strategy, and growing 
+    your channel with AI"
+  - Grid of blog post cards: 2 columns on desktop, 1 on mobile
+  - Each card shows: cover image placeholder, category tag, 
+    title, excerpt (2 sentences), read time, date, 
+    "Read article →" link
+  - Category filter tabs above grid: 
+    All · YouTube SEO · Editing · Short-Form · AI Tools
+  - No pagination needed yet — show all posts on one page
+
+INDIVIDUAL POST PAGE (/blog/[slug]):
+  - Same header and footer as landing page
+  - Article layout: max-width 680px, centered
+  - Show: category tag, h1 title, read time + date, 
+    author "DayTabs Team", cover image, article body
+  - Table of contents (auto-generated from h2 headings) 
+    — sticky on desktop, collapsed on mobile
+  - At end of article: CTA box with purple background:
+    "Analyze your next video with DayTabs"
+    "Get quality scores, SEO titles, and short clip ideas 
+    in under 2 minutes."
+    Button: "Try it free →" linking to /panel
+
+  - "Related articles" section showing 2 other posts
+
+BLOG POST STORAGE:
+  Store posts as static data (array of objects in a .ts file) 
+  for now — no CMS needed yet. Each post object:
+  {
+    slug: string,
+    title: string,
+    category: string,
+    excerpt: string,
+    readTime: string,
+    publishedAt: string,
+    content: string (HTML or markdown),
+    metaDescription: string,
+    keywords: string[]
+  }
+
+─────────────────────────────────────────
+4. BLOG POSTS — WRITE ALL 6 IN FULL
+─────────────────────────────────────────
+Write the complete content for all 6 blog posts below. 
+Each post must be:
+- Minimum 1,200 words
+- Structured with h2 and h3 headings
+- Written in a direct, expert tone — no fluff
+- Include the target keyword naturally 3-5 times
+- Include an internal link to DayTabs in the last section
+- End with a practical takeaway or checklist
+
+POST 1:
+  slug: "youtube-seo-guide-2026"
+  title: "YouTube SEO in 2026: What Actually Works 
+          (And What to Stop Doing)"
+  category: "YouTube SEO"
+  target keyword: "YouTube SEO 2026"
+  topics to cover:
+    - Why keyword-stuffed titles no longer work
+    - How YouTube's algorithm reads your description now
+    - The role of watch time vs click-through rate in ranking
+    - Chapter timestamps and why they improve search visibility
+    - How to find low-competition keywords that still get views
+    - Tags: still relevant or waste of time?
+    - How AI tools can speed up your SEO workflow
+
+POST 2:
+  slug: "how-to-repurpose-youtube-videos-for-tiktok"
+  title: "How to Repurpose Your YouTube Videos for 
+          TikTok and Instagram Reels (Without It Looking Lazy)"
+  category: "Short-Form"
+  target keyword: "repurpose YouTube videos TikTok"
+  topics to cover:
+    - Why direct re-uploads fail (algorithm and audience reasons)
+    - The 3 types of moments that work as short clips
+    - How to reframe a long-form point into a 30-second hook
+    - Captions: why they're non-negotiable for Reels and TikTok
+    - Platform-specific formatting differences
+    - How to find the best moments in a long video quickly
+
+POST 3:
+  slug: "video-quality-checklist-for-creators"
+  title: "The Video Quality Checklist Every Creator 
+          Should Run Before Hitting Publish"
+  category: "Editing"
+  target keyword: "video quality checklist"
+  topics to cover:
+    - Lighting: the single biggest quality signal
+    - Audio: why bad audio kills good content
+    - Framing and rule of thirds
+    - Background: what viewers actually notice
+    - Color consistency across your videos
+    - The first 5 seconds: what to check
+    - Tools to analyze your video quality automatically
+
+POST 4:
+  slug: "how-to-write-youtube-descriptions-that-rank"
+  title: "How to Write YouTube Descriptions That 
+          Actually Rank in Search"
+  category: "YouTube SEO"
+  target keyword: "YouTube description SEO"
+  topics to cover:
+    - Why the first 2 lines are the only ones that matter for CTR
+    - Where to place your keyword in the description
+    - The chapters section: how it helps search and watch time
+    - What to include in the links section
+    - Description templates for different video types
+    - Common mistakes that hurt ranking
+    - How to generate descriptions faster with AI
+
+POST 5:
+  slug: "hook-writing-guide-for-video-creators"
+  title: "How to Write a Video Hook That Stops 
+          the Scroll in the First 3 Seconds"
+  category: "Editing"
+  target keyword: "video hook writing"
+  topics to cover:
+    - Why the first 3 seconds decide everything on TikTok
+    - The 5 hook formulas that consistently work
+    - How to lead with the result, not the story
+    - Pattern interrupts: what they are and how to use them
+    - Hook examples broken down by niche
+    - How to test your hook before publishing
+    - Using your transcript to find hidden hooks in your content
+
+POST 6:
+  slug: "ai-tools-for-content-creators-2026"
+  title: "The AI Tools Content Creators Are 
+          Actually Using in 2026"
+  category: "AI Tools"
+  target keyword: "AI tools content creators 2026"
+  topics to cover:
+    - The difference between general AI and purpose-built tools
+    - Script writing: what AI is genuinely good at
+    - Video analysis: what you can automate now
+    - SEO optimization: titles, tags, descriptions
+    - What AI still can't do (and shouldn't)
+    - How to integrate AI into your weekly publishing workflow
+    - DayTabs: how it fits into the creator workflow
+
+─────────────────────────────────────────
+5. INTERNAL LINKING STRATEGY
+─────────────────────────────────────────
+Within the blog posts, add these internal links:
+
+- Every post must link to /panel with anchor text like:
+  "analyze your video automatically", "video analysis tool", 
+  "check your video quality" — NOT "click here"
+
+- Post 1 (YouTube SEO) links to Post 4 (descriptions)
+- Post 2 (repurpose) links to Post 5 (hooks)
+- Post 3 (quality checklist) links to Post 6 (AI tools)
+- Post 4 (descriptions) links to Post 1 (YouTube SEO)
+- Post 5 (hooks) links to Post 2 (repurpose)
+- Post 6 (AI tools) links to Post 3 (quality checklist)
+
+This creates a topical cluster that signals authority to Google.
+
+─────────────────────────────────────────
+6. LANDING PAGE COPY IMPROVEMENTS
+─────────────────────────────────────────
+Update the landing page subtitle (below the hero) to:
+"The fastest way to improve your videos before you publish.
+DayTabs analyzes your footage for quality issues, suggests 
+edits with exact timestamps, generates platform-specific 
+titles and tags, and identifies the best moments to 
+repurpose as short clips — all from a single upload."
+
+Update the platform section subtitle to:
+"Whether you publish long-form on YouTube or short-form on 
+TikTok, Instagram Reels, LinkedIn, or Twitter — DayTabs 
+gives you tailored recommendations for each platform 
+in a single analysis."
+
+─────────────────────────────────────────
+IMPORTANT NOTES:
+- Blog lives at /blog — completely separate from /panel
+- Do not change anything inside /panel or the app itself
+- Do not change the dark purple visual theme of the landing page
+- Blog posts must be fully written — not placeholders
+- All meta tags must be dynamically set using React Helmet 
+  or equivalent (update <head> per route)
+- Sitemap must be accessible at /sitemap.xml as plain XML
+- Test that Google can crawl /blog without being redirected 
+  to /panel login
+- Add "Blog" to the landing page navigation header

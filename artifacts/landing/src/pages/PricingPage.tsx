@@ -1,6 +1,7 @@
 import { useLocation } from "wouter";
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
+import { Helmet } from "react-helmet-async";
 import { Check, Zap, Star, Flame, Building2, Loader2 } from "lucide-react";
 import Navbar from "../components/Navbar";
 
@@ -131,8 +132,74 @@ export default function PricingPage() {
     }
   };
 
+  const faqSchema = {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    mainEntity: [
+      {
+        "@type": "Question",
+        name: "Is DayTabs free to use?",
+        acceptedAnswer: {
+          "@type": "Answer",
+          text: "Yes. DayTabs offers a free plan with 2 video analyses per month, teleprompter access, and basic quality reports. No credit card required.",
+        },
+      },
+      {
+        "@type": "Question",
+        name: "What platforms does DayTabs support?",
+        acceptedAnswer: {
+          "@type": "Answer",
+          text: "DayTabs supports YouTube (Long and Shorts), Instagram Reels, TikTok, Twitter/X, and LinkedIn.",
+        },
+      },
+      {
+        "@type": "Question",
+        name: "Does DayTabs store my videos?",
+        acceptedAnswer: {
+          "@type": "Answer",
+          text: "No. Videos are deleted immediately after analysis completes. Only your transcript and results are saved.",
+        },
+      },
+      {
+        "@type": "Question",
+        name: "What is included in the publish package?",
+        acceptedAnswer: {
+          "@type": "Answer",
+          text: "The publish package generates 5 title options, a full SEO description, 25-30 optimized tags, chapter timestamps, and a downloadable .srt subtitle file for YouTube.",
+        },
+      },
+    ],
+  };
+
   return (
     <div className="min-h-screen bg-background text-foreground">
+      <Helmet>
+        <title>DayTabs Pricing — Free, Creator, Pro &amp; Studio Plans</title>
+        <meta
+          name="description"
+          content="Start free with 2 video analyses per month. Upgrade for more analyses, publish packages, subtitle downloads, and script planning. No contracts."
+        />
+        <meta name="robots" content="index, follow" />
+        <link rel="canonical" href="https://daytabs.com/pricing" />
+        <meta name="author" content="DayTabs" />
+        <meta property="og:title" content="DayTabs Pricing — Free, Creator, Pro &amp; Studio Plans" />
+        <meta
+          property="og:description"
+          content="Start free with 2 video analyses per month. Upgrade for more analyses, publish packages, subtitle downloads, and script planning. No contracts."
+        />
+        <meta property="og:image" content="https://daytabs.com/opengraph.jpg" />
+        <meta property="og:url" content="https://daytabs.com/pricing" />
+        <meta property="og:type" content="website" />
+        <meta property="og:site_name" content="DayTabs" />
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content="DayTabs Pricing — Free, Creator, Pro &amp; Studio Plans" />
+        <meta
+          name="twitter:description"
+          content="Start free with 2 video analyses per month. Upgrade for more analyses, publish packages, subtitle downloads, and script planning. No contracts."
+        />
+        <meta name="twitter:image" content="https://daytabs.com/opengraph.jpg" />
+        <script type="application/ld+json">{JSON.stringify(faqSchema)}</script>
+      </Helmet>
       <Navbar />
 
       <section className="pt-32 pb-24 px-6 relative overflow-hidden">
