@@ -604,7 +604,7 @@ export default function ScriptPlannerTab() {
                 </p>
               </div>
 
-              <div className="grid grid-cols-3 gap-4 mt-2 w-full max-w-lg">
+              <div className="grid grid-cols-3 gap-4 mt-6 w-full">
                 {[
                   { icon: Camera, label: "Camera Plan", sub: "Shot angles for every scene", cls: "text-blue-400", bg: "bg-blue-500/8 border-blue-500/15" },
                   { icon: Film, label: "B-Roll Ideas", sub: "Visual suggestions per section", cls: "text-purple-400", bg: "bg-purple-500/8 border-purple-500/15" },
@@ -696,7 +696,7 @@ export default function ScriptPlannerTab() {
                         autoFocus
                       />
                     ) : (
-                      <div className="max-w-2xl text-[14px] text-white/78 leading-[1.9] whitespace-pre-wrap">
+                      <div className="w-full text-[14px] text-white/78 leading-[1.9] whitespace-pre-wrap">
                         {editedScript.split("\n").map((line, i) => {
                           const isPacingCue = /\[([A-Z ]+)\]/.test(line);
                           return (
