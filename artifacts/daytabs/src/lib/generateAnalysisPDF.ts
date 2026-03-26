@@ -174,8 +174,8 @@ export async function generateAnalysisPDF(
   doc.setTextColor(...COL.muted);
   doc.text("/ 100  Overall Quality Score", MARGIN + 16, state.y + 4);
 
-  const verdict = overallScore >= 70 ? "Strong video — ready to publish."
-    : overallScore >= 45 ? "Good foundation — a few improvements needed."
+  const verdict = overallScore >= 70 ? "Strong video, ready to publish."
+    : overallScore >= 45 ? "Good foundation, a few improvements needed."
     : "Needs attention before publishing.";
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8.5);
@@ -399,7 +399,7 @@ export async function generateAnalysisPDF(
       doc.setTextColor(...COL.purple);
       doc.text(`${i + 1}. ${clip.title ?? `Clip ${i + 1}`}`, MARGIN, state.y);
 
-      const ts = (clip.start && clip.end) ? ` — ${clip.start} → ${clip.end}` : "";
+      const ts = (clip.start && clip.end) ? `, ${clip.start} → ${clip.end}` : "";
       doc.setFont("helvetica", "normal");
       doc.setFontSize(7.5);
       doc.setTextColor(...COL.muted);
@@ -422,7 +422,7 @@ export async function generateAnalysisPDF(
   const fullText: string = transcript.fullText ?? "";
   if (fullText) {
     sectionHeader(state, "Transcript (excerpt)");
-    const excerpt = fullText.length > 1200 ? fullText.substring(0, 1200) + "\n\n[…truncated — full transcript in app]" : fullText;
+    const excerpt = fullText.length > 1200 ? fullText.substring(0, 1200) + "\n\n[…truncated, full transcript in app]" : fullText;
     bodyText(state, excerpt, 0, COL.muted);
     drawHRule(state);
   }
@@ -445,7 +445,7 @@ export async function generateAnalysisPDF(
     doc.setFont("helvetica", "normal");
     doc.setFontSize(7);
     doc.setTextColor(...COL.muted);
-    doc.text(`DayTabs Analysis Report — ${dateStr}`, MARGIN, PAGE_H - 8);
+    doc.text(`DayTabs Analysis Report, ${dateStr}`, MARGIN, PAGE_H - 8);
     doc.text(`Page ${p} of ${pageCount}`, PAGE_W - MARGIN, PAGE_H - 8, { align: "right" });
   }
 

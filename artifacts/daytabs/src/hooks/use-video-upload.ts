@@ -45,7 +45,7 @@ export function useVideoUpload() {
       return new Promise<{ jobId: string }>((resolve, reject) => {
         const xhr = new XMLHttpRequest();
 
-        // Real upload progress — maps the upload phase to 0–92%
+        // Real upload progress, maps the upload phase to 0–92%
         xhr.upload.addEventListener("progress", (e) => {
           if (e.lengthComputable) {
             setUploadProgress(Math.round((e.loaded / e.total) * 92));
@@ -95,7 +95,7 @@ export function useVideoUpload() {
           reject(new Error("Upload timed out. The file may be too large or your connection is too slow."));
         });
 
-        // 60 minute timeout — supports up to 2GB on slow connections
+        // 60 minute timeout, supports up to 2GB on slow connections
         xhr.timeout = 60 * 60 * 1000;
 
         xhr.open("POST", "/api/analysis/upload");

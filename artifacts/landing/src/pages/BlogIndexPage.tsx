@@ -35,7 +35,7 @@ export default function BlogIndexPage() {
   return (
     <div className="min-h-screen bg-background text-foreground overflow-x-hidden">
       <Helmet>
-        <title>DayTabs Blog — Video Strategy, SEO &amp; Creator Tips</title>
+        <title>DayTabs Blog - Video Strategy, SEO &amp; Creator Tips</title>
         <meta
           name="description"
           content="Actionable guides for content creators on YouTube SEO, video editing, short-form content strategy, and growing your channel with AI tools."
@@ -43,7 +43,7 @@ export default function BlogIndexPage() {
         <meta name="robots" content="index, follow" />
         <link rel="canonical" href="https://daytabs.com/blog" />
         <meta name="author" content="DayTabs" />
-        <meta property="og:title" content="DayTabs Blog — Video Strategy, SEO &amp; Creator Tips" />
+        <meta property="og:title" content="DayTabs Blog - Video Strategy, SEO &amp; Creator Tips" />
         <meta
           property="og:description"
           content="Actionable guides for content creators on YouTube SEO, video editing, short-form content strategy, and growing your channel with AI tools."
@@ -53,7 +53,7 @@ export default function BlogIndexPage() {
         <meta property="og:type" content="website" />
         <meta property="og:site_name" content="DayTabs" />
         <meta name="twitter:card" content="summary_large_image" />
-        <meta name="twitter:title" content="DayTabs Blog — Video Strategy, SEO &amp; Creator Tips" />
+        <meta name="twitter:title" content="DayTabs Blog - Video Strategy, SEO &amp; Creator Tips" />
         <meta
           name="twitter:description"
           content="Actionable guides for content creators on YouTube SEO, video editing, short-form content strategy, and growing your channel with AI tools."

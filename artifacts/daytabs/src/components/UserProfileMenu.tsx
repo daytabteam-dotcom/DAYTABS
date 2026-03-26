@@ -161,7 +161,7 @@ export function UserProfileMenu() {
         window.open(result.portalUrl, "_blank", "noopener,noreferrer");
       }
     } catch {
-      // ignore — subscription display will stay unchanged
+      // ignore, subscription display will stay unchanged
     } finally {
       setReactivating(false);
     }
@@ -273,7 +273,7 @@ export function UserProfileMenu() {
                       </div>
                     )}
 
-                    {/* Manage Subscription — opens Paddle portal */}
+                    {/* Manage Subscription, opens Paddle portal */}
                     <button
                       onClick={handleManageSubscription}
                       disabled={portalLoading}
@@ -304,7 +304,7 @@ export function UserProfileMenu() {
               </div>
             )}
 
-            {/* Free plan — upgrade CTA */}
+            {/* Free plan, upgrade CTA */}
             {!plan.isPaid && (
               <div className="space-y-2">
                 <button

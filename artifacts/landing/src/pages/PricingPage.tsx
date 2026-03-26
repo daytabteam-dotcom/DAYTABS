@@ -174,7 +174,7 @@ export default function PricingPage() {
   return (
     <div className="min-h-screen bg-background text-foreground">
       <Helmet>
-        <title>DayTabs Pricing — Free, Creator, Pro &amp; Studio Plans</title>
+        <title>DayTabs Pricing - Free, Creator, Pro &amp; Studio Plans</title>
         <meta
           name="description"
           content="Start free with 2 video analyses per month. Upgrade for more analyses, publish packages, subtitle downloads, and script planning. No contracts."
@@ -182,7 +182,7 @@ export default function PricingPage() {
         <meta name="robots" content="index, follow" />
         <link rel="canonical" href="https://daytabs.com/pricing" />
         <meta name="author" content="DayTabs" />
-        <meta property="og:title" content="DayTabs Pricing — Free, Creator, Pro &amp; Studio Plans" />
+        <meta property="og:title" content="DayTabs Pricing - Free, Creator, Pro &amp; Studio Plans" />
         <meta
           property="og:description"
           content="Start free with 2 video analyses per month. Upgrade for more analyses, publish packages, subtitle downloads, and script planning. No contracts."
@@ -192,7 +192,7 @@ export default function PricingPage() {
         <meta property="og:type" content="website" />
         <meta property="og:site_name" content="DayTabs" />
         <meta name="twitter:card" content="summary_large_image" />
-        <meta name="twitter:title" content="DayTabs Pricing — Free, Creator, Pro &amp; Studio Plans" />
+        <meta name="twitter:title" content="DayTabs Pricing - Free, Creator, Pro &amp; Studio Plans" />
         <meta
           name="twitter:description"
           content="Start free with 2 video analyses per month. Upgrade for more analyses, publish packages, subtitle downloads, and script planning. No contracts."

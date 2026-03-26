@@ -173,7 +173,7 @@ export function UpgradeErrorModal({ error, onClose }: UpgradeErrorModalProps) {
                 <div className="flex items-center gap-2">
                   <Lock className="w-3.5 h-3.5 text-primary/60 shrink-0" />
                   <p className="text-xs text-primary/80">
-                    {error.meta.feature === "publish_package" && "Titles, descriptions, tags & chapters — optimized for each platform"}
+                    {error.meta.feature === "publish_package" && "Titles, descriptions, tags & chapters, optimized for each platform"}
                     {error.meta.feature === "short_clip_ideas" && "Best clip moments for TikTok, Reels & YouTube Shorts"}
                     {error.meta.feature === "subtitle_download" && "YouTube-compatible .srt subtitle file from your transcript"}
                     {!["publish_package", "short_clip_ideas", "subtitle_download"].includes(error.meta.feature) && "Upgrade to unlock this feature"}

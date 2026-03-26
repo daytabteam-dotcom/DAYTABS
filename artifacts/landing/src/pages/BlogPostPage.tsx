@@ -116,12 +116,12 @@ export default function BlogPostPage() {
   return (
     <div className="min-h-screen bg-background text-foreground overflow-x-hidden">
       <Helmet>
-        <title>{post.title} — DayTabs Blog</title>
+        <title>{post.title} - DayTabs Blog</title>
         <meta name="description" content={post.metaDescription} />
         <meta name="robots" content="index, follow" />
         <link rel="canonical" href={postUrl} />
         <meta name="author" content="DayTabs" />
-        <meta property="og:title" content={`${post.title} — DayTabs Blog`} />
+        <meta property="og:title" content={`${post.title} - DayTabs Blog`} />
         <meta property="og:description" content={post.metaDescription} />
         <meta property="og:image" content={`${SITE_URL}/opengraph.jpg`} />
         <meta property="og:url" content={postUrl} />
@@ -130,7 +130,7 @@ export default function BlogPostPage() {
         <meta property="article:published_time" content={post.publishedAt} />
         <meta property="article:author" content="DayTabs Team" />
         <meta name="twitter:card" content="summary_large_image" />
-        <meta name="twitter:title" content={`${post.title} — DayTabs Blog`} />
+        <meta name="twitter:title" content={`${post.title} - DayTabs Blog`} />
         <meta name="twitter:description" content={post.metaDescription} />
         <meta name="twitter:image" content={`${SITE_URL}/opengraph.jpg`} />
         <script type="application/ld+json">{JSON.stringify(articleSchema)}</script>

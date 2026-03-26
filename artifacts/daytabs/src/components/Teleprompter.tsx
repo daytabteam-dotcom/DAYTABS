@@ -115,7 +115,7 @@ export function Teleprompter({ script, onClose }: TeleprompterProps) {
               <RotateCcw className="w-4 h-4" />
             </button>
 
-            {/* Play / Pause — main CTA */}
+            {/* Play / Pause, main CTA */}
             <button
               onClick={() => setPlaying(p => !p)}
               className={`flex items-center gap-2.5 px-7 py-3 rounded-2xl font-bold text-base transition-all shadow-2xl ${

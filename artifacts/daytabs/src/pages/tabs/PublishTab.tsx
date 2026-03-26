@@ -175,7 +175,7 @@ export default function PublishTab({ onDataReady, onDataReset, onRegisterExport 
                 )}
               </div>
 
-              {/* Translate Subtitles — locked for free */}
+              {/* Translate Subtitles, locked for free */}
               <div className="flex items-center justify-between pt-3 border-t border-white/8">
                 <div className="flex items-center gap-2">
                   <Globe className="w-4 h-4 text-white/40" />

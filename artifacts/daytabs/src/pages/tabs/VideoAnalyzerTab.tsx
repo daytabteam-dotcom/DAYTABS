@@ -82,7 +82,7 @@ function UpgradeOverlay({ feature, label }: { feature: string; label: string }) 
           onClick={() => navigateToPricing(feature)}
           className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-gradient-to-r from-primary to-purple-500 text-white hover:opacity-90 transition-opacity whitespace-nowrap"
         >
-          Upgrade to Creator — $19/mo
+          Upgrade to Creator, $19/mo
         </button>
       </div>
     </div>
@@ -203,7 +203,7 @@ function QualityPanel({ data, isPaid }: { data: any; isPaid: boolean }) {
             />
           </div>
           <p className="text-xs text-white/40 mt-2">
-            {overallScore >= 70 ? "Strong video — ready to publish." : overallScore >= 45 ? "Good foundation — a few improvements needed." : "Needs attention before publishing."}
+            {overallScore >= 70 ? "Strong video, ready to publish." : overallScore >= 45 ? "Good foundation, a few improvements needed." : "Needs attention before publishing."}
           </p>
         </div>
       </div>
@@ -266,7 +266,7 @@ function EditingPanel({ data, isPaid }: { data: any; isPaid: boolean }) {
               </div>
             ))}
             {hooks.length > 1 && (
-              <BlurSection blur={!isPaid} feature="hook-moments" label="Unlock all hook moments — see every high-value clip opportunity in your video">
+              <BlurSection blur={!isPaid} feature="hook-moments" label="Unlock all hook moments, see every high-value clip opportunity in your video">
                 <div className="space-y-2">
                   {hooks.slice(1).map((h: any, i: number) => (
                     <div key={i} className="flex items-start gap-3 p-3 rounded-xl bg-yellow-400/5 border border-yellow-400/15">
@@ -425,7 +425,7 @@ function PublishPanel({ data, platforms, isPaid, subtitleFile, videoFileName }: 
                   <p className="text-sm text-white/70 leading-relaxed">
                     {pData.description.split(/[.!?]/).slice(0, 2).join(". ") + "."}
                   </p>
-                  <BlurSection blur feature="full-description" label="Get the full description with chapters, links section, and CTA — 150-400 words">
+                  <BlurSection blur feature="full-description" label="Get the full description with chapters, links section, and CTA, 150-400 words">
                     <p className="text-sm text-white/70 whitespace-pre-line leading-relaxed mt-2">{pData.description}</p>
                   </BlurSection>
                 </>
@@ -451,7 +451,7 @@ function PublishPanel({ data, platforms, isPaid, subtitleFile, videoFileName }: 
                 ))}
               </div>
               {extraTags.length > 0 && (
-                <BlurSection blur={!isPaid} feature="tags" label={`Get ${extraTags.length + 3} more tags optimized for your niche — from broad to long-tail`}>
+                <BlurSection blur={!isPaid} feature="tags" label={`Get ${extraTags.length + 3} more tags optimized for your niche, from broad to long-tail`}>
                   <div className="flex flex-wrap gap-1.5 mt-2">
                     {extraTags.map((tag: { tag: string }, i: number) => (
                       <span key={i} className="px-2.5 py-1 bg-primary/10 border border-primary/20 text-primary/80 rounded-lg text-xs font-mono">
@@ -494,7 +494,7 @@ function PublishPanel({ data, platforms, isPaid, subtitleFile, videoFileName }: 
                   <p className="text-xs text-white/30 italic">Run analysis with the Publish module enabled to generate subtitle file.</p>
                 )
               ) : (
-                <BlurSection blur feature="subtitle-file" label="Download subtitle file — Creator plan and above. YouTube-compatible .srt format.">
+                <BlurSection blur feature="subtitle-file" label="Download subtitle file, Creator plan and above. YouTube-compatible .srt format.">
                   <div className="py-6 text-center">
                     <Download className="w-6 h-6 text-white/30 mx-auto mb-2" />
                     <p className="text-sm text-white/40">Download .srt subtitle file</p>
@@ -657,7 +657,7 @@ function TranscriptPanel({ data, isPaid }: { data: any; isPaid: boolean }) {
         {hasMoreContent && (
           <div className="relative">
             <div className="absolute inset-x-0 top-0 h-12 bg-gradient-to-b from-transparent to-background/95 pointer-events-none" />
-            <BlurSection blur feature="full-transcript" label="Full transcript available on Creator plan — includes timestamps every 30 seconds">
+            <BlurSection blur feature="full-transcript" label="Full transcript available on Creator plan, includes timestamps every 30 seconds">
               <div className="py-8 text-center text-sm text-white/40">
                 [Transcript continues beyond 1 minute]
               </div>
@@ -758,7 +758,7 @@ function LimitReachedModal({ limit, onClose, onUpgrade }: { limit: number; onClo
           onClick={onUpgrade}
           className="w-full py-3 rounded-xl text-sm font-semibold bg-gradient-to-r from-primary to-purple-500 text-white hover:opacity-90 transition-opacity mb-3"
         >
-          View Plans — from $19/mo
+          View Plans, from $19/mo
         </button>
         <button onClick={onClose} className="text-xs text-white/30 hover:text-white/50 transition-colors">
           Maybe later
@@ -780,7 +780,7 @@ function getVideoDuration(file: File): Promise<number | null> {
   });
 }
 
-/** Controlled upload zone — parent manages the accepted file state */
+/** Controlled upload zone, parent manages the accepted file state */
 function UploadZone({ onFile, currentFile, isPending, maxSizeLabel, durationLabel }: {
   onFile: (f: File) => void;
   currentFile: File | null;
@@ -825,7 +825,7 @@ function UploadZone({ onFile, currentFile, isPending, maxSizeLabel, durationLabe
           <div className="absolute inset-0 flex flex-col items-center justify-center p-6 bg-gradient-to-t from-black/80 via-transparent to-transparent">
             <Film className="w-8 h-8 text-primary mb-2" />
             <p className="text-sm font-semibold text-white/90 text-center">{currentFile.name}</p>
-            <p className="text-xs text-white/40 mt-1">{(currentFile.size / 1024 / 1024).toFixed(1)} MB — click to change</p>
+            <p className="text-xs text-white/40 mt-1">{(currentFile.size / 1024 / 1024).toFixed(1)} MB, click to change</p>
           </div>
         </div>
       ) : (
@@ -919,9 +919,9 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
     );
   }
 
-  /** Called immediately on file drop — validates size and duration before accepting the file */
+  /** Called immediately on file drop, validates size and duration before accepting the file */
   async function handleFileSelected(f: File) {
-    // If the plan hasn't loaded yet, accept the file optimistically — server will enforce limits
+    // If the plan hasn't loaded yet, accept the file optimistically, server will enforce limits
     if (planLoading) { setFile(f); return; }
 
     const norm = plan.normalizedPlan;
@@ -947,18 +947,18 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
         action: { label: up.action, route: up.route },
         meta: { current_plan: norm },
       });
-      return; // Reject — don't set the file at all
+      return; // Reject, don't set the file at all
     }
 
     // 2. Accept the file for display immediately
     setFile(f);
 
-    // 3. Async duration check (very fast — just reads metadata)
+    // 3. Async duration check (very fast, just reads metadata)
     const duration = await getVideoDuration(f);
     if (duration !== null && !isNaN(duration) && isFinite(duration)) {
       const durationLimit = DURATION_LIMITS_SEC[norm] ?? DURATION_LIMITS_SEC.free;
       if (duration > durationLimit) {
-        setFile(null); // Reject — clear the file
+        setFile(null); // Reject, clear the file
         const limitMin = Math.round(durationLimit / 60);
         const durMin = Math.round(duration / 60);
         const upgradeMap: Record<string, { action: string; route: string }> = {
@@ -982,7 +982,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
   async function handleAnalyze() {
     if (!file) { toast({ title: "No video selected", description: "Please drop or select a video first.", variant: "destructive" }); return; }
 
-    // Client-side pre-checks (informational — server is source of truth)
+    // Client-side pre-checks (informational, server is source of truth)
     if (uploadsRemaining === 0) { setShowLimitModal(true); return; }
 
     setIsSubmitting(true);

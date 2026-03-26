@@ -93,7 +93,7 @@ const steps = [
     desc: "Our AI extracts audio, transcribes speech, analyzes frames, and generates comprehensive insights in minutes.",
     visual: (
       <div className="relative h-48 flex items-center justify-center">
-        <div className="flex gap-1 items-end h-24" aria-label="Audio waveform visualization — DayTabs Video Analyzer">
+        <div className="flex gap-1 items-end h-24" aria-label="Audio waveform visualization, DayTabs Video Analyzer">
           {[40, 65, 30, 80, 55, 90, 45, 70, 35, 85, 60, 95].map((h, i) => (
             <motion.div
               key={i}
@@ -116,7 +116,7 @@ const steps = [
     title: "Get Actionable Insights",
     desc: "Receive a full dashboard with Quality, Content, SEO, and Subtitle tabs, each with specific, actionable recommendations.",
     visual: (
-      <div className="relative h-48 flex flex-col gap-2 items-center justify-center w-full max-w-xs mx-auto" aria-label="Video analysis scores dashboard — DayTabs Video Analyzer">
+      <div className="relative h-48 flex flex-col gap-2 items-center justify-center w-full max-w-xs mx-auto" aria-label="Video analysis scores dashboard, DayTabs Video Analyzer">
         {[
           { label: "Quality Score", val: 87, color: "from-violet-500 to-purple-400" },
           { label: "Content Score", val: 92, color: "from-purple-500 to-pink-400" },
@@ -147,7 +147,7 @@ const languages = ["Hello!", "Hola!", "Bonjour!", "Ciao!", "Hallo!", "こんに�
 
 function LanguageAnimate() {
   return (
-    <div className="relative h-48 flex items-center justify-center overflow-hidden" aria-label="AI dubbing in multiple languages — DayTabs AI Dubbing">
+    <div className="relative h-48 flex items-center justify-center overflow-hidden" aria-label="AI dubbing in multiple languages, DayTabs AI Dubbing">
       <div className="glass rounded-2xl px-8 py-4 text-center min-w-[160px]">
         <motion.div
           key="lang"
@@ -189,7 +189,7 @@ const platforms = [
 const faqs = [
   {
     q: "How does DayTabs analyze my video?",
-    a: "DayTabs extracts the audio from your video, transcribes every word with timestamps, analyzes individual frames for lighting and visual quality, and sends the full context to our AI pipeline. The result is a complete report covering quality scores, content feedback, SEO-optimized titles and tags, chapter timestamps, and short clip suggestions — all in one upload.",
+    a: "DayTabs extracts the audio from your video, transcribes every word with timestamps, analyzes individual frames for lighting and visual quality, and sends the full context to our AI pipeline. The result is a complete report covering quality scores, content feedback, SEO-optimized titles and tags, chapter timestamps, and short clip suggestions, all in one upload.",
   },
   {
     q: "Is my video stored on your servers?",
@@ -201,7 +201,7 @@ const faqs = [
   },
   {
     q: "How is DayTabs different from ChatGPT?",
-    a: "ChatGPT requires you to know what to ask and how to upload frames manually. DayTabs handles the entire pipeline — upload once, get a complete report with quality scores, edit suggestions, platform-specific titles, tags, timestamps, and short clip ideas. No prompting required.",
+    a: "ChatGPT requires you to know what to ask and how to upload frames manually. DayTabs handles the entire pipeline, upload once, get a complete report with quality scores, edit suggestions, platform-specific titles, tags, timestamps, and short clip ideas. No prompting required.",
   },
   {
     q: "Can I use DayTabs for free?",
@@ -271,7 +271,7 @@ export default function LandingPage() {
   return (
     <div className="min-h-screen bg-background text-foreground overflow-x-hidden">
       <Helmet>
-        <title>DayTabs — AI Video Analysis for Content Creators</title>
+        <title>DayTabs, AI Video Analysis for Content Creators</title>
         <meta
           name="description"
           content="Upload your video and get instant AI feedback on quality, editing, SEO titles, tags, and short clip ideas. Built for YouTube, TikTok, and Instagram creators."
@@ -283,7 +283,7 @@ export default function LandingPage() {
           name="keywords"
           content="AI video analysis, YouTube SEO, video editing tool, content creator tools, video quality checker, TikTok video analyzer, Instagram Reels optimizer"
         />
-        <meta property="og:title" content="DayTabs — AI Video Analysis for Content Creators" />
+        <meta property="og:title" content="DayTabs, AI Video Analysis for Content Creators" />
         <meta
           property="og:description"
           content="Upload your video and get instant AI feedback on quality, editing, SEO titles, tags, and short clip ideas. Built for YouTube, TikTok, and Instagram creators."
@@ -293,7 +293,7 @@ export default function LandingPage() {
         <meta property="og:type" content="website" />
         <meta property="og:site_name" content="DayTabs" />
         <meta name="twitter:card" content="summary_large_image" />
-        <meta name="twitter:title" content="DayTabs — AI Video Analysis for Content Creators" />
+        <meta name="twitter:title" content="DayTabs, AI Video Analysis for Content Creators" />
         <meta
           name="twitter:description"
           content="Upload your video and get instant AI feedback on quality, editing, SEO titles, tags, and short clip ideas. Built for YouTube, TikTok, and Instagram creators."
@@ -349,7 +349,7 @@ export default function LandingPage() {
             className="text-lg md:text-xl text-white/60 max-w-2xl mx-auto mb-10"
           >
             Upload your video and get instant feedback on quality, editing, SEO optimization,
-            and short clip ideas — all in one place. Built for YouTube, TikTok, Instagram,
+            and short clip ideas, all in one place. Built for YouTube, TikTok, Instagram,
             LinkedIn, and Twitter.
           </motion.p>
 
@@ -523,7 +523,7 @@ export default function LandingPage() {
               Built for <span className="gradient-text">Every Platform</span>
             </h2>
             <p className="text-white/50 text-lg max-w-2xl mx-auto mb-8">
-              Whether you publish long-form on YouTube or short-form on TikTok, Instagram Reels, LinkedIn, or Twitter —
+              Whether you publish long-form on YouTube or short-form on TikTok, Instagram Reels, LinkedIn, or Twitter,
               DayTabs gives you tailored recommendations for each platform in a single analysis.
             </p>
             <div className="flex flex-wrap items-center justify-center gap-6">

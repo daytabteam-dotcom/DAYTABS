@@ -784,7 +784,7 @@ export default function ScriptPlannerTab() {
                                           <card.icon className={`w-3.5 h-3.5 ${card.cls}`} />
                                           <p className={`text-[10px] font-bold uppercase tracking-wider opacity-70 ${card.cls}`}>{card.label}</p>
                                         </div>
-                                        <p className="text-[12px] text-white/60 leading-relaxed">{card.value || "—"}</p>
+                                        <p className="text-[12px] text-white/60 leading-relaxed">{card.value || "-"}</p>
                                       </div>
                                     ))}
                                   </div>
