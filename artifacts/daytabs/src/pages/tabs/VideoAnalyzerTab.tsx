@@ -892,6 +892,9 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
       const firstModule = selectedModules.find(m => (results as any)?.[m]);
       setActiveResultTab(firstModule ?? "quality");
 
+      // Refresh plan usage so the Home page counter updates immediately
+      window.dispatchEvent(new CustomEvent("daytabs:plan-updated"));
+
       // Register real PDF export so ExportWarningDialog can trigger it
       const exportFn = async () => {
         if (!resultsRef.current) return;
