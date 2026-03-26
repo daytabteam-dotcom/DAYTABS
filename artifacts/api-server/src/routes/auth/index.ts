@@ -5,9 +5,10 @@ import { OAuth2Client } from "google-auth-library";
 import nodemailer from "nodemailer";
 import { db } from "@workspace/db";
 import { usersTable } from "@workspace/db";
-import { eq, and, gte, count } from "drizzle-orm";
-import { analysisJobsTable, scriptPlannerChatsTable } from "@workspace/db";
+import { eq } from "drizzle-orm";
 import { requireAuth } from "../../middlewares/auth";
+import { normalizePlan, PLAN_LIMITS } from "../../lib/planLimits";
+import { getOrCreateUsage } from "../../lib/usageService";
 
 const router = Router();
 
@@ -67,38 +68,6 @@ function createMailTransport() {
   });
 }
 
-/** Monthly usage counts for the dashboard */
-async function getMonthlyUsageCounts(userId: number): Promise<{ uploadCounts: Record<string, number>; scriptPlannerChats: number }> {
-  const startOfMonth = new Date();
-  startOfMonth.setDate(1);
-  startOfMonth.setHours(0, 0, 0, 0);
-
-  const [uploadRow] = await db
-    .select({ cnt: count() })
-    .from(analysisJobsTable)
-    .where(
-      and(
-        eq(analysisJobsTable.userId, userId),
-        eq(analysisJobsTable.mode, "video-analyzer"),
-        gte(analysisJobsTable.createdAt, startOfMonth)
-      )
-    );
-
-  const [chatRow] = await db
-    .select({ cnt: count() })
-    .from(scriptPlannerChatsTable)
-    .where(
-      and(
-        eq(scriptPlannerChatsTable.userId, userId),
-        gte(scriptPlannerChatsTable.createdAt, startOfMonth)
-      )
-    );
-
-  return {
-    uploadCounts: { "video-analyzer": Number(uploadRow?.cnt ?? 0) },
-    scriptPlannerChats: Number(chatRow?.cnt ?? 0),
-  };
-}
 
 router.post("/signup", async (req, res) => {
   try {
@@ -136,14 +105,23 @@ router.get("/me", requireAuth, async (req, res) => {
   try {
     const [user] = await db.select().from(usersTable).where(eq(usersTable.id, req.auth!.user_id)).limit(1);
     if (!user) { res.status(404).json({ error: "User not found" }); return; }
-    const { uploadCounts, scriptPlannerChats } = await getMonthlyUsageCounts(user.id);
+    const plan = normalizePlan(user.plan);
+    const planConfig = PLAN_LIMITS[plan];
+    const usage = await getOrCreateUsage(user.id);
     res.json({
       id: user.id,
       email: user.email,
       name: user.name,
       plan: user.plan,
-      uploadCounts,
-      scriptPlannerChats,
+      uploadCounts: { "video-analyzer": usage.videoAnalysesUsed },
+      scriptPlannerChats: usage.scriptPlannerChatsUsed,
+      features: planConfig.features,
+      limits: {
+        video_analyses_per_month: planConfig.video_analyses_per_month === Infinity ? -1 : planConfig.video_analyses_per_month,
+        script_planner_chats_per_month: planConfig.script_planner_chats_per_month === Infinity ? -1 : planConfig.script_planner_chats_per_month,
+        max_video_size_bytes: planConfig.max_video_size_bytes,
+        max_video_duration_seconds: planConfig.max_video_duration_seconds,
+      },
     });
   } catch (err) {
     req.log.error({ err }, "Get me error");

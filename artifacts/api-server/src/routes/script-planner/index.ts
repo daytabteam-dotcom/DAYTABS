@@ -2,18 +2,13 @@ import { Router, type IRouter } from "express";
 import { requireAuth } from "../../middlewares/auth";
 import { openai } from "../../lib/openai";
 import { db, scriptPlannerChatsTable } from "@workspace/db";
-import { eq, and, desc, count, gte } from "drizzle-orm";
+import { eq, and, desc } from "drizzle-orm";
+import { normalizePlan, PLAN_LIMITS } from "../../lib/planLimits";
+import { checkAndIncrementScriptChat } from "../../lib/usageService";
 
 const router: IRouter = Router();
 
 router.use(requireAuth);
-
-function normalizePlan(plan: string): "free" | "creator" | "pro" | "studio" {
-  if (plan === "premium") return "creator";
-  if (plan === "professional") return "studio";
-  if (plan === "creator" || plan === "pro" || plan === "studio") return plan as "creator" | "pro" | "studio";
-  return "free";
-}
 
 const SYSTEM_PROMPT_FULL = `You are an expert content strategist and scriptwriter who specialises in high-performing YouTube and social media videos.
 
@@ -144,11 +139,12 @@ router.post("/generate", async (req, res) => {
 
   const rawPlan = req.auth!.plan ?? "free";
   const plan = normalizePlan(rawPlan);
+  const planConfig = PLAN_LIMITS[plan];
   const isFree = plan === "free";
   const isCreator = plan === "creator";
   const isPremiumAI = plan === "pro" || plan === "studio";
 
-  const planMessageLimit = isFree ? 3 : 10;
+  const planMessageLimit = planConfig.script_planner_messages_per_session;
   const userMessageCount = messages.filter(m => m.role === "user").length;
 
   if (userMessageCount > planMessageLimit) {
@@ -156,7 +152,11 @@ router.post("/generate", async (req, res) => {
       ? "Upgrade to Creator for 10 messages per chat."
       : "You've reached the 10 message limit for this chat.";
     res.status(403).json({
+      code: "MESSAGE_LIMIT_REACHED",
       error: `You've used all ${planMessageLimit} messages on this chat. ${upgradeHint}`,
+      title: isFree ? "Message limit reached" : "Chat limit reached",
+      message: upgradeHint,
+      action: isFree ? { label: "Upgrade to Creator — $19/mo", route: "/pricing?highlight=creator" } : undefined,
       limitReached: true,
       type: "message_limit",
     });
@@ -164,7 +164,7 @@ router.post("/generate", async (req, res) => {
   }
 
   const systemPrompt = isFree ? SYSTEM_PROMPT_FREE : SYSTEM_PROMPT_FULL;
-  const model = isPremiumAI ? "gpt-4o" : "gpt-4o-mini";
+  const model = planConfig.script_planner_model;
   const maxTokens = isFree ? 1500 : isCreator ? 4000 : 6000;
 
   const history = messages.slice(-10);
@@ -298,38 +298,12 @@ router.post("/chats", async (req, res) => {
   }
 
   const rawPlanForChat = req.auth!.plan ?? "free";
-  const plan = normalizePlan(rawPlanForChat);
-  const isFree = plan === "free";
-
-  const CHAT_LIMITS: Record<string, number> = { free: 1, creator: 15, pro: 40, studio: Infinity };
-  const chatLimit = CHAT_LIMITS[plan] ?? 1;
 
   try {
-    if (chatLimit !== Infinity) {
-      const startOfMonth = new Date();
-      startOfMonth.setDate(1);
-      startOfMonth.setHours(0, 0, 0, 0);
-
-      const whereClause = isFree
-        ? eq(scriptPlannerChatsTable.userId, userId)
-        : and(eq(scriptPlannerChatsTable.userId, userId), gte(scriptPlannerChatsTable.createdAt, startOfMonth));
-
-      const [{ total }] = await db
-        .select({ total: count() })
-        .from(scriptPlannerChatsTable)
-        .where(whereClause!);
-
-      if (total >= chatLimit) {
-        const nextPlan = plan === "free" ? "Creator" : plan === "creator" ? "Pro" : "Studio";
-        res.status(403).json({
-          error: isFree
-            ? `Free plan is limited to 1 saved chat. Upgrade to Creator for 15 chats per month.`
-            : `You've reached ${chatLimit} chats this month. Upgrade to ${nextPlan} for more.`,
-          limitReached: true,
-          type: "chat_limit",
-        });
-        return;
-      }
+    const chatLimitCheck = await checkAndIncrementScriptChat(userId, rawPlanForChat);
+    if (!chatLimitCheck.allowed) {
+      res.status(429).json({ ...chatLimitCheck.error, limitReached: true, type: "chat_limit" });
+      return;
     }
 
     const [created] = await db

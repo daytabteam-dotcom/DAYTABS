@@ -48,12 +48,17 @@ export function useVideoUpload() {
           uploadUrl = body.uploadUrl;
           fileKey = body.fileKey;
           useR2 = true;
-        } else if (presignRes.status === 429 || presignRes.status === 403) {
-          const e = (await presignRes.json().catch(() => ({}))) as { error?: string };
-          throw new Error(e.error ?? "Upload not allowed");
+        } else if (presignRes.status === 429 || presignRes.status === 403 || presignRes.status === 413) {
+          const body = (await presignRes.json().catch(() => ({}))) as { error?: string; code?: string; title?: string; message?: string; action?: unknown; meta?: unknown };
+          if (body.code) {
+            const err = new Error(body.message ?? body.error ?? "Upload not allowed");
+            (err as any).structured = body;
+            throw err;
+          }
+          throw new Error(body.error ?? "Upload not allowed");
         }
       } catch (err) {
-        if (err instanceof Error && (err.message.includes("limit") || err.message.includes("requires") || err.message.includes("not allowed"))) throw err;
+        if (err instanceof Error && ((err as any).structured || err.message.includes("limit") || err.message.includes("requires") || err.message.includes("not allowed"))) throw err;
       }
 
       if (useR2) {
@@ -95,14 +100,19 @@ export function useVideoUpload() {
           });
 
           if (!startRes.ok) {
-            const e = (await startRes.json().catch(() => ({}))) as { error?: string };
-            throw new Error(e.error ?? "Failed to start analysis");
+            const body = (await startRes.json().catch(() => ({}))) as { error?: string; code?: string; title?: string; message?: string; action?: unknown; meta?: unknown };
+            if (body.code) {
+              const err = new Error(body.message ?? body.error ?? "Failed to start analysis");
+              (err as any).structured = body;
+              throw err;
+            }
+            throw new Error(body.error ?? "Failed to start analysis");
           }
 
           setUploadProgress(100);
           return startRes.json() as Promise<{ jobId: string }>;
         } catch (r2Err) {
-          if (r2Err instanceof Error && (r2Err.message.includes("limit") || r2Err.message.includes("requires") || r2Err.message.includes("allowed"))) throw r2Err;
+          if (r2Err instanceof Error && ((r2Err as any).structured || r2Err.message.includes("limit") || r2Err.message.includes("requires") || r2Err.message.includes("allowed"))) throw r2Err;
           console.warn("[upload] R2 direct upload failed, falling back to multipart:", r2Err);
           setUploadProgress(0);
         }
@@ -131,8 +141,13 @@ export function useVideoUpload() {
           body: form,
         });
         if (!res.ok) {
-          const e = (await res.json().catch(() => ({}))) as { error?: string };
-          throw new Error(e.error ?? "Upload failed");
+          const body = (await res.json().catch(() => ({}))) as { error?: string; code?: string; title?: string; message?: string; action?: unknown; meta?: unknown };
+          if (body.code) {
+            const err = new Error(body.message ?? body.error ?? "Upload failed");
+            (err as any).structured = body;
+            throw err;
+          }
+          throw new Error(body.error ?? "Upload failed");
         }
         setUploadProgress(100);
         return res.json() as Promise<{ jobId: string }>;

@@ -8,7 +8,7 @@ import { exec } from "child_process";
 import { promisify } from "util";
 import { db } from "@workspace/db";
 import { analysisJobsTable } from "@workspace/db";
-import { eq, and, gte, count } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { runAnalysisPipeline, type PipelineMode } from "./pipeline";
 import { updateJob } from "./services";
 import { openai } from "../../lib/openai";
@@ -20,6 +20,8 @@ import {
 } from "@workspace/api-zod";
 import { isR2Configured, generatePresignedPutUrl, downloadFromR2, deleteFromR2 } from "../../lib/r2";
 import { optionalAuth } from "../../middlewares/auth";
+import { normalizePlan, getLimits, buildFileTooLargeError, buildVideoTooLongError } from "../../lib/planLimits";
+import { checkAndIncrementVideoAnalysis, decrementVideoAnalysis, getOrCreateUsage } from "../../lib/usageService";
 
 const execAsync = promisify(exec);
 
@@ -38,60 +40,8 @@ const VOICE_SAMPLE_TEXT: Record<string, string> = {
   shimmer: "Hello! I'm Shimmer — clear, friendly, and approachable. I'm ideal for tutorials, how-tos, and educational content.",
 };
 
-// ── Plan normalization (backward compat) ───────────────────────────────────────
-function normalizePlan(plan: string): "free" | "creator" | "pro" | "studio" {
-  if (plan === "premium") return "creator";
-  if (plan === "professional") return "studio";
-  if (plan === "creator" || plan === "pro" || plan === "studio") return plan as "creator" | "pro" | "studio";
-  return "free";
-}
-
-// ── Plan limits ────────────────────────────────────────────────────────────────
-const PLAN_UPLOAD_LIMITS: Record<string, number> = {
-  free:    3,
-  creator: 15,
-  pro:     40,
-  studio:  Infinity,
-};
-
-const PLAN_SIZE_LIMITS: Record<string, number> = {
-  free:    200 * 1024 * 1024,
-  creator: 500 * 1024 * 1024,
-  pro:     1024 * 1024 * 1024,
-  studio:  2 * 1024 * 1024 * 1024,
-};
-
-const PLAN_DURATION_LIMITS: Record<string, number> = {
-  free:    5 * 60,
-  creator: 15 * 60,
-  pro:     30 * 60,
-  studio:  60 * 60,
-};
-
-async function checkUploadLimit(userId: number, plan: string): Promise<{ allowed: boolean; used: number; limit: number }> {
-  const n = normalizePlan(plan);
-  const limit = PLAN_UPLOAD_LIMITS[n] ?? PLAN_UPLOAD_LIMITS.free;
-
-  if (limit === Infinity) return { allowed: true, used: 0, limit: -1 };
-
-  const startOfMonth = new Date();
-  startOfMonth.setDate(1);
-  startOfMonth.setHours(0, 0, 0, 0);
-
-  const [row] = await db
-    .select({ cnt: count() })
-    .from(analysisJobsTable)
-    .where(
-      and(
-        eq(analysisJobsTable.userId, userId),
-        eq(analysisJobsTable.mode, "video-analyzer"),
-        gte(analysisJobsTable.createdAt, startOfMonth)
-      )
-    );
-
-  const used = Number(row?.cnt ?? 0);
-  return { allowed: used < limit, used, limit };
-}
+// ── Plan normalization (from shared planLimits module) ─────────────────────────
+// (normalizePlan is imported from ../../lib/planLimits)
 
 const uploadDir = path.join(os.tmpdir(), "daytabs-uploads");
 
@@ -157,12 +107,16 @@ router.get("/presign-upload", async (req, res) => {
   const validExts = ["mp4", "mov", "avi", "webm", "mpeg", "mkv"];
   if (!validExts.includes(ext)) { res.status(400).json({ error: "Invalid file extension" }); return; }
 
-  const plan = req.auth?.plan ?? "free";
+  const rawPlan = req.auth?.plan ?? "free";
+  const plan = normalizePlan(rawPlan);
+  const limits = getLimits(rawPlan);
 
-  if (req.auth) {
-    const { allowed, used, limit } = await checkUploadLimit(req.auth.user_id, plan);
-    if (!allowed) {
-      res.status(429).json({ error: `Upload limit reached this month (${used}/${limit}). Upgrade your plan to continue.` });
+  // Peek check (no increment — actual increment happens at /start)
+  if (req.auth && limits.video_analyses_per_month !== Infinity) {
+    const usage = await getOrCreateUsage(req.auth.user_id);
+    if (usage.videoAnalysesUsed >= limits.video_analyses_per_month) {
+      const { buildMonthlyLimitError } = await import("../../lib/planLimits");
+      res.status(429).json(buildMonthlyLimitError(plan, usage.videoAnalysesUsed, limits.video_analyses_per_month));
       return;
     }
   }
@@ -227,14 +181,14 @@ router.post("/start", async (req, res) => {
   const userId = req.auth?.user_id ?? null;
 
   if (userId) {
-    const { allowed, used, limit } = await checkUploadLimit(userId, rawPlan);
-    if (!allowed) {
-      res.status(429).json({ error: `Upload limit reached this month (${used}/${limit}). Upgrade your plan to continue.` });
+    const limitCheck = await checkAndIncrementVideoAnalysis(userId, rawPlan);
+    if (!limitCheck.allowed) {
+      res.status(429).json(limitCheck.error);
       return;
     }
   }
 
-  const maxDurationSeconds = PLAN_DURATION_LIMITS[normalizedPlan] ?? PLAN_DURATION_LIMITS.free;
+  const maxDurationSeconds = getLimits(rawPlan).max_video_duration_seconds;
 
   const jobId = uuidv4();
   const ext = path.extname(fileKey).replace(".", "") || "mp4";
@@ -266,6 +220,7 @@ router.post("/start", async (req, res) => {
     } catch (err) {
       req.log.error({ err, jobId }, "Failed to download from R2");
       await updateJob(jobId, { status: "error", error: "Failed to download video from cloud storage. Please try uploading again." });
+      if (userId) await decrementVideoAnalysis(userId);
       return;
     }
 
@@ -280,8 +235,9 @@ router.post("/start", async (req, res) => {
       audioVoice: (audioVoice as "alloy" | "echo" | "fable" | "onyx" | "nova" | "shimmer") || "alloy",
       plan,
       maxDurationSeconds,
-    }).catch((err) => {
+    }).catch(async (err) => {
       req.log.error({ err, jobId }, "Pipeline error (R2 start)");
+      if (userId) await decrementVideoAnalysis(userId);
     });
   });
 });
@@ -329,26 +285,24 @@ router.post("/upload", upload.single("video"), async (req, res) => {
     const rawPlan = req.auth?.plan ?? "free";
     const normalizedPlan = normalizePlan(rawPlan);
     const userId = req.auth?.user_id ?? null;
+    const planLimits = getLimits(rawPlan);
 
-    const sizeLimit = PLAN_SIZE_LIMITS[normalizedPlan] ?? PLAN_SIZE_LIMITS.free;
-    if (req.file.size > sizeLimit) {
+    if (req.file.size > planLimits.max_video_size_bytes) {
       await fs.unlink(req.file.path).catch(() => {});
-      const limitMB = Math.round(sizeLimit / 1024 / 1024);
-      const limitLabel = limitMB >= 1024 ? `${(limitMB / 1024).toFixed(0)} GB` : `${limitMB} MB`;
-      res.status(413).json({ error: `File exceeds the ${limitLabel} limit for your plan. Upgrade to upload larger videos.` });
+      res.status(413).json(buildFileTooLargeError(normalizedPlan, req.file.size));
       return;
     }
 
     if (userId) {
-      const { allowed, used, limit } = await checkUploadLimit(userId, rawPlan);
-      if (!allowed) {
+      const limitCheck = await checkAndIncrementVideoAnalysis(userId, rawPlan);
+      if (!limitCheck.allowed) {
         await fs.unlink(req.file.path).catch(() => {});
-        res.status(429).json({ error: `Upload limit reached this month (${used}/${limit}). Upgrade your plan to continue.` });
+        res.status(429).json(limitCheck.error);
         return;
       }
     }
 
-    const maxDurationSeconds = PLAN_DURATION_LIMITS[normalizedPlan] ?? PLAN_DURATION_LIMITS.free;
+    const maxDurationSeconds = planLimits.max_video_duration_seconds;
 
     const jobId = uuidv4();
     const translateSubtitles = req.body.translateSubtitles === "true" || req.body.translateSubtitles === true;
@@ -382,8 +336,9 @@ router.post("/upload", upload.single("video"), async (req, res) => {
         audioVoice,
         plan: rawPlan,
         maxDurationSeconds,
-      }).catch((err) => {
+      }).catch(async (err) => {
         req.log.error({ err, jobId }, "Pipeline error");
+        if (userId) await decrementVideoAnalysis(userId);
       });
     });
 

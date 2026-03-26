@@ -13,6 +13,7 @@ import { useToast } from "@/hooks/use-toast";
 import { usePlan, getFileSizeLimit, getFileSizeLimitLabel, getDurationLimitLabel } from "@/hooks/use-plan";
 import { PlanPickerModal } from "@/components/PlanPickerModal";
 import { generateAnalysisPDF } from "@/lib/generateAnalysisPDF";
+import { UpgradeErrorModal, type LimitError } from "@/components/UpgradeErrorModal";
 
 interface TabProps {
   onDataReady: () => void;
@@ -830,6 +831,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
   const [showLimitModal, setShowLimitModal] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [limitError, setLimitError] = useState<LimitError | null>(null);
 
   const { uploadAsync: uploadVideo, isPending: isUploading } = useVideoUpload();
   const { data: pollData } = useAnalysisPolling(jobId);
@@ -889,13 +891,9 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
 
   async function handleAnalyze() {
     if (!file) { toast({ title: "No video selected", description: "Please drop or select a video first.", variant: "destructive" }); return; }
-    if (uploadsRemaining === 0) { setShowLimitModal(true); return; }
 
-    const sizeLimit = getFileSizeLimit(plan.plan);
-    if (file.size > sizeLimit) {
-      toast({ title: "File too large", description: `Your plan allows up to ${getFileSizeLimitLabel(plan.plan)} per video.`, variant: "destructive" });
-      return;
-    }
+    // Client-side pre-checks (informational — server is source of truth)
+    if (uploadsRemaining === 0) { setShowLimitModal(true); return; }
 
     setIsSubmitting(true);
     try {
@@ -909,7 +907,13 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
       });
       setJobId(id);
     } catch (err: any) {
-      toast({ title: "Upload failed", description: err?.message ?? "Please try again.", variant: "destructive" });
+      // Detect structured limit errors from the server
+      const structured = err?.structured ?? err?.response;
+      if (structured?.code) {
+        setLimitError(structured as LimitError);
+      } else {
+        toast({ title: "Upload failed", description: err?.message ?? "Please try again.", variant: "destructive" });
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -933,6 +937,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
   return (
     <div className="space-y-8">
       {showPlanModal && <PlanPickerModal onClose={() => setShowPlanModal(false)} />}
+      <UpgradeErrorModal error={limitError} onClose={() => setLimitError(null)} />
       {showLimitModal && (
         <LimitReachedModal
           limit={limits.uploadLimit}

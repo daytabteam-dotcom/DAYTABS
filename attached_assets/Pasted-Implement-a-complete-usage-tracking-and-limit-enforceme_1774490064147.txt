@@ -1,0 +1,356 @@
+Implement a complete usage tracking and limit enforcement system for DayTabs. 
+Read all existing auth, database, and API route files carefully before starting.
+
+─────────────────────────────────────────
+1. DATABASE SCHEMA — USAGE TRACKING
+─────────────────────────────────────────
+Create or update the database to track usage per user per billing period.
+
+Add a `user_usage` table (or collection) with these fields:
+  - user_id (foreign key to users table)
+  - period_start (date — first day of current billing month)
+  - period_end (date — last day of current billing month)
+  - video_analyses_used (integer, default 0)
+  - script_planner_chats_used (integer, default 0)
+  - last_updated (timestamp)
+
+Add a `user_plans` table if it doesn't exist:
+  - user_id
+  - plan_name (enum: 'free', 'creator', 'pro', 'studio')
+  - plan_started_at (timestamp)
+  - plan_expires_at (timestamp, nullable — null means active)
+  - is_active (boolean)
+
+Reset usage counters automatically at the start of each billing month.
+The reset logic: when a usage check is made, if period_start is in a 
+previous month, reset counters to 0 and update period_start/period_end 
+to the current month before checking limits.
+
+─────────────────────────────────────────
+2. PLAN LIMITS — SOURCE OF TRUTH
+─────────────────────────────────────────
+Define a single config object as the source of truth for all plan limits. 
+Use this everywhere — never hardcode limits in individual routes.
+
+const PLAN_LIMITS = {
+  free: {
+    video_analyses_per_month: 2,
+    max_video_size_mb: 200,
+    max_video_duration_minutes: 5,
+    script_planner_chats_per_month: 1,
+    script_planner_messages_per_session: 3,
+    script_planner_model: 'gpt-4o-mini',
+    features: {
+      quality_report: true,
+      editing_report: true,
+      publish_package: false,
+      short_clip_ideas: false,
+      subtitle_download: false,
+      teleprompter: true,
+      dubbing: false,
+      priority_processing: false,
+    }
+  },
+  creator: {
+    video_analyses_per_month: 15,
+    max_video_size_mb: 500,
+    max_video_duration_minutes: 15,
+    script_planner_chats_per_month: 15,
+    script_planner_messages_per_session: 10,
+    script_planner_model: 'gpt-4o-mini',
+    features: {
+      quality_report: true,
+      editing_report: true,
+      publish_package: true,
+      short_clip_ideas: true,
+      subtitle_download: false,
+      teleprompter: true,
+      dubbing: false,
+      priority_processing: false,
+    }
+  },
+  pro: {
+    video_analyses_per_month: 40,
+    max_video_size_mb: 1024,
+    max_video_duration_minutes: 30,
+    script_planner_chats_per_month: 40,
+    script_planner_messages_per_session: 10,
+    script_planner_model: 'gpt-4o',
+    features: {
+      quality_report: true,
+      editing_report: true,
+      publish_package: true,
+      short_clip_ideas: true,
+      subtitle_download: true,
+      teleprompter: true,
+      dubbing: false,
+      priority_processing: true,
+    }
+  },
+  studio: {
+    video_analyses_per_month: Infinity,
+    max_video_size_mb: 2048,
+    max_video_duration_minutes: 60,
+    script_planner_chats_per_month: Infinity,
+    script_planner_messages_per_session: 10,
+    script_planner_model: 'gpt-4o',
+    features: {
+      quality_report: true,
+      editing_report: true,
+      publish_package: true,
+      short_clip_ideas: true,
+      subtitle_download: true,
+      teleprompter: true,
+      dubbing: false,
+      priority_processing: true,
+    }
+  }
+}
+
+─────────────────────────────────────────
+3. ENFORCEMENT MIDDLEWARE
+─────────────────────────────────────────
+Create a reusable middleware function called `checkLimit` that runs 
+BEFORE any analysis or script planner API call.
+
+It must check in this exact order:
+
+STEP 1 — Authentication
+  If user is not logged in:
+  → Return 401
+  → Error code: AUTH_REQUIRED
+  → Message: "Please sign in to continue."
+
+STEP 2 — Plan lookup
+  Fetch user's current plan from user_plans table.
+  If no plan found, default to 'free'.
+
+STEP 3 — Monthly reset check
+  If period_start is in a previous month:
+  → Reset video_analyses_used = 0
+  → Reset script_planner_chats_used = 0
+  → Update period_start and period_end to current month
+
+STEP 4 — Feature access check
+  If the requested feature is not enabled for the user's plan:
+  → Return 403
+  → Error code: FEATURE_LOCKED
+  → Message: specific per feature (see section 4)
+  → Include: { upgrade_to: 'creator' } (or whichever plan unlocks it)
+
+STEP 5 — Video file size check (for upload routes only)
+  If file size exceeds plan limit:
+  → Return 413
+  → Error code: FILE_TOO_LARGE
+  → Message: specific (see section 4)
+
+STEP 6 — Video duration check (after duration is known)
+  If video duration exceeds plan limit:
+  → Return 422
+  → Error code: VIDEO_TOO_LONG
+  → Message: specific (see section 4)
+
+STEP 7 — Monthly usage limit check
+  If video_analyses_used >= plan limit:
+  → Return 429
+  → Error code: MONTHLY_LIMIT_REACHED
+  → Message: specific (see section 4)
+  → Include: { used: X, limit: Y, resets_on: date }
+
+STEP 8 — Script planner chat limit (for script planner routes only)
+  If script_planner_chats_used >= plan limit:
+  → Return 429
+  → Error code: CHAT_LIMIT_REACHED
+  → Message: specific (see section 4)
+
+STEP 9 — If all checks pass:
+  → Increment the relevant counter
+  → Proceed with the request
+
+─────────────────────────────────────────
+4. ERROR MESSAGES — USER-FACING
+─────────────────────────────────────────
+Every error must return a structured JSON response AND trigger a 
+specific UI state. Never show raw error messages to users.
+
+Define these exact error responses:
+
+AUTH_REQUIRED:
+  title: "Sign in to continue"
+  message: "You need an account to use DayTabs."
+  action: { label: "Sign in", route: "/login" }
+
+FEATURE_LOCKED (publish_package):
+  title: "Publish package is a Creator feature"
+  message: "Get titles, descriptions, tags, and chapters 
+            optimized for every platform you target."
+  action: { label: "Upgrade to Creator — $19/mo", route: "/pricing" }
+
+FEATURE_LOCKED (short_clip_ideas):
+  title: "Short clip ideas require Creator plan"
+  message: "Find the best moments to repurpose across 
+            TikTok, Reels, and Shorts."
+  action: { label: "Upgrade to Creator — $19/mo", route: "/pricing" }
+
+FEATURE_LOCKED (subtitle_download):
+  title: "Subtitle download is a Pro feature"
+  message: "Get YouTube-compatible .srt files generated 
+            automatically from your transcript."
+  action: { label: "Upgrade to Pro — $39/mo", route: "/pricing" }
+
+FILE_TOO_LARGE (free, 200MB limit):
+  title: "Video file is too large"
+  message: "Free plan supports videos up to 200 MB. 
+            Your file is [X] MB."
+  action: { label: "Upgrade for larger files", route: "/pricing" }
+
+FILE_TOO_LARGE (creator, 500MB limit):
+  title: "Video file is too large"
+  message: "Creator plan supports videos up to 500 MB. 
+            Your file is [X] MB."
+  action: { label: "Upgrade to Pro for up to 1 GB", route: "/pricing" }
+
+VIDEO_TOO_LONG (free, 5min limit):
+  title: "Video is too long for your plan"
+  message: "Free plan supports videos up to 5 minutes. 
+            Your video is [X] minutes long."
+  action: { label: "Upgrade to Creator for 15 min videos", 
+            route: "/pricing" }
+
+VIDEO_TOO_LONG (creator, 15min limit):
+  title: "Video is too long for your plan"
+  message: "Creator plan supports videos up to 15 minutes. 
+            Your video is [X] minutes long."
+  action: { label: "Upgrade to Pro for 30 min videos", 
+            route: "/pricing" }
+
+MONTHLY_LIMIT_REACHED (free):
+  title: "You've used both free analyses this month"
+  message: "Your 2 free analyses reset on [date]. Upgrade to 
+            Creator for 15 analyses every month."
+  action: { label: "Upgrade to Creator — $19/mo", route: "/pricing" }
+  secondary_action: { label: "Resets on [date]", disabled: true }
+
+MONTHLY_LIMIT_REACHED (creator):
+  title: "You've used all 15 analyses this month"
+  message: "Your analyses reset on [date]. Upgrade to Pro 
+            for 40 analyses per month."
+  action: { label: "Upgrade to Pro — $39/mo", route: "/pricing" }
+
+MONTHLY_LIMIT_REACHED (pro):
+  title: "You've used all 40 analyses this month"
+  message: "Your analyses reset on [date]. Upgrade to Studio 
+            for unlimited analyses."
+  action: { label: "Upgrade to Studio — $89/mo", route: "/pricing" }
+
+CHAT_LIMIT_REACHED (free):
+  title: "You've used your 1 free script chat this month"
+  message: "Upgrade to Creator for 15 script planning 
+            sessions every month."
+  action: { label: "Upgrade to Creator — $19/mo", route: "/pricing" }
+
+CHAT_LIMIT_REACHED (creator):
+  title: "You've used all 15 script chats this month"
+  message: "Upgrade to Pro for 40 sessions with the 
+            more powerful GPT-4o model."
+  action: { label: "Upgrade to Pro — $39/mo", route: "/pricing" }
+
+GENERIC_ERROR:
+  title: "Something went wrong"
+  message: "We hit an unexpected issue processing your video. 
+            Your analysis count has not been charged."
+  action: { label: "Try again", reload: true }
+  note: If the error occurs AFTER the counter was incremented but 
+        BEFORE analysis completes, decrement the counter back.
+
+─────────────────────────────────────────
+5. COUNTER ROLLBACK ON FAILURE
+─────────────────────────────────────────
+If an analysis is started (counter incremented) but fails before 
+completing due to a server error or API error:
+- Decrement video_analyses_used by 1
+- Log the failure with: user_id, timestamp, error_type, job_id
+- Show GENERIC_ERROR to the user
+- Never charge a failed analysis against the user's monthly limit
+
+─────────────────────────────────────────
+6. FRONTEND ERROR HANDLING
+─────────────────────────────────────────
+Create a reusable ErrorModal component that handles all error states.
+
+The modal must:
+- Show the title and message from the error response
+- Show the primary action button (styled with the existing purple theme)
+- Show secondary action if present (styled as text link)
+- For MONTHLY_LIMIT_REACHED: show a mini plan comparison 
+  (current plan vs next plan, 3 key differences only)
+- For FEATURE_LOCKED: show a one-line preview of what they're missing
+- Never show error codes or stack traces to the user
+- Be dismissible with ESC key or clicking outside
+- On the pricing page link, highlight the recommended upgrade plan 
+  automatically using URL param: /pricing?highlight=creator
+
+Also add inline limit indicators in the dashboard:
+- Show "X / Y analyses used this month" progress bar on home dashboard
+- Show "X / Y script chats used" in Script Planner sidebar
+- When usage reaches 80%, change progress bar color to amber
+- When usage reaches 100%, change to red and disable the 
+  relevant action button with a tooltip showing reset date
+
+─────────────────────────────────────────
+7. API ROUTES TO PROTECT
+─────────────────────────────────────────
+Apply the checkLimit middleware to these routes:
+
+POST /api/analysis/upload
+  → Check: auth, file_size, monthly_limit
+  → After duration known: check video_duration
+  → After completion: increment video_analyses_used
+
+POST /api/analysis/[job_id]/publish
+  → Check: auth, feature(publish_package)
+
+POST /api/analysis/[job_id]/subtitles
+  → Check: auth, feature(subtitle_download)
+
+POST /api/script-planner/chat
+  → Check: auth, chat_limit, messages_per_session
+  → On new session: increment script_planner_chats_used
+
+─────────────────────────────────────────
+8. USAGE API ENDPOINT
+─────────────────────────────────────────
+Create GET /api/user/usage that returns:
+
+{
+  plan: 'free',
+  usage: {
+    video_analyses: { used: 2, limit: 2, resets_on: '2026-04-01' },
+    script_chats: { used: 1, limit: 1, resets_on: '2026-04-01' }
+  },
+  features: {
+    publish_package: false,
+    short_clip_ideas: false,
+    subtitle_download: false,
+    dubbing: false
+  }
+}
+
+The frontend should call this endpoint on app load and after each 
+analysis completes to keep the UI counters accurate.
+
+─────────────────────────────────────────
+IMPORTANT NOTES:
+- All limit checks must happen server-side — never trust the client
+- Do not change Script Planner or Teleprompter UI
+- Do not change the visual theme
+- Free plan limit is 2 video analyses per month — not 3
+- All existing analyses already in the database should be counted 
+  toward the current month's usage on first load
+- Test every error state manually before marking complete:
+    1. Upload a video over the size limit
+    2. Upload a video over the duration limit
+    3. Use both free analyses and try a 3rd
+    4. Try to access publish package as a free user
+    5. Use the 1 free script chat and try another
+    6. Simulate a mid-analysis failure and verify counter rolls back

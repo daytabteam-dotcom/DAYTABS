@@ -3,6 +3,14 @@ import { useUser } from "./use-user";
 
 export type PlanName = "free" | "creator" | "pro" | "studio" | "premium" | "professional";
 
+export interface PlanFeatures {
+  publish_package: boolean;
+  short_clip_ideas: boolean;
+  subtitle_download: boolean;
+  dubbing: boolean;
+  priority_queue: boolean;
+}
+
 export interface PlanInfo {
   plan: PlanName;
   normalizedPlan: "free" | "creator" | "pro" | "studio";
@@ -12,6 +20,7 @@ export interface PlanInfo {
   isCreator: boolean;
   isPro: boolean;
   isStudio: boolean;
+  features: PlanFeatures;
 }
 
 export interface PlanLimits {
@@ -26,6 +35,16 @@ export interface ScriptPlannerLimits {
   chatsRemaining: number;
 }
 
+function getDefaultFeatures(norm: "free" | "creator" | "pro" | "studio"): PlanFeatures {
+  return {
+    publish_package:  norm === "creator" || norm === "pro" || norm === "studio",
+    short_clip_ideas: norm === "creator" || norm === "pro" || norm === "studio",
+    subtitle_download:norm === "pro" || norm === "studio",
+    dubbing:          false,
+    priority_queue:   norm === "studio",
+  };
+}
+
 function normalizePlan(plan: string): "free" | "creator" | "pro" | "studio" {
   if (plan === "premium") return "creator";
   if (plan === "professional") return "studio";
@@ -34,7 +53,7 @@ function normalizePlan(plan: string): "free" | "creator" | "pro" | "studio" {
 }
 
 const UPLOAD_LIMITS: Record<string, number> = {
-  free:    3,
+  free:    2,
   creator: 15,
   pro:     40,
   studio:  -1,
@@ -132,6 +151,7 @@ export function usePlan() {
           plan: string;
           uploadCounts: Record<string, number>;
           scriptPlannerChats?: number;
+          features?: PlanFeatures;
         };
         const rawPlan = (data.plan || "free") as PlanName;
         const norm = normalizePlan(rawPlan);
@@ -144,6 +164,7 @@ export function usePlan() {
           isCreator: norm === "creator",
           isPro: norm === "pro",
           isStudio: norm === "studio",
+          features: data.features ?? getDefaultFeatures(norm),
         });
       }
     } catch {
@@ -174,6 +195,7 @@ export function usePlan() {
     isCreator: norm === "creator",
     isPro: norm === "pro",
     isStudio: norm === "studio",
+    features: getDefaultFeatures(norm),
   };
 
   function getModeLimits(mode: string): PlanLimits {
