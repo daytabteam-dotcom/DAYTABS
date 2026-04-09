@@ -51,17 +51,18 @@ export function useUploadVideoWithFile() {
  * Hook to poll analysis status until it is complete or errored.
  */
 export function useAnalysisPolling(jobId: string | null) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return useGetAnalysisStatus(jobId!, {
     query: {
       enabled: !!jobId,
-      refetchInterval: (query) => {
+      refetchInterval: (query: { state: { data?: { status?: string } } }) => {
         const status = query.state.data?.status;
         if (status === "complete" || status === "error") {
           return false; // Stop polling
         }
         return 2000; // Poll every 2 seconds
       }
-    }
+    } as any
   });
 }
 
@@ -69,11 +70,12 @@ export function useAnalysisPolling(jobId: string | null) {
  * Hook to fetch final results once analysis is complete.
  */
 export function useAnalysisResults(jobId: string | null, isComplete: boolean) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return useGetAnalysisResult(jobId!, {
     query: {
       enabled: !!jobId && isComplete,
       staleTime: Infinity, // Don't refetch results once we have them
-    }
+    } as any
   });
 }
 

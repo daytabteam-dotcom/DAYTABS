@@ -88,7 +88,7 @@ function mapSubscription(d: Record<string, unknown>): PaddleSubscription {
     nextBilledAt: (d.next_billed_at as string) || null,
     canceledAt: (d.canceled_at as string) || null,
     scheduledChange: sc?.action && sc.effective_at
-      ? { action: sc.action as PaddleSubscription["scheduledChange"]["action"], effectiveAt: sc.effective_at }
+      ? { action: sc.action as NonNullable<PaddleSubscription["scheduledChange"]>["action"], effectiveAt: sc.effective_at }
       : null,
     managementUrls: {
       updatePaymentMethod: mgmt?.update_payment_method ?? null,

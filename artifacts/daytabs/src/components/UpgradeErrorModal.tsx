@@ -66,6 +66,7 @@ export function UpgradeErrorModal({ error, onClose }: UpgradeErrorModalProps) {
       document.addEventListener("keydown", handleKeyDown);
       return () => document.removeEventListener("keydown", handleKeyDown);
     }
+    return undefined;
   }, [error, handleKeyDown]);
 
   function handleAction() {

@@ -32,7 +32,7 @@ fs.mkdir(UPLOAD_BASE, { recursive: true }).catch(() => {});
 
 interface UploadSession {
   uploadId: string;
-  userId: string | null;
+  userId: number | null;
   rawPlan: string;
   filename: string;
   fileSize: number;
@@ -89,7 +89,7 @@ router.post("/init", async (req, res) => {
 
     const rawPlan = (req as any).auth?.plan ?? "free";
     const normalizedPlan = normalizePlan(rawPlan);
-    const userId = (req as any).auth?.user_id ?? null;
+    const userId: number | null = (req as any).auth?.user_id != null ? Number((req as any).auth.user_id) : null;
     const planLimits = getLimits(rawPlan);
 
     const allowedTypes = [
