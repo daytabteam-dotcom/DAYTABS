@@ -15,8 +15,9 @@ RUN pnpm install --frozen-lockfile
 
 RUN NODE_ENV=production pnpm run build:prod
 
-RUN ls -la artifacts/landing/dist/ || echo "LANDING DIST MISSING"
-RUN ls -la artifacts/daytabs/dist/ || echo "DAYTABS DIST MISSING"
+RUN ls -la artifacts/landing/dist/ || (echo "ERROR: landing dist missing" && exit 1)
+RUN ls -la artifacts/daytabs/dist/ || (echo "ERROR: daytabs dist missing" && exit 1)
+RUN ls -la artifacts/api-server/dist/ || (echo "ERROR: api-server dist missing" && exit 1)
 
 EXPOSE 3000
 
