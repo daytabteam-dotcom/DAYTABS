@@ -33,20 +33,17 @@ app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
 app.use("/api", router);
 
-// In production, serve the built frontend apps from the API server
-if (process.env.NODE_ENV === "production") {
-  const projectRoot = path.resolve('/app');
+const projectRoot = path.resolve('/app');
 
-  app.use('/', express.static(path.join(projectRoot, 'artifacts/landing/dist')));
-  app.use('/panel', express.static(path.join(projectRoot, 'artifacts/daytabs/dist')));
+app.use('/', express.static(path.join(projectRoot, 'artifacts/landing/dist')));
+app.use('/panel', express.static(path.join(projectRoot, 'artifacts/daytabs/dist')));
 
-  app.get('/panel/*', (_req, res) => {
-    res.sendFile(path.join(projectRoot, 'artifacts/daytabs/dist/index.html'));
-  });
+app.get('/panel/*', (_req, res) => {
+  res.sendFile(path.join(projectRoot, 'artifacts/daytabs/dist/index.html'));
+});
 
-  app.get('*', (_req, res) => {
-    res.sendFile(path.join(projectRoot, 'artifacts/landing/dist/index.html'));
-  });
-}
+app.get('*', (_req, res) => {
+  res.sendFile(path.join(projectRoot, 'artifacts/landing/dist/index.html'));
+});
 
 export default app;
