@@ -36,18 +36,18 @@ app.use("/api", router);
 // In production, serve the built frontend apps from the API server
 if (process.env.NODE_ENV === "production") {
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
-  const landingDir = path.resolve(__dirname, "../../landing/dist/public");
-  const daytabsDir = path.resolve(__dirname, "../../daytabs/dist/public");
+  const landingDir = path.join(__dirname, '../../../artifacts/landing/dist');
+  const daytabsDir = path.join(__dirname, '../../../artifacts/daytabs/dist');
 
   // Serve DayTabs panel at /panel/
   app.use("/panel", express.static(daytabsDir));
-  app.use("/panel", (_req, res) => {
+  app.get("/panel/*", (_req, res) => {
     res.sendFile(path.join(daytabsDir, "index.html"));
   });
 
   // Serve landing page at /  (must come last — catch-all)
-  app.use(express.static(landingDir));
-  app.use((_req, res) => {
+  app.use("/", express.static(landingDir));
+  app.get("*", (_req, res) => {
     res.sendFile(path.join(landingDir, "index.html"));
   });
 }

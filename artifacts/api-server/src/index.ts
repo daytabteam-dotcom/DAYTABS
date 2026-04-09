@@ -21,24 +21,12 @@ async function runStartupMigrations() {
   }
 }
 
-const rawPort = process.env["PORT"];
-
-if (!rawPort) {
-  throw new Error(
-    "PORT environment variable is required but was not provided.",
-  );
-}
-
-const port = Number(rawPort);
-
-if (Number.isNaN(port) || port <= 0) {
-  throw new Error(`Invalid PORT value: "${rawPort}"`);
-}
+const PORT = parseInt(process.env.PORT ?? '3000', 10);
 
 await runStartupMigrations();
 
-const server = app.listen(port, () => {
-  logger.info({ port }, "Server listening");
+const server = app.listen(PORT, () => {
+  logger.info({ port: PORT }, "Server listening");
 });
 
 // Extend timeouts to support large video uploads (up to 2 GB for Studio plan).

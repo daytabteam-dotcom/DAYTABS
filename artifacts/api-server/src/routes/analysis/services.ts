@@ -108,13 +108,27 @@ export async function transcribeAudio(audioPath: string): Promise<{ text: string
 }
 
 export async function extractAudio(videoPath: string, outputPath: string): Promise<void> {
-  await execAsync(`ffmpeg -i "${videoPath}" -vn -ar 16000 -ac 1 -c:a libmp3lame -q:a 4 "${outputPath}" -y`);
+  try {
+    await execAsync(`ffmpeg -i "${videoPath}" -vn -ar 16000 -ac 1 -c:a libmp3lame -q:a 4 "${outputPath}" -y`);
+  } catch (err: any) {
+    if (err.message?.includes('ENOENT') || err.code === 'ENOENT') {
+      throw new Error('ffmpeg is not installed on this server. Please install ffmpeg to process videos.');
+    }
+    throw err;
+  }
 }
 
 export async function compressVideo(inputPath: string, outputPath: string): Promise<void> {
-  await execAsync(
-    `ffmpeg -i "${inputPath}" -vf scale=640:-2 -crf 32 -preset veryfast "${outputPath}" -y`
-  );
+  try {
+    await execAsync(
+      `ffmpeg -i "${inputPath}" -vf scale=640:-2 -crf 32 -preset veryfast "${outputPath}" -y`
+    );
+  } catch (err: any) {
+    if (err.message?.includes('ENOENT') || err.code === 'ENOENT') {
+      throw new Error('ffmpeg is not installed on this server. Please install ffmpeg to process videos.');
+    }
+    throw err;
+  }
 }
 
 export async function extractFrames(videoPath: string, framesDir: string, count = 5): Promise<string[]> {
