@@ -28,10 +28,28 @@ app.use(
   }),
 );
 app.use(cors());
-app.use(express.json({ limit: "50mb" }));
-app.use(express.urlencoded({ extended: true, limit: "50mb" }));
+
+// Body parsing middleware - applied to all routes except multipart uploads
+app.use((req, res, next) => {
+  // Skip body parsing for multipart/form-data requests (file uploads)
+  if (req.headers['content-type']?.includes('multipart/form-data')) {
+    return next();
+  }
+
+  express.json({ limit: "50mb" })(req, res, next);
+});
+
+app.use((req, res, next) => {
+  // Skip body parsing for multipart/form-data requests (file uploads)
+  if (req.headers['content-type']?.includes('multipart/form-data')) {
+    return next();
+  }
+
+  express.urlencoded({ extended: true, limit: "50mb" })(req, res, next);
+});
 
 app.use("/api", router);
+
 
 const projectRoot = path.resolve('/app');
 

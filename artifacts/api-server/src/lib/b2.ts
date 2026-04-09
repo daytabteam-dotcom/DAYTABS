@@ -47,8 +47,12 @@ function getB2Bucket(): string {
 }
 
 export async function uploadToB2(key: string, filePath: string, contentType: string) {
+  logger.info({ key, filePath, contentType }, "uploadToB2 called");
+
   const client = getB2Client();
   const bucket = getB2Bucket();
+
+  logger.info({ bucket, endpoint: process.env.B2_ENDPOINT }, "B2 client and bucket initialized");
 
   try {
     const stats = await fs.promises.stat(filePath);
@@ -63,6 +67,8 @@ export async function uploadToB2(key: string, filePath: string, contentType: str
       // <= 100MB: use buffer for better compatibility
       body = await fs.promises.readFile(filePath);
     }
+
+    logger.info({ key, bodyType: stats.size > 100 * 1024 * 1024 ? 'stream' : 'buffer', size: stats.size }, "Prepared upload body");
 
     await client.send(
       new PutObjectCommand({
@@ -107,22 +113,5 @@ export async function downloadFromB2(key: string, destPath: string) {
   } catch (err) {
     logger.error({ err, key, destPath }, "B2 download failed");
     throw err;
-  }
-}
-
-export async function deleteFromB2(key: string) {
-  try {
-    const client = getB2Client();
-    const bucket = getB2Bucket();
-    logger.info({ key }, "Deleting from B2");
-    await client.send(
-      new DeleteObjectCommand({
-        Bucket: bucket,
-        Key: key,
-      }),
-    );
-    logger.info({ key }, "B2 deletion completed");
-  } catch (err) {
-    logger.error({ err, key }, "Failed to delete from B2");
   }
 }

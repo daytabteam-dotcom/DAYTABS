@@ -43,16 +43,28 @@ const VOICE_SAMPLE_TEXT: Record<string, string> = {
 
 const uploadDir = path.join(os.tmpdir(), "daytabs-uploads");
 
+// Ensure upload directory exists
+fs.mkdir(uploadDir, { recursive: true }).catch((err) => {
+  console.error("Failed to create upload directory:", err);
+});
+
 // Multer streams files directly to disk — never buffers in memory.
 // Limit is 2 GB (Studio plan max). Plan-specific size checks happen after upload.
 const storage = multer.diskStorage({
   destination: async (_req, _file, cb) => {
-    await fs.mkdir(uploadDir, { recursive: true });
-    cb(null, uploadDir);
+    try {
+      await fs.mkdir(uploadDir, { recursive: true });
+      cb(null, uploadDir);
+    } catch (err) {
+      console.error("Failed to create upload destination:", err);
+      cb(err as Error, "");
+    }
   },
   filename: (_req, file, cb) => {
     const ext = path.extname(file.originalname) || ".mp4";
-    cb(null, `${uuidv4()}${ext}`);
+    const filename = `${uuidv4()}${ext}`;
+    console.log(`Generated filename: ${filename} for ${file.originalname}`);
+    cb(null, filename);
   },
 });
 
@@ -100,10 +112,25 @@ router.get("/voice-preview/:voice", async (req, res) => {
 // Files are streamed from the client directly to disk via multer.
 // The pipeline runs on the local file, then deletes it.
 router.post("/upload", (req, res, next) => {
+  req.log.info({
+    body: req.body,
+    headers: req.headers,
+    contentType: req.headers['content-type'],
+    method: req.method,
+    url: req.url
+  }, "Upload request received");
+
   // Extend request/response timeout for large file uploads (up to 2 GB)
   req.socket.setTimeout(60 * 60 * 1000); // 1 hour
 
   upload.single("video")(req, res, (multerErr) => {
+    req.log.info({
+      multerErr: multerErr?.message,
+      file: req.file?.path,
+      fileSize: req.file?.size,
+      originalName: req.file?.originalname
+    }, "Multer processing complete");
+
     if (multerErr) {
       const code = (multerErr as any).code as string | undefined;
       if (code === "LIMIT_FILE_SIZE") {
@@ -120,8 +147,26 @@ router.post("/upload", (req, res, next) => {
     next();
   });
 }, async (req, res) => {
+  req.log.info({
+    file: req.file?.path,
+    size: req.file?.size,
+    hasFile: !!req.file,
+    bodyKeys: Object.keys(req.body || {})
+  }, "Upload handler started");
+
   try {
-    if (!req.file) { res.status(400).json({ error: "No video file uploaded" }); return; }
+    if (!req.file) {
+      req.log.error("No file received in upload handler");
+      res.status(400).json({ error: "No video file uploaded" });
+      return;
+    }
+
+    req.log.info({
+      filePath: req.file.path,
+      size: req.file.size,
+      mimetype: req.file.mimetype,
+      originalName: req.file.originalname
+    }, "File received successfully");
 
     const validatedMode: PipelineMode = "video-analyzer";
 
@@ -197,26 +242,31 @@ router.post("/upload", (req, res, next) => {
     // Validate B2 configuration before attempting upload
     const b2EnvVars = ["B2_ENDPOINT", "B2_ACCESS_KEY_ID", "B2_SECRET_ACCESS_KEY", "B2_BUCKET_NAME"];
     const missingVars = b2EnvVars.filter(v => !process.env[v]);
+    req.log.info({
+      b2EnvVars: b2EnvVars.map(v => ({ name: v, exists: !!process.env[v] })),
+      missingVars
+    }, "Checking B2 configuration");
+
     if (missingVars.length > 0) {
       await fs.unlink(req.file.path).catch(() => {});
       req.log.error({ missingVars }, "B2 environment variables not configured");
-      res.status(503).json({ 
-        error: "Video upload service temporarily unavailable", 
-        details: `Missing configuration: ${missingVars.join(", ")}` 
+      res.status(503).json({
+        error: "Video upload service temporarily unavailable",
+        details: `Missing configuration: ${missingVars.join(", ")}`
       });
       return;
     }
 
     try {
-      req.log.info({ jobId, b2Key, size: req.file.size }, "Uploading video to B2");
+      req.log.info({ jobId, b2Key, size: req.file.size, filePath: req.file.path }, "Starting B2 upload");
       await uploadToB2(b2Key, req.file.path, req.file.mimetype);
       await fs.unlink(req.file.path).catch(() => {});
-      req.log.info({ jobId, b2Key }, "B2 upload succeeded");
+      req.log.info({ jobId, b2Key }, "B2 upload succeeded, local file cleaned up");
     } catch (err) {
       await fs.unlink(req.file.path).catch(() => {});
-      req.log.error({ err, jobId, b2Key }, "B2 upload failed");
-      res.status(500).json({ 
-        error: "Failed to upload video to temporary storage", 
+      req.log.error({ err, jobId, b2Key, errorMessage: err instanceof Error ? err.message : String(err) }, "B2 upload failed");
+      res.status(500).json({
+        error: "Failed to upload video to temporary storage",
         details: err instanceof Error ? err.message : String(err)
       });
       return;
@@ -268,6 +318,28 @@ router.post("/upload", (req, res, next) => {
 
 router.get("/queue-status", (req, res) => {
   res.json(getQueueStatus());
+});
+
+// ── Upload health check ───────────────────────────────────────────────────────
+router.get("/upload-health", (req, res) => {
+  const uploadDir = path.join(os.tmpdir(), "daytabs-uploads");
+  const b2EnvVars = ["B2_ENDPOINT", "B2_ACCESS_KEY_ID", "B2_SECRET_ACCESS_KEY", "B2_BUCKET_NAME"];
+  const missingVars = b2EnvVars.filter(v => !process.env[v]);
+
+  res.json({
+    status: "ok",
+    timestamp: new Date().toISOString(),
+    uploadDir: uploadDir,
+    uploadDirExists: require("fs").existsSync(uploadDir),
+    b2Configured: missingVars.length === 0,
+    missingB2Vars: missingVars,
+    queueSize: analysisQueue.size,
+    queuePending: analysisQueue.pending,
+    multerLimits: {
+      fileSize: "2GB",
+      allowedTypes: ["video/mp4", "video/quicktime", "video/x-msvideo", "video/webm", "video/mpeg", "video/mov"]
+    }
+  });
 });
 
 // ── Job status polling ────────────────────────────────────────────────────────

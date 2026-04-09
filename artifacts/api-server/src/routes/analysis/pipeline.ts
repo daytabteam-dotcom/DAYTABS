@@ -4,7 +4,7 @@ import path from "path";
 import { db } from "@workspace/db";
 import { analysisJobsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
-import { downloadFromB2, deleteFromB2 } from "../../lib/b2";
+import { downloadFromB2 } from "../../lib/b2";
 import {
   updateJob, transcribeAudio, extractAudio, extractFrames,
   analyzeVisuals, analyzeAudio, analyzeEditingPoints,
@@ -40,7 +40,6 @@ export async function runAnalysisPipeline(
     await downloadFromB2(b2Key, localVideoPath);
     return await runVideoAnalyzer(jobId, localVideoPath, options);
   } finally {
-    await deleteFromB2(b2Key).catch(() => {});
     await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
   }
 }
