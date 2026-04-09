@@ -15,6 +15,7 @@ export const analysisJobsTable = pgTable("analysis_jobs", {
   replaceAudio: integer("replace_audio").notNull().default(0),
   audioLanguage: text("audio_language"),
   videoPath: text("video_path"),
+  b2Key: text("b2_key").notNull().default(""),
   audioPath: text("audio_path"),
   framesDir: text("frames_dir"),
   result: jsonb("result"),

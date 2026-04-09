@@ -121,19 +121,6 @@ export async function extractAudio(videoPath: string, outputPath: string): Promi
   }
 }
 
-export async function compressVideo(inputPath: string, outputPath: string): Promise<void> {
-  try {
-    await execAsync(
-      `ffmpeg -i "${inputPath}" -vf scale=640:-2 -crf 32 -preset veryfast "${outputPath}" -y`
-    );
-  } catch (err: any) {
-    if (err.message?.includes('ENOENT') || err.code === 'ENOENT') {
-      throw new Error('ffmpeg is not installed on this server. Please install ffmpeg to process videos.');
-    }
-    throw err;
-  }
-}
-
 export async function extractFrames(videoPath: string, framesDir: string, count = 5): Promise<string[]> {
   const duration = await getMediaDuration(videoPath);
   try {

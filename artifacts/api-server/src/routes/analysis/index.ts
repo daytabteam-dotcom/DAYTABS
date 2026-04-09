@@ -11,6 +11,8 @@ import { analysisJobsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { runAnalysisPipeline, type PipelineMode } from "./pipeline";
 import { updateJob } from "./services";
+import { uploadToB2 } from "../../lib/b2";
+import { analysisQueue, getQueueStatus } from "../../lib/analysisQueue";
 import { openai } from "../../lib/openai";
 import {
   GetAnalysisStatusParams,
@@ -184,6 +186,24 @@ router.post("/upload", (req, res, next) => {
     const audioLanguage = req.body.audioLanguage || null;
     const audioVoice = req.body.audioVoice || "alloy";
 
+    if (analysisQueue.size >= 10) {
+      await fs.unlink(req.file.path).catch(() => {});
+      res.status(429).json({ error: "Too many analysis jobs queued. Please wait and try again." });
+      return;
+    }
+
+    const b2Key = `uploads/${jobId}/video.mp4`;
+
+    try {
+      await uploadToB2(b2Key, req.file.path, req.file.mimetype);
+      await fs.unlink(req.file.path).catch(() => {});
+    } catch (err) {
+      await fs.unlink(req.file.path).catch(() => {});
+      req.log.error({ err, jobId }, "B2 upload failed");
+      res.status(500).json({ error: "Failed to upload video to temporary storage" });
+      return;
+    }
+
     await db.insert(analysisJobsTable).values({
       id: jobId,
       userId: userId ?? undefined,
@@ -196,37 +216,40 @@ router.post("/upload", (req, res, next) => {
       subtitleLanguage: req.body.subtitleLanguage || null,
       replaceAudio: 0,
       audioLanguage,
-      videoPath: req.file.path,
-    });
+      b2Key,
+    } as any);
 
-    // Respond immediately — pipeline runs in background
-    res.json({ jobId, message: "Video uploaded. Analysis started." });
+    // Respond immediately — analysis will execute through the queue.
+    res.json({ jobId, message: "Video uploaded. Analysis queued." });
 
-    setImmediate(() => {
-      runAnalysisPipeline(jobId, req.file!.path, {
-        mode: validatedMode,
-        platform: validatedPlatforms[0] ?? "youtube_long",
-        platforms: validatedPlatforms,
-        modules: validatedModules,
-        translateSubtitles,
-        subtitleLanguage: req.body.subtitleLanguage || undefined,
-        audioLanguage: audioLanguage || undefined,
-        audioVoice,
-        plan: rawPlan,
-        maxDurationSeconds,
-      }).then(async () => {
-        // Only count analyses that produced a successful report
+    analysisQueue
+      .add(async () => {
+        await runAnalysisPipeline(jobId, b2Key, {
+          mode: validatedMode,
+          platform: validatedPlatforms[0] ?? "youtube_long",
+          platforms: validatedPlatforms,
+          modules: validatedModules,
+          translateSubtitles,
+          subtitleLanguage: req.body.subtitleLanguage || undefined,
+          audioLanguage: audioLanguage || undefined,
+          audioVoice,
+          plan: rawPlan,
+          maxDurationSeconds,
+        });
         if (userId) await incrementVideoAnalysis(userId);
-      }).catch((err) => {
-        req.log.error({ err, jobId }, "Pipeline error");
-        // Counter is NOT incremented on failure — no rollback needed
+      })
+      .catch((err) => {
+        req.log.error({ err, jobId }, "Queued pipeline error");
       });
-    });
   } catch (err) {
     req.log.error({ err }, "Upload handler error");
     if (req.file?.path) await fs.unlink(req.file.path).catch(() => {});
     res.status(500).json({ error: "Upload failed", details: err instanceof Error ? err.message : String(err) });
   }
+});
+
+router.get("/queue-status", (req, res) => {
+  res.json(getQueueStatus());
 });
 
 // ── Job status polling ────────────────────────────────────────────────────────

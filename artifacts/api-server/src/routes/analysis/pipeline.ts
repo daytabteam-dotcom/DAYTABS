@@ -1,10 +1,12 @@
 import fs from "fs/promises";
+import os from "os";
 import path from "path";
 import { db } from "@workspace/db";
 import { analysisJobsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
+import { downloadFromB2, deleteFromB2 } from "../../lib/b2";
 import {
-  updateJob, transcribeAudio, extractAudio, compressVideo, extractFrames,
+  updateJob, transcribeAudio, extractAudio, extractFrames,
   analyzeVisuals, analyzeAudio, analyzeEditingPoints,
   generateSeo, generateShortClipIdeas, generateSrt, translateSegments,
   computeQualityScore, getMediaDuration, logger,
@@ -27,10 +29,20 @@ export interface PipelineOptions {
 
 export async function runAnalysisPipeline(
   jobId: string,
-  videoPath: string,
+  b2Key: string,
   options: PipelineOptions
 ): Promise<void> {
-  return runVideoAnalyzer(jobId, videoPath, options);
+  const workDir = path.join(os.tmpdir(), "daytabs", jobId);
+  const localVideoPath = path.join(workDir, "video.mp4");
+
+  try {
+    await fs.mkdir(workDir, { recursive: true });
+    await downloadFromB2(b2Key, localVideoPath);
+    return await runVideoAnalyzer(jobId, localVideoPath, options);
+  } finally {
+    await deleteFromB2(b2Key).catch(() => {});
+    await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
+  }
 }
 
 async function runVideoAnalyzer(
@@ -39,7 +51,6 @@ async function runVideoAnalyzer(
   options: PipelineOptions
 ): Promise<void> {
   const workDir = path.join(path.dirname(videoPath), jobId);
-  const compressedPath = path.join(workDir, "compressed.mp4");
   const audioPath = path.join(workDir, "audio.mp3");
   const framesDir = path.join(workDir, "frames");
 
@@ -57,15 +68,11 @@ async function runVideoAnalyzer(
     await fs.mkdir(workDir, { recursive: true });
     await fs.mkdir(framesDir, { recursive: true });
 
-    // Step 1: Compress
-    await updateJob(jobId, { status: "extracting_audio", progress: 5, currentStep: "Compressing video" });
-    await compressVideo(videoPath, compressedPath);
-
-    // Step 2: Extract audio
+    // Step 1: Extract audio
     await updateJob(jobId, { status: "extracting_audio", progress: 12, currentStep: "Extracting audio" });
-    await extractAudio(compressedPath, audioPath);
+    await extractAudio(videoPath, audioPath);
 
-    // Step 3: Duration check
+    // Step 2: Duration check
     await updateJob(jobId, { status: "extracting_audio", progress: 18, currentStep: "Checking video duration" });
     const durationSec = await getMediaDuration(audioPath);
     if (durationSec > maxDuration) {
@@ -79,7 +86,6 @@ async function runVideoAnalyzer(
         error: `Video is ${Math.round(durationSec / 60)} minutes long, but the ${planLabel} plan allows up to ${Math.round(maxDuration / 60)} minutes. Upgrade your plan or trim your video.`,
       });
       await fs.unlink(videoPath).catch(() => {});
-      await fs.unlink(compressedPath).catch(() => {});
       await fs.unlink(audioPath).catch(() => {});
       return;
     }
@@ -191,17 +197,11 @@ async function runVideoAnalyzer(
       result,
     });
 
-    const savedVideoExt = path.extname(videoPath);
-    const savedVideoPath = path.join(workDir, `original${savedVideoExt}`);
-    await fs.rename(videoPath, savedVideoPath).catch(() => fs.unlink(videoPath).catch(() => {}));
-    await fs.unlink(compressedPath).catch(() => {});
     await fs.rm(framesDir, { recursive: true, force: true }).catch(() => {});
-    await db.update(analysisJobsTable).set({ videoPath: savedVideoPath, updatedAt: new Date() }).where(eq(analysisJobsTable.id, jobId));
-
   } catch (err) {
     logger.error({ err, jobId }, "Video analyzer pipeline error");
     await updateJob(jobId, { status: "error", error: err instanceof Error ? err.message : String(err) });
     await fs.unlink(videoPath).catch(() => {});
-    await fs.unlink(compressedPath).catch(() => {});
   }
 }
+
