@@ -1,7 +1,10 @@
 import app from "./app";
+import express from "express";
 import { logger } from "./lib/logger";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
+import path from "path";
+import { fileURLToPath } from "url";
 
 /**
  * Apply any pending schema changes that couldn't run via drizzle-kit during the build phase.
@@ -24,6 +27,27 @@ async function runStartupMigrations() {
 const PORT = parseInt(process.env.PORT ?? '3000', 10);
 
 await runStartupMigrations();
+
+if (process.env.NODE_ENV === 'production') {
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = path.dirname(__filename);
+
+  // Serve landing page at /
+  app.use('/', express.static(path.join(__dirname, '../../../artifacts/landing/dist')));
+
+  // Serve main app at /panel/
+  app.use('/panel', express.static(path.join(__dirname, '../../../artifacts/daytabs/dist')));
+
+  // SPA fallback for /panel/* routes
+  app.get('/panel/*', (_req, res) => {
+    res.sendFile(path.join(__dirname, '../../../artifacts/daytabs/dist/index.html'));
+  });
+
+  // SPA fallback for landing /* routes
+  app.get('*', (_req, res) => {
+    res.sendFile(path.join(__dirname, '../../../artifacts/landing/dist/index.html'));
+  });
+}
 
 const server = app.listen(PORT, '0.0.0.0', () => {
   logger.info({ port: PORT }, "Server listening");
