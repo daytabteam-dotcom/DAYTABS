@@ -62,7 +62,7 @@ async function runVideoAnalyzer(
   videoPath: string,
   options: PipelineOptions
 ): Promise<void> {
-  const workDir = path.join(path.dirname(videoPath), jobId);
+  const workDir = path.dirname(videoPath);
   const audioPath = path.join(workDir, "audio.mp3");
   const framesDir = path.join(workDir, "frames");
 
