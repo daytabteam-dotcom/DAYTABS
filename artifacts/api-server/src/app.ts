@@ -35,15 +35,15 @@ app.use("/api", router);
 
 const projectRoot = path.resolve('/app');
 
-app.use('/', express.static(path.join(projectRoot, 'artifacts/landing/dist')));
-app.use('/panel', express.static(path.join(projectRoot, 'artifacts/daytabs/dist')));
+app.use('/', express.static(path.join(projectRoot, 'artifacts/landing/dist/public')));
+app.use('/panel', express.static(path.join(projectRoot, 'artifacts/daytabs/dist/public')));
 
 app.get('/panel/{*path}', (_req, res) => {
-  res.sendFile(path.join(projectRoot, 'artifacts/daytabs/dist/index.html'));
+  res.sendFile(path.join(projectRoot, 'artifacts/daytabs/dist/public/index.html'));
 });
 
 app.get('/{*path}', (_req, res) => {
-  res.sendFile(path.join(projectRoot, 'artifacts/landing/dist/index.html'));
+  res.sendFile(path.join(projectRoot, 'artifacts/landing/dist/public/index.html'));
 });
 
 export default app;
