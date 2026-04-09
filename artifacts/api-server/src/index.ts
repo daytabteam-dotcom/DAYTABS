@@ -25,7 +25,7 @@ const PORT = parseInt(process.env.PORT ?? '3000', 10);
 
 await runStartupMigrations();
 
-const server = app.listen(PORT, () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
   logger.info({ port: PORT }, "Server listening");
 });
 

@@ -16,7 +16,10 @@ import {
 
 const router = Router();
 
-const JWT_SECRET = process.env.JWT_SECRET || "daytabs-dev-secret-change-in-production";
+const JWT_SECRET = process.env.JWT_SECRET!;
+if (!JWT_SECRET) {
+  throw new Error("JWT_SECRET environment variable is required");
+}
 const WEBHOOK_SECRET = process.env.PADDLE_WEBHOOK_SECRET || "";
 
 const PRICE_TO_PLAN: Record<string, string> = {

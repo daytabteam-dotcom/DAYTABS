@@ -12,7 +12,10 @@ import { getOrCreateUsage } from "../../lib/usageService";
 
 const router = Router();
 
-const JWT_SECRET = process.env.JWT_SECRET || "daytabs-dev-secret-change-in-production";
+const JWT_SECRET = process.env.JWT_SECRET!;
+if (!JWT_SECRET) {
+  throw new Error("JWT_SECRET environment variable is required");
+}
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
 const CORE_APP_URL = process.env.CORE_APP_URL || "/panel/";
@@ -38,17 +41,6 @@ function getGoogleRedirectUri(req: import("express").Request): string {
   if (process.env.GOOGLE_REDIRECT_URI) return process.env.GOOGLE_REDIRECT_URI;
   return `${getPublicBaseUrl(req)}/api/auth/google/callback`;
 }
-
-router.get("/debug-oauth", (req, res) => {
-  const redirectUri = getGoogleRedirectUri(req);
-  res.json({
-    redirectUri,
-    authorizedJsOrigin: redirectUri.replace("/api/auth/google/callback", ""),
-    authorizedRedirectUri: redirectUri,
-    envDomains: process.env.REPLIT_DOMAINS || "(not set)",
-    envDevDomain: process.env.REPLIT_DEV_DOMAIN || "(not set)",
-  });
-});
 
 function signToken(userId: number, email: string, name?: string | null, plan = "free") {
   return jwt.sign(

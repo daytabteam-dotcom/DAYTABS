@@ -24,8 +24,11 @@ export async function getMediaDuration(filePath: string): Promise<number> {
     );
     const d = parseFloat(stdout.trim());
     return isNaN(d) ? 0 : d;
-  } catch {
-    return 0;
+  } catch (err: any) {
+    if (err.message?.includes('ENOENT') || err.code === 'ENOENT') {
+      throw new Error('ffmpeg is not installed on this server. Please install ffmpeg to process videos.');
+    }
+    throw err;
   }
 }
 
@@ -133,15 +136,22 @@ export async function compressVideo(inputPath: string, outputPath: string): Prom
 
 export async function extractFrames(videoPath: string, framesDir: string, count = 5): Promise<string[]> {
   const duration = await getMediaDuration(videoPath);
-  if (duration <= 0) {
-    await execAsync(`ffmpeg -i "${videoPath}" -vf "select=lt(n\\,${count})" -vsync vfr "${framesDir}/frame_%03d.jpg" -y`);
-  } else {
-    const interval = duration / (count + 1);
-    for (let i = 1; i <= count; i++) {
-      const ts = (interval * i).toFixed(2);
-      const outPath = path.join(framesDir, `frame_${String(i).padStart(3, "0")}.jpg`);
-      await execAsync(`ffmpeg -ss ${ts} -i "${videoPath}" -frames:v 1 -q:v 3 "${outPath}" -y`).catch(() => {});
+  try {
+    if (duration <= 0) {
+      await execAsync(`ffmpeg -i "${videoPath}" -vf "select=lt(n\\,${count})" -vsync vfr "${framesDir}/frame_%03d.jpg" -y`);
+    } else {
+      const interval = duration / (count + 1);
+      for (let i = 1; i <= count; i++) {
+        const ts = (interval * i).toFixed(2);
+        const outPath = path.join(framesDir, `frame_${String(i).padStart(3, "0")}.jpg`);
+        await execAsync(`ffmpeg -ss ${ts} -i "${videoPath}" -frames:v 1 -q:v 3 "${outPath}" -y`);
+      }
     }
+  } catch (err: any) {
+    if (err.message?.includes('ENOENT') || err.code === 'ENOENT') {
+      throw new Error('ffmpeg is not installed on this server. Please install ffmpeg to process videos.');
+    }
+    throw err;
   }
   const files = await fs.readdir(framesDir);
   const jpgs = files.filter(f => f.endsWith(".jpg")).sort().slice(0, count);
