@@ -12,6 +12,19 @@ import {
   computeQualityScore, getMediaDuration, logger,
 } from "./services";
 
+async function withTimeout<T>(promise: Promise<T>, ms: number, label: string, jobId: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<T>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+  });
+
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export type PipelineMode = "video-analyzer";
 
 export interface PipelineOptions {
@@ -69,7 +82,9 @@ async function runVideoAnalyzer(
 
     // Step 1: Extract audio
     await updateJob(jobId, { status: "extracting_audio", progress: 12, currentStep: "Extracting audio" });
+    logger.info({ jobId, videoPath, audioPath }, "Calling extractAudio");
     await extractAudio(videoPath, audioPath);
+    logger.info({ jobId, audioPath }, "Audio extraction complete");
 
     // Step 2: Duration check
     await updateJob(jobId, { status: "extracting_audio", progress: 18, currentStep: "Checking video duration" });
@@ -91,6 +106,7 @@ async function runVideoAnalyzer(
 
     // Step 4: Transcribe (one Whisper call for all modules)
     await updateJob(jobId, { status: "transcribing", progress: 25, currentStep: "Transcribing audio", audioPath });
+    logger.info({ jobId, audioPath }, "Calling transcribeAudio");
     let transcriptText = "";
     let transcriptSegments: Array<{ start: number; end: number; text: string }> = [];
 
@@ -98,6 +114,7 @@ async function runVideoAnalyzer(
       const transcription = await transcribeAudio(audioPath);
       transcriptText = transcription.text;
       transcriptSegments = transcription.segments;
+      logger.info({ jobId, transcriptLength: transcriptText.length, segmentCount: transcriptSegments.length }, "Whisper transcription completed");
     } catch (err) {
       logger.error({ err, jobId }, "Transcription failed");
       await updateJob(jobId, { status: "error", error: `Transcription failed: ${err instanceof Error ? err.message : String(err)}` });
@@ -120,13 +137,28 @@ async function runVideoAnalyzer(
     if (runQuality) {
       await updateJob(jobId, { status: "analyzing_visual", progress, currentStep: "Extracting video frames" });
       const frameCount = isFree ? 1 : 5;
-      const frameBase64List = await extractFrames(videoPath, framesDir, frameCount);
+      const frameBase64List = await withTimeout(
+        extractFrames(videoPath, framesDir, frameCount),
+        90000,
+        "frame extraction",
+        jobId,
+      );
 
       progress = 45;
       await updateJob(jobId, { status: "analyzing_visual", progress, currentStep: "Analyzing video quality" });
       const primaryPlatform = platforms[0] ?? "youtube_long";
-      const visualAnalysis = await analyzeVisuals(frameBase64List, primaryPlatform, plan);
-      const audioAnalysis = await analyzeAudio(transcriptText, 0.9);
+      const visualAnalysis = await withTimeout(
+        analyzeVisuals(frameBase64List, primaryPlatform, plan),
+        90000,
+        "visual analysis",
+        jobId,
+      );
+      const audioAnalysis = await withTimeout(
+        analyzeAudio(transcriptText, 0.9),
+        90000,
+        "audio analysis",
+        jobId,
+      );
       const qualityScore = computeQualityScore(visualAnalysis, audioAnalysis);
 
       result.quality = {
@@ -140,7 +172,12 @@ async function runVideoAnalyzer(
     // Step 6: Editing module
     if (runEditing) {
       await updateJob(jobId, { status: "analyzing_content", progress, currentStep: "Analyzing editing points" });
-      const editingData = await analyzeEditingPoints(transcriptText, transcriptSegments, audioPath, plan);
+      const editingData = await withTimeout(
+        analyzeEditingPoints(transcriptText, transcriptSegments, audioPath, plan),
+        90000,
+        "editing analysis",
+        jobId,
+      );
       result.editing = editingData;
       progress = 68;
     }
@@ -151,7 +188,12 @@ async function runVideoAnalyzer(
       const publishResults: Record<string, unknown> = {};
       for (const platform of platforms) {
         try {
-          const seoResult = await generateSeo(transcriptText, platform, transcriptSegments, plan);
+          const seoResult = await withTimeout(
+            generateSeo(transcriptText, platform, transcriptSegments, plan),
+            90000,
+            `SEO generation for ${platform}`,
+            jobId,
+          );
           publishResults[platform] = seoResult;
         } catch (err) {
           logger.warn({ err, platform, jobId }, "SEO generation failed for platform");
@@ -166,7 +208,12 @@ async function runVideoAnalyzer(
         let subtitleSegments = transcriptSegments;
         if (options.translateSubtitles && options.subtitleLanguage) {
           try {
-            subtitleSegments = await translateSegments(transcriptSegments, options.subtitleLanguage);
+            subtitleSegments = await withTimeout(
+              translateSegments(transcriptSegments, options.subtitleLanguage),
+              90000,
+              "subtitle translation",
+              jobId,
+            );
           } catch (err) {
             logger.warn({ err, jobId }, "Subtitle translation failed");
           }
@@ -184,7 +231,12 @@ async function runVideoAnalyzer(
     // Step 8: Short clips module
     if (runShortClips) {
       await updateJob(jobId, { status: "analyzing_content", progress, currentStep: "Finding best short clip moments" });
-      const shortClipsData = await generateShortClipIdeas(transcriptText, transcriptSegments, platforms, plan);
+      const shortClipsData = await withTimeout(
+        generateShortClipIdeas(transcriptText, transcriptSegments, platforms, plan),
+        90000,
+        "short clip generation",
+        jobId,
+      );
       result.shortClips = shortClipsData;
       progress = 95;
     }

@@ -60,19 +60,40 @@ export function buildApproximateSegments(
   return segs;
 }
 
+async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<T>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+  });
+
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export async function transcribeAudio(audioPath: string): Promise<{ text: string; segments: Array<{ start: number; end: number; text: string }> }> {
   const audioBuffer = await fs.readFile(audioPath);
   const actualDuration = await getMediaDuration(audioPath);
+  logger.info({ audioPath, actualDuration }, "Starting transcription");
 
   // Attempt verbose transcription with word-level timestamps
   try {
-    const file = await toFile(audioBuffer, "audio.mp3", { type: "audio/mpeg" });
-    const response = await openai.audio.transcriptions.create({
-      file,
-      model: "whisper-1",
-      response_format: "verbose_json",
-      timestamp_granularities: ["word", "segment"],
-    } as Parameters<typeof openai.audio.transcriptions.create>[0]);
+    const file = await toFile(audioBuffer, "audio.mp3");
+    logger.info({ audioPath }, "Calling Whisper verbose transcription");
+
+    const response = await withTimeout(
+      openai.audio.transcriptions.create({
+        file,
+        model: "whisper-1",
+        response_format: "verbose_json",
+        timestamp_granularities: ["word", "segment"],
+      } as Parameters<typeof openai.audio.transcriptions.create>[0]),
+      90000,
+      "Whisper verbose transcription"
+    );
+
     const r = response as unknown as {
       text: string;
       segments?: Array<{ start: number; end: number; text: string }>;
@@ -86,25 +107,37 @@ export async function transcribeAudio(audioPath: string): Promise<{ text: string
       const segments = actualDuration > 0
         ? rawSegments.map(s => ({ ...s, start: Math.min(s.start, actualDuration), end: Math.min(s.end, actualDuration) }))
         : rawSegments;
+      logger.info({ audioPath, segmentCount: segments.length }, "Whisper verbose transcription succeeded");
       return { text: r.text || "", segments };
     }
     if (r.text) {
+      logger.info({ audioPath, textLength: r.text.length }, "Whisper verbose transcription returned text only");
       return { text: r.text, segments: buildApproximateSegments(r.text, actualDuration) };
     }
   } catch (err) {
-    logger.warn({ err }, "Whisper verbose transcription failed, falling back to basic");
+    logger.warn({ err, audioPath }, "Whisper verbose transcription failed, falling back to basic");
   }
 
   // Basic fallback
   try {
-    const file = await toFile(audioBuffer, "audio.mp3", { type: "audio/mpeg" });
-    const response = await openai.audio.transcriptions.create({
-      file,
-      model: "whisper-1",
-    });
-    if (response.text) return { text: response.text, segments: buildApproximateSegments(response.text, actualDuration) };
+    const file = await toFile(audioBuffer, "audio.mp3");
+    logger.info({ audioPath }, "Calling Whisper basic transcription");
+
+    const response = await withTimeout(
+      openai.audio.transcriptions.create({
+        file,
+        model: "whisper-1",
+      }),
+      120000,
+      "Whisper basic transcription"
+    );
+
+    if (response.text) {
+      logger.info({ audioPath, textLength: response.text.length }, "Whisper basic transcription succeeded");
+      return { text: response.text, segments: buildApproximateSegments(response.text, actualDuration) };
+    }
   } catch (err) {
-    logger.warn({ err }, "Whisper basic transcription also failed");
+    logger.warn({ err, audioPath }, "Whisper basic transcription also failed");
   }
 
   return { text: "", segments: [] };
