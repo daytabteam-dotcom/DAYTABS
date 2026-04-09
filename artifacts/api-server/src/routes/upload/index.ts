@@ -20,6 +20,7 @@ import {
   checkVideoAnalysisLimit,
   incrementVideoAnalysis,
 } from "../../lib/usageService";
+import { uploadToB2 } from "../../lib/b2";
 import { logger } from "../../lib/logger";
 
 const execAsync = promisify(exec);
@@ -341,6 +342,23 @@ router.post("/complete", async (req, res) => {
     const jobId = uuidv4();
     const userId = session.userId;
     const validatedMode: PipelineMode = "video-analyzer";
+    const b2Key = `uploads/${jobId}/video.mp4`;
+
+    // Upload assembled file to B2
+    try {
+      logger.info({ jobId, b2Key, assembledPath }, "Uploading assembled file to B2");
+      await uploadToB2(b2Key, assembledPath, session.mimeType);
+      logger.info({ jobId, b2Key }, "B2 upload succeeded for chunked upload");
+    } catch (err) {
+      logger.error({ err, jobId, b2Key }, "B2 upload failed for chunked upload");
+      sessions.delete(uploadId);
+      await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
+      res.status(500).json({
+        error: "Failed to upload video to temporary storage",
+        details: err instanceof Error ? err.message : String(err)
+      });
+      return;
+    }
 
     await db.insert(analysisJobsTable).values({
       id: jobId,
@@ -354,15 +372,19 @@ router.post("/complete", async (req, res) => {
       subtitleLanguage: session.subtitleLanguage ?? null,
       replaceAudio: 0,
       audioLanguage: session.audioLanguage ?? null,
-      videoPath: assembledPath,
+      videoPath: b2Key, // Store B2 key as videoPath for compatibility
+      b2Key: b2Key,
     });
 
     sessions.delete(uploadId);
 
-    res.json({ jobId, filePath: assembledPath });
+    // Clean up local assembled file after B2 upload
+    await fs.unlink(assembledPath).catch(() => {});
+
+    res.json({ jobId, filePath: b2Key });
 
     setImmediate(() => {
-      runAnalysisPipeline(jobId, assembledPath, {
+      runAnalysisPipeline(jobId, b2Key, {
         mode: validatedMode,
         platform: session.platforms[0] ?? "youtube_long",
         platforms: session.platforms,
