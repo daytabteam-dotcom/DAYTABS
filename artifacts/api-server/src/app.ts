@@ -35,20 +35,17 @@ app.use("/api", router);
 
 // In production, serve the built frontend apps from the API server
 if (process.env.NODE_ENV === "production") {
-  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  const projectRoot = path.resolve('/app');
 
-  // Serve landing page at /
-  app.use('/', express.static(path.join(__dirname, '../../../artifacts/landing/dist')));
-  // Serve main app at /panel/
-  app.use('/panel', express.static(path.join(__dirname, '../../../artifacts/daytabs/dist')));
+  app.use('/', express.static(path.join(projectRoot, 'artifacts/landing/dist')));
+  app.use('/panel', express.static(path.join(projectRoot, 'artifacts/daytabs/dist')));
 
-  // SPA fallback for panel
-  app.get('/panel/*', (req, res) => {
-    res.sendFile(path.join(__dirname, '../../../artifacts/daytabs/dist/index.html'));
+  app.get('/panel/*', (_req, res) => {
+    res.sendFile(path.join(projectRoot, 'artifacts/daytabs/dist/index.html'));
   });
-  // SPA fallback for landing
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, '../../../artifacts/landing/dist/index.html'));
+
+  app.get('*', (_req, res) => {
+    res.sendFile(path.join(projectRoot, 'artifacts/landing/dist/index.html'));
   });
 }
 
