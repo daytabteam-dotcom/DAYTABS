@@ -194,13 +194,31 @@ router.post("/upload", (req, res, next) => {
 
     const b2Key = `uploads/${jobId}/video.mp4`;
 
+    // Validate B2 configuration before attempting upload
+    const b2EnvVars = ["B2_ENDPOINT", "B2_ACCESS_KEY_ID", "B2_SECRET_ACCESS_KEY", "B2_BUCKET_NAME"];
+    const missingVars = b2EnvVars.filter(v => !process.env[v]);
+    if (missingVars.length > 0) {
+      await fs.unlink(req.file.path).catch(() => {});
+      req.log.error({ missingVars }, "B2 environment variables not configured");
+      res.status(503).json({ 
+        error: "Video upload service temporarily unavailable", 
+        details: `Missing configuration: ${missingVars.join(", ")}` 
+      });
+      return;
+    }
+
     try {
+      req.log.info({ jobId, b2Key, size: req.file.size }, "Uploading video to B2");
       await uploadToB2(b2Key, req.file.path, req.file.mimetype);
       await fs.unlink(req.file.path).catch(() => {});
+      req.log.info({ jobId, b2Key }, "B2 upload succeeded");
     } catch (err) {
       await fs.unlink(req.file.path).catch(() => {});
-      req.log.error({ err, jobId }, "B2 upload failed");
-      res.status(500).json({ error: "Failed to upload video to temporary storage" });
+      req.log.error({ err, jobId, b2Key }, "B2 upload failed");
+      res.status(500).json({ 
+        error: "Failed to upload video to temporary storage", 
+        details: err instanceof Error ? err.message : String(err)
+      });
       return;
     }
 
