@@ -17,4 +17,4 @@ RUN NODE_ENV=production pnpm run build:prod
 
 EXPOSE 3000
 
-CMD ["pnpm", "start"]
+CMD ["sh", "-c", "pnpm --filter @workspace/db run push && node --enable-source-maps artifacts/api-server/dist/index.mjs"]
