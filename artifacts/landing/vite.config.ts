@@ -8,16 +8,8 @@ import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
 const rawPort = process.env.PORT;
 const port = rawPort ? Number(rawPort) : 3000;
 
-const basePath = process.env.BASE_PATH;
-
-if (!basePath) {
-  throw new Error(
-    "BASE_PATH environment variable is required but was not provided.",
-  );
-}
-
 export default defineConfig({
-  base: basePath,
+  base: process.env.BASE_PATH ?? '/',
   define: {
     "import.meta.env.VITE_PADDLE_CLIENT_TOKEN": JSON.stringify(process.env.PADDLE_CLIENT_TOKEN ?? ""),
     "import.meta.env.VITE_PADDLE_ENVIRONMENT": JSON.stringify(process.env.PADDLE_ENVIRONMENT ?? "production"),
