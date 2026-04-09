@@ -38,11 +38,11 @@ const projectRoot = path.resolve('/app');
 app.use('/', express.static(path.join(projectRoot, 'artifacts/landing/dist')));
 app.use('/panel', express.static(path.join(projectRoot, 'artifacts/daytabs/dist')));
 
-app.get('/panel/*', (_req, res) => {
+app.get('/panel/{*path}', (_req, res) => {
   res.sendFile(path.join(projectRoot, 'artifacts/daytabs/dist/index.html'));
 });
 
-app.get('*', (_req, res) => {
+app.get('/{*path}', (_req, res) => {
   res.sendFile(path.join(projectRoot, 'artifacts/landing/dist/index.html'));
 });
 
