@@ -11,9 +11,28 @@ import { toFile } from "openai";
 
 export const execAsync = promisify(exec);
 
+async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<T>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+  });
+
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export async function updateJob(jobId: string, updates: Partial<typeof analysisJobsTable.$inferInsert>) {
+  const setData: any = { ...updates, updatedAt: new Date() };
+  if (updates.result) {
+    const current = await db.select({ result: analysisJobsTable.result }).from(analysisJobsTable).where(eq(analysisJobsTable.id, jobId)).limit(1);
+    const existingResult = current[0]?.result || {};
+    setData.result = { ...existingResult, ...updates.result };
+  }
   await db.update(analysisJobsTable)
-    .set({ ...updates, updatedAt: new Date() })
+    .set(setData)
     .where(eq(analysisJobsTable.id, jobId));
 }
 
@@ -145,7 +164,7 @@ export async function transcribeAudio(audioPath: string): Promise<{ text: string
 
 export async function extractAudio(videoPath: string, outputPath: string): Promise<void> {
   try {
-    await execAsync(`ffmpeg -i "${videoPath}" -vn -ar 16000 -ac 1 -c:a libmp3lame -q:a 4 "${outputPath}" -y`);
+    await withTimeout(execAsync(`ffmpeg -i "${videoPath}" -vn -ar 16000 -ac 1 -c:a libmp3lame -q:a 4 "${outputPath}" -y`), 60000, "ffmpeg audio extraction");
   } catch (err: any) {
     if (err.message?.includes('ENOENT') || err.code === 'ENOENT') {
       throw new Error('ffmpeg is not installed on this server. Please install ffmpeg to process videos.');
@@ -158,13 +177,16 @@ export async function extractFrames(videoPath: string, framesDir: string, count 
   const duration = await getMediaDuration(videoPath);
   try {
     if (duration <= 0) {
-      await execAsync(`ffmpeg -i "${videoPath}" -vf "select=lt(n\\,${count})" -vsync vfr "${framesDir}/frame_%03d.jpg" -y`);
+      logger.info({ videoPath, count }, "Extracting frames with select filter");
+      await withTimeout(execAsync(`ffmpeg -i "${videoPath}" -vf "select=lt(n\\,${count})" -vsync vfr "${framesDir}/frame_%03d.jpg" -y`), 60000, "ffmpeg frame extraction select");
     } else {
       const interval = duration / (count + 1);
+      logger.info({ videoPath, count, duration, interval }, "Extracting frames at intervals");
       for (let i = 1; i <= count; i++) {
         const ts = (interval * i).toFixed(2);
         const outPath = path.join(framesDir, `frame_${String(i).padStart(3, "0")}.jpg`);
-        await execAsync(`ffmpeg -ss ${ts} -i "${videoPath}" -frames:v 1 -q:v 3 "${outPath}" -y`);
+        logger.info({ i, ts, outPath }, "Extracting frame");
+        await withTimeout(execAsync(`ffmpeg -ss ${ts} -i "${videoPath}" -frames:v 1 -q:v 3 "${outPath}" -y`), 30000, `ffmpeg frame extraction ${i}`);
       }
     }
   } catch (err: any) {
@@ -175,6 +197,7 @@ export async function extractFrames(videoPath: string, framesDir: string, count 
   }
   const files = await fs.readdir(framesDir);
   const jpgs = files.filter(f => f.endsWith(".jpg")).sort().slice(0, count);
+  logger.info({ framesDir, extractedCount: jpgs.length }, "Frame extraction completed");
   return Promise.all(jpgs.map(async (f) => {
     const buf = await fs.readFile(path.join(framesDir, f));
     return buf.toString("base64");

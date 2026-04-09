@@ -121,6 +121,8 @@ async function runVideoAnalyzer(
       return;
     }
 
+    await updateJob(jobId, { result: { transcript: { segments: transcriptSegments, fullText: transcriptText } } });
+
     let progress = 35;
     const result: Record<string, unknown> = {
       mode: "video-analyzer",
@@ -137,12 +139,14 @@ async function runVideoAnalyzer(
     if (runQuality) {
       await updateJob(jobId, { status: "analyzing_visual", progress, currentStep: "Extracting video frames" });
       const frameCount = isFree ? 1 : 5;
+      logger.info({ jobId, frameCount }, "Starting frame extraction");
       const frameBase64List = await withTimeout(
         extractFrames(videoPath, framesDir, frameCount),
         90000,
         "frame extraction",
         jobId,
       );
+      logger.info({ jobId, frameCount: frameBase64List.length }, "Frame extraction completed");
 
       progress = 45;
       await updateJob(jobId, { status: "analyzing_visual", progress, currentStep: "Analyzing video quality" });
@@ -166,6 +170,7 @@ async function runVideoAnalyzer(
         ...visualAnalysis,
         ...audioAnalysis,
       };
+      await updateJob(jobId, { result: { quality: result.quality } });
       progress = 55;
     }
 
@@ -179,6 +184,7 @@ async function runVideoAnalyzer(
         jobId,
       );
       result.editing = editingData;
+      await updateJob(jobId, { result: { editing: editingData } });
       progress = 68;
     }
 
@@ -202,6 +208,7 @@ async function runVideoAnalyzer(
       }
 
       result.publish = publishResults;
+      await updateJob(jobId, { result: { publish: publishResults } });
 
       // SRT only for paid users
       if (!isFree) {
@@ -238,6 +245,7 @@ async function runVideoAnalyzer(
         jobId,
       );
       result.shortClips = shortClipsData;
+      await updateJob(jobId, { result: { shortClips: shortClipsData } });
       progress = 95;
     }
 
