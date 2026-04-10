@@ -1,6 +1,6 @@
 FROM node:24-slim
 
-RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y ffmpeg postgresql-client && rm -rf /var/lib/apt/lists/*
 RUN npm install -g pnpm
 
 WORKDIR /app
@@ -21,4 +21,4 @@ RUN ls -la artifacts/api-server/dist/ || (echo "ERROR: api-server dist missing" 
 
 EXPOSE 3000
 
-CMD ["sh", "-c", "pnpm --filter @workspace/db run push && node --enable-source-maps artifacts/api-server/dist/index.mjs"]
+CMD ["sh", "-c", "/app/scripts/wait-for-db.sh && pnpm --filter @workspace/db run push && node --enable-source-maps artifacts/api-server/dist/index.mjs"]
