@@ -11,19 +11,6 @@ import { toFile } from "openai";
 
 export const execAsync = promisify(exec);
 
-async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<T>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
-  });
-
-  try {
-    return await Promise.race([promise, timeout]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
-
 export async function updateJob(jobId: string, updates: Partial<typeof analysisJobsTable.$inferInsert>) {
   const setData: any = { ...updates, updatedAt: new Date() };
   if (updates.result) {
