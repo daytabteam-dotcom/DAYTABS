@@ -11,7 +11,6 @@ import { analysisJobsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { runAnalysisPipeline, type PipelineMode } from "./pipeline";
 import { updateJob } from "./services";
-import { uploadToB2 } from "../../lib/b2";
 import { analysisQueue, getQueueStatus } from "../../lib/analysisQueue";
 import { openai } from "../../lib/openai";
 import {
@@ -237,52 +236,21 @@ router.post("/upload", (req, res, next) => {
       return;
     }
 
-    const b2Key = `uploads/${jobId}/video.mp4`;
-
-    // Validate B2 configuration before attempting upload
-    const b2EnvVars = ["B2_ENDPOINT", "B2_ACCESS_KEY_ID", "B2_SECRET_ACCESS_KEY", "B2_BUCKET_NAME"];
-    const missingVars = b2EnvVars.filter(v => !process.env[v]);
-    req.log.info({
-      b2EnvVars: b2EnvVars.map(v => ({ name: v, exists: !!process.env[v] })),
-      missingVars
-    }, "Checking B2 configuration");
-
-    if (missingVars.length > 0) {
-      await fs.unlink(req.file.path).catch(() => {});
-      req.log.error({ missingVars }, "B2 environment variables not configured");
-      res.status(503).json({
-        error: "Video upload service temporarily unavailable",
-        details: `Missing configuration: ${missingVars.join(", ")}`
-      });
-      return;
-    }
-
-    try {
-      req.log.info({ jobId, b2Key, size: req.file.size, filePath: req.file.path }, "Starting B2 upload");
-      await uploadToB2(b2Key, req.file.path, req.file.mimetype);
-      req.log.info({ jobId, b2Key }, "B2 upload succeeded, local file retained for queued analysis");
-    } catch (err) {
-      await fs.unlink(req.file.path).catch(() => {});
-      req.log.error({ err, jobId, b2Key, errorMessage: err instanceof Error ? err.message : String(err) }, "B2 upload failed");
-      res.status(500).json({
-        error: "Failed to upload video to temporary storage",
-        details: err instanceof Error ? err.message : String(err)
-      });
-      return;
-    }
+    const b2Key = "";
 
     await db.insert(analysisJobsTable).values({
       id: jobId,
       userId: userId ?? undefined,
       status: "queued",
       progress: 2,
-      currentStep: "Preparing analysis",
+      currentStep: "Waiting for analysis slot",
       mode: validatedMode,
       platform: validatedPlatforms[0] ?? "youtube_long",
       translateSubtitles: translateSubtitles ? 1 : 0,
       subtitleLanguage: req.body.subtitleLanguage || null,
       replaceAudio: 0,
       audioLanguage,
+      videoPath: req.file.path,
       b2Key,
       result: {
         analysisOptions: {
@@ -307,6 +275,7 @@ router.post("/upload", (req, res, next) => {
     analysisQueue
       .add(async () => {
         try {
+          await updateJob(jobId, { status: "queued", progress: 5, currentStep: "Starting analysis" });
           const completed = await runAnalysisPipeline(jobId, b2Key, {
             mode: validatedMode,
             platform: validatedPlatforms[0] ?? "youtube_long",

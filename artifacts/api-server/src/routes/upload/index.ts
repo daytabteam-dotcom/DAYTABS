@@ -9,6 +9,7 @@ import { promisify } from "util";
 import { db } from "@workspace/db";
 import { analysisJobsTable } from "@workspace/db";
 import { runAnalysisPipeline, type PipelineMode } from "../analysis/pipeline";
+import { updateJob } from "../analysis/services";
 import { optionalAuth } from "../../middlewares/auth";
 import {
   normalizePlan,
@@ -20,7 +21,6 @@ import {
   checkVideoAnalysisLimit,
   incrementVideoAnalysis,
 } from "../../lib/usageService";
-import { uploadToB2 } from "../../lib/b2";
 import { logger } from "../../lib/logger";
 import { analysisQueue } from "../../lib/analysisQueue";
 
@@ -343,37 +343,21 @@ router.post("/complete", async (req, res) => {
     const jobId = uuidv4();
     const userId = session.userId;
     const validatedMode: PipelineMode = "video-analyzer";
-    const b2Key = `uploads/${jobId}/video.mp4`;
-
-    // Upload assembled file to B2
-    try {
-      logger.info({ jobId, b2Key, assembledPath }, "Uploading assembled file to B2");
-      await uploadToB2(b2Key, assembledPath, session.mimeType);
-      logger.info({ jobId, b2Key }, "B2 upload succeeded for chunked upload");
-    } catch (err) {
-      logger.error({ err, jobId, b2Key }, "B2 upload failed for chunked upload");
-      sessions.delete(uploadId);
-      await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
-      res.status(500).json({
-        error: "Failed to upload video to temporary storage",
-        details: err instanceof Error ? err.message : String(err)
-      });
-      return;
-    }
+    const b2Key = "";
 
     await db.insert(analysisJobsTable).values({
       id: jobId,
       userId: userId ?? undefined,
       status: "queued",
       progress: 2,
-      currentStep: "Preparing analysis",
+      currentStep: "Waiting for analysis slot",
       mode: validatedMode,
       platform: session.platforms[0] ?? "youtube_long",
       translateSubtitles: session.translateSubtitles ? 1 : 0,
       subtitleLanguage: session.subtitleLanguage ?? null,
       replaceAudio: 0,
       audioLanguage: session.audioLanguage ?? null,
-      videoPath: b2Key, // Store B2 key as videoPath for compatibility
+      videoPath: assembledPath,
       b2Key: b2Key,
       result: {
         analysisOptions: {
@@ -398,6 +382,7 @@ router.post("/complete", async (req, res) => {
     analysisQueue
       .add(async () => {
         try {
+          await updateJob(jobId, { status: "queued", progress: 5, currentStep: "Starting analysis" });
           const completed = await runAnalysisPipeline(jobId, b2Key, {
             mode: validatedMode,
             platform: session.platforms[0] ?? "youtube_long",

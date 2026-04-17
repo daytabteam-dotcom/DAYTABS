@@ -85,7 +85,7 @@ export async function runAnalysisPipeline(
       .where(eq(analysisJobsTable.id, jobId))
       .limit(1);
 
-    if (job[0]?.status === "complete") {
+    if (job[0]?.status === "complete" && b2Key) {
       try {
         await deleteFromB2(b2Key);
       } catch (err) {
