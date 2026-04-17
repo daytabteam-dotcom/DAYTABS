@@ -28,7 +28,7 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, label: string, jo
 
 function getAnalysisTimeoutMs() {
   const configuredMinutes = Number(process.env.ANALYSIS_TIMEOUT_MINUTES);
-  const minutes = Number.isFinite(configuredMinutes) && configuredMinutes > 0 ? configuredMinutes : 7;
+  const minutes = Number.isFinite(configuredMinutes) && configuredMinutes > 0 ? configuredMinutes : 180;
   return minutes * 60 * 1000;
 }
 
@@ -248,8 +248,8 @@ async function runVideoAnalyzer(
     await stopIfMemoryHigh(jobId, "duration check");
     if (durationSec > maxDuration) {
       const planLabels: Record<string, string> = {
-        free: "Free (5 min)", creator: "Creator (15 min)", pro: "Pro (30 min)", studio: "Studio (60 min)",
-        premium: "Creator (15 min)", professional: "Studio (60 min)",
+        free: "Free (5 min)", creator: "Creator (40 min)", pro: "Pro (2 hr)", studio: "Studio (3 hr)",
+        premium: "Creator (40 min)", professional: "Studio (3 hr)",
       };
       const planLabel = planLabels[plan] ?? "your plan";
       await updateJob(jobId, {

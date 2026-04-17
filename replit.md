@@ -2,7 +2,7 @@
 
 ## Overview
 
-DayTabs is a full-stack AI-powered video analysis web application. Users upload videos (up to 2GB), choose one of 4 analysis modes, and receive AI-powered insights and output. Protected by auth (email/password + Google OAuth). Subscription payments via Paddle.
+DayTabs is a full-stack AI-powered video analysis web application. Users upload videos with plan-based size and duration limits, choose one of 4 analysis modes, and receive AI-powered insights and output. Protected by auth (email/password + Google OAuth). Subscription payments via Paddle.
 
 ## Stack
 
@@ -45,7 +45,7 @@ artifacts-monorepo/
 ### Video Upload Flow
 - **Single upload path**: multipart POST to `POST /api/analysis/upload` — Multer streams directly to disk at `/tmp/daytabs-uploads/`, never buffering in memory
 - **No cloud storage**: Cloudflare R2 has been fully removed. Files live on the local filesystem for the duration of analysis only, then deleted
-- **Large file support**: Server timeout set to 1 hour; multer hard cap is 2 GB; XHR on the frontend gives real upload progress
+- **Large file support**: Direct R2 upload URL and frontend upload timeout support Pro-sized 5 GB uploads; XHR on the frontend gives real upload progress
 - **Deleted routes**: `GET /api/analysis/presign-upload` and `POST /api/analysis/start` (R2 two-step flow) are gone
 - **Frontend**: `use-video-upload.ts` uses `XMLHttpRequest` directly to `/api/analysis/upload` for real `upload.onprogress` events
 
@@ -121,9 +121,9 @@ Table: `analysis_jobs`
 | Plan    | Price | Analyses/mo | File Size | Duration   | Short Clips | Publish |
 |---------|-------|-------------|-----------|------------|-------------|---------|
 | Free    | $0    | 3           | 200 MB    | 5 min      | No          | No      |
-| Creator | $19   | 15          | 500 MB    | 15 min     | Yes         | Yes     |
-| Pro     | $39   | 40          | 1 GB      | 30 min     | Yes         | Yes     |
-| Studio  | $89   | Unlimited   | 2 GB      | 60 min     | Yes         | Yes     |
+| Creator | $19   | 15          | 1 GB      | 40 min     | Yes         | Yes     |
+| Pro     | $39   | 40          | 5 GB      | 2 hr       | Yes         | Yes     |
+| Studio  | $89   | Unlimited   | 100 GB    | 3 hr       | Yes         | Yes     |
 
 DB stores: free / premium (→creator) / professional (→studio) / creator / pro / studio. Always run through `normalizePlan()` before limit checks.
 

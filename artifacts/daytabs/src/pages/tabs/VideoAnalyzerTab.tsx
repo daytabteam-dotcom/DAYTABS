@@ -1514,9 +1514,9 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
         : `${Math.round(sizeLimit / (1024 * 1024))} MB`;
       const fileLabel = `${(f.size / (1024 * 1024)).toFixed(1)} MB`;
       const upgradeMap: Record<string, { action: string; route: string }> = {
-        free:    { action: "Upgrade to Creator for 500 MB videos", route: "/pricing?highlight=creator" },
-        creator: { action: "Upgrade to Pro for 1 GB videos",       route: "/pricing?highlight=pro" },
-        pro:     { action: "Upgrade to Studio for 2 GB videos",    route: "/pricing?highlight=studio" },
+        free:    { action: "Upgrade to Creator for 1 GB videos",   route: "/pricing?highlight=creator" },
+        creator: { action: "Upgrade to Pro for 5 GB videos",       route: "/pricing?highlight=pro" },
+        pro:     { action: "Upgrade to Studio for 100 GB videos",  route: "/pricing?highlight=studio" },
         studio:  { action: "View Plans",                            route: "/pricing" },
       };
       const up = upgradeMap[norm] ?? upgradeMap.free;
@@ -1542,9 +1542,9 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
         const limitMin = Math.round(durationLimit / 60);
         const durMin = Math.round(duration / 60);
         const upgradeMap: Record<string, { action: string; route: string }> = {
-          free:    { action: "Upgrade to Creator for 15 min videos", route: "/pricing?highlight=creator" },
-          creator: { action: "Upgrade to Pro for 30 min videos",     route: "/pricing?highlight=pro" },
-          pro:     { action: "Upgrade to Studio for 60 min videos",  route: "/pricing?highlight=studio" },
+          free:    { action: "Upgrade to Creator for 40 min videos", route: "/pricing?highlight=creator" },
+          creator: { action: "Upgrade to Pro for 2 hour videos",     route: "/pricing?highlight=pro" },
+          pro:     { action: "Upgrade to Studio for 3 hour videos",  route: "/pricing?highlight=studio" },
           studio:  { action: "View Plans",                           route: "/pricing" },
         };
         const up = upgradeMap[norm] ?? upgradeMap.free;

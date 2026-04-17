@@ -55,9 +55,9 @@
 | Plan | Price | Analyses/mo | Max File | Max Duration |
 |---|---|---|---|---|
 | Free | $0 | 3 | 200 MB | 5 min |
-| Creator | $19 | 15 | 500 MB | 15 min |
-| Pro | $39 | 40 | 1 GB | 30 min |
-| Studio | $89 | Unlimited | 2 GB | 60 min |
+| Creator | $19 | 15 | 1 GB | 40 min |
+| Pro | $39 | 40 | 5 GB | 2 hr |
+| Studio | $89 | Unlimited | 100 GB | 3 hr |
 
 ---
 
@@ -115,7 +115,7 @@ pnpm --filter @workspace/api-spec run codegen
 
 ## Analysis Pipeline
 
-1. Upload video (`POST /api/analysis/upload`, up to 2 GB)
+1. Upload video (`POST /api/upload/*` direct upload path, up to 5 GB for Pro)
 2. ffmpeg compresses + extracts audio
 3. Whisper transcribes audio
 4. GPT-4o analyzes quality, editing, publish package, and short clip ideas in parallel

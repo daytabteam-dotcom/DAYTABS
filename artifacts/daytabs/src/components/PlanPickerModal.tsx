@@ -23,8 +23,8 @@ const PLAN_META = [
     price: "$19",
     features: [
       "15 video analyses/month",
-      "Up to 15 min video length",
-      "500 MB upload limit",
+      "Up to 40 min video length",
+      "1 GB upload limit",
       "Quality, Editing, Publish modules",
       "Short Clip Ideas",
       "Full transcript included",
@@ -43,8 +43,8 @@ const PLAN_META = [
     price: "$39",
     features: [
       "40 video analyses/month",
-      "Up to 30 min video length",
-      "1 GB upload limit",
+      "Up to 2 hr video length",
+      "5 GB upload limit",
       "All modules unlocked",
       "Advanced AI analysis",
       "Subtitle file download",
@@ -63,8 +63,8 @@ const PLAN_META = [
     price: "$89",
     features: [
       "Unlimited video analyses",
-      "Up to 60 min video length",
-      "2 GB upload limit",
+      "Up to 3 hr video length",
+      "100 GB upload limit",
       "All modules unlocked",
       "Priority processing",
       "Subtitle translation",

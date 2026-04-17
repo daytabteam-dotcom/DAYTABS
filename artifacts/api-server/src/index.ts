@@ -105,8 +105,8 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   logger.info({ port: PORT }, "Server listening");
 });
 
-// Extend timeouts to support large video uploads (up to 2 GB for Studio plan).
+// Extend timeouts to support Pro-sized direct uploads.
 // Default Node.js socket timeout is 5 s which is far too short for big files.
-server.setTimeout(60 * 60 * 1000);       // 1 hour socket timeout
-server.headersTimeout = 61 * 60 * 1000;  // slightly above socket timeout
-server.requestTimeout = 61 * 60 * 1000;  // same
+server.setTimeout(6 * 60 * 60 * 1000);
+server.headersTimeout = 6 * 60 * 60 * 1000 + 60_000;
+server.requestTimeout = 6 * 60 * 60 * 1000 + 60_000;

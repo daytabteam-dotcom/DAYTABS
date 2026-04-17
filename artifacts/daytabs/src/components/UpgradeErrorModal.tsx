@@ -46,7 +46,7 @@ const PLAN_COMPARE: Record<string, {
       label: "Studio",
       color: "text-pink-400",
       price: "$89/mo",
-      perks: ["Unlimited video analyses", "Priority processing queue", "2 GB video file uploads"],
+      perks: ["Unlimited video analyses", "Priority processing queue", "100 GB video file uploads"],
     },
   },
 };

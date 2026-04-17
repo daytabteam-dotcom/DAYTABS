@@ -54,7 +54,8 @@ fs.mkdir(uploadDir, { recursive: true }).catch((err) => {
 });
 
 // Multer streams files directly to disk — never buffers in memory.
-// Limit is 2 GB (Studio plan max). Plan-specific size checks happen after upload.
+// Legacy multipart path supports the Pro target. Larger Professional uploads
+// should use the direct R2 upload path.
 const storage = multer.diskStorage({
   destination: async (_req, _file, cb) => {
     try {
@@ -75,7 +76,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: 2 * 1024 * 1024 * 1024 }, // 2 GB hard cap
+  limits: { fileSize: 5 * 1024 * 1024 * 1024 }, // 5 GB legacy hard cap
   fileFilter: (_req, file, cb) => {
     const allowed = ["video/mp4", "video/quicktime", "video/x-msvideo", "video/webm", "video/mpeg", "video/mov"];
     if (allowed.includes(file.mimetype) || file.originalname.match(/\.(mp4|mov|avi|webm|mpeg|mkv)$/i)) {
@@ -124,8 +125,8 @@ router.post("/upload", (req, res, next) => {
     url: req.url
   }, "Upload request received");
 
-  // Extend request/response timeout for large file uploads (up to 2 GB)
-  req.socket.setTimeout(60 * 60 * 1000); // 1 hour
+  // Extend request/response timeout for Pro-sized legacy uploads.
+  req.socket.setTimeout(6 * 60 * 60 * 1000);
 
   upload.single("video")(req, res, (multerErr) => {
     req.log.info({
@@ -138,7 +139,7 @@ router.post("/upload", (req, res, next) => {
     if (multerErr) {
       const code = (multerErr as any).code as string | undefined;
       if (code === "LIMIT_FILE_SIZE") {
-        // The hard 2 GB limit was hit — report plan limit for clarity
+        // The hard legacy limit was hit — report plan limit for clarity
         const rawPlan = (req as any).auth?.plan ?? "free";
         const norm = normalizePlan(rawPlan);
         const planLimits = getLimits(rawPlan);
@@ -466,7 +467,7 @@ router.get("/upload-health", (req, res) => {
     queueSize: analysisQueue.size,
     queuePending: analysisQueue.pending,
     multerLimits: {
-      fileSize: "2GB",
+      fileSize: "5GB",
       allowedTypes: ["video/mp4", "video/quicktime", "video/x-msvideo", "video/webm", "video/mpeg", "video/mov"]
     }
   });

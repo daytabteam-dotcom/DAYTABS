@@ -108,7 +108,7 @@ export async function createR2UploadUrl(key: string, contentType: string) {
     Key: key,
     ContentType: contentType,
   });
-  const uploadUrl = await getSignedUrl(getR2Client(), command, { expiresIn: 15 * 60 });
+  const uploadUrl = await getSignedUrl(getR2Client(), command, { expiresIn: 6 * 60 * 60 });
   return {
     uploadUrl,
     fileKey: key,

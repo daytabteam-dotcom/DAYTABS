@@ -101,7 +101,7 @@ export function UploadSection({ onUpload, isUploading }: UploadSectionProps) {
               </div>
               <h3 className="text-xl font-bold text-foreground">Drop your video here</h3>
               <p className="text-sm text-muted-foreground max-w-[260px]">
-                Support for MP4, MOV, AVI up to 1 Hour or 2GB.
+                Support for MP4, MOV, AVI with plan-based size and duration limits.
               </p>
               <div className="mt-4 px-6 py-2 bg-secondary rounded-full text-sm font-medium text-secondary-foreground">
                 Browse Files

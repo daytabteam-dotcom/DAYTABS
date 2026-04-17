@@ -69,7 +69,7 @@ const steps = [
     icon: Upload,
     num: "01",
     title: "Upload Your Video",
-    desc: "Drop any video up to 2GB: YouTube Long, TikTok, Instagram Reels, LinkedIn or X. We handle all formats.",
+    desc: "Drop long-form or short-form videos and get plan-aware upload support up to 5GB on Pro.",
     visual: (
       <div className="relative h-48 flex items-center justify-center">
         <div className="w-48 h-32 glass rounded-2xl border-2 border-dashed border-violet-500/50 flex flex-col items-center justify-center gap-2">

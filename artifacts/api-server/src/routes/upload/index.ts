@@ -56,7 +56,7 @@ interface UploadSession {
 const sessions = new Map<string, UploadSession>();
 
 const CLEANUP_INTERVAL_MS = 30 * 60 * 1000;
-const SESSION_MAX_AGE_MS = 2 * 60 * 60 * 1000;
+const SESSION_MAX_AGE_MS = 8 * 60 * 60 * 1000;
 
 setInterval(async () => {
   const now = Date.now();

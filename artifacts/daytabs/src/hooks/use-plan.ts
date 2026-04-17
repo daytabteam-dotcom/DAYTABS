@@ -68,16 +68,16 @@ const SCRIPT_PLANNER_CHAT_LIMITS: Record<string, number> = {
 
 export const FILE_SIZE_LIMITS: Record<string, number> = {
   free:    200 * 1024 * 1024,
-  creator: 500 * 1024 * 1024,
-  pro:     1024 * 1024 * 1024,
-  studio:  2 * 1024 * 1024 * 1024,
+  creator: 1024 * 1024 * 1024,
+  pro:     5 * 1024 * 1024 * 1024,
+  studio:  100 * 1024 * 1024 * 1024,
 };
 
 export const DURATION_LIMITS_SEC: Record<string, number> = {
   free:    5 * 60,
-  creator: 15 * 60,
-  pro:     30 * 60,
-  studio:  60 * 60,
+  creator: 40 * 60,
+  pro:     2 * 60 * 60,
+  studio:  3 * 60 * 60,
 };
 
 export const PLAN_DISPLAY_NAMES: Record<string, string> = {
@@ -122,6 +122,10 @@ export function getFileSizeLimitLabel(plan: string): string {
 
 export function getDurationLimitLabel(plan: string): string {
   const secs = DURATION_LIMITS_SEC[normalizePlan(plan)] ?? DURATION_LIMITS_SEC.free;
+  if (secs >= 60 * 60) {
+    const hours = secs / (60 * 60);
+    return `${hours % 1 === 0 ? hours.toFixed(0) : hours.toFixed(1)} hr`;
+  }
   return `${Math.round(secs / 60)} min`;
 }
 

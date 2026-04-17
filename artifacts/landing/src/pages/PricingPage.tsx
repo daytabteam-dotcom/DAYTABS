@@ -43,8 +43,8 @@ const plans = [
     popular: true,
     features: [
       { text: "15 video analyses / month" },
-      { text: "Up to 500 MB per video" },
-      { text: "Up to 15 min video duration" },
+      { text: "Up to 1 GB per video" },
+      { text: "Up to 40 min video duration" },
       { text: "Quality and editing reports" },
       { text: "Publish package (titles, descriptions, tags)" },
       { text: "Short clip ideas" },
@@ -67,8 +67,8 @@ const plans = [
     popular: false,
     features: [
       { text: "40 video analyses / month" },
-      { text: "Up to 1 GB per video" },
-      { text: "Up to 30 min video duration" },
+      { text: "Up to 5 GB per video" },
+      { text: "Up to 2 hr video duration" },
       { text: "All Creator features included" },
       { text: "Subtitle file download" },
       { text: "40 script planner chats / month" },
@@ -90,8 +90,8 @@ const plans = [
     popular: false,
     features: [
       { text: "Unlimited video analyses" },
-      { text: "Up to 2 GB per video" },
-      { text: "Up to 60 min video duration" },
+      { text: "Up to 100 GB per video" },
+      { text: "Up to 3 hr video duration" },
       { text: "All Pro features included" },
       { text: "Unlimited script planner chats" },
       { text: "AI Dubbing", badge: "Coming Soon" },

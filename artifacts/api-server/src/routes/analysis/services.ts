@@ -604,10 +604,82 @@ export async function transcribeAudio(audioPath: string): Promise<{
   wordTimings?: Array<{ start: number; end: number; word: string }>;
   whisperConfidence: number;
 }> {
-  const audioBuffer = await fs.readFile(audioPath);
   const actualDuration = await getMediaDuration(audioPath);
   logger.info({ audioPath, actualDuration }, "Starting transcription");
+  const stats = await fs.stat(audioPath);
+  const shouldChunk = actualDuration > 0 && (stats.size > 20 * 1024 * 1024 || actualDuration > 20 * 60);
 
+  if (shouldChunk) {
+    const chunkDir = path.join(path.dirname(audioPath), "transcript-chunks");
+    const chunkSeconds = 10 * 60;
+    await fs.mkdir(chunkDir, { recursive: true });
+    try {
+      const combinedText: string[] = [];
+      const combinedSegments: Array<{ start: number; end: number; text: string }> = [];
+      const combinedWords: Array<{ start: number; end: number; word: string }> = [];
+      const confidences: number[] = [];
+      const totalChunks = Math.max(1, Math.ceil(actualDuration / chunkSeconds));
+
+      for (let i = 0; i < totalChunks; i++) {
+        const startSec = i * chunkSeconds;
+        const durationSec = Math.min(chunkSeconds, Math.max(actualDuration - startSec, 0));
+        if (durationSec <= 0) continue;
+
+        const chunkPath = path.join(chunkDir, `chunk_${String(i).padStart(3, "0")}.mp3`);
+        await runMediaCommand(
+          "ffmpeg",
+          ["-nostdin", "-hide_banner", "-loglevel", "error", "-threads", "1", "-ss", String(startSec), "-t", String(durationSec), "-i", audioPath, "-ar", "16000", "-ac", "1", "-c:a", "libmp3lame", "-q:a", "5", chunkPath, "-y"],
+          10 * 60 * 1000,
+          `ffmpeg audio chunk ${i + 1}`
+        );
+
+        const chunk = await transcribeAudioSingleFile(chunkPath, durationSec, 180000);
+        if (chunk.text) combinedText.push(chunk.text);
+        confidences.push(chunk.whisperConfidence);
+        combinedSegments.push(...chunk.segments.map(s => ({
+          start: startSec + s.start,
+          end: startSec + s.end,
+          text: s.text,
+        })));
+        if (chunk.wordTimings?.length) {
+          combinedWords.push(...chunk.wordTimings.map(w => ({
+            start: startSec + w.start,
+            end: startSec + w.end,
+            word: w.word,
+          })));
+        }
+      }
+
+      const avgConfidence = confidences.length
+        ? confidences.reduce((sum, n) => sum + n, 0) / confidences.length
+        : 0;
+      return {
+        text: combinedText.join(" ").trim(),
+        segments: combinedSegments,
+        wordTimings: combinedWords.length ? combinedWords : undefined,
+        whisperConfidence: Math.max(0, Math.min(1, avgConfidence)),
+      };
+    } catch (err) {
+      logger.warn({ err, audioPath }, "Chunked transcription failed, falling back to single-file transcription");
+    } finally {
+      await fs.rm(chunkDir, { recursive: true, force: true }).catch(() => {});
+    }
+  }
+
+  return transcribeAudioSingleFile(audioPath, actualDuration, 120000);
+}
+
+async function transcribeAudioSingleFile(
+  audioPath: string,
+  actualDuration: number,
+  timeoutMs: number
+): Promise<{
+  text: string;
+  segments: Array<{ start: number; end: number; text: string }>;
+  wordTimings?: Array<{ start: number; end: number; word: string }>;
+  whisperConfidence: number;
+}> {
+  const audioBuffer = await fs.readFile(audioPath);
   try {
     const file = await toFile(audioBuffer, "audio.mp3");
     const response = await withTimeout(
@@ -617,7 +689,7 @@ export async function transcribeAudio(audioPath: string): Promise<{
         response_format: "verbose_json",
         timestamp_granularities: ["word", "segment"],
       } as Parameters<typeof openai.audio.transcriptions.create>[0]),
-      90000,
+      timeoutMs,
       "Whisper verbose transcription"
     );
 
@@ -663,7 +735,7 @@ export async function transcribeAudio(audioPath: string): Promise<{
     const file = await toFile(audioBuffer, "audio.mp3");
     const response = await withTimeout(
       openai.audio.transcriptions.create({ file, model: "whisper-1" }),
-      120000,
+      timeoutMs,
       "Whisper basic transcription"
     );
     if (response.text) {
@@ -680,7 +752,7 @@ export async function extractAudio(videoPath: string, outputPath: string): Promi
   await runMediaCommand(
     "ffmpeg",
     ["-nostdin", "-hide_banner", "-loglevel", "error", "-threads", "1", "-i", videoPath, "-vn", "-ar", "16000", "-ac", "1", "-c:a", "libmp3lame", "-q:a", "4", outputPath, "-y"],
-    60000,
+    getConfiguredTimeoutMs("FFMPEG_AUDIO_EXTRACTION_TIMEOUT_MS", 30 * 60 * 1000),
     "ffmpeg audio extraction"
   );
 }

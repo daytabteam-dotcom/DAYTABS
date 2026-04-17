@@ -43,8 +43,8 @@ export const PLAN_LIMITS: Record<NormalizedPlan, PlanConfig> = {
   },
   creator: {
     video_analyses_per_month: 15,
-    max_video_size_bytes: 500 * 1024 * 1024,
-    max_video_duration_seconds: 15 * 60,
+    max_video_size_bytes: 1024 * 1024 * 1024,
+    max_video_duration_seconds: 40 * 60,
     script_planner_chats_per_month: 15,
     script_planner_messages_per_session: 10,
     script_planner_model: "gpt-4o-mini",
@@ -61,8 +61,8 @@ export const PLAN_LIMITS: Record<NormalizedPlan, PlanConfig> = {
   },
   pro: {
     video_analyses_per_month: 40,
-    max_video_size_bytes: 1024 * 1024 * 1024,
-    max_video_duration_seconds: 30 * 60,
+    max_video_size_bytes: 5 * 1024 * 1024 * 1024,
+    max_video_duration_seconds: 2 * 60 * 60,
     script_planner_chats_per_month: 40,
     script_planner_messages_per_session: 10,
     script_planner_model: "gpt-4o",
@@ -79,8 +79,8 @@ export const PLAN_LIMITS: Record<NormalizedPlan, PlanConfig> = {
   },
   studio: {
     video_analyses_per_month: Infinity,
-    max_video_size_bytes: 2 * 1024 * 1024 * 1024,
-    max_video_duration_seconds: 60 * 60,
+    max_video_size_bytes: 100 * 1024 * 1024 * 1024,
+    max_video_duration_seconds: 3 * 60 * 60,
     script_planner_chats_per_month: Infinity,
     script_planner_messages_per_session: 10,
     script_planner_model: "gpt-4o",
@@ -206,7 +206,7 @@ export function buildFileTooLargeError(plan: NormalizedPlan, fileSizeBytes: numb
       code: "FILE_TOO_LARGE",
       title: "Video file is too large",
       message: `Creator plan supports videos up to ${limitLabel}. Your file is ${fileLabel}.`,
-      action: { label: "Upgrade to Pro for up to 1 GB", route: "/pricing?highlight=pro" },
+      action: { label: "Upgrade to Pro for up to 5 GB", route: "/pricing?highlight=pro" },
       meta: { file_size_bytes: fileSizeBytes, limit_bytes: limit },
     };
   }
@@ -228,7 +228,7 @@ export function buildVideoTooLongError(plan: NormalizedPlan, durationSeconds: nu
       code: "VIDEO_TOO_LONG",
       title: "Video is too long for your plan",
       message: `Free plan supports videos up to ${limitMin} minutes. Your video is ${durationMin} minutes long.`,
-      action: { label: "Upgrade to Creator for 15 min videos", route: "/pricing?highlight=creator" },
+      action: { label: "Upgrade to Creator for 40 min videos", route: "/pricing?highlight=creator" },
       meta: { duration_seconds: durationSeconds, limit_seconds: limit },
     };
   }
@@ -237,7 +237,7 @@ export function buildVideoTooLongError(plan: NormalizedPlan, durationSeconds: nu
       code: "VIDEO_TOO_LONG",
       title: "Video is too long for your plan",
       message: `Creator plan supports videos up to ${limitMin} minutes. Your video is ${durationMin} minutes long.`,
-      action: { label: "Upgrade to Pro for 30 min videos", route: "/pricing?highlight=pro" },
+      action: { label: "Upgrade to Pro for 2 hour videos", route: "/pricing?highlight=pro" },
       meta: { duration_seconds: durationSeconds, limit_seconds: limit },
     };
   }

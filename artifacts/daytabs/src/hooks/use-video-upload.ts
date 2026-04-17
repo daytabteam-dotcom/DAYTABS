@@ -33,7 +33,7 @@ const CHUNK_SIZE = 5 * 1024 * 1024;
 const INIT_TIMEOUT_MS = 20_000;
 const COMPLETE_TIMEOUT_MS = 90_000;
 const UPLOAD_STALL_TIMEOUT_MS = 90_000;
-const UPLOAD_HARD_TIMEOUT_MS = 45 * 60 * 1000;
+const UPLOAD_HARD_TIMEOUT_MS = 6 * 60 * 60 * 1000;
 
 function getHttpErrorMessage(status: number, fallback: string) {
   if (status === 502) {
