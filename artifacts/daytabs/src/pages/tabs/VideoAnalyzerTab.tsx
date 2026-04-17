@@ -1127,6 +1127,8 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
   const [limitError, setLimitError] = useState<LimitError | null>(null);
   const [analysisHistory, setAnalysisHistory] = useState<AnalysisHistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyResult, setHistoryResult] = useState<any | null>(null);
+  const [openedHistoryJobId, setOpenedHistoryJobId] = useState<string | null>(null);
 
   const { uploadAsync: uploadVideo, isPending: isUploading, uploadInfo, cancelUpload } = useVideoUpload();
   const { data: pollData } = useAnalysisPolling(jobId);
@@ -1141,14 +1143,15 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
   const isAnalyzing = isUploading || isSubmitting || (!!jobId && !!statusData && !TERMINAL_STATUSES.has(statusData.status ?? ""));
   const isError = statusData?.status === "error";
   const isDone = statusData?.status === "complete";
-  const hasResults = isDone && !!results;
+  const displayedResults = historyResult ?? results;
+  const hasResults = !!historyResult || (isDone && !!results);
 
   // Keep refs so the PDF export closure always has the latest values
   const resultsRef = useRef<any>(null);
   const fileNameRef = useRef<string>("analysis");
   const [isPdfExporting, setIsPdfExporting] = useState(false);
 
-  useEffect(() => { resultsRef.current = results ?? null; }, [results]);
+  useEffect(() => { resultsRef.current = displayedResults ?? null; }, [displayedResults]);
   useEffect(() => { if (file?.name) fileNameRef.current = file.name; }, [file]);
 
   const loadAnalysisHistory = useCallback(async () => {
@@ -1183,6 +1186,8 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
     if (recovery.modules?.length) setSelectedModules(recovery.modules);
 
     if (recovery.jobId) {
+      setHistoryResult(null);
+      setOpenedHistoryJobId(null);
       setJobId(recovery.jobId);
       toast({
         title: "Analysis restored",
@@ -1198,6 +1203,8 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
         const options = data.result?.analysisOptions;
         if (options?.platforms?.length) setSelectedPlatforms(options.platforms);
         if (options?.modules?.length) setSelectedModules(options.modules);
+        setHistoryResult(null);
+        setOpenedHistoryJobId(null);
         setJobId(data.jobId);
         writePendingUploadRecovery({ ...recovery, jobId: data.jobId });
         toast({
@@ -1216,7 +1223,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
     if (hasResults) {
       clearPendingUploadRecovery();
       onDataReady();
-      const firstModule = selectedModules.find(m => (results as any)?.[m]);
+      const firstModule = selectedModules.find(m => (displayedResults as any)?.[m]);
       setActiveResultTab(firstModule ?? "quality");
 
       // Refresh plan usage so the Home page counter updates immediately
@@ -1232,7 +1239,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
     } else {
       onRegisterExport(null);
     }
-  }, [hasResults, loadAnalysisHistory]);
+  }, [hasResults, displayedResults, selectedModules, onDataReady, onRegisterExport, loadAnalysisHistory]);
 
   useEffect(() => {
     if (statusData?.status === "error") {
@@ -1256,6 +1263,10 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
 
   /** Called immediately on file drop, validates size and duration before accepting the file */
   async function handleFileSelected(f: File) {
+    setHistoryResult(null);
+    setOpenedHistoryJobId(null);
+    setJobId(null);
+
     // If the plan hasn't loaded yet, accept the file optimistically, server will enforce limits
     if (planLoading) { setFile(f); return; }
 
@@ -1321,6 +1332,8 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
     if (uploadsRemaining === 0) { setShowLimitModal(true); return; }
 
     setIsSubmitting(true);
+    setHistoryResult(null);
+    setOpenedHistoryJobId(null);
     const recovery: PendingUploadRecovery = {
       startedAt: Date.now(),
       fileName: file.name,
@@ -1338,6 +1351,8 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
         },
       });
       writePendingUploadRecovery({ ...recovery, jobId: id });
+      setHistoryResult(null);
+      setOpenedHistoryJobId(null);
       setJobId(id);
     } catch (err: any) {
       // Silently reset if the user cancelled
@@ -1357,6 +1372,8 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
           if (options?.platforms?.length) setSelectedPlatforms(options.platforms);
           if (options?.modules?.length) setSelectedModules(options.modules);
           writePendingUploadRecovery({ ...recovery, jobId: recovered.jobId });
+          setHistoryResult(null);
+          setOpenedHistoryJobId(null);
           setJobId(recovered.jobId);
           toast({
             title: "Analysis restored",
@@ -1376,13 +1393,24 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
     if (options?.platforms?.length) setSelectedPlatforms(options.platforms);
     if (options?.modules?.length) setSelectedModules(options.modules);
     setFile(null);
-    setJobId(item.jobId);
-    writePendingUploadRecovery({
-      startedAt: item.createdAt ? new Date(item.createdAt).getTime() : Date.now(),
-      jobId: item.jobId,
-      platforms: options?.platforms?.length ? options.platforms : [item.platform ?? "youtube_long"],
-      modules: options?.modules?.length ? options.modules : ["quality", "editing"],
-    });
+
+    if (item.status === "complete" && item.result) {
+      clearPendingUploadRecovery();
+      setJobId(null);
+      setHistoryResult(item.result);
+      setOpenedHistoryJobId(item.jobId);
+    } else {
+      setHistoryResult(null);
+      setOpenedHistoryJobId(null);
+      setJobId(item.jobId);
+      writePendingUploadRecovery({
+        startedAt: item.createdAt ? new Date(item.createdAt).getTime() : Date.now(),
+        jobId: item.jobId,
+        platforms: options?.platforms?.length ? options.platforms : [item.platform ?? "youtube_long"],
+        modules: options?.modules?.length ? options.modules : ["quality", "editing"],
+      });
+    }
+
     toast({
       title: item.status === "complete" ? "Report opened" : "Analysis restored",
       description: item.status === "complete" ? "Your saved analysis report is ready." : "We reconnected to the selected analysis.",
@@ -1393,6 +1421,8 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
     clearPendingUploadRecovery();
     setFile(null);
     setJobId(null);
+    setHistoryResult(null);
+    setOpenedHistoryJobId(null);
     onDataReset();
   }
 
@@ -1406,8 +1436,8 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
   const errorMessage = (pollData as any)?.error ?? "An unexpected error occurred during analysis.";
 
   const availableResultTabs = RESULT_TABS.filter(t => {
-    if (t.id === "transcript") return !!(results as any)?.transcript;
-    return selectedModules.includes(t.id) && !!(results as any)?.[t.id];
+    if (t.id === "transcript") return !!(displayedResults as any)?.transcript;
+    return selectedModules.includes(t.id) && !!(displayedResults as any)?.[t.id];
   });
 
   return (
@@ -1535,7 +1565,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
             <AnalysisHistoryCards
               items={analysisHistory}
               loading={historyLoading}
-              activeJobId={jobId}
+              activeJobId={openedHistoryJobId ?? jobId}
               onOpen={handleOpenHistoryItem}
             />
           </section>
@@ -1554,10 +1584,10 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
             <div className="flex items-center gap-2">
               <button
                 onClick={async () => {
-                  if (!results) return;
+                  if (!displayedResults) return;
                   setIsPdfExporting(true);
                   try {
-                    await generateAnalysisPDF(results as any, file?.name ?? "analysis");
+                    await generateAnalysisPDF(displayedResults as any, file?.name ?? fileNameRef.current);
                   } finally {
                     setIsPdfExporting(false);
                   }
@@ -1602,11 +1632,11 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
               </div>
               <AnimatePresence mode="wait">
                 <motion.div key={activeResultTab} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
-                  {activeResultTab === "quality"    && <QualityPanel    data={(results as any).quality}    isPaid={isPaid} />}
-                  {activeResultTab === "editing"    && <EditingPanel    data={(results as any).editing}    isPaid={isPaid} />}
-                  {activeResultTab === "publish"    && <PublishPanel    data={(results as any).publish}    platforms={selectedPlatforms} isPaid={isPaid} subtitleFile={(results as any).subtitleFile} videoFileName={file?.name} />}
-                  {activeResultTab === "shortClips" && <ShortClipsPanel data={(results as any).shortClips} isPaid={isPaid} />}
-                  {activeResultTab === "transcript" && <TranscriptPanel data={(results as any).transcript} isPaid={isPaid} />}
+                  {activeResultTab === "quality"    && <QualityPanel    data={(displayedResults as any).quality}    isPaid={isPaid} />}
+                  {activeResultTab === "editing"    && <EditingPanel    data={(displayedResults as any).editing}    isPaid={isPaid} />}
+                  {activeResultTab === "publish"    && <PublishPanel    data={(displayedResults as any).publish}    platforms={selectedPlatforms} isPaid={isPaid} subtitleFile={(displayedResults as any).subtitleFile} videoFileName={file?.name} />}
+                  {activeResultTab === "shortClips" && <ShortClipsPanel data={(displayedResults as any).shortClips} isPaid={isPaid} />}
+                  {activeResultTab === "transcript" && <TranscriptPanel data={(displayedResults as any).transcript} isPaid={isPaid} />}
                 </motion.div>
               </AnimatePresence>
             </>
