@@ -21,12 +21,16 @@ if (!JWT_SECRET) {
   throw new Error("JWT_SECRET environment variable is required");
 }
 const WEBHOOK_SECRET = process.env.PADDLE_WEBHOOK_SECRET || "";
+const PRICE_PREMIUM = process.env.PADDLE_PRICE_PREMIUM || process.env.VITE_PADDLE_PRICE_PREMIUM || "";
+const PRICE_PRO = process.env.PADDLE_PRICE_PRO || process.env.VITE_PADDLE_PRICE_PRO || "";
+const PRICE_PROFESSIONAL = process.env.PADDLE_PRICE_PROFESSIONAL || process.env.VITE_PADDLE_PRICE_PROFESSIONAL || "";
+const PRICE_FREE = process.env.PADDLE_PRICE_FREE || process.env.VITE_PADDLE_PRICE_FREE || "";
 
 const PRICE_TO_PLAN: Record<string, string> = {
-  [process.env.PADDLE_PRICE_PREMIUM || ""]: "creator",
-  [process.env.PADDLE_PRICE_PROFESSIONAL || ""]: "studio",
-  [process.env.PADDLE_PRICE_PRO || ""]: "pro",
-  [process.env.PADDLE_PRICE_FREE || ""]: "free",
+  [PRICE_PREMIUM]: "creator",
+  [PRICE_PROFESSIONAL]: "studio",
+  [PRICE_PRO]: "pro",
+  [PRICE_FREE]: "free",
 };
 
 function priceIdToPlan(priceId: string): string | null {

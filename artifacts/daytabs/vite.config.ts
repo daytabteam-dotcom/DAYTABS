@@ -7,16 +7,22 @@ import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
 // PORT is only used by the dev server — not needed during `vite build`
 const rawPort = process.env.PORT;
 const port = rawPort ? Number(rawPort) : 3000;
+const paddleClientToken = process.env.VITE_PADDLE_CLIENT_TOKEN ?? process.env.PADDLE_CLIENT_TOKEN ?? "";
+const paddleEnvironment = process.env.VITE_PADDLE_ENVIRONMENT ?? process.env.PADDLE_ENVIRONMENT ?? "production";
+const paddlePriceFree = process.env.VITE_PADDLE_PRICE_FREE ?? process.env.PADDLE_PRICE_FREE ?? "";
+const paddlePricePremium = process.env.VITE_PADDLE_PRICE_PREMIUM ?? process.env.PADDLE_PRICE_PREMIUM ?? "";
+const paddlePricePro = process.env.VITE_PADDLE_PRICE_PRO ?? process.env.PADDLE_PRICE_PRO ?? "";
+const paddlePriceProfessional = process.env.VITE_PADDLE_PRICE_PROFESSIONAL ?? process.env.PADDLE_PRICE_PROFESSIONAL ?? "";
 
 export default defineConfig({
   base: process.env.BASE_PATH ?? '/panel/',
   define: {
-    "import.meta.env.VITE_PADDLE_CLIENT_TOKEN": JSON.stringify(process.env.PADDLE_CLIENT_TOKEN ?? ""),
-    "import.meta.env.VITE_PADDLE_ENVIRONMENT": JSON.stringify(process.env.PADDLE_ENVIRONMENT ?? "production"),
-    "import.meta.env.VITE_PADDLE_PRICE_FREE": JSON.stringify(process.env.PADDLE_PRICE_FREE ?? ""),
-    "import.meta.env.VITE_PADDLE_PRICE_PREMIUM": JSON.stringify(process.env.PADDLE_PRICE_PREMIUM ?? ""),
-    "import.meta.env.VITE_PADDLE_PRICE_PRO": JSON.stringify(process.env.PADDLE_PRICE_PRO ?? process.env.PADDLE_PRICE_PROFESSIONAL ?? ""),
-    "import.meta.env.VITE_PADDLE_PRICE_PROFESSIONAL": JSON.stringify(process.env.PADDLE_PRICE_PROFESSIONAL ?? ""),
+    "import.meta.env.VITE_PADDLE_CLIENT_TOKEN": JSON.stringify(paddleClientToken),
+    "import.meta.env.VITE_PADDLE_ENVIRONMENT": JSON.stringify(paddleEnvironment),
+    "import.meta.env.VITE_PADDLE_PRICE_FREE": JSON.stringify(paddlePriceFree),
+    "import.meta.env.VITE_PADDLE_PRICE_PREMIUM": JSON.stringify(paddlePricePremium),
+    "import.meta.env.VITE_PADDLE_PRICE_PRO": JSON.stringify(paddlePricePro),
+    "import.meta.env.VITE_PADDLE_PRICE_PROFESSIONAL": JSON.stringify(paddlePriceProfessional),
   },
   plugins: [
     react(),

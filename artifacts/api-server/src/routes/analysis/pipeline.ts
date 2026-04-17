@@ -25,6 +25,22 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, label: string, jo
   }
 }
 
+function getPipelineErrorMessage(err: unknown): string {
+  const fallback = err instanceof Error ? err.message : String(err);
+  const code = typeof err === "object" && err !== null
+    ? String((err as { Code?: unknown; code?: unknown; name?: unknown }).Code ?? (err as { code?: unknown }).code ?? (err as { name?: unknown }).name ?? "")
+    : "";
+  const statusCode = typeof err === "object" && err !== null
+    ? (err as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode
+    : undefined;
+
+  if (code === "AccessDenied" || statusCode === 403) {
+    return "Analysis failed because the server could not read the uploaded video from temporary storage. Please check the Backblaze B2 bucket permissions and credentials, then upload the video again.";
+  }
+
+  return fallback || "Analysis failed unexpectedly.";
+}
+
 export type PipelineMode = "video-analyzer";
 
 export interface PipelineOptions {
@@ -44,7 +60,7 @@ export async function runAnalysisPipeline(
   jobId: string,
   b2Key: string,
   options: PipelineOptions
-): Promise<void> {
+): Promise<boolean> {
   const workDir = path.join(os.tmpdir(), "daytabs", jobId);
   const localVideoPath = path.join(workDir, "video.mp4");
 
@@ -66,6 +82,29 @@ export async function runAnalysisPipeline(
         logger.error({ err, jobId, b2Key }, "Analysis completed, but B2 video cleanup failed");
       }
     }
+
+    return job[0]?.status === "complete";
+  } catch (err) {
+    logger.error({ err, jobId, b2Key }, "Analysis pipeline failed before completion");
+
+    const job = await db
+      .select({ status: analysisJobsTable.status, error: analysisJobsTable.error })
+      .from(analysisJobsTable)
+      .where(eq(analysisJobsTable.id, jobId))
+      .limit(1)
+      .catch(() => []);
+
+    if (job[0]?.status !== "complete" && job[0]?.status !== "error") {
+      await updateJob(jobId, {
+        status: "error",
+        currentStep: "Analysis failed",
+        error: getPipelineErrorMessage(err),
+      }).catch((updateErr) => {
+        logger.error({ err: updateErr, jobId }, "Failed to mark analysis job as errored");
+      });
+    }
+
+    throw err;
   } finally {
     await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
   }

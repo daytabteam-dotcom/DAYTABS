@@ -306,7 +306,7 @@ router.post("/upload", (req, res, next) => {
 
     analysisQueue
       .add(async () => {
-        await runAnalysisPipeline(jobId, b2Key, {
+        const completed = await runAnalysisPipeline(jobId, b2Key, {
           mode: validatedMode,
           platform: validatedPlatforms[0] ?? "youtube_long",
           platforms: validatedPlatforms,
@@ -318,7 +318,7 @@ router.post("/upload", (req, res, next) => {
           plan: rawPlan,
           maxDurationSeconds,
         });
-        if (userId) await incrementVideoAnalysis(userId);
+        if (completed && userId) await incrementVideoAnalysis(userId);
       })
       .catch((err) => {
         req.log.error({ err, jobId }, "Queued pipeline error");

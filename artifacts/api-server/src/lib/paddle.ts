@@ -2,9 +2,15 @@ const PADDLE_API_KEY = process.env.PADDLE_API_KEY || "";
 const PADDLE_BASE = "https://api.paddle.com";
 
 const PRICE_IDS = {
-  premium: process.env.PADDLE_PRICE_PREMIUM || "",
-  pro: process.env.PADDLE_PRICE_PRO || "",
-  professional: process.env.PADDLE_PRICE_PROFESSIONAL || "",
+  premium: process.env.PADDLE_PRICE_PREMIUM || process.env.VITE_PADDLE_PRICE_PREMIUM || "",
+  pro: process.env.PADDLE_PRICE_PRO || process.env.VITE_PADDLE_PRICE_PRO || "",
+  professional: process.env.PADDLE_PRICE_PROFESSIONAL || process.env.VITE_PADDLE_PRICE_PROFESSIONAL || "",
+};
+
+const FALLBACK_PRICES: Record<string, { name: string; unitAmount: number }> = {
+  premium: { name: "Creator", unitAmount: 1900 },
+  pro: { name: "Pro", unitAmount: 3900 },
+  professional: { name: "Studio", unitAmount: 8900 },
 };
 
 export interface PaddlePrice {
@@ -65,11 +71,20 @@ export async function fetchPaddlePrice(priceId: string): Promise<PaddlePrice | n
 }
 
 export async function fetchAllPrices(): Promise<Record<string, PaddlePrice>> {
-  const [premium, pro, professional] = await Promise.all([
+  const [premiumLive, proLive, professionalLive] = await Promise.all([
     fetchPaddlePrice(PRICE_IDS.premium),
     fetchPaddlePrice(PRICE_IDS.pro),
     fetchPaddlePrice(PRICE_IDS.professional),
   ]);
+  const fallback = (key: keyof typeof PRICE_IDS): PaddlePrice | null => {
+    const id = PRICE_IDS[key];
+    if (!id) return null;
+    const price = FALLBACK_PRICES[key];
+    return { id, name: price.name, unitAmount: price.unitAmount, currency: "USD", interval: "month", frequency: 1 };
+  };
+  const premium = premiumLive ?? fallback("premium");
+  const pro = proLive ?? fallback("pro");
+  const professional = professionalLive ?? fallback("professional");
   const result: Record<string, PaddlePrice> = {};
   if (premium) {
     result.premium = premium;

@@ -70,7 +70,7 @@ async function recoverInterruptedAnalysisJobs() {
             plan = user[0]?.plan;
           }
 
-          await runAnalysisPipeline(job.id, job.b2Key, {
+          const completed = await runAnalysisPipeline(job.id, job.b2Key, {
             mode: "video-analyzer",
             platform: storedOptions.platform ?? job.platform ?? "youtube_long",
             platforms: storedOptions.platforms ?? [job.platform ?? "youtube_long"],
@@ -82,7 +82,7 @@ async function recoverInterruptedAnalysisJobs() {
             plan: plan ?? "free",
             maxDurationSeconds: storedOptions.maxDurationSeconds,
           });
-          if (job.userId) await incrementVideoAnalysis(job.userId);
+          if (completed && job.userId) await incrementVideoAnalysis(job.userId);
         })
         .catch((err) => {
           logger.error({ err, jobId: job.id }, "Recovered pipeline error");

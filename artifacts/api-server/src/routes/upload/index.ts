@@ -400,7 +400,7 @@ router.post("/complete", async (req, res) => {
 
     analysisQueue
       .add(async () => {
-        await runAnalysisPipeline(jobId, b2Key, {
+        const completed = await runAnalysisPipeline(jobId, b2Key, {
           mode: validatedMode,
           platform: session.platforms[0] ?? "youtube_long",
           platforms: session.platforms,
@@ -412,7 +412,7 @@ router.post("/complete", async (req, res) => {
           plan: rawPlan,
           maxDurationSeconds,
         });
-        if (userId) await incrementVideoAnalysis(userId);
+        if (completed && userId) await incrementVideoAnalysis(userId);
         await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
       })
       .catch(async (err) => {
