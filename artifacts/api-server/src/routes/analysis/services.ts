@@ -184,7 +184,8 @@ async function runMediaCommand(
       if (settled) return;
       settled = true;
       child.kill("SIGKILL");
-      reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+      const stderr = Buffer.concat(stderrChunks).toString("utf8").trim();
+      reject(new Error(`${label} timed out after ${timeoutMs}ms${stderr ? `: ${stderr}` : ""}`));
     }, timeoutMs);
 
     child.stderr.on("data", (chunk: Buffer) => {
@@ -219,6 +220,24 @@ async function runMediaCommand(
       reject(new Error(`${label} failed${signal ? ` with signal ${signal}` : ` with code ${code}`}${stderr ? `: ${stderr}` : ""}`));
     });
   });
+}
+
+function getConfiguredTimeoutMs(envName: string, defaultMs: number): number {
+  const value = Number(process.env[envName]);
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : defaultMs;
+}
+
+async function listExtractedFrameJpegs(framesDir: string, count: number): Promise<string[]> {
+  const files = await fs.readdir(framesDir);
+  const jpgs: string[] = [];
+  for (const file of files.filter(f => f.endsWith(".jpg")).sort()) {
+    const stat = await fs.stat(path.join(framesDir, file)).catch(() => null);
+    if (stat && stat.size > 0) {
+      jpgs.push(file);
+    }
+    if (jpgs.length >= count) break;
+  }
+  return jpgs;
 }
 
 export async function updateJob(jobId: string, updates: Partial<typeof analysisJobsTable.$inferInsert>) {
@@ -382,12 +401,14 @@ export async function extractAudio(videoPath: string, outputPath: string): Promi
 export async function extractFrames(videoPath: string, framesDir: string, count = 5): Promise<string[]> {
   const duration = await getMediaDuration(videoPath);
   const frameScaleFilter = "scale='min(640,iw)':-2";
+  const seekTimeoutMs = getConfiguredTimeoutMs("FFMPEG_FRAME_SEEK_TIMEOUT_MS", 45000);
+  const fallbackTimeoutMs = getConfiguredTimeoutMs("FFMPEG_FRAME_FALLBACK_TIMEOUT_MS", 90000);
   if (duration <= 0) {
     logger.info({ videoPath, count }, "Extracting frames with select filter");
     await runMediaCommand(
       "ffmpeg",
       ["-nostdin", "-hide_banner", "-loglevel", "error", "-threads", "1", "-i", videoPath, "-vf", `select=lt(n\\,${count}),${frameScaleFilter}`, "-vsync", "vfr", "-q:v", "8", path.join(framesDir, "frame_%03d.jpg"), "-y"],
-      60000,
+      fallbackTimeoutMs,
       "ffmpeg frame extraction select"
     );
   } else {
@@ -397,16 +418,44 @@ export async function extractFrames(videoPath: string, framesDir: string, count 
       const ts = Math.min(Math.max(interval * i, 0.1), Math.max(duration - 0.1, 0.1)).toFixed(2);
       const outPath = path.join(framesDir, `frame_${String(i).padStart(3, "0")}.jpg`);
       logger.info({ i, ts, outPath }, "Extracting frame");
+      try {
+        await runMediaCommand(
+          "ffmpeg",
+          ["-nostdin", "-hide_banner", "-loglevel", "error", "-threads", "1", "-ss", ts, "-i", videoPath, "-frames:v", "1", "-vf", frameScaleFilter, "-q:v", "8", outPath, "-y"],
+          seekTimeoutMs,
+          `ffmpeg frame extraction ${i}`
+        );
+      } catch (fastSeekErr) {
+        logger.warn({ err: fastSeekErr, i, ts, outPath }, "Fast frame extraction failed, retrying with accurate seek");
+        try {
+          await runMediaCommand(
+            "ffmpeg",
+            ["-nostdin", "-hide_banner", "-loglevel", "error", "-threads", "1", "-i", videoPath, "-ss", ts, "-frames:v", "1", "-vf", frameScaleFilter, "-q:v", "8", outPath, "-y"],
+            fallbackTimeoutMs,
+            `ffmpeg accurate frame extraction ${i}`
+          );
+        } catch (accurateSeekErr) {
+          logger.warn({ err: accurateSeekErr, i, ts, outPath }, "Frame extraction retry failed, continuing with remaining frames");
+          await fs.unlink(outPath).catch(() => {});
+        }
+      }
+    }
+
+    const jpgs = await listExtractedFrameJpegs(framesDir, count);
+    if (jpgs.length === 0) {
+      logger.warn({ videoPath, count, duration }, "No interval frames extracted, falling back to first decodable frames");
       await runMediaCommand(
         "ffmpeg",
-        ["-nostdin", "-hide_banner", "-loglevel", "error", "-threads", "1", "-ss", ts, "-i", videoPath, "-frames:v", "1", "-vf", frameScaleFilter, "-q:v", "8", outPath, "-y"],
-        30000,
-        `ffmpeg frame extraction ${i}`
+        ["-nostdin", "-hide_banner", "-loglevel", "error", "-threads", "1", "-i", videoPath, "-vf", `select=lt(n\\,${count}),${frameScaleFilter}`, "-vsync", "vfr", "-q:v", "8", path.join(framesDir, "frame_%03d.jpg"), "-y"],
+        fallbackTimeoutMs,
+        "ffmpeg frame extraction fallback"
       );
     }
   }
-  const files = await fs.readdir(framesDir);
-  const jpgs = files.filter(f => f.endsWith(".jpg")).sort().slice(0, count);
+  const jpgs = await listExtractedFrameJpegs(framesDir, count);
+  if (jpgs.length === 0) {
+    throw new Error("Could not extract any video frames from this file. The video may use an unsupported codec or be corrupted.");
+  }
   logger.info({ framesDir, extractedCount: jpgs.length }, "Frame extraction completed");
   const frameBase64List: string[] = [];
   for (const f of jpgs) {

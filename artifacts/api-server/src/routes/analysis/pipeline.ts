@@ -31,6 +31,11 @@ function getAnalysisTimeoutMs() {
   return minutes * 60 * 1000;
 }
 
+function getFrameExtractionTimeoutMs() {
+  const configuredMs = Number(process.env.ANALYSIS_FRAME_EXTRACTION_TIMEOUT_MS);
+  return Number.isFinite(configuredMs) && configuredMs > 0 ? Math.floor(configuredMs) : 180000;
+}
+
 function isAnalysisTimeoutError(err: unknown) {
   return err instanceof Error && err.message === "Analysis timed out";
 }
@@ -321,7 +326,7 @@ async function runVideoAnalyzer(
       logger.info({ jobId, frameCount }, "Starting frame extraction");
       const frameBase64List = await withTimeout(
         extractFrames(videoPath, framesDir, frameCount),
-        90000,
+        getFrameExtractionTimeoutMs(),
         "frame extraction",
         jobId,
       );
