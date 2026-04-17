@@ -4,7 +4,7 @@ import path from "path";
 import { db } from "@workspace/db";
 import { analysisJobsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
-import { downloadFromB2 } from "../../lib/b2";
+import { deleteFromB2, downloadFromB2 } from "../../lib/b2";
 import {
   updateJob, transcribeAudio, extractAudio, extractFrames,
   analyzeVisuals, analyzeAudio, analyzeEditingPoints,
@@ -51,7 +51,21 @@ export async function runAnalysisPipeline(
   try {
     await fs.mkdir(workDir, { recursive: true });
     await downloadFromB2(b2Key, localVideoPath);
-    return await runVideoAnalyzer(jobId, localVideoPath, options);
+    await runVideoAnalyzer(jobId, localVideoPath, options);
+
+    const job = await db
+      .select({ status: analysisJobsTable.status })
+      .from(analysisJobsTable)
+      .where(eq(analysisJobsTable.id, jobId))
+      .limit(1);
+
+    if (job[0]?.status === "complete") {
+      try {
+        await deleteFromB2(b2Key);
+      } catch (err) {
+        logger.error({ err, jobId, b2Key }, "Analysis completed, but B2 video cleanup failed");
+      }
+    }
   } finally {
     await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
   }

@@ -3,6 +3,7 @@ const PADDLE_BASE = "https://api.paddle.com";
 
 const PRICE_IDS = {
   premium: process.env.PADDLE_PRICE_PREMIUM || "",
+  pro: process.env.PADDLE_PRICE_PRO || "",
   professional: process.env.PADDLE_PRICE_PROFESSIONAL || "",
 };
 
@@ -64,13 +65,22 @@ export async function fetchPaddlePrice(priceId: string): Promise<PaddlePrice | n
 }
 
 export async function fetchAllPrices(): Promise<Record<string, PaddlePrice>> {
-  const [premium, professional] = await Promise.all([
+  const [premium, pro, professional] = await Promise.all([
     fetchPaddlePrice(PRICE_IDS.premium),
+    fetchPaddlePrice(PRICE_IDS.pro),
     fetchPaddlePrice(PRICE_IDS.professional),
   ]);
   const result: Record<string, PaddlePrice> = {};
-  if (premium) result.premium = premium;
-  if (professional) result.professional = professional;
+  if (premium) {
+    result.premium = premium;
+    result.creator = premium;
+  }
+  if (pro) result.pro = pro;
+  if (professional) {
+    result.professional = professional;
+    result.studio = professional;
+    if (!result.pro) result.pro = professional;
+  }
   return result;
 }
 

@@ -115,3 +115,22 @@ export async function downloadFromB2(key: string, destPath: string) {
     throw err;
   }
 }
+
+export async function deleteFromB2(key: string) {
+  const client = getB2Client();
+  const bucket = getB2Bucket();
+
+  try {
+    logger.info({ key }, "Deleting B2 object");
+    await client.send(
+      new DeleteObjectCommand({
+        Bucket: bucket,
+        Key: key,
+      }),
+    );
+    logger.info({ key }, "B2 object deleted successfully");
+  } catch (err) {
+    logger.error({ err, key }, "B2 delete failed");
+    throw err;
+  }
+}

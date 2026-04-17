@@ -77,7 +77,7 @@ const PLAN_META = [
 export function PlanPickerModal({ onClose, highlightPlan }: PlanPickerModalProps) {
   const { user } = useUser();
   const { openCheckout } = usePaddle();
-  const { formatPrice, loading: pricesLoading } = usePaddlePrices();
+  const { prices, formatPrice, loading: pricesLoading } = usePaddlePrices();
   const [, navigate] = useLocation();
 
   useEffect(() => {
@@ -86,13 +86,22 @@ export function PlanPickerModal({ onClose, highlightPlan }: PlanPickerModalProps
     return () => document.removeEventListener("keydown", handler);
   }, [onClose]);
 
+  const getPriceId = (planKey: "creator" | "pro" | "studio") => {
+    const envPriceId = PADDLE_PRICES[planKey];
+    if (envPriceId) return envPriceId;
+    if (prices[planKey]?.id) return prices[planKey].id;
+    if (planKey === "creator") return prices.premium?.id ?? "";
+    if (planKey === "studio") return prices.professional?.id ?? "";
+    return "";
+  };
+
   const handleSelect = (planKey: "creator" | "pro" | "studio") => {
     if (planKey === "studio") {
       onClose();
       navigate("/contact");
       return;
     }
-    const priceId = PADDLE_PRICES[planKey];
+    const priceId = getPriceId(planKey);
     if (priceId && user) {
       openCheckout(priceId, user.email);
       onClose();
@@ -124,7 +133,7 @@ export function PlanPickerModal({ onClose, highlightPlan }: PlanPickerModalProps
           <div className="p-6 grid sm:grid-cols-3 gap-4">
             {PLAN_META.map((plan) => {
               const isHighlighted = highlightPlan === plan.key;
-              const priceId = PADDLE_PRICES[plan.key];
+              const priceId = getPriceId(plan.key);
               const hasCheckout = !!priceId;
 
               return (
@@ -174,7 +183,7 @@ export function PlanPickerModal({ onClose, highlightPlan }: PlanPickerModalProps
                     className={`w-full py-2.5 text-sm font-semibold text-white rounded-lg transition-all cursor-pointer ${plan.ctaClass} disabled:opacity-40 disabled:cursor-not-allowed`}
                     data-testid={`button-select-plan-${plan.key}`}
                   >
-                    {plan.key === "studio" ? "Contact us" : hasCheckout ? `Start ${plan.name}` : "Coming Soon"}
+                    {plan.key === "studio" ? "Contact us" : "Upgrade"}
                   </button>
                 </div>
               );
