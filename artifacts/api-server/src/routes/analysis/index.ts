@@ -285,6 +285,20 @@ router.post("/upload", (req, res, next) => {
       replaceAudio: 0,
       audioLanguage,
       b2Key,
+      result: {
+        analysisOptions: {
+          mode: validatedMode,
+          platform: validatedPlatforms[0] ?? "youtube_long",
+          platforms: validatedPlatforms,
+          modules: validatedModules,
+          translateSubtitles,
+          subtitleLanguage: req.body.subtitleLanguage || undefined,
+          audioLanguage: audioLanguage || undefined,
+          audioVoice,
+          plan: rawPlan,
+          maxDurationSeconds,
+        },
+      },
     } as any);
 
     // Respond immediately — analysis will execute through the queue.

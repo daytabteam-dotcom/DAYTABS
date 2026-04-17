@@ -22,6 +22,7 @@ import {
 } from "../../lib/usageService";
 import { uploadToB2 } from "../../lib/b2";
 import { logger } from "../../lib/logger";
+import { analysisQueue } from "../../lib/analysisQueue";
 
 const execAsync = promisify(exec);
 const router: IRouter = Router();
@@ -374,6 +375,20 @@ router.post("/complete", async (req, res) => {
       audioLanguage: session.audioLanguage ?? null,
       videoPath: b2Key, // Store B2 key as videoPath for compatibility
       b2Key: b2Key,
+      result: {
+        analysisOptions: {
+          mode: validatedMode,
+          platform: session.platforms[0] ?? "youtube_long",
+          platforms: session.platforms,
+          modules: session.modules,
+          translateSubtitles: session.translateSubtitles,
+          subtitleLanguage: session.subtitleLanguage ?? undefined,
+          audioLanguage: session.audioLanguage ?? undefined,
+          audioVoice: session.audioVoice,
+          plan: rawPlan,
+          maxDurationSeconds,
+        },
+      },
     });
 
     sessions.delete(uploadId);
@@ -383,28 +398,27 @@ router.post("/complete", async (req, res) => {
 
     res.json({ jobId, filePath: b2Key });
 
-    setImmediate(() => {
-      runAnalysisPipeline(jobId, b2Key, {
-        mode: validatedMode,
-        platform: session.platforms[0] ?? "youtube_long",
-        platforms: session.platforms,
-        modules: session.modules,
-        translateSubtitles: session.translateSubtitles,
-        subtitleLanguage: session.subtitleLanguage ?? undefined,
-        audioLanguage: session.audioLanguage ?? undefined,
-        audioVoice: session.audioVoice,
-        plan: rawPlan,
-        maxDurationSeconds,
-      })
-        .then(async () => {
-          if (userId) await incrementVideoAnalysis(userId);
-          await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
-        })
-        .catch(async (err) => {
-          logger.error({ err, jobId }, "Pipeline error after chunked upload");
-          await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
+    analysisQueue
+      .add(async () => {
+        await runAnalysisPipeline(jobId, b2Key, {
+          mode: validatedMode,
+          platform: session.platforms[0] ?? "youtube_long",
+          platforms: session.platforms,
+          modules: session.modules,
+          translateSubtitles: session.translateSubtitles,
+          subtitleLanguage: session.subtitleLanguage ?? undefined,
+          audioLanguage: session.audioLanguage ?? undefined,
+          audioVoice: session.audioVoice,
+          plan: rawPlan,
+          maxDurationSeconds,
         });
-    });
+        if (userId) await incrementVideoAnalysis(userId);
+        await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
+      })
+      .catch(async (err) => {
+        logger.error({ err, jobId }, "Queued pipeline error after chunked upload");
+        await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
+      });
   } catch (err) {
     logger.error({ err }, "Upload complete error");
     res.status(500).json({ error: "Failed to assemble upload" });

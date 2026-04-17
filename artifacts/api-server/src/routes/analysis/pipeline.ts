@@ -261,6 +261,6 @@ async function runVideoAnalyzer(
     logger.error({ err, jobId }, "Video analyzer pipeline error");
     await updateJob(jobId, { status: "error", error: err instanceof Error ? err.message : String(err) });
     await fs.unlink(videoPath).catch(() => {});
+    throw err;
   }
 }
-

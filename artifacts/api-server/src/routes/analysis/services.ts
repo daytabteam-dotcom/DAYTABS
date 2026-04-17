@@ -1,4 +1,4 @@
-import { exec } from "child_process";
+import { exec, spawn } from "child_process";
 import { promisify } from "util";
 import fs from "fs/promises";
 import path from "path";
@@ -10,6 +10,59 @@ import { openai } from "../../lib/openai";
 import { toFile } from "openai";
 
 export const execAsync = promisify(exec);
+
+async function runMediaCommand(
+  command: string,
+  args: string[],
+  timeoutMs: number,
+  label: string
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { stdio: ["ignore", "ignore", "pipe"] });
+    const stderrChunks: Buffer[] = [];
+    let stderrBytes = 0;
+    let settled = false;
+
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      child.kill("SIGKILL");
+      reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderrChunks.push(chunk);
+      stderrBytes += chunk.length;
+      while (stderrBytes > 64 * 1024 && stderrChunks.length > 1) {
+        const removed = stderrChunks.shift();
+        stderrBytes -= removed?.length ?? 0;
+      }
+    });
+
+    child.on("error", (err: NodeJS.ErrnoException) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (err.code === "ENOENT") {
+        reject(new Error("ffmpeg is not installed on this server. Please install ffmpeg to process videos."));
+      } else {
+        reject(err);
+      }
+    });
+
+    child.on("close", (code, signal) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      const stderr = Buffer.concat(stderrChunks).toString("utf8").trim();
+      reject(new Error(`${label} failed${signal ? ` with signal ${signal}` : ` with code ${code}`}${stderr ? `: ${stderr}` : ""}`));
+    });
+  });
+}
 
 export async function updateJob(jobId: string, updates: Partial<typeof analysisJobsTable.$inferInsert>) {
   const setData: any = { ...updates, updatedAt: new Date() };
@@ -150,37 +203,38 @@ export async function transcribeAudio(audioPath: string): Promise<{ text: string
 }
 
 export async function extractAudio(videoPath: string, outputPath: string): Promise<void> {
-  try {
-    await withTimeout(execAsync(`ffmpeg -i "${videoPath}" -vn -ar 16000 -ac 1 -c:a libmp3lame -q:a 4 "${outputPath}" -y`), 60000, "ffmpeg audio extraction");
-  } catch (err: any) {
-    if (err.message?.includes('ENOENT') || err.code === 'ENOENT') {
-      throw new Error('ffmpeg is not installed on this server. Please install ffmpeg to process videos.');
-    }
-    throw err;
-  }
+  await runMediaCommand(
+    "ffmpeg",
+    ["-nostdin", "-hide_banner", "-loglevel", "error", "-i", videoPath, "-vn", "-ar", "16000", "-ac", "1", "-c:a", "libmp3lame", "-q:a", "4", outputPath, "-y"],
+    60000,
+    "ffmpeg audio extraction"
+  );
 }
 
 export async function extractFrames(videoPath: string, framesDir: string, count = 5): Promise<string[]> {
   const duration = await getMediaDuration(videoPath);
-  try {
-    if (duration <= 0) {
-      logger.info({ videoPath, count }, "Extracting frames with select filter");
-      await withTimeout(execAsync(`ffmpeg -i "${videoPath}" -vf "select=lt(n\\,${count})" -vsync vfr "${framesDir}/frame_%03d.jpg" -y`), 60000, "ffmpeg frame extraction select");
-    } else {
-      const interval = duration / (count + 1);
-      logger.info({ videoPath, count, duration, interval }, "Extracting frames at intervals");
-      for (let i = 1; i <= count; i++) {
-        const ts = (interval * i).toFixed(2);
-        const outPath = path.join(framesDir, `frame_${String(i).padStart(3, "0")}.jpg`);
-        logger.info({ i, ts, outPath }, "Extracting frame");
-        await withTimeout(execAsync(`ffmpeg -ss ${ts} -i "${videoPath}" -frames:v 1 -q:v 3 "${outPath}" -y`), 30000, `ffmpeg frame extraction ${i}`);
-      }
+  if (duration <= 0) {
+    logger.info({ videoPath, count }, "Extracting frames with select filter");
+    await runMediaCommand(
+      "ffmpeg",
+      ["-nostdin", "-hide_banner", "-loglevel", "error", "-i", videoPath, "-vf", `select=lt(n\\,${count})`, "-vsync", "vfr", path.join(framesDir, "frame_%03d.jpg"), "-y"],
+      60000,
+      "ffmpeg frame extraction select"
+    );
+  } else {
+    const interval = duration / (count + 1);
+    logger.info({ videoPath, count, duration, interval }, "Extracting frames at intervals");
+    for (let i = 1; i <= count; i++) {
+      const ts = Math.min(Math.max(interval * i, 0.1), Math.max(duration - 0.1, 0.1)).toFixed(2);
+      const outPath = path.join(framesDir, `frame_${String(i).padStart(3, "0")}.jpg`);
+      logger.info({ i, ts, outPath }, "Extracting frame");
+      await runMediaCommand(
+        "ffmpeg",
+        ["-nostdin", "-hide_banner", "-loglevel", "error", "-ss", ts, "-i", videoPath, "-frames:v", "1", "-q:v", "3", outPath, "-y"],
+        30000,
+        `ffmpeg frame extraction ${i}`
+      );
     }
-  } catch (err: any) {
-    if (err.message?.includes('ENOENT') || err.code === 'ENOENT') {
-      throw new Error('ffmpeg is not installed on this server. Please install ffmpeg to process videos.');
-    }
-    throw err;
   }
   const files = await fs.readdir(framesDir);
   const jpgs = files.filter(f => f.endsWith(".jpg")).sort().slice(0, count);
