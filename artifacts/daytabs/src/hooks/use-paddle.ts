@@ -1,8 +1,8 @@
 import { useEffect, useState, useCallback } from "react";
 import { initializePaddle, Paddle } from "@paddle/paddle-js";
 
-const CLIENT_TOKEN = import.meta.env.VITE_PADDLE_CLIENT_TOKEN as string;
-const ENVIRONMENT = (import.meta.env.VITE_PADDLE_ENVIRONMENT ?? "production") as "production" | "sandbox";
+const BUILD_CLIENT_TOKEN = (import.meta.env.VITE_PADDLE_CLIENT_TOKEN as string | undefined)?.trim() ?? "";
+const BUILD_ENVIRONMENT = (import.meta.env.VITE_PADDLE_ENVIRONMENT ?? "production") as "production" | "sandbox";
 const ADMIN_EMAIL = import.meta.env.VITE_ADMIN_EMAIL as string | undefined;
 
 export const PADDLE_PRICES = {
@@ -15,6 +15,9 @@ export const PADDLE_PRICES = {
 
 let paddleInstance: Paddle | null = null;
 let paddleInitPromise: Promise<Paddle | null> | null = null;
+let runtimeConfigPromise: Promise<{ clientToken: string; environment: "production" | "sandbox" } | null> | null = null;
+let clientToken = BUILD_CLIENT_TOKEN;
+let environment: "production" | "sandbox" = BUILD_ENVIRONMENT === "sandbox" ? "sandbox" : "production";
 let globalDiscountCode = "";
 const discountListeners = new Set<(code: string) => void>();
 
@@ -50,14 +53,38 @@ async function handleCheckoutComplete(
   }
 }
 
+async function loadRuntimePaddleConfig() {
+  if (clientToken) return { clientToken, environment };
+  if (runtimeConfigPromise) return runtimeConfigPromise;
+
+  runtimeConfigPromise = fetch("/api/paddle/config", { cache: "no-store" })
+    .then(async (res) => {
+      if (!res.ok) return null;
+      const config = await res.json() as {
+        clientToken?: string;
+        environment?: string;
+      };
+      const token = config.clientToken?.trim() ?? "";
+      if (!token) return null;
+
+      clientToken = token;
+      environment = config.environment === "sandbox" ? "sandbox" : "production";
+      return { clientToken, environment };
+    })
+    .catch(() => null);
+
+  return runtimeConfigPromise;
+}
+
 async function ensurePaddleInitialized(): Promise<Paddle | null> {
   if (paddleInstance) return paddleInstance;
-  if (!CLIENT_TOKEN) return null;
+  const config = await loadRuntimePaddleConfig();
+  if (!config) return null;
   if (paddleInitPromise) return paddleInitPromise;
 
   paddleInitPromise = initializePaddle({
-    token: CLIENT_TOKEN,
-    environment: ENVIRONMENT,
+    token: config.clientToken,
+    environment: config.environment,
     checkout: {
       settings: { displayMode: "overlay", theme: "dark", locale: "en" },
     },
@@ -99,7 +126,6 @@ export function usePaddle() {
 
   useEffect(() => {
     if (paddleInstance) { setPaddle(paddleInstance); return; }
-    if (!CLIENT_TOKEN) return;
     ensurePaddleInitialized().then((instance) => {
       if (instance) setPaddle(instance);
     });

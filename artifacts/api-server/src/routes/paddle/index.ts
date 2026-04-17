@@ -21,6 +21,8 @@ if (!JWT_SECRET) {
   throw new Error("JWT_SECRET environment variable is required");
 }
 const WEBHOOK_SECRET = process.env.PADDLE_WEBHOOK_SECRET || "";
+const PADDLE_CLIENT_TOKEN = process.env.PADDLE_CLIENT_TOKEN || process.env.VITE_PADDLE_CLIENT_TOKEN || "";
+const PADDLE_ENVIRONMENT = process.env.PADDLE_ENVIRONMENT || process.env.VITE_PADDLE_ENVIRONMENT || "production";
 const PRICE_PREMIUM = process.env.PADDLE_PRICE_PREMIUM || process.env.VITE_PADDLE_PRICE_PREMIUM || "";
 const PRICE_PRO = process.env.PADDLE_PRICE_PRO || process.env.VITE_PADDLE_PRICE_PRO || "";
 const PRICE_PROFESSIONAL = process.env.PADDLE_PRICE_PROFESSIONAL || process.env.VITE_PADDLE_PRICE_PROFESSIONAL || "";
@@ -62,6 +64,20 @@ function verifyPaddleSignature(rawBody: string, signatureHeader: string, secret:
     return false;
   }
 }
+
+/**
+ * GET /api/paddle/config
+ * Returns public Paddle JS configuration for the static frontend.
+ * The client token is intentionally public and is not the Paddle API key.
+ */
+router.get("/config", (_req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  res.json({
+    clientToken: PADDLE_CLIENT_TOKEN,
+    environment: PADDLE_ENVIRONMENT === "sandbox" ? "sandbox" : "production",
+    configured: Boolean(PADDLE_CLIENT_TOKEN),
+  });
+});
 
 /**
  * GET /api/paddle/prices
