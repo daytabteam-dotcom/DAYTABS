@@ -146,7 +146,7 @@ function scoreColorTemperature(obs: VisualObservations): number {
 }
 
 // NEW: Score pacing/engagement
-function scorePacing(pacing: PacingObservations): number {
+export function scorePacing(pacing: PacingObservations): number {
   let score = 100;
   if (pacing.pacingRating === "slow") score -= 20;
   if (pacing.pacingRating === "very_slow") score -= 40;
@@ -321,9 +321,9 @@ export function buildRetentionForecast(
   topicRelevanceOfBackground: "yes" | "neutral" | "no",
   totalDurationSec: number
 ): RetentionForecast {
-  // Start with a base retention for the platform (YouTube avg ~40%, TikTok ~60%)
-  // Use a balanced baseline of 50%
-  let baseRetention = 50;
+  // Start from a conservative creator-content baseline. This is a professional
+  // forecast, not a motivational score, so "average" should feel average.
+  let baseRetention = totalDurationSec <= 90 ? 58 : 44;
 
   // Visual quality impact
   baseRetention += (visualScore - 70) * 0.15;
@@ -332,11 +332,11 @@ export function buildRetentionForecast(
   baseRetention += (audioScore - 70) * 0.2;
 
   // Hook strength (biggest single factor in retention)
-  if (hookStrength === "strong") baseRetention += 15;
-  else if (hookStrength === "weak") baseRetention -= 20;
+  if (hookStrength === "strong") baseRetention += 10;
+  else if (hookStrength === "weak") baseRetention -= 22;
 
   // Pacing
-  if (pacingObs.pacingRating === "good") baseRetention += 5;
+  if (pacingObs.pacingRating === "good") baseRetention += 2;
   if (pacingObs.pacingRating === "slow") baseRetention -= 10;
   if (pacingObs.pacingRating === "very_slow") baseRetention -= 20;
 
@@ -348,16 +348,16 @@ export function buildRetentionForecast(
   if (topicRelevanceOfBackground === "no") baseRetention -= 8;
 
   // Long pauses
-  baseRetention -= Math.min(pacingObs.longPauseCount * 3, 15);
+  baseRetention -= Math.min(pacingObs.longPauseCount * 4, 18);
 
   // Clamp
-  const estimatedRetentionPct = Math.max(10, Math.min(90, Math.round(baseRetention)));
+  const estimatedRetentionPct = Math.max(8, Math.min(82, Math.round(baseRetention)));
 
   const retentionGrade: RetentionForecast["retentionGrade"] =
-    estimatedRetentionPct >= 70 ? "A" :
-    estimatedRetentionPct >= 55 ? "B" :
-    estimatedRetentionPct >= 40 ? "C" :
-    estimatedRetentionPct >= 25 ? "D" : "F";
+    estimatedRetentionPct >= 72 ? "A" :
+    estimatedRetentionPct >= 58 ? "B" :
+    estimatedRetentionPct >= 43 ? "C" :
+    estimatedRetentionPct >= 28 ? "D" : "F";
 
   // Build retention curve: starts at 100%, drops based on identified risk points
   const curvePoints: Array<{ sec: number; pct: number }> = [];
@@ -369,8 +369,6 @@ export function buildRetentionForecast(
   curvePoints.push({ sec: 0, pct: 100 });
   curvePoints.push({ sec: 5, pct: Math.round(100 * initialDropFactor) });
   currentPct = Math.round(100 * initialDropFactor);
-
-  const riskSecSet = new Set(pacingObs.engagementRiskTimestamps.map(r => Math.floor(r.at)));
 
   for (let sec = 10; sec <= totalDurationSec; sec += step) {
     // Natural decay
@@ -441,7 +439,7 @@ export function buildRetentionForecast(
       ? "The hook is the primary risk — most viewers will leave in the first 8 seconds before the value is clear."
       : pacingObs.pacingRating === "very_slow" || pacingObs.pacingRating === "slow"
       ? `Pacing is the main retention killer — ${pacingObs.longPauseCount} silence gaps and ${Math.round(pacingObs.wordsPerMinute)} wpm delivery will cause mid-video drop-offs.`
-      : "Retention is limited by a combination of pacing gaps and presentation energy — fixable in post.",
+      : "Retention is limited by a combination of pacing gaps and presentation energy. Fix the drop-off points before publishing.",
   ];
 
   return {
@@ -923,9 +921,9 @@ function buildVisualResult(obs: VisualObservations, assessments: Record<string, 
   );
 
   const severityFor = (score: number): string => {
-    if (score >= 90) return "excellent";
-    if (score >= 75) return "good";
-    if (score >= 55) return "needs work";
+    if (score >= 95) return "excellent";
+    if (score >= 80) return "good";
+    if (score >= 60) return "needs work";
     return "critical";
   };
 
@@ -1155,9 +1153,9 @@ export async function analyzeAudio(
     audioSignals = await measureAudioSignals(audioPath);
   }
 
-  const clarityScore = scoreAudioClarity(whisperConfidence);
-  const volumeScore = scoreAudioVolume(audioSignals.peakVariationDb, audioSignals.hasDropouts);
-  const noiseScore = scoreBackgroundNoise(audioSignals.noiseFloorDb);
+  const initialClarityScore = scoreAudioClarity(whisperConfidence);
+  const initialVolumeScore = scoreAudioVolume(audioSignals.peakVariationDb, audioSignals.hasDropouts);
+  const initialNoiseScore = scoreBackgroundNoise(audioSignals.noiseFloorDb);
   const fillerScore = scoreFillerWords(fillerRatio);
 
   const response = await callOpenAI({
@@ -1171,11 +1169,13 @@ Rules:
 - For clarity: note consonant clipping, room reverb, proximity effect, or compression artifacts
 - For background noise: identify the TYPE of noise (HVAC hum, street noise, keyboard, breathing) and when most noticeable
 - For filler words: name the most distracting one to fix first and give a specific replacement strategy
-- Never say "decent", "good", "acceptable", "generally" without a specific observation
+- Do not add reassurance or motivational praise
+- If you identify an audible flaw, state the flaw directly and explain the consequence
+- Never say "excellent", "decent", "good", "acceptable", or "generally" without a specific observation that justifies it
 
 Transcript snippet: "${transcript.substring(0, 500)}"
 Filler words detected: ${fillerBreakdownStr || "none"} (${fillerWordCount} total — ${Math.round(fillerRatio * 100)}% of speech)
-Whisper transcription confidence: ${clarityScore}%
+Whisper transcription confidence: ${initialClarityScore}%
 Volume peak variation: ${audioSignals.peakVariationDb.toFixed(1)} dB
 Noise floor estimate: ${audioSignals.noiseFloorDb.toFixed(1)} dBFS
 
@@ -1198,11 +1198,24 @@ Return STRICT JSON only — assessment strings, NO numbers:
   const txt = parseJson<Record<string, string>>(response.choices[0]?.message?.content ?? "{}", {});
 
   const severityFor = (score: number): string => {
-    if (score >= 90) return "excellent";
-    if (score >= 75) return "good";
-    if (score >= 55) return "needs work";
+    if (score >= 95) return "excellent";
+    if (score >= 80) return "good";
+    if (score >= 60) return "needs work";
     return "critical";
   };
+
+  const capScoreForEvidence = (score: number, text: string): number => {
+    const lower = text.toLowerCase();
+    const severe = /\b(noticeable|clipping|clips|muffled|unclear|hard to hear|dropout|dropouts|distort|distortion|distract|distracting|echo|reverb|hum|hiss|room noise|background noise|spike|dip|plosive|sibilance)\b/.test(lower);
+    const minor = /\b(slight|minor|small|subtle|occasional)\b/.test(lower);
+    if (severe) return Math.min(score, 72);
+    if (minor) return Math.min(score, 84);
+    return score;
+  };
+
+  const volumeScore = capScoreForEvidence(initialVolumeScore, `${txt.volumeAssessment ?? ""} ${txt.volumeSuggestion ?? ""} ${txt.volumeEffect ?? ""}`);
+  const clarityScore = capScoreForEvidence(initialClarityScore, `${txt.clarityAssessment ?? ""} ${txt.claritySuggestion ?? ""} ${txt.clarityEffect ?? ""}`);
+  const noiseScore = capScoreForEvidence(initialNoiseScore, `${txt.noiseAssessment ?? ""} ${txt.noiseSuggestion ?? ""} ${txt.noiseEffect ?? ""}`);
 
   return {
     audioVolume: {
@@ -1216,7 +1229,7 @@ Return STRICT JSON only — assessment strings, NO numbers:
     audioClarity: {
       level: clarityScore >= 75 ? "good" : clarityScore >= 50 ? "acceptable" : "poor",
       numeric: clarityScore,
-      assessment: txt.clarityAssessment ?? `Whisper confidence at ${clarityScore}%`,
+      assessment: txt.clarityAssessment ?? `Whisper confidence at ${initialClarityScore}%`,
       suggestions: [txt.claritySuggestion ?? "Record closer to the mic or in a treated space"],
       effect: txt.clarityEffect ?? "Low clarity reduces comprehension and viewer retention",
       severity: severityFor(clarityScore),

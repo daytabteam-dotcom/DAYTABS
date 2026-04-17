@@ -10,6 +10,7 @@ import {
   analyzeVisuals, analyzeAudio, analyzeEditingPoints,
   generateSeo, generateShortClipIdeas, generateSrt, translateSegments,
   computeQualityScore, getMediaDuration, logger, generateVideoName, getTotalAnalysisScore,
+  analyzePacing, buildRetentionForecast, scorePacing,
 } from "./services";
 
 async function withTimeout<T>(promise: Promise<T>, ms: number, label: string, jobId: string): Promise<T> {
@@ -265,6 +266,8 @@ async function runVideoAnalyzer(
     logger.info({ jobId, audioPath }, "Calling transcribeAudio");
     let transcriptText = "";
     let transcriptSegments: Array<{ start: number; end: number; text: string }> = [];
+    let wordTimings: Array<{ start: number; end: number; word: string }> | undefined;
+    let whisperConfidence = 0.75;
 
     try {
       const transcription = await transcribeAudio(audioPath);
@@ -272,6 +275,8 @@ async function runVideoAnalyzer(
       await stopIfMemoryHigh(jobId, "transcription");
       transcriptText = transcription.text;
       transcriptSegments = transcription.segments;
+      wordTimings = transcription.wordTimings;
+      whisperConfidence = transcription.whisperConfidence;
       logger.info({ jobId, transcriptLength: transcriptText.length, segmentCount: transcriptSegments.length }, "Whisper transcription completed");
     } catch (err) {
       logger.error({ err, jobId }, "Transcription failed");
@@ -338,7 +343,7 @@ async function runVideoAnalyzer(
       await updateJob(jobId, { status: "analyzing_visual", progress, currentStep: "Analyzing video quality" });
       const primaryPlatform = platforms[0] ?? "youtube_long";
       const visualAnalysis = await withTimeout(
-        analyzeVisuals(frameBase64List, primaryPlatform, plan),
+        analyzeVisuals(frameBase64List, primaryPlatform, plan, transcriptText),
         90000,
         "visual analysis",
         jobId,
@@ -349,7 +354,7 @@ async function runVideoAnalyzer(
       await fs.mkdir(framesDir, { recursive: true }).catch(() => {});
       await stopIfMemoryHigh(jobId, "visual analysis");
       const audioAnalysis = await withTimeout(
-        analyzeAudio(transcriptText, 0.9),
+        analyzeAudio(transcriptText, whisperConfidence, audioPath),
         90000,
         "audio analysis",
         jobId,
@@ -357,14 +362,44 @@ async function runVideoAnalyzer(
       await stopIfCancelled(jobId);
       await stopIfMemoryHigh(jobId, "audio analysis");
       const qualityScore = computeQualityScore(visualAnalysis, audioAnalysis);
+      const pacing = analyzePacing(transcriptSegments, wordTimings);
+      const totalDurationSec = transcriptSegments[transcriptSegments.length - 1]?.end ?? await getMediaDuration(videoPath);
+      const wordCount = transcriptText.split(/\s+/).filter(Boolean).length;
+      const fillerWordCount = Number((audioAnalysis as { fillerWords?: { numeric?: unknown } }).fillerWords?.numeric ?? 0);
+      const fillerRatio = wordCount > 0 ? fillerWordCount / wordCount : 0;
+      const retention = buildRetentionForecast(
+        Number((visualAnalysis as { overallVisualScore?: unknown }).overallVisualScore ?? 70),
+        computeQualityScore({}, audioAnalysis),
+        pacing,
+        fillerRatio,
+        transcriptSegments,
+        ((visualAnalysis as { hookStrength?: "strong" | "moderate" | "weak" }).hookStrength ?? "moderate"),
+        ((visualAnalysis as { background?: { contextAppropriate?: "yes" | "neutral" | "no" } }).background?.contextAppropriate ?? "neutral"),
+        totalDurationSec,
+      );
+      const pacingScore = scorePacing(pacing);
 
       result.quality = {
         score: qualityScore,
         ...visualAnalysis,
         ...audioAnalysis,
+        pacing: {
+          level: pacing.pacingRating,
+          numeric: pacingScore,
+          assessment: `${Math.round(pacing.wordsPerMinute)} wpm with ${pacing.longPauseCount} silence gap${pacing.longPauseCount === 1 ? "" : "s"}.`,
+          suggestions: pacing.longPauseCount > 0
+            ? ["Cut silence gaps over 1.5 seconds and tighten slow sections before upload."]
+            : ["Keep delivery tight; use B-roll or pattern breaks before attention drops."],
+          severity: pacingScore >= 95 ? "excellent" : pacingScore >= 80 ? "good" : pacingScore >= 60 ? "needs work" : "critical",
+          wordsPerMinute: pacing.wordsPerMinute,
+          longPauseCount: pacing.longPauseCount,
+          engagementRisks: pacing.engagementRiskTimestamps,
+        },
+        retention,
       };
+      result.retention = retention;
       result.totalScore = getTotalAnalysisScore(result);
-      await updateJob(jobId, { result: { quality: result.quality, totalScore: result.totalScore } });
+      await updateJob(jobId, { result: { quality: result.quality, retention, totalScore: result.totalScore } });
       progress = 55;
     }
 

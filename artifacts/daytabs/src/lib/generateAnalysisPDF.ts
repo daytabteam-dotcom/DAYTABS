@@ -174,8 +174,8 @@ export async function generateAnalysisPDF(
   doc.setTextColor(...COL.muted);
   doc.text("/ 100  Overall Quality Score", MARGIN + 16, state.y + 4);
 
-  const verdict = overallScore >= 70 ? "Strong video, ready to publish."
-    : overallScore >= 45 ? "Good foundation, a few improvements needed."
+  const verdict = overallScore >= 85 ? "Strong video, close to publish-ready."
+    : overallScore >= 60 ? "Usable foundation, but fix the flagged issues before publishing."
     : "Needs attention before publishing.";
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8.5);
@@ -224,6 +224,7 @@ export async function generateAnalysisPDF(
     ["Audio Clarity",     quality.audioClarity],
     ["Audio Volume",      quality.audioVolume],
     ["Background Noise",  quality.backgroundNoise],
+    ["Pacing",            quality.pacing],
   ] as const;
 
   for (const [label, dim] of dims) {
@@ -249,6 +250,27 @@ export async function generateAnalysisPDF(
   }
 
   drawHRule(state);
+
+  const retention = results.retention ?? quality.retention;
+  if (retention) {
+    sectionHeader(state, "Retention Forecast");
+    labelValue(state, "Estimated Retention", `${retention.estimatedRetentionPct ?? 0}% average (Grade ${retention.retentionGrade ?? "C"})`);
+    if (retention.summary) {
+      bodyText(state, retention.summary);
+    }
+    if (retention.dropOffMoments?.length) {
+      state.y += 1;
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8.5);
+      doc.setTextColor(...COL.muted);
+      doc.text("Likely Drop-Off Points", MARGIN, state.y);
+      state.y += 5;
+      for (const m of (retention.dropOffMoments as any[]).slice(0, 6)) {
+        bullet(state, `[${m.at}] ${m.reason ?? ""} Fix: ${m.fix ?? ""}`);
+      }
+    }
+    drawHRule(state);
+  }
 
   // ─── Editing Suggestions ─────────────────────────────────────────────────
   const editing = results.editing ?? {};

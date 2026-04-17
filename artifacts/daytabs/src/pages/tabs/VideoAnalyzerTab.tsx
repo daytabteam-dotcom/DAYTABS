@@ -264,7 +264,7 @@ function BlurSection({ children, feature, label, blur }: { children: React.React
 }
 
 function SeverityBadge({ severity, numeric }: { severity?: string; numeric?: number }) {
-  const s = severity ?? (numeric !== undefined ? (numeric >= 80 ? "excellent" : numeric >= 60 ? "good" : numeric >= 40 ? "needs work" : "critical") : "good");
+  const s = severity ?? (numeric !== undefined ? (numeric >= 95 ? "excellent" : numeric >= 80 ? "good" : numeric >= 60 ? "needs work" : "critical") : "good");
   const cls = s === "excellent" ? "text-green-400 border-green-400/20 bg-green-400/5"
     : s === "good" ? "text-blue-400 border-blue-400/20 bg-blue-400/5"
     : s === "needs work" ? "text-yellow-400 border-yellow-400/20 bg-yellow-400/5"
@@ -341,10 +341,73 @@ function FillerCard({ metric }: { metric: any }) {
   );
 }
 
+function RetentionForecastCard({ data }: { data: any }) {
+  if (!data) return null;
+  const moments = Array.isArray(data.dropOffMoments) ? data.dropOffMoments : [];
+  const points = Array.isArray(data.retentionCurvePoints) ? data.retentionCurvePoints : [];
+  const grade = data.retentionGrade ?? "C";
+  const gradeClass = grade === "A" ? "text-green-400 border-green-400/20 bg-green-400/5"
+    : grade === "B" ? "text-blue-400 border-blue-400/20 bg-blue-400/5"
+    : grade === "C" ? "text-yellow-400 border-yellow-400/20 bg-yellow-400/5"
+    : "text-red-400 border-red-400/20 bg-red-400/5";
+
+  return (
+    <div className="space-y-4">
+      <div className="p-5 rounded-2xl border border-white/8 bg-background/40">
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-4">
+          <div>
+            <p className="text-xs text-white/35 uppercase tracking-wider flex items-center gap-2">
+              <TrendingUp className="w-4 h-4 text-white/35" />
+              Retention Forecast
+            </p>
+            <p className="text-sm text-white/65 mt-2">{data.summary}</p>
+          </div>
+          <div className="flex items-center gap-3 shrink-0">
+            <div className="text-right">
+              <p className="text-4xl font-bold font-mono text-white">{data.estimatedRetentionPct ?? 0}%</p>
+              <p className="text-xs text-white/35">estimated average</p>
+            </div>
+            <span className={`px-2.5 py-1 rounded-full text-xs font-semibold border ${gradeClass}`}>Grade {grade}</span>
+          </div>
+        </div>
+
+        {points.length > 1 && (
+          <div className="flex items-end gap-1 h-20 border-l border-b border-white/10 pl-2 pb-2">
+            {points.slice(0, 24).map((p: any, i: number) => (
+              <div key={`${p.sec}-${i}`} className="flex-1 min-w-1 bg-primary/70 rounded-t" style={{ height: `${Math.max(6, Math.min(100, p.pct ?? 0))}%` }} title={`${p.sec}s: ${p.pct}%`} />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {moments.length > 0 && (
+        <div>
+          <h3 className="text-sm font-semibold text-white/60 uppercase tracking-wider mb-3 flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-400" />
+            Likely Drop-Off Points
+          </h3>
+          <div className="grid gap-2">
+            {moments.slice(0, 6).map((m: any, i: number) => (
+              <div key={`${m.at}-${i}`} className="p-3 rounded-xl bg-background/60 border border-white/8">
+                <div className="flex flex-wrap items-center gap-2 mb-2">
+                  <span className="text-xs font-mono text-primary min-w-[48px]">{m.at}</span>
+                  <span className={`px-2 py-0.5 rounded-full text-[11px] font-semibold border capitalize ${m.severity === "high" ? "text-red-400 border-red-400/20 bg-red-400/5" : m.severity === "medium" ? "text-yellow-400 border-yellow-400/20 bg-yellow-400/5" : "text-blue-400 border-blue-400/20 bg-blue-400/5"}`}>{m.severity} risk</span>
+                </div>
+                <p className="text-xs text-white/60">{m.reason}</p>
+                {m.fix && <p className="text-xs text-primary/80 mt-1">→ {m.fix}</p>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function QualityPanel({ data, isPaid }: { data: any; isPaid: boolean }) {
   if (!data) return <p className="text-white/40 text-sm">No quality data.</p>;
   const overallScore = data.score ?? data.overallScore ?? data.overallVisualScore ?? 0;
-  const scoreColor = overallScore >= 70 ? "text-green-400" : overallScore >= 45 ? "text-yellow-400" : "text-red-400";
+  const scoreColor = overallScore >= 85 ? "text-green-400" : overallScore >= 60 ? "text-yellow-400" : "text-red-400";
 
   return (
     <div className="space-y-6">
@@ -369,11 +432,11 @@ function QualityPanel({ data, isPaid }: { data: any; isPaid: boolean }) {
               initial={{ width: 0 }}
               animate={{ width: `${overallScore}%` }}
               transition={{ duration: 1, ease: "easeOut" }}
-              className={`h-full rounded-full ${overallScore >= 70 ? "bg-gradient-to-r from-green-500 to-emerald-400" : overallScore >= 45 ? "bg-gradient-to-r from-yellow-500 to-amber-400" : "bg-gradient-to-r from-red-500 to-rose-400"}`}
+              className={`h-full rounded-full ${overallScore >= 85 ? "bg-gradient-to-r from-green-500 to-emerald-400" : overallScore >= 60 ? "bg-gradient-to-r from-yellow-500 to-amber-400" : "bg-gradient-to-r from-red-500 to-rose-400"}`}
             />
           </div>
           <p className="text-xs text-white/40 mt-2">
-            {overallScore >= 70 ? "Strong video, ready to publish." : overallScore >= 45 ? "Good foundation, a few improvements needed." : "Needs attention before publishing."}
+            {overallScore >= 85 ? "Strong video, close to publish-ready." : overallScore >= 60 ? "Usable foundation, but fix the flagged issues before publishing." : "Needs attention before publishing."}
           </p>
         </div>
       </div>
@@ -419,9 +482,12 @@ function QualityPanel({ data, isPaid }: { data: any; isPaid: boolean }) {
             {data.audioVolume && <MetricCard title="Audio Volume" metric={data.audioVolume} />}
             {data.backgroundNoise && <MetricCard title="Background Noise" metric={data.backgroundNoise} />}
             {data.fillerWords && <FillerCard metric={data.fillerWords} />}
+            {data.pacing && <MetricCard title="Pacing" metric={data.pacing} />}
           </div>
         </div>
       </div>
+
+      <RetentionForecastCard data={data.retention} />
 
       {data.colorGradingRecommendation && isPaid && (
         <div className="p-4 rounded-xl bg-background/60 border border-white/8">
