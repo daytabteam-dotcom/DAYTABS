@@ -300,7 +300,7 @@ function MetricCard({ title, metric }: { title: string; metric: any }) {
   const numVal = metric.numeric ?? 0;
   const Icon = getMetricIcon(title);
   return (
-    <div className="bg-background/60 rounded-xl p-4 border border-white/8 hover:border-primary/20 transition-all">
+    <div className="h-full bg-background/60 rounded-xl p-4 border border-white/8 hover:border-primary/20 transition-all">
       <div className="mb-3">
         <p className="text-xs text-white/40 uppercase tracking-wider flex items-center gap-2">
           <Icon className="w-4 h-4 text-white/35" />
@@ -319,7 +319,7 @@ function FillerCard({ metric }: { metric: any }) {
   const numVal = metric.numeric ?? 0;
   const words: string[] = metric.words ?? [];
   return (
-    <div className="bg-background/60 rounded-xl p-4 border border-white/8 hover:border-primary/20 transition-all col-span-2">
+    <div className="h-full bg-background/60 rounded-xl p-4 border border-white/8 hover:border-primary/20 transition-all md:col-span-2 xl:col-span-3">
       <div className="flex justify-between items-start mb-2">
         <div className="flex items-center gap-2">
           <Mic2 className="w-4 h-4 text-white/40" />
@@ -378,25 +378,49 @@ function QualityPanel({ data, isPaid }: { data: any; isPaid: boolean }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
-        {data.lighting && <MetricCard title="Lighting" metric={data.lighting} />}
-        {data.audioClarity && <MetricCard title="Audio Clarity" metric={data.audioClarity} />}
+      <div className="space-y-5">
+        <div className="space-y-3">
+          <p className="text-xs text-white/35 uppercase tracking-wider">Visual Quality</p>
+          {isPaid ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+              {data.lighting && <MetricCard title="Lighting" metric={data.lighting} />}
+              {data.brightness    && <MetricCard title="Brightness"    metric={data.brightness} />}
+              {data.contrast      && <MetricCard title="Contrast"      metric={data.contrast} />}
+              {data.colorTemperature && <MetricCard title="Color Temperature" metric={{ numeric: 75, assessment: data.colorTemperature?.assessment, suggestions: data.colorTemperature?.suggestions, severity: data.colorTemperature?.severity }} />}
+              {data.background    && <MetricCard title="Background"    metric={data.background} />}
+              {data.framing       && <MetricCard title="Framing"       metric={data.framing} />}
+              {data.sharpness     && <MetricCard title="Sharpness"     metric={data.sharpness} />}
+              {data.stability     && <MetricCard title="Stability"     metric={data.stability} />}
+            </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                {data.lighting && <MetricCard title="Lighting" metric={data.lighting} />}
+              </div>
+              <BlurSection blur feature="visual-quality" label="Get detailed scores for contrast, color, framing, and background">
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                  {data.brightness    && <MetricCard title="Brightness"    metric={data.brightness} />}
+                  {data.contrast      && <MetricCard title="Contrast"      metric={data.contrast} />}
+                  {data.colorTemperature && <MetricCard title="Color Temperature" metric={{ numeric: 75, assessment: data.colorTemperature?.assessment, suggestions: data.colorTemperature?.suggestions, severity: data.colorTemperature?.severity }} />}
+                  {data.background    && <MetricCard title="Background"    metric={data.background} />}
+                  {data.framing       && <MetricCard title="Framing"       metric={data.framing} />}
+                  {data.sharpness     && <MetricCard title="Sharpness"     metric={data.sharpness} />}
+                  {data.stability     && <MetricCard title="Stability"     metric={data.stability} />}
+                </div>
+              </BlurSection>
+            </>
+          )}
+        </div>
 
-        <BlurSection blur={!isPaid} feature="visual-quality" label="Get detailed scores for contrast, color, framing, and background">
-          <div className="grid grid-cols-1 gap-3">
-            {data.brightness    && <MetricCard title="Brightness"    metric={data.brightness} />}
-            {data.contrast      && <MetricCard title="Contrast"      metric={data.contrast} />}
-            {data.colorTemperature && <MetricCard title="Color Temperature" metric={{ numeric: 75, assessment: data.colorTemperature?.assessment, suggestions: data.colorTemperature?.suggestions, severity: data.colorTemperature?.severity }} />}
-            {data.background    && <MetricCard title="Background"    metric={data.background} />}
-            {data.framing       && <MetricCard title="Framing"       metric={data.framing} />}
-            {data.sharpness     && <MetricCard title="Sharpness"     metric={data.sharpness} />}
-            {data.stability     && <MetricCard title="Stability"     metric={data.stability} />}
+        <div className="space-y-3">
+          <p className="text-xs text-white/35 uppercase tracking-wider">Audio Quality</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+            {data.audioClarity && <MetricCard title="Audio Clarity" metric={data.audioClarity} />}
+            {data.audioVolume && <MetricCard title="Audio Volume" metric={data.audioVolume} />}
+            {data.backgroundNoise && <MetricCard title="Background Noise" metric={data.backgroundNoise} />}
+            {data.fillerWords && <FillerCard metric={data.fillerWords} />}
           </div>
-        </BlurSection>
-
-        {data.audioVolume && <MetricCard title="Audio Volume" metric={data.audioVolume} />}
-        {data.backgroundNoise && <MetricCard title="Background Noise" metric={data.backgroundNoise} />}
-        {data.fillerWords && <FillerCard metric={data.fillerWords} />}
+        </div>
       </div>
 
       {data.colorGradingRecommendation && isPaid && (
