@@ -214,7 +214,7 @@ export async function transcribeAudio(audioPath: string): Promise<{ text: string
 export async function extractAudio(videoPath: string, outputPath: string): Promise<void> {
   await runMediaCommand(
     "ffmpeg",
-    ["-nostdin", "-hide_banner", "-loglevel", "error", "-i", videoPath, "-vn", "-ar", "16000", "-ac", "1", "-c:a", "libmp3lame", "-q:a", "4", outputPath, "-y"],
+    ["-nostdin", "-hide_banner", "-loglevel", "error", "-threads", "1", "-i", videoPath, "-vn", "-ar", "16000", "-ac", "1", "-c:a", "libmp3lame", "-q:a", "4", outputPath, "-y"],
     60000,
     "ffmpeg audio extraction"
   );
@@ -222,11 +222,12 @@ export async function extractAudio(videoPath: string, outputPath: string): Promi
 
 export async function extractFrames(videoPath: string, framesDir: string, count = 5): Promise<string[]> {
   const duration = await getMediaDuration(videoPath);
+  const frameScaleFilter = "scale='min(640,iw)':-2";
   if (duration <= 0) {
     logger.info({ videoPath, count }, "Extracting frames with select filter");
     await runMediaCommand(
       "ffmpeg",
-      ["-nostdin", "-hide_banner", "-loglevel", "error", "-i", videoPath, "-vf", `select=lt(n\\,${count})`, "-vsync", "vfr", path.join(framesDir, "frame_%03d.jpg"), "-y"],
+      ["-nostdin", "-hide_banner", "-loglevel", "error", "-threads", "1", "-i", videoPath, "-vf", `select=lt(n\\,${count}),${frameScaleFilter}`, "-vsync", "vfr", "-q:v", "8", path.join(framesDir, "frame_%03d.jpg"), "-y"],
       60000,
       "ffmpeg frame extraction select"
     );
@@ -239,7 +240,7 @@ export async function extractFrames(videoPath: string, framesDir: string, count 
       logger.info({ i, ts, outPath }, "Extracting frame");
       await runMediaCommand(
         "ffmpeg",
-        ["-nostdin", "-hide_banner", "-loglevel", "error", "-ss", ts, "-i", videoPath, "-frames:v", "1", "-q:v", "3", outPath, "-y"],
+        ["-nostdin", "-hide_banner", "-loglevel", "error", "-threads", "1", "-ss", ts, "-i", videoPath, "-frames:v", "1", "-vf", frameScaleFilter, "-q:v", "8", outPath, "-y"],
         30000,
         `ffmpeg frame extraction ${i}`
       );
@@ -248,10 +249,12 @@ export async function extractFrames(videoPath: string, framesDir: string, count 
   const files = await fs.readdir(framesDir);
   const jpgs = files.filter(f => f.endsWith(".jpg")).sort().slice(0, count);
   logger.info({ framesDir, extractedCount: jpgs.length }, "Frame extraction completed");
-  return Promise.all(jpgs.map(async (f) => {
+  const frameBase64List: string[] = [];
+  for (const f of jpgs) {
     const buf = await fs.readFile(path.join(framesDir, f));
-    return buf.toString("base64");
-  }));
+    frameBase64List.push(buf.toString("base64"));
+  }
+  return frameBase64List;
 }
 
 export function generateSrt(segments: Array<{ start: number; end: number; text: string }>): string {

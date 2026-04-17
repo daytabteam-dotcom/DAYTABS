@@ -60,6 +60,31 @@ async function stopIfCancelled(jobId: string) {
   }
 }
 
+function getMemorySoftLimitMb() {
+  const configured = Number(process.env.ANALYSIS_MEMORY_SOFT_LIMIT_MB);
+  return Number.isFinite(configured) && configured > 0 ? configured : 430;
+}
+
+function getMaxFrameCount(plan: string) {
+  const configured = Number(process.env.ANALYSIS_MAX_FRAMES);
+  const maxFrames = Number.isFinite(configured) && configured > 0 ? Math.floor(configured) : 2;
+  return plan === "free" ? 1 : Math.max(1, Math.min(maxFrames, 5));
+}
+
+async function stopIfMemoryHigh(jobId: string, label: string) {
+  const limitMb = getMemorySoftLimitMb();
+  const rssMb = Math.round(process.memoryUsage().rss / 1024 / 1024);
+  if (rssMb < limitMb) return;
+
+  logger.warn({ jobId, rssMb, limitMb, label }, "Analysis stopped before Render memory limit");
+  await updateJob(jobId, {
+    status: "error",
+    currentStep: "Analysis stopped to protect server memory",
+    error: "This video needs more memory than the current server can safely use. Try a shorter/lower-resolution video, or run the analysis again with fewer modules selected.",
+  });
+  throw new Error(`Analysis stopped before memory limit at ${label}: ${rssMb}MB used`);
+}
+
 export type PipelineMode = "video-analyzer";
 
 export interface PipelineOptions {
@@ -87,6 +112,7 @@ export async function runAnalysisPipeline(
   try {
     await fs.mkdir(workDir, { recursive: true });
     await stopIfCancelled(jobId);
+    await stopIfMemoryHigh(jobId, "download start");
     if (sourceVideoPath) {
       logger.info({ jobId, sourceVideoPath, localVideoPath }, "Copying uploaded video from local storage for analysis");
       await fs.copyFile(sourceVideoPath, localVideoPath);
@@ -94,6 +120,7 @@ export async function runAnalysisPipeline(
       await downloadFromB2(b2Key, localVideoPath);
     }
     await stopIfCancelled(jobId);
+    await stopIfMemoryHigh(jobId, "download complete");
     await runVideoAnalyzer(jobId, localVideoPath, options);
 
     const job = await db
@@ -157,18 +184,21 @@ async function runVideoAnalyzer(
     await fs.mkdir(workDir, { recursive: true });
     await fs.mkdir(framesDir, { recursive: true });
     await stopIfCancelled(jobId);
+    await stopIfMemoryHigh(jobId, "analysis start");
 
     // Step 1: Extract audio
     await updateJob(jobId, { status: "extracting_audio", progress: 12, currentStep: "Extracting audio" });
     logger.info({ jobId, videoPath, audioPath }, "Calling extractAudio");
     await extractAudio(videoPath, audioPath);
     await stopIfCancelled(jobId);
+    await stopIfMemoryHigh(jobId, "audio extraction");
     logger.info({ jobId, audioPath }, "Audio extraction complete");
 
     // Step 2: Duration check
     await updateJob(jobId, { status: "extracting_audio", progress: 18, currentStep: "Checking video duration" });
     const durationSec = await getMediaDuration(audioPath);
     await stopIfCancelled(jobId);
+    await stopIfMemoryHigh(jobId, "duration check");
     if (durationSec > maxDuration) {
       const planLabels: Record<string, string> = {
         free: "Free (5 min)", creator: "Creator (15 min)", pro: "Pro (30 min)", studio: "Studio (60 min)",
@@ -193,6 +223,7 @@ async function runVideoAnalyzer(
     try {
       const transcription = await transcribeAudio(audioPath);
       await stopIfCancelled(jobId);
+      await stopIfMemoryHigh(jobId, "transcription");
       transcriptText = transcription.text;
       transcriptSegments = transcription.segments;
       logger.info({ jobId, transcriptLength: transcriptText.length, segmentCount: transcriptSegments.length }, "Whisper transcription completed");
@@ -219,7 +250,7 @@ async function runVideoAnalyzer(
     // Step 5: Quality module
     if (runQuality) {
       await updateJob(jobId, { status: "analyzing_visual", progress, currentStep: "Extracting video frames" });
-      const frameCount = isFree ? 1 : 5;
+      const frameCount = getMaxFrameCount(plan);
       logger.info({ jobId, frameCount }, "Starting frame extraction");
       const frameBase64List = await withTimeout(
         extractFrames(videoPath, framesDir, frameCount),
@@ -228,6 +259,7 @@ async function runVideoAnalyzer(
         jobId,
       );
       await stopIfCancelled(jobId);
+      await stopIfMemoryHigh(jobId, "frame extraction");
       logger.info({ jobId, frameCount: frameBase64List.length }, "Frame extraction completed");
 
       progress = 45;
@@ -240,6 +272,10 @@ async function runVideoAnalyzer(
         jobId,
       );
       await stopIfCancelled(jobId);
+      frameBase64List.length = 0;
+      await fs.rm(framesDir, { recursive: true, force: true }).catch(() => {});
+      await fs.mkdir(framesDir, { recursive: true }).catch(() => {});
+      await stopIfMemoryHigh(jobId, "visual analysis");
       const audioAnalysis = await withTimeout(
         analyzeAudio(transcriptText, 0.9),
         90000,
@@ -247,6 +283,7 @@ async function runVideoAnalyzer(
         jobId,
       );
       await stopIfCancelled(jobId);
+      await stopIfMemoryHigh(jobId, "audio analysis");
       const qualityScore = computeQualityScore(visualAnalysis, audioAnalysis);
 
       result.quality = {
@@ -268,6 +305,7 @@ async function runVideoAnalyzer(
         jobId,
       );
       await stopIfCancelled(jobId);
+      await stopIfMemoryHigh(jobId, "editing analysis");
       result.editing = editingData;
       await updateJob(jobId, { result: { editing: editingData } });
       progress = 68;
@@ -286,6 +324,7 @@ async function runVideoAnalyzer(
             jobId,
           );
           await stopIfCancelled(jobId);
+          await stopIfMemoryHigh(jobId, `SEO generation for ${platform}`);
           publishResults[platform] = seoResult;
         } catch (err) {
           logger.warn({ err, platform, jobId }, "SEO generation failed for platform");
@@ -308,6 +347,7 @@ async function runVideoAnalyzer(
               jobId,
             );
             await stopIfCancelled(jobId);
+            await stopIfMemoryHigh(jobId, "subtitle translation");
           } catch (err) {
             logger.warn({ err, jobId }, "Subtitle translation failed");
           }
@@ -332,6 +372,7 @@ async function runVideoAnalyzer(
         jobId,
       );
       await stopIfCancelled(jobId);
+      await stopIfMemoryHigh(jobId, "short clip generation");
       result.shortClips = shortClipsData;
       await updateJob(jobId, { result: { shortClips: shortClipsData } });
       progress = 95;
