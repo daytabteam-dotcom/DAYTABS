@@ -1,4 +1,4 @@
-const { execSync } = require('child_process');
+import { execFileSync } from 'node:child_process';
 
 const dbUrl = process.env.DATABASE_URL;
 
@@ -10,8 +10,8 @@ if (!dbUrl) {
 const url = new URL(dbUrl);
 
 const host = url.hostname;
-const port = url.port;
-const user = url.username;
+const port = url.port || '5432';
+const user = decodeURIComponent(url.username);
 
 console.log(`Waiting for database at ${host}:${port}...`);
 
@@ -21,12 +21,14 @@ const maxAttempts = 60; // 5 minutes
 
 while (!ready && attempts < maxAttempts) {
   try {
-    execSync(`pg_isready -h ${host} -p ${port} -U ${user}`, { stdio: 'pipe' });
+    execFileSync('pg_isready', ['-h', host, '-p', port, '-U', user], {
+      stdio: 'pipe',
+    });
     ready = true;
     console.log('Database is ready!');
   } catch (e) {
     console.log('Database not ready, waiting...');
-    execSync('sleep 5');
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5000);
     attempts++;
   }
 }
