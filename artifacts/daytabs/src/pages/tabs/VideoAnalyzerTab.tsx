@@ -1,11 +1,13 @@
 import React, { useState, useCallback, useEffect, useRef } from "react";
 import { useDropzone } from "react-dropzone";
 import { motion, AnimatePresence } from "framer-motion";
+import type { LucideIcon } from "lucide-react";
 import {
   Upload, Film, Wand2, Shield, Scissors, TrendingUp, Sparkles,
   CheckCircle2, AlertTriangle, XCircle, RefreshCcw,
   Volume2, Eye, Zap, Hash, FileText, Lock, Download,
   Copy, Check, AlignLeft, ChevronRight, FileDown, X, History,
+  Lamp, Sun, Contrast, Image, Frame, Focus, Palette, Mic2, Waves, Gauge,
 } from "lucide-react";
 import { useAnalysisPolling, useAnalysisResults } from "@/hooks/use-analysis";
 import { useVideoUpload, type UploadProgressInfo } from "@/hooks/use-video-upload";
@@ -261,20 +263,6 @@ function BlurSection({ children, feature, label, blur }: { children: React.React
   );
 }
 
-function ScoreBar({ score }: { score: number }) {
-  const color = score >= 70 ? "bg-green-400" : score >= 45 ? "bg-yellow-400" : "bg-red-400";
-  return (
-    <div className="relative h-2 bg-white/8 rounded-full overflow-hidden mt-2">
-      <motion.div
-        initial={{ width: 0 }}
-        animate={{ width: `${score}%` }}
-        transition={{ duration: 0.8, ease: "easeOut" }}
-        className={`h-full ${color} rounded-full`}
-      />
-    </div>
-  );
-}
-
 function SeverityBadge({ severity, numeric }: { severity?: string; numeric?: number }) {
   const s = severity ?? (numeric !== undefined ? (numeric >= 80 ? "excellent" : numeric >= 60 ? "good" : numeric >= 40 ? "needs work" : "critical") : "good");
   const cls = s === "excellent" ? "text-green-400 border-green-400/20 bg-green-400/5"
@@ -286,18 +274,40 @@ function SeverityBadge({ severity, numeric }: { severity?: string; numeric?: num
   );
 }
 
+const METRIC_ICONS: Record<string, LucideIcon> = {
+  lighting: Lamp,
+  brightness: Sun,
+  contrast: Contrast,
+  colortemperature: Palette,
+  colorbalance: Palette,
+  background: Image,
+  framing: Frame,
+  sharpness: Focus,
+  stability: Gauge,
+  audioclarity: Mic2,
+  audiovolume: Volume2,
+  backgroundnoise: Waves,
+  pacing: Gauge,
+  fillerwords: Mic2,
+};
+
+function getMetricIcon(title: string): LucideIcon {
+  return METRIC_ICONS[title.replace(/\s+/g, "").toLowerCase()] ?? Sparkles;
+}
+
 function MetricCard({ title, metric }: { title: string; metric: any }) {
   if (!metric) return null;
   const numVal = metric.numeric ?? 0;
+  const Icon = getMetricIcon(title);
   return (
     <div className="bg-background/60 rounded-xl p-4 border border-white/8 hover:border-primary/20 transition-all">
-      <div className="flex justify-between items-start mb-2">
-        <p className="text-xs text-white/40 uppercase tracking-wider">{title}</p>
-        <SeverityBadge severity={metric.severity} numeric={numVal} />
+      <div className="mb-3">
+        <p className="text-xs text-white/40 uppercase tracking-wider flex items-center gap-2">
+          <Icon className="w-4 h-4 text-white/35" />
+          {title}
+        </p>
       </div>
-      <span className="text-3xl font-bold font-mono">{numVal}</span>
-      <span className="text-xs text-white/40 ml-1">/ 100</span>
-      <ScoreBar score={numVal} />
+      <SeverityBadge severity={metric.severity} numeric={numVal} />
       {metric.assessment && <p className="text-xs text-white/50 mt-2">{metric.assessment}</p>}
       {metric.suggestions?.[0] && <p className="text-xs text-primary/80 mt-1">→ {metric.suggestions[0]}</p>}
     </div>
@@ -312,7 +322,7 @@ function FillerCard({ metric }: { metric: any }) {
     <div className="bg-background/60 rounded-xl p-4 border border-white/8 hover:border-primary/20 transition-all col-span-2">
       <div className="flex justify-between items-start mb-2">
         <div className="flex items-center gap-2">
-          <Volume2 className="w-4 h-4 text-white/40" />
+          <Mic2 className="w-4 h-4 text-white/40" />
           <p className="text-xs text-white/40 uppercase tracking-wider">Filler Words</p>
         </div>
         <SeverityBadge severity={metric.severity} numeric={metric.level === "high" ? 30 : metric.level === "medium" ? 60 : 85} />

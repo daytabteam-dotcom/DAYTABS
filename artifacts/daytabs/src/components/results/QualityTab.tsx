@@ -1,10 +1,35 @@
 import React from "react";
 import { QualityResult, MetricItem } from "@workspace/api-client-react";
-import { CheckCircle2, AlertTriangle, XCircle, Info } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import {
+  CheckCircle2, AlertTriangle, XCircle, Info,
+  Lamp, Sun, Contrast, Focus, Gauge, Palette, Image, Frame, Volume2, Mic2, Waves, Sparkles,
+} from "lucide-react";
 import { motion } from "framer-motion";
 
 interface QualityTabProps {
   data: QualityResult;
+}
+
+const METRIC_ICONS: Record<string, LucideIcon> = {
+  lighting: Lamp,
+  brightness: Sun,
+  contrast: Contrast,
+  sharpness: Focus,
+  stability: Gauge,
+  colorbalance: Palette,
+  colortemperature: Palette,
+  background: Image,
+  framing: Frame,
+  audiovolume: Volume2,
+  audioclarity: Mic2,
+  backgroundnoise: Waves,
+  fillerwords: Mic2,
+  pacing: Gauge,
+};
+
+function getMetricIcon(title: string): LucideIcon {
+  return METRIC_ICONS[title.replace(/\s+/g, "").toLowerCase()] ?? Sparkles;
 }
 
 function MetricCard({ title, metric }: { title: string, metric?: MetricItem }) {
@@ -23,19 +48,21 @@ function MetricCard({ title, metric }: { title: string, metric?: MetricItem }) {
   };
 
   const levelColor = colorMap[metric.level.toLowerCase()] || colorMap['ok'];
-  const Icon = IconMap[metric.level.toLowerCase()] || IconMap['ok'];
+  const StatusIcon = IconMap[metric.level.toLowerCase()] || IconMap['ok'];
+  const MetricIcon = getMetricIcon(title);
+  const displayTitle = title.replace(/([A-Z])/g, ' $1').trim();
 
   return (
     <div className="bg-background rounded-2xl p-5 border border-border hover:border-primary/30 transition-all duration-300">
       <div className="flex justify-between items-start mb-4">
         <div>
-          <h4 className="text-lg font-bold text-foreground capitalize">{title.replace(/([A-Z])/g, ' $1').trim()}</h4>
-          {metric.numeric !== undefined && (
-            <div className="text-2xl font-light font-mono mt-1">{metric.numeric}</div>
-          )}
+          <h4 className="text-lg font-bold text-foreground capitalize flex items-center gap-2">
+            <MetricIcon className="w-5 h-5 text-muted-foreground" />
+            {displayTitle}
+          </h4>
         </div>
         <div className={`px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wider flex items-center gap-1.5 border ${levelColor}`}>
-          {Icon}
+          {StatusIcon}
           {metric.level}
         </div>
       </div>
