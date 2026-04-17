@@ -57,7 +57,7 @@ export function useAnalysisPolling(jobId: string | null) {
       enabled: !!jobId,
       refetchInterval: (query: { state: { data?: { status?: string } } }) => {
         const status = query.state.data?.status;
-        if (status === "complete" || status === "error") {
+        if (status === "complete" || status === "error" || status === "cancelled") {
           return false; // Stop polling
         }
         return 2000; // Poll every 2 seconds

@@ -25,6 +25,41 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, label: string, jo
   }
 }
 
+function getAnalysisTimeoutMs() {
+  const configuredMinutes = Number(process.env.ANALYSIS_TIMEOUT_MINUTES);
+  const minutes = Number.isFinite(configuredMinutes) && configuredMinutes > 0 ? configuredMinutes : 7;
+  return minutes * 60 * 1000;
+}
+
+function isAnalysisTimeoutError(err: unknown) {
+  return err instanceof Error && err.message === "Analysis timed out";
+}
+
+async function runWithAnalysisDeadline<T>(jobId: string, promise: Promise<T>): Promise<T> {
+  const timeoutMs = getAnalysisTimeoutMs();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<T>((_, reject) => {
+    timer = setTimeout(() => reject(new Error("Analysis timed out")), timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeout]);
+  } catch (err) {
+    if (isAnalysisTimeoutError(err)) {
+      const minutes = Math.round(timeoutMs / 60_000);
+      logger.warn({ jobId, timeoutMs }, "Analysis exceeded maximum runtime");
+      await updateJob(jobId, {
+        status: "error",
+        currentStep: "Analysis timed out",
+        error: `Analysis took longer than ${minutes} minutes and was stopped. Try a shorter video or select fewer analysis modules.`,
+      });
+    }
+    throw err;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 function getPipelineErrorMessage(err: unknown): string {
   const fallback = err instanceof Error ? err.message : String(err);
   const code = typeof err === "object" && err !== null
@@ -40,6 +75,11 @@ function getPipelineErrorMessage(err: unknown): string {
 
   if (code === "AccessDenied" || statusCode === 403) {
     return "Analysis failed because the server could not read the uploaded video from Cloudflare R2. Please check the R2 bucket permissions and credentials, then upload the video again.";
+  }
+
+  if (isAnalysisTimeoutError(err)) {
+    const minutes = Math.round(getAnalysisTimeoutMs() / 60_000);
+    return `Analysis took longer than ${minutes} minutes and was stopped. Try a shorter video or select fewer analysis modules.`;
   }
 
   return fallback || "Analysis failed unexpectedly.";
@@ -121,7 +161,7 @@ export async function runAnalysisPipeline(
     }
     await stopIfCancelled(jobId);
     await stopIfMemoryHigh(jobId, "download complete");
-    await runVideoAnalyzer(jobId, localVideoPath, options);
+    await runWithAnalysisDeadline(jobId, runVideoAnalyzer(jobId, localVideoPath, options));
 
     const job = await db
       .select({ status: analysisJobsTable.status })
@@ -143,7 +183,7 @@ export async function runAnalysisPipeline(
     if (job[0]?.status !== "complete" && job[0]?.status !== "error" && job[0]?.status !== "cancelled") {
       await updateJob(jobId, {
         status: "error",
-        currentStep: "Analysis failed",
+        currentStep: isAnalysisTimeoutError(err) ? "Analysis timed out" : "Analysis failed",
         error: getPipelineErrorMessage(err),
       }).catch((updateErr) => {
         logger.error({ err: updateErr, jobId }, "Failed to mark analysis job as errored");
@@ -390,7 +430,15 @@ async function runVideoAnalyzer(
     await fs.rm(framesDir, { recursive: true, force: true }).catch(() => {});
   } catch (err) {
     logger.error({ err, jobId }, "Video analyzer pipeline error");
-    await updateJob(jobId, { status: "error", error: err instanceof Error ? err.message : String(err) });
+    if (isAnalysisTimeoutError(err)) {
+      await updateJob(jobId, {
+        status: "error",
+        currentStep: "Analysis timed out",
+        error: getPipelineErrorMessage(err),
+      });
+    } else {
+      await updateJob(jobId, { status: "error", error: err instanceof Error ? err.message : String(err) });
+    }
     await fs.unlink(videoPath).catch(() => {});
     throw err;
   }

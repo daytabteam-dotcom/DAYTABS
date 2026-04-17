@@ -72,7 +72,11 @@ export async function updateJob(jobId: string, updates: Partial<typeof analysisJ
     .where(eq(analysisJobsTable.id, jobId))
     .limit(1);
 
-  if (current[0]?.status === "cancelled" && updates.status !== "cancelled") {
+  const currentStatus = current[0]?.status;
+  if (
+    (currentStatus === "cancelled" || currentStatus === "complete" || currentStatus === "error") &&
+    updates.status !== currentStatus
+  ) {
     return;
   }
 
