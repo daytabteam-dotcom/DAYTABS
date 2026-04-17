@@ -13,12 +13,9 @@ export const execAsync = promisify(exec);
 
 // ─── Deterministic Scoring Rubrics ───────────────────────────────────────────
 //
-// All numeric scores are computed here in TypeScript, not by the AI.
-// The AI returns structured boolean/enum observations; this layer maps them
-// to points. Same input → same score, every time.
-//
-// Each rubric is a list of { condition, points } rules applied to the
-// structured observation object the AI returns.
+// Numeric scores are computed here in TypeScript, not by the AI — EXCEPT for
+// context-dependent judgments (e.g. "is this background appropriate for the
+// topic?") which require semantic understanding and are returned as enums by the AI.
 
 interface VisualObservations {
   // Lighting
@@ -34,11 +31,14 @@ interface VisualObservations {
   blacksCrushed: boolean;
   highlightsClipped: boolean;
   imageLooksFlat: boolean;
-  // Background
+  // Background — now includes CONTEXT APPROPRIATENESS
   backgroundObjects: "none" | "minimal" | "moderate" | "cluttered";
   backgroundDistractsFromSubject: boolean;
   backgroundColorClashesWithSubject: boolean;
   depthOfFieldSeparation: "strong" | "moderate" | "weak" | "none";
+  backgroundContextAppropriate: "yes" | "neutral" | "no"; // NEW: is BG appropriate for the video topic?
+  backgroundContextIssue: string; // NEW: if "no", describe why (e.g. "kitchen appliances behind a business software demo")
+  backgroundSuggestionContextual: string; // NEW: specific suggestion based on actual background content
   // Framing
   eyeLinePosition: "upper-third" | "center" | "lower-third" | "off-frame";
   excessiveHeadroom: boolean;
@@ -53,6 +53,20 @@ interface VisualObservations {
   // Color temperature
   colorCast: "none" | "warm" | "cool" | "green" | "mixed";
   colorCastSeverity: "none" | "slight" | "moderate" | "strong";
+  // Engagement signals — NEW
+  facialEngagement: "high" | "medium" | "low"; // eye contact, expressiveness
+  presenceOnCamera: "commanding" | "adequate" | "weak"; // energy, confidence
+  visualVariety: "high" | "medium" | "low"; // any B-roll, cuts, graphics, or purely static talking head
+}
+
+// NEW: Pacing observations derived from transcript timing
+interface PacingObservations {
+  avgWordGapMs: number;           // average ms between words
+  longPauseCount: number;         // pauses > 1.5s
+  longPauseTimestamps: number[];  // when they occur (seconds into video)
+  wordsPerMinute: number;
+  pacingRating: "fast" | "good" | "slow" | "very_slow";
+  engagementRiskTimestamps: Array<{ at: number; reason: string }>; // predicted drop-off moments
 }
 
 function scoreLighting(obs: VisualObservations): number {
@@ -91,6 +105,9 @@ function scoreBackground(obs: VisualObservations): number {
   if (obs.backgroundColorClashesWithSubject) score -= 10;
   if (obs.depthOfFieldSeparation === "weak") score -= 10;
   if (obs.depthOfFieldSeparation === "none") score -= 20;
+  // NEW: penalize context-inappropriate backgrounds heavily
+  if (obs.backgroundContextAppropriate === "no") score -= 30;
+  if (obs.backgroundContextAppropriate === "neutral") score -= 5;
   return Math.max(0, Math.min(100, score));
 }
 
@@ -128,6 +145,19 @@ function scoreColorTemperature(obs: VisualObservations): number {
   return Math.max(0, Math.min(100, score));
 }
 
+// NEW: Score pacing/engagement
+function scorePacing(pacing: PacingObservations): number {
+  let score = 100;
+  if (pacing.pacingRating === "slow") score -= 20;
+  if (pacing.pacingRating === "very_slow") score -= 40;
+  if (pacing.pacingRating === "fast") score -= 5; // slight penalty for rushing
+  // Each long pause is a viewer risk moment
+  score -= Math.min(pacing.longPauseCount * 8, 40);
+  if (pacing.wordsPerMinute < 100) score -= 15;
+  if (pacing.wordsPerMinute > 200) score -= 10; // too fast = hard to follow
+  return Math.max(0, Math.min(100, score));
+}
+
 // Audio scoring is fully deterministic — no AI involved in the numbers
 function scoreAudioVolume(peakVariationDb: number, hasDropouts: boolean): number {
   let score = 100;
@@ -139,14 +169,10 @@ function scoreAudioVolume(peakVariationDb: number, hasDropouts: boolean): number
 }
 
 function scoreAudioClarity(whisperConfidence: number): number {
-  // whisperConfidence is 0–1; map directly to 0–100
-  // Whisper confidence is itself a reliable signal of intelligibility
   return Math.round(Math.max(0, Math.min(100, whisperConfidence * 100)));
 }
 
 function scoreBackgroundNoise(noiseFloorDb: number): number {
-  // noiseFloorDb is negative (e.g. -50 = quiet, -20 = loud hum)
-  // quieter = higher score
   if (noiseFloorDb <= -50) return 100;
   if (noiseFloorDb <= -45) return 90;
   if (noiseFloorDb <= -40) return 80;
@@ -157,13 +183,274 @@ function scoreBackgroundNoise(noiseFloorDb: number): number {
 }
 
 function scoreFillerWords(fillerRatio: number): number {
-  // fillerRatio = fillerCount / wordCount
   if (fillerRatio <= 0.02) return 100;
   if (fillerRatio <= 0.04) return 85;
   if (fillerRatio <= 0.06) return 70;
   if (fillerRatio <= 0.08) return 55;
   if (fillerRatio <= 0.12) return 40;
   return 25;
+}
+
+// ─── NEW: Pacing Analysis ──────────────────────────────────────────────────────
+
+/**
+ * Analyzes word-level timing data from Whisper to detect pacing issues.
+ * Returns drop-off risk moments with explanations.
+ */
+export function analyzePacing(
+  segments: Array<{ start: number; end: number; text: string }>,
+  wordTimings?: Array<{ start: number; end: number; word: string }>
+): PacingObservations {
+  const totalDuration = segments[segments.length - 1]?.end ?? 0;
+  const totalWords = segments.reduce((acc, s) => acc + s.text.split(/\s+/).filter(Boolean).length, 0);
+  const wordsPerMinute = totalDuration > 0 ? Math.round((totalWords / totalDuration) * 60) : 130;
+
+  const longPauseTimestamps: number[] = [];
+  const longPauseCount_threshold = 1.5; // seconds
+  const engagementRiskTimestamps: Array<{ at: number; reason: string }> = [];
+
+  // Detect pauses between segments
+  for (let i = 1; i < segments.length; i++) {
+    const prev = segments[i - 1]!;
+    const curr = segments[i]!;
+    const gap = curr.start - prev.end;
+    if (gap >= longPauseCount_threshold) {
+      longPauseTimestamps.push(prev.end);
+      engagementRiskTimestamps.push({
+        at: prev.end,
+        reason: `${gap.toFixed(1)}s silence gap — viewer likely to disengage here`,
+      });
+    }
+  }
+
+  // Detect slow delivery sections (< 80 wpm within a segment)
+  for (const seg of segments) {
+    const segWords = seg.text.split(/\s+/).filter(Boolean).length;
+    const segDur = seg.end - seg.start;
+    if (segDur > 3 && segWords > 0) {
+      const segWpm = (segWords / segDur) * 60;
+      if (segWpm < 80) {
+        engagementRiskTimestamps.push({
+          at: seg.start,
+          reason: `Very slow delivery (~${Math.round(segWpm)} wpm) — viewer attention likely drops`,
+        });
+      }
+    }
+  }
+
+  // Detect if hook (first 15s) is weak on pacing
+  const first15 = segments.filter(s => s.start < 15);
+  const first15Words = first15.reduce((a, s) => a + s.text.split(/\s+/).filter(Boolean).length, 0);
+  const first15Dur = first15[first15.length - 1]?.end ?? 15;
+  const hookWpm = first15Dur > 0 ? (first15Words / first15Dur) * 60 : 130;
+  if (hookWpm < 100 && first15Dur > 5) {
+    engagementRiskTimestamps.push({
+      at: 0,
+      reason: `Hook delivery is slow (~${Math.round(hookWpm)} wpm in first 15s) — viewer may leave before the value is revealed`,
+    });
+  }
+
+  // Avg word gap from word-level timings if available
+  let avgWordGapMs = 300; // default assumption
+  if (wordTimings && wordTimings.length > 1) {
+    let totalGap = 0;
+    for (let i = 1; i < wordTimings.length; i++) {
+      totalGap += (wordTimings[i]!.start - wordTimings[i - 1]!.end) * 1000;
+    }
+    avgWordGapMs = Math.round(totalGap / (wordTimings.length - 1));
+    // Flag conversations with unusually large word gaps
+    if (avgWordGapMs > 600) {
+      engagementRiskTimestamps.push({
+        at: 0,
+        reason: `Average gap between words is ${avgWordGapMs}ms — delivery feels hesitant throughout`,
+      });
+    }
+  }
+
+  let pacingRating: PacingObservations["pacingRating"] = "good";
+  if (wordsPerMinute < 90) pacingRating = "very_slow";
+  else if (wordsPerMinute < 120) pacingRating = "slow";
+  else if (wordsPerMinute > 185) pacingRating = "fast";
+
+  // Sort by time
+  engagementRiskTimestamps.sort((a, b) => a.at - b.at);
+
+  return {
+    avgWordGapMs,
+    longPauseCount: longPauseTimestamps.length,
+    longPauseTimestamps,
+    wordsPerMinute,
+    pacingRating,
+    engagementRiskTimestamps: engagementRiskTimestamps.slice(0, 10),
+  };
+}
+
+// ─── NEW: Retention Forecasting ──────────────────────────────────────────────
+
+export interface RetentionForecast {
+  estimatedRetentionPct: number; // e.g. 42
+  retentionGrade: "A" | "B" | "C" | "D" | "F";
+  summary: string; // 2-sentence plain-language summary
+  dropOffMoments: Array<{
+    at: string;       // "00:08"
+    atSec: number;
+    severity: "high" | "medium" | "low";
+    reason: string;   // specific, actionable
+    fix: string;      // how to fix this specific moment
+  }>;
+  retentionCurvePoints: Array<{ sec: number; pct: number }>; // estimated curve for charting
+}
+
+function fmtSecs(s: number): string {
+  const m = Math.floor(s / 60);
+  const sec = Math.floor(s % 60);
+  return `${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+}
+
+/**
+ * Builds a simulated retention curve based on all analysis signals.
+ * This is an evidence-based estimate, not a random curve.
+ */
+export function buildRetentionForecast(
+  visualScore: number,
+  audioScore: number,
+  pacingObs: PacingObservations,
+  fillerRatio: number,
+  segments: Array<{ start: number; end: number; text: string }>,
+  hookStrength: "strong" | "moderate" | "weak", // determined by AI
+  topicRelevanceOfBackground: "yes" | "neutral" | "no",
+  totalDurationSec: number
+): RetentionForecast {
+  // Start with a base retention for the platform (YouTube avg ~40%, TikTok ~60%)
+  // Use a balanced baseline of 50%
+  let baseRetention = 50;
+
+  // Visual quality impact
+  baseRetention += (visualScore - 70) * 0.15;
+
+  // Audio quality impact (more important than visual)
+  baseRetention += (audioScore - 70) * 0.2;
+
+  // Hook strength (biggest single factor in retention)
+  if (hookStrength === "strong") baseRetention += 15;
+  else if (hookStrength === "weak") baseRetention -= 20;
+
+  // Pacing
+  if (pacingObs.pacingRating === "good") baseRetention += 5;
+  if (pacingObs.pacingRating === "slow") baseRetention -= 10;
+  if (pacingObs.pacingRating === "very_slow") baseRetention -= 20;
+
+  // Filler words
+  if (fillerRatio > 0.08) baseRetention -= 8;
+  else if (fillerRatio > 0.04) baseRetention -= 4;
+
+  // Background appropriateness
+  if (topicRelevanceOfBackground === "no") baseRetention -= 8;
+
+  // Long pauses
+  baseRetention -= Math.min(pacingObs.longPauseCount * 3, 15);
+
+  // Clamp
+  const estimatedRetentionPct = Math.max(10, Math.min(90, Math.round(baseRetention)));
+
+  const retentionGrade: RetentionForecast["retentionGrade"] =
+    estimatedRetentionPct >= 70 ? "A" :
+    estimatedRetentionPct >= 55 ? "B" :
+    estimatedRetentionPct >= 40 ? "C" :
+    estimatedRetentionPct >= 25 ? "D" : "F";
+
+  // Build retention curve: starts at 100%, drops based on identified risk points
+  const curvePoints: Array<{ sec: number; pct: number }> = [];
+  let currentPct = 100;
+  const step = Math.max(1, Math.floor(totalDurationSec / 20));
+
+  // Initial cliff: first 5 seconds always has highest drop
+  const initialDropFactor = hookStrength === "weak" ? 0.55 : hookStrength === "moderate" ? 0.75 : 0.88;
+  curvePoints.push({ sec: 0, pct: 100 });
+  curvePoints.push({ sec: 5, pct: Math.round(100 * initialDropFactor) });
+  currentPct = Math.round(100 * initialDropFactor);
+
+  const riskSecSet = new Set(pacingObs.engagementRiskTimestamps.map(r => Math.floor(r.at)));
+
+  for (let sec = 10; sec <= totalDurationSec; sec += step) {
+    // Natural decay
+    const decayRate = 0.985;
+    currentPct = Math.round(currentPct * decayRate);
+
+    // Extra drop at pacing risk moments
+    if (pacingObs.longPauseTimestamps.some(t => Math.abs(t - sec) < step)) {
+      currentPct = Math.round(currentPct * 0.93);
+    }
+
+    curvePoints.push({ sec, pct: Math.max(5, currentPct) });
+  }
+
+  // Normalize so the final retention matches our estimate
+  const lastPoint = curvePoints[curvePoints.length - 1];
+  if (lastPoint && lastPoint.pct !== estimatedRetentionPct) {
+    const scale = estimatedRetentionPct / lastPoint.pct;
+    for (const p of curvePoints) {
+      if (p.sec > 5) {
+        p.pct = Math.max(5, Math.min(100, Math.round(p.pct * scale)));
+      }
+    }
+  }
+
+  // Build drop-off moments from pacing observations
+  const dropOffMoments: RetentionForecast["dropOffMoments"] = [];
+
+  // Always add hook as the first drop-off point with context
+  if (hookStrength === "weak") {
+    dropOffMoments.push({
+      at: "00:05",
+      atSec: 5,
+      severity: "high",
+      reason: "Weak hook — the opening doesn't give the viewer a compelling reason to keep watching. Value is revealed too late.",
+      fix: "Open with your most surprising result or a specific problem your viewer already feels. The first sentence must answer 'why should I keep watching?'",
+    });
+  } else if (hookStrength === "moderate") {
+    dropOffMoments.push({
+      at: "00:05",
+      atSec: 5,
+      severity: "medium",
+      reason: "Hook is present but not sharp enough to stop a scroll — it describes what the video is about rather than creating urgency.",
+      fix: "Replace the opening with a specific failure, surprising outcome, or bold claim that happens before any context-setting.",
+    });
+  }
+
+  // Add pacing risk moments
+  for (const risk of pacingObs.engagementRiskTimestamps.slice(0, 5)) {
+    if (risk.at > 3) { // skip if overlapping with hook
+      dropOffMoments.push({
+        at: fmtSecs(risk.at),
+        atSec: risk.at,
+        severity: risk.reason.includes("silence") ? "high" : "medium",
+        reason: risk.reason,
+        fix: risk.reason.includes("silence")
+          ? "Cut this pause in post. If the pause is intentional for emphasis, shorten it to under 0.5s."
+          : "Increase delivery speed for this section or cut to B-roll/graphic to maintain visual momentum.",
+      });
+    }
+  }
+
+  dropOffMoments.sort((a, b) => a.atSec - b.atSec);
+
+  const summaryLines = [
+    `Estimated ${estimatedRetentionPct}% average retention (${retentionGrade} grade).`,
+    hookStrength === "weak"
+      ? "The hook is the primary risk — most viewers will leave in the first 8 seconds before the value is clear."
+      : pacingObs.pacingRating === "very_slow" || pacingObs.pacingRating === "slow"
+      ? `Pacing is the main retention killer — ${pacingObs.longPauseCount} silence gaps and ${Math.round(pacingObs.wordsPerMinute)} wpm delivery will cause mid-video drop-offs.`
+      : "Retention is limited by a combination of pacing gaps and presentation energy — fixable in post.",
+  ];
+
+  return {
+    estimatedRetentionPct,
+    retentionGrade,
+    summary: summaryLines.join(" "),
+    dropOffMoments,
+    retentionCurvePoints: curvePoints,
+  };
 }
 
 // ─── End of scoring rubrics ───────────────────────────────────────────────────
@@ -212,10 +499,7 @@ async function runMediaCommand(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      if (code === 0) {
-        resolve();
-        return;
-      }
+      if (code === 0) { resolve(); return; }
       const stderr = Buffer.concat(stderrChunks).toString("utf8").trim();
       reject(new Error(`${label} failed${signal ? ` with signal ${signal}` : ` with code ${code}`}${stderr ? `: ${stderr}` : ""}`));
     });
@@ -232,9 +516,7 @@ async function listExtractedFrameJpegs(framesDir: string, count: number): Promis
   const jpgs: string[] = [];
   for (const file of files.filter(f => f.endsWith(".jpg")).sort()) {
     const stat = await fs.stat(path.join(framesDir, file)).catch(() => null);
-    if (stat && stat.size > 0) {
-      jpgs.push(file);
-    }
+    if (stat && stat.size > 0) jpgs.push(file);
     if (jpgs.length >= count) break;
   }
   return jpgs;
@@ -260,9 +542,7 @@ export async function updateJob(jobId: string, updates: Partial<typeof analysisJ
     const existingResult = current[0]?.result || {};
     setData.result = { ...existingResult, ...updates.result };
   }
-  await db.update(analysisJobsTable)
-    .set(setData)
-    .where(eq(analysisJobsTable.id, jobId));
+  await db.update(analysisJobsTable).set(setData).where(eq(analysisJobsTable.id, jobId));
 }
 
 export async function getMediaDuration(filePath: string): Promise<number> {
@@ -313,7 +593,6 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): P
   const timeout = new Promise<T>((_, reject) => {
     timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
   });
-
   try {
     return await Promise.race([promise, timeout]);
   } finally {
@@ -321,15 +600,18 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): P
   }
 }
 
-export async function transcribeAudio(audioPath: string): Promise<{ text: string; segments: Array<{ start: number; end: number; text: string }> }> {
+export async function transcribeAudio(audioPath: string): Promise<{
+  text: string;
+  segments: Array<{ start: number; end: number; text: string }>;
+  wordTimings?: Array<{ start: number; end: number; word: string }>;
+  whisperConfidence: number;
+}> {
   const audioBuffer = await fs.readFile(audioPath);
   const actualDuration = await getMediaDuration(audioPath);
   logger.info({ audioPath, actualDuration }, "Starting transcription");
 
   try {
     const file = await toFile(audioBuffer, "audio.mp3");
-    logger.info({ audioPath }, "Calling Whisper verbose transcription");
-
     const response = await withTimeout(
       openai.audio.transcriptions.create({
         file,
@@ -343,23 +625,37 @@ export async function transcribeAudio(audioPath: string): Promise<{ text: string
 
     const r = response as unknown as {
       text: string;
-      segments?: Array<{ start: number; end: number; text: string }>;
+      segments?: Array<{ start: number; end: number; text: string; avg_logprob?: number }>;
+      words?: Array<{ start: number; end: number; word: string }>;
     };
+
+    // Compute confidence from segment log probabilities
+    const logProbs = (r.segments ?? []).map(s => s.avg_logprob ?? -0.5).filter(v => isFinite(v));
+    const avgLogProb = logProbs.length > 0 ? logProbs.reduce((a, b) => a + b, 0) / logProbs.length : -0.5;
+    // Convert log prob to 0-1 confidence (logprob of 0 = perfect, -1 = poor)
+    const whisperConfidence = Math.max(0, Math.min(1, 1 + avgLogProb));
+
     const rawSegments = (r.segments ?? []).map(s => ({
       start: s.start,
       end: s.end,
       text: s.text.trim(),
     }));
+
+    const wordTimings = (r.words ?? []).map(w => ({
+      start: w.start,
+      end: w.end,
+      word: w.word,
+    }));
+
     if (rawSegments.length > 0) {
       const segments = actualDuration > 0
         ? rawSegments.map(s => ({ ...s, start: Math.min(s.start, actualDuration), end: Math.min(s.end, actualDuration) }))
         : rawSegments;
-      logger.info({ audioPath, segmentCount: segments.length }, "Whisper verbose transcription succeeded");
-      return { text: r.text || "", segments };
+      return { text: r.text || "", segments, wordTimings, whisperConfidence };
     }
+
     if (r.text) {
-      logger.info({ audioPath, textLength: r.text.length }, "Whisper verbose transcription returned text only");
-      return { text: r.text, segments: buildApproximateSegments(r.text, actualDuration) };
+      return { text: r.text, segments: buildApproximateSegments(r.text, actualDuration), whisperConfidence };
     }
   } catch (err) {
     logger.warn({ err, audioPath }, "Whisper verbose transcription failed, falling back to basic");
@@ -367,26 +663,19 @@ export async function transcribeAudio(audioPath: string): Promise<{ text: string
 
   try {
     const file = await toFile(audioBuffer, "audio.mp3");
-    logger.info({ audioPath }, "Calling Whisper basic transcription");
-
     const response = await withTimeout(
-      openai.audio.transcriptions.create({
-        file,
-        model: "whisper-1",
-      }),
+      openai.audio.transcriptions.create({ file, model: "whisper-1" }),
       120000,
       "Whisper basic transcription"
     );
-
     if (response.text) {
-      logger.info({ audioPath, textLength: response.text.length }, "Whisper basic transcription succeeded");
-      return { text: response.text, segments: buildApproximateSegments(response.text, actualDuration) };
+      return { text: response.text, segments: buildApproximateSegments(response.text, actualDuration), whisperConfidence: 0.6 };
     }
   } catch (err) {
     logger.warn({ err, audioPath }, "Whisper basic transcription also failed");
   }
 
-  return { text: "", segments: [] };
+  return { text: "", segments: [], whisperConfidence: 0 };
 }
 
 export async function extractAudio(videoPath: string, outputPath: string): Promise<void> {
@@ -403,8 +692,8 @@ export async function extractFrames(videoPath: string, framesDir: string, count 
   const frameScaleFilter = "scale='min(640,iw)':-2";
   const seekTimeoutMs = getConfiguredTimeoutMs("FFMPEG_FRAME_SEEK_TIMEOUT_MS", 45000);
   const fallbackTimeoutMs = getConfiguredTimeoutMs("FFMPEG_FRAME_FALLBACK_TIMEOUT_MS", 90000);
+
   if (duration <= 0) {
-    logger.info({ videoPath, count }, "Extracting frames with select filter");
     await runMediaCommand(
       "ffmpeg",
       ["-nostdin", "-hide_banner", "-loglevel", "error", "-threads", "1", "-i", videoPath, "-vf", `select=lt(n\\,${count}),${frameScaleFilter}`, "-vsync", "vfr", "-q:v", "8", path.join(framesDir, "frame_%03d.jpg"), "-y"],
@@ -413,11 +702,9 @@ export async function extractFrames(videoPath: string, framesDir: string, count 
     );
   } else {
     const interval = duration / (count + 1);
-    logger.info({ videoPath, count, duration, interval }, "Extracting frames at intervals");
     for (let i = 1; i <= count; i++) {
       const ts = Math.min(Math.max(interval * i, 0.1), Math.max(duration - 0.1, 0.1)).toFixed(2);
       const outPath = path.join(framesDir, `frame_${String(i).padStart(3, "0")}.jpg`);
-      logger.info({ i, ts, outPath }, "Extracting frame");
       try {
         await runMediaCommand(
           "ffmpeg",
@@ -425,8 +712,7 @@ export async function extractFrames(videoPath: string, framesDir: string, count 
           seekTimeoutMs,
           `ffmpeg frame extraction ${i}`
         );
-      } catch (fastSeekErr) {
-        logger.warn({ err: fastSeekErr, i, ts, outPath }, "Fast frame extraction failed, retrying with accurate seek");
+      } catch {
         try {
           await runMediaCommand(
             "ffmpeg",
@@ -435,7 +721,7 @@ export async function extractFrames(videoPath: string, framesDir: string, count 
             `ffmpeg accurate frame extraction ${i}`
           );
         } catch (accurateSeekErr) {
-          logger.warn({ err: accurateSeekErr, i, ts, outPath }, "Frame extraction retry failed, continuing with remaining frames");
+          logger.warn({ err: accurateSeekErr, i, ts, outPath }, "Frame extraction retry failed");
           await fs.unlink(outPath).catch(() => {});
         }
       }
@@ -443,7 +729,6 @@ export async function extractFrames(videoPath: string, framesDir: string, count 
 
     const jpgs = await listExtractedFrameJpegs(framesDir, count);
     if (jpgs.length === 0) {
-      logger.warn({ videoPath, count, duration }, "No interval frames extracted, falling back to first decodable frames");
       await runMediaCommand(
         "ffmpeg",
         ["-nostdin", "-hide_banner", "-loglevel", "error", "-threads", "1", "-i", videoPath, "-vf", `select=lt(n\\,${count}),${frameScaleFilter}`, "-vsync", "vfr", "-q:v", "8", path.join(framesDir, "frame_%03d.jpg"), "-y"],
@@ -452,11 +737,12 @@ export async function extractFrames(videoPath: string, framesDir: string, count 
       );
     }
   }
+
   const jpgs = await listExtractedFrameJpegs(framesDir, count);
   if (jpgs.length === 0) {
-    throw new Error("Could not extract any video frames from this file. The video may use an unsupported codec or be corrupted.");
+    throw new Error("Could not extract any video frames from this file.");
   }
-  logger.info({ framesDir, extractedCount: jpgs.length }, "Frame extraction completed");
+
   const frameBase64List: string[] = [];
   for (const f of jpgs) {
     const buf = await fs.readFile(path.join(framesDir, f));
@@ -465,14 +751,12 @@ export async function extractFrames(videoPath: string, framesDir: string, count 
   return frameBase64List;
 }
 
-// Measure audio noise floor and peak variation using ffmpeg/ffprobe
 export async function measureAudioSignals(audioPath: string): Promise<{
   noiseFloorDb: number;
   peakVariationDb: number;
   hasDropouts: boolean;
 }> {
   try {
-    // Use ffmpeg's volumedetect filter to get mean/max volume
     const { stderr } = await execAsync(
       `ffmpeg -i "${audioPath}" -af volumedetect -f null - 2>&1 || true`
     );
@@ -481,14 +765,9 @@ export async function measureAudioSignals(audioPath: string): Promise<{
     const meanDb = meanMatch ? parseFloat(meanMatch[1]!) : -30;
     const maxDb = maxMatch ? parseFloat(maxMatch[1]!) : -10;
     const peakVariationDb = Math.abs(maxDb - meanDb);
-
-    // Detect silences to find dropouts (gaps > 1.5s mid-speech)
     const silences = await detectSilences(audioPath, 1.5, -40);
     const hasDropouts = silences.length > 2;
-
-    // Estimate noise floor: run silencedetect at a quiet threshold to find the floor
-    const noiseFloorDb = meanDb - 20; // conservative approximation
-
+    const noiseFloorDb = meanDb - 20;
     return { noiseFloorDb, peakVariationDb, hasDropouts };
   } catch {
     return { noiseFloorDb: -35, peakVariationDb: 6, hasDropouts: false };
@@ -527,8 +806,8 @@ export function generateSrt(segments: Array<{ start: number; end: number; text: 
     const segDur = seg.end - seg.start;
     for (let i = 0; i < lines.length; i += 2) {
       const chunk = lines.slice(i, i + 2);
-      const ratio = (i / Math.max(lines.length, 1));
-      const endRatio = (Math.min(i + 2, lines.length) / Math.max(lines.length, 1));
+      const ratio = i / Math.max(lines.length, 1);
+      const endRatio = Math.min(i + 2, lines.length) / Math.max(lines.length, 1);
       cards.push({
         start: seg.start + ratio * segDur,
         end: seg.start + endRatio * segDur,
@@ -558,28 +837,12 @@ const BASE_SYSTEM_PROMPT = `You are an expert content strategist and video consu
 
 Never use: "Great job!", "Consider trying", "You might want to", "As a content creator", "In conclusion", or any filler phrase. Every sentence must contain a specific observation or action. Write in second person ("your video", "you open with"). Be direct but not harsh. Lead every section with the most important insight first. If something is genuinely good, say so in one word and move on.`;
 
-const VISUAL_DIMENSION_INSTRUCTIONS = `
-For EACH dimension, write exactly as a professional video producer giving paid notes to a client. Rules:
-- Reference where in the frame or when in the video the issue occurs (e.g. "upper-right corner", "your face in the closing segment", "the left edge throughout")
-- Never use vague praise like "decent", "balanced", "good", "acceptable" without backing it up with a specific physical observation
-- If something scores above 85, still name the ONE thing that would push it to 100
-- Suggest a concrete, measurable fix where possible (e.g. "drop highlights by 15%", "raise the camera 3 inches so the eyeline hits the upper third")
-- Tone: confident, direct, zero hedging.
-
-Dimension-specific guidance:
-- lighting: Identify light source direction, shadow placement on face/background, any color temperature mismatch, and whether catch lights are visible in the eyes
-- brightness: Note whether the subject's skin is properly exposed or clipped, flag any region significantly darker/brighter than the subject
-- contrast: State whether blacks are crushed, highlights clipped, or the image looks flat/washed. Reference specific areas
-- background: Note exactly what objects are visible, whether any are distracting or off-brand, depth of field separation, background color vs clothing
-- framing: Describe headroom, exact eye-line position relative to the rule of thirds, whether shoulders are cut awkwardly
-- sharpness: State whether focus is on the eyes specifically, note any motion blur, background sharpness relative to subject
-- stability: Identify micro-jitter, drift, or stabilization artifacts and when they occur
-- colorTemperature: Name the cast (e.g. "blue daylight spill", "orange tungsten glow", "mixed sources creating green shadow") and a correction value`;
-
-// The AI now returns structured boolean/enum observations ONLY — no numeric scores.
-// Scores are computed deterministically by the rubric functions above.
+// UPDATED: Now asks the AI for context-aware background judgment and engagement signals
 const VISUAL_OBSERVATIONS_SCHEMA = `
-Return STRICT JSON only (no markdown). Do NOT include any numeric scores — only the observations below:
+Return STRICT JSON only (no markdown). Do NOT include any numeric scores — only the observations below.
+
+CRITICAL for backgroundContextAppropriate: Judge whether the background matches the VIDEO'S TOPIC AND BRAND. A kitchen for a business software demo = "no". A home office for a productivity app = "yes". A cluttered living room for a luxury brand = "no". Be specific about WHY in backgroundContextIssue.
+
 {
   "observations": {
     "lightSourceVisible": true/false,
@@ -596,6 +859,8 @@ Return STRICT JSON only (no markdown). Do NOT include any numeric scores — onl
     "backgroundDistractsFromSubject": true/false,
     "backgroundColorClashesWithSubject": true/false,
     "depthOfFieldSeparation": "strong" | "moderate" | "weak" | "none",
+    "backgroundContextAppropriate": "yes" | "neutral" | "no",
+    "backgroundContextIssue": "describe exactly what is wrong with background context, or empty string if fine",
     "eyeLinePosition": "upper-third" | "center" | "lower-third" | "off-frame",
     "excessiveHeadroom": true/false,
     "shouldersCutAwkwardly": true/false,
@@ -605,7 +870,10 @@ Return STRICT JSON only (no markdown). Do NOT include any numeric scores — onl
     "driftVisible": true/false,
     "stabilizationArtifacts": true/false,
     "colorCast": "none" | "warm" | "cool" | "green" | "mixed",
-    "colorCastSeverity": "none" | "slight" | "moderate" | "strong"
+    "colorCastSeverity": "none" | "slight" | "moderate" | "strong",
+    "facialEngagement": "high" | "medium" | "low",
+    "presenceOnCamera": "commanding" | "adequate" | "weak",
+    "visualVariety": "high" | "medium" | "low"
   },
   "assessments": {
     "overallTopFix": "the single most impactful fix — specific, measurable",
@@ -618,14 +886,18 @@ Return STRICT JSON only (no markdown). Do NOT include any numeric scores — onl
     "contrastSuggestion": "exact fix",
     "colorTemperature": "name the specific cast and where it is most visible",
     "colorTemperatureSuggestion": "specific correction value",
-    "background": "list exactly what objects are visible, note anything distracting or off-brand",
-    "backgroundSuggestion": "exact change",
+    "background": "describe exactly what objects are visible AND whether they are appropriate for the video topic — name the topic explicitly",
+    "backgroundSuggestion": "contextual fix that references what IS in the background and what should replace it (e.g. 'replace kitchen appliances with a simple wall or branded backdrop appropriate for a tech product demo')",
     "framing": "headroom, eye-line position, shoulder crop — be exact",
     "framingSuggestion": "specific camera or posture adjustment",
     "sharpness": "focus plane location, any motion blur, background sharpness relative to subject",
     "sharpnessSuggestion": "exact fix",
     "stability": "note micro-jitter, drift, or stabilization artifacts and when they occur",
-    "stabilitySuggestion": "exact fix"
+    "stabilitySuggestion": "exact fix",
+    "presenceFeedback": "direct feedback on eye contact, energy, confidence on camera",
+    "presenceSuggestion": "one specific actionable improvement for on-camera presence",
+    "hookStrength": "strong" | "moderate" | "weak",
+    "hookStrengthReason": "why the hook is or isn't working — reference the actual opening seconds"
   }
 }`;
 
@@ -633,7 +905,7 @@ function buildVisualResult(obs: VisualObservations, assessments: Record<string, 
   const lightingScore = scoreLighting(obs);
   const brightnessScore = scoreBrightness(obs);
   const contrastScore = scoreContrast(obs);
-  const backgroundScore = scoreBackground(obs);
+  const backgroundScore = scoreBackground(obs); // now context-aware
   const framingScore = scoreFraming(obs);
   const sharpnessScore = scoreSharpness(obs);
   const stabilityScore = scoreStability(obs);
@@ -661,6 +933,15 @@ function buildVisualResult(obs: VisualObservations, assessments: Record<string, 
     overallVisualScore,
     topFix: assessments.overallTopFix ?? "",
     colorGradingRecommendation: assessments.colorGradingRecommendation ?? "",
+    hookStrength: (assessments.hookStrength as "strong" | "moderate" | "weak") ?? "moderate",
+    hookStrengthReason: assessments.hookStrengthReason ?? "",
+    presence: {
+      level: obs.presenceOnCamera,
+      facialEngagement: obs.facialEngagement,
+      visualVariety: obs.visualVariety,
+      assessment: assessments.presenceFeedback ?? "",
+      suggestion: assessments.presenceSuggestion ?? "",
+    },
     lighting: {
       level: lightingScore >= 75 ? "high" : lightingScore >= 50 ? "medium" : "low",
       numeric: lightingScore,
@@ -691,7 +972,10 @@ function buildVisualResult(obs: VisualObservations, assessments: Record<string, 
     background: {
       level: backgroundScore >= 75 ? "clean" : backgroundScore >= 50 ? "normal" : "distracting",
       numeric: backgroundScore,
+      contextAppropriate: obs.backgroundContextAppropriate,
+      contextIssue: obs.backgroundContextIssue ?? "",
       assessment: assessments.background ?? "",
+      // Use the AI's contextual suggestion instead of a generic one
       suggestions: [assessments.backgroundSuggestion ?? ""],
       severity: severityFor(backgroundScore),
     },
@@ -719,15 +1003,19 @@ function buildVisualResult(obs: VisualObservations, assessments: Record<string, 
   };
 
   if (plan === "free") {
-    // Free plan: only return lighting + overall
-    const { brightness, contrast, colorTemperature, background, framing, sharpness, stability, ...freeBase } = base;
+    const { brightness, contrast, colorTemperature, background, framing, sharpness, stability, presence, ...freeBase } = base;
     return freeBase;
   }
 
   return base;
 }
 
-export async function analyzeVisuals(frameBase64List: string[], platform: string, plan = "free"): Promise<object> {
+export async function analyzeVisuals(
+  frameBase64List: string[],
+  platform: string,
+  plan = "free",
+  transcript?: string  // NEW: pass transcript so AI can judge background context against topic
+): Promise<object> {
   const imageContent = frameBase64List.map(b64 => ({
     type: "image_url",
     image_url: { url: `data:image/jpeg;base64,${b64}` },
@@ -735,13 +1023,26 @@ export async function analyzeVisuals(frameBase64List: string[], platform: string
 
   const isFree = plan === "free";
 
+  // Provide transcript context to the AI so it can judge background appropriateness
+  const transcriptContext = transcript
+    ? `\n\nVIDEO TOPIC CONTEXT (from transcript): "${transcript.substring(0, 400)}"\nUse this to judge whether the background is appropriate for what is being discussed.`
+    : "";
+
   const prompt = `${BASE_SYSTEM_PROMPT}
 
-Analyze these ${frameBase64List.length} frame(s) from a ${platform} video.
+Analyze these ${frameBase64List.length} frame(s) from a ${platform} video.${transcriptContext}
 
-${VISUAL_DIMENSION_INSTRUCTIONS}
+For EACH dimension, write exactly as a professional video producer giving paid notes:
+- Reference where in the frame or when in the video the issue occurs
+- Never use vague praise without a specific physical observation
+- If something scores above 85, name the ONE thing that would push it to 100
+- Suggest a concrete, measurable fix
 
-CRITICAL RULE: Never reference frame numbers (frame 1, frame 2, etc.) in your output. Reference approximate time positions (e.g. "in the opening segment", "around the midpoint") or describe what is happening on screen. Always write as if describing what the viewer sees in the final video.
+CRITICAL RULE: Never reference frame numbers. Reference approximate time positions.
+
+BACKGROUND CONTEXT RULE: Judge background against the VIDEO'S TOPIC. If the creator is discussing a business app but is standing in a kitchen with appliances visible — that is "no" for backgroundContextAppropriate, even if the shot is technically clean. Explain what is wrong and suggest a specific alternative that fits the topic.
+
+PRESENCE RULE: Assess eye contact, energy, and confidence. A slow, hesitant delivery is a retention risk. A confident, direct presenter retains viewers. Be specific.
 
 ${VISUAL_OBSERVATIONS_SCHEMA}`;
 
@@ -760,6 +1061,9 @@ ${VISUAL_OBSERVATIONS_SCHEMA}`;
     backgroundDistractsFromSubject: false,
     backgroundColorClashesWithSubject: false,
     depthOfFieldSeparation: "moderate",
+    backgroundContextAppropriate: "neutral",
+    backgroundContextIssue: "",
+    backgroundSuggestionContextual: "",
     eyeLinePosition: "center",
     excessiveHeadroom: false,
     shouldersCutAwkwardly: false,
@@ -770,33 +1074,40 @@ ${VISUAL_OBSERVATIONS_SCHEMA}`;
     stabilizationArtifacts: false,
     colorCast: "none",
     colorCastSeverity: "none",
+    facialEngagement: "medium",
+    presenceOnCamera: "adequate",
+    visualVariety: "low",
   };
 
   const defaultAssessments = {
-    overallTopFix: "Move your key light 40 degrees to camera right — the current front-on placement is flattening your face and removing all depth.",
-    colorGradingRecommendation: "Add +10 warmth to counteract the cool daylight cast and make skin tones more natural.",
-    lighting: "Key light is front-facing, eliminating facial shadow and depth",
-    lightingSuggestion: "Shift key light 40 degrees to the right to create natural dimensionality",
-    brightness: "Exposure looks correct on the face but check for hot spots near any windows",
-    brightnessSuggestion: "Confirm highlights are not clipping by checking the histogram before recording",
-    contrast: "Image looks slightly flat — blacks are not fully seated",
-    contrastSuggestion: "Lower blacks by 10 points in your color grade to add depth without crushing shadow detail",
-    colorTemperature: "Neutral with a slight cool cast in the shadows",
-    colorTemperatureSuggestion: "Add +5 warmth to neutralize the shadow cast",
-    background: "Background is visible but not distracting — check for off-brand items",
-    backgroundSuggestion: "Move 2 feet forward from the background to increase depth-of-field separation",
-    framing: "Eyes sit at mid-frame rather than the upper third",
-    framingSuggestion: "Lower the camera or raise your seat so eyes land at the upper-third line",
-    sharpness: "Focus appears to be on the face — confirm it is locked on the eyes specifically",
-    sharpnessSuggestion: "Use manual focus and zoom in on the eyes during setup to confirm sharpness",
-    stability: "Footage appears stable — check for any drift at the start of each take",
-    stabilitySuggestion: "Use a locking ballhead to eliminate the subtle drift common with fluid heads on static shots",
+    overallTopFix: "Ensure your background is appropriate for the video topic — a neutral wall or branded backdrop will keep focus on you and the content.",
+    colorGradingRecommendation: "Add +10 warmth to counteract any cool daylight cast and make skin tones more natural.",
+    lighting: "Key light positioning needs review — front-facing light eliminates facial depth.",
+    lightingSuggestion: "Shift key light 40 degrees to the right to create natural dimensionality.",
+    brightness: "Check for exposure inconsistency between subject and background.",
+    brightnessSuggestion: "Confirm highlights are not clipping by checking the histogram before recording.",
+    contrast: "Image may appear slightly flat — blacks should be seated properly.",
+    contrastSuggestion: "Lower blacks by 10 points in your color grade.",
+    colorTemperature: "Check for any mixed light sources causing color cast.",
+    colorTemperatureSuggestion: "Add +5 warmth to neutralize any shadow cast.",
+    background: "Background needs to be evaluated for topic appropriateness, not just visual cleanliness.",
+    backgroundSuggestion: "Choose a backdrop that signals credibility and matches your video topic — a clean wall, bookshelf, or branded setup works for most content categories.",
+    framing: "Eyes should land at the upper-third line for maximum viewer connection.",
+    framingSuggestion: "Lower the camera or raise your seat so eyes land at the upper-third line.",
+    sharpness: "Confirm focus is locked on the eyes specifically during setup.",
+    sharpnessSuggestion: "Use manual focus and zoom in on the eyes during setup to confirm sharpness.",
+    stability: "Use a locking tripod to eliminate any movement.",
+    stabilitySuggestion: "Use a locking ballhead to eliminate drift common with fluid heads on static shots.",
+    presenceFeedback: "Evaluate eye contact and delivery energy throughout the video.",
+    presenceSuggestion: "Speak directly into the lens as if talking to one specific person — pick a spot on the lens and hold it.",
+    hookStrength: "moderate",
+    hookStrengthReason: "The opening needs to create more urgency in the first 5 seconds.",
   };
 
   try {
     const response = await callOpenAI({
       model: "gpt-4o",
-      max_completion_tokens: isFree ? 1000 : 2000,
+      max_completion_tokens: isFree ? 1200 : 2500,
       messages: [{ role: "user", content: [{ type: "text", text: prompt }, ...imageContent] }],
     });
 
@@ -820,7 +1131,8 @@ export async function analyzeAudio(
   whisperConfidence: number,
   audioPath?: string
 ): Promise<object> {
-  const fillerWordPattern = /\b(um+|uh+|er+|ah+|like|you know|basically|literally|actually|so|right\?)\b/gi;
+  // Expanded filler word list
+  const fillerWordPattern = /\b(um+|uh+|er+|ah+|like|you know|basically|literally|actually|so|right\?|kind of|sort of|I mean|you see|hmm+|well|anyway)\b/gi;
   const fillerWordMatches = transcript.match(fillerWordPattern) || [];
   const fillerWordCount = fillerWordMatches.length;
 
@@ -838,31 +1150,28 @@ export async function analyzeAudio(
   const fillerRatio = wordCount > 0 ? fillerWordCount / wordCount : 0;
   const fillerLevel = fillerRatio > 0.1 ? "high" : fillerRatio > 0.05 ? "medium" : "low";
 
-  // Measure audio signals deterministically if audioPath is available
   let audioSignals = { noiseFloorDb: -35, peakVariationDb: 6, hasDropouts: false };
   if (audioPath) {
     audioSignals = await measureAudioSignals(audioPath);
   }
 
-  // Compute all numeric scores deterministically
   const clarityScore = scoreAudioClarity(whisperConfidence);
   const volumeScore = scoreAudioVolume(audioSignals.peakVariationDb, audioSignals.hasDropouts);
   const noiseScore = scoreBackgroundNoise(audioSignals.noiseFloorDb);
   const fillerScore = scoreFillerWords(fillerRatio);
 
-  // AI is only asked to write the assessment text, never the numbers
   const response = await callOpenAI({
     model: "gpt-4o-mini",
     max_completion_tokens: 800,
     messages: [{ role: "user", content: `You are a professional audio engineer and presentation coach. Write assessment text only — do NOT produce any numeric scores.
 
 Rules:
-- Reference actual words, patterns, or moments you detect — never generic advice
+- Reference actual words, patterns, or moments — never generic advice
 - For volume: identify specific moments where it dips or spikes
 - For clarity: note consonant clipping, room reverb, proximity effect, or compression artifacts
-- For background noise: identify the TYPE of noise (HVAC hum, street noise, keyboard, breathing) and when it is most noticeable
+- For background noise: identify the TYPE of noise (HVAC hum, street noise, keyboard, breathing) and when most noticeable
 - For filler words: name the most distracting one to fix first and give a specific replacement strategy
-- Never say "decent", "good", "acceptable", "generally" without a specific observation backing it up
+- Never say "decent", "good", "acceptable", "generally" without a specific observation
 
 Transcript snippet: "${transcript.substring(0, 500)}"
 Filler words detected: ${fillerBreakdownStr || "none"} (${fillerWordCount} total — ${Math.round(fillerRatio * 100)}% of speech)
@@ -899,7 +1208,7 @@ Return STRICT JSON only — assessment strings, NO numbers:
     audioVolume: {
       level: volumeScore >= 75 ? "high" : volumeScore >= 50 ? "medium" : "low",
       numeric: volumeScore,
-      assessment: txt.volumeAssessment ?? `Peak variation of ${audioSignals.peakVariationDb.toFixed(1)} dB detected — aim for under 4 dB for broadcast-level consistency`,
+      assessment: txt.volumeAssessment ?? `Peak variation of ${audioSignals.peakVariationDb.toFixed(1)} dB — aim for under 4 dB`,
       suggestions: [txt.volumeSuggestion ?? "Normalize to -14 LUFS and add a limiter ceiling at -1 dBTP"],
       effect: txt.volumeEffect ?? "Inconsistent volume forces viewers to adjust their device mid-watch",
       severity: severityFor(volumeScore),
@@ -907,16 +1216,16 @@ Return STRICT JSON only — assessment strings, NO numbers:
     audioClarity: {
       level: clarityScore >= 75 ? "good" : clarityScore >= 50 ? "acceptable" : "poor",
       numeric: clarityScore,
-      assessment: txt.clarityAssessment ?? `Whisper confidence at ${clarityScore}% — speech is ${clarityScore >= 80 ? "highly intelligible" : "partially unclear"}`,
-      suggestions: [txt.claritySuggestion ?? "Record in a treated space or closer to the mic to improve intelligibility"],
+      assessment: txt.clarityAssessment ?? `Whisper confidence at ${clarityScore}%`,
+      suggestions: [txt.claritySuggestion ?? "Record closer to the mic or in a treated space"],
       effect: txt.clarityEffect ?? "Low clarity reduces comprehension and viewer retention",
       severity: severityFor(clarityScore),
     },
     backgroundNoise: {
       level: noiseScore >= 75 ? "low" : noiseScore >= 50 ? "medium" : "high",
       numeric: noiseScore,
-      assessment: txt.noiseAssessment ?? `Noise floor estimated at ${audioSignals.noiseFloorDb.toFixed(1)} dBFS`,
-      suggestions: [txt.noiseSuggestion ?? "Run a noise reduction pass using a 0.5s room tone sample as the noise profile"],
+      assessment: txt.noiseAssessment ?? `Noise floor at ${audioSignals.noiseFloorDb.toFixed(1)} dBFS`,
+      suggestions: [txt.noiseSuggestion ?? "Run a noise reduction pass using a 0.5s room tone sample"],
       effect: txt.noiseEffect ?? "Audible background noise undermines production quality",
       severity: severityFor(noiseScore),
     },
@@ -927,7 +1236,7 @@ Return STRICT JSON only — assessment strings, NO numbers:
       breakdown: fillerBreakdown,
       assessment: `${fillerWordCount} filler words detected (${Math.round(fillerRatio * 100)}% of speech)${fillerBreakdownStr ? `: ${fillerBreakdownStr}` : ""}`,
       suggestions: [txt.fillerSuggestion ?? "Replace the most frequent filler with a deliberate pause"],
-      effect: txt.fillerEffect ?? "Filler words at this frequency reduce perceived expertise and slow delivery pace",
+      effect: txt.fillerEffect ?? "Filler words reduce perceived expertise and slow delivery pace",
       severity: severityFor(fillerScore),
     },
   };
@@ -949,13 +1258,11 @@ Rules:
 - 3 to 7 words
 - Specific to the actual topic
 - No quotation marks in the title
-- No generic labels like "Video Analysis", "My Video", "Introduction", or "Untitled"
+- No generic labels
 
-Script:
-"${transcript.substring(0, 1800)}"
+Script: "${transcript.substring(0, 1800)}"
 
-Return:
-{"videoName":"specific video name"}`,
+Return: {"videoName":"specific video name"}`,
       }],
     });
 
@@ -974,7 +1281,10 @@ export function getTotalAnalysisScore(result: Record<string, unknown>): number |
   return Number.isFinite(score) ? Math.max(0, Math.min(100, Math.round(score))) : undefined;
 }
 
-export async function analyzeScriptFeedback(transcript: string, segments: Array<{ start: number; end: number; text: string }>): Promise<object> {
+export async function analyzeScriptFeedback(
+  transcript: string,
+  segments: Array<{ start: number; end: number; text: string }>
+): Promise<object> {
   const first15sec = segments.filter(s => s.start <= 15).map(s => s.text).join(" ");
   const response = await callOpenAI({
     model: "gpt-4o",
@@ -987,33 +1297,25 @@ Full transcript: "${transcript.substring(0, 2500)}"
 First 15 seconds: "${first15sec}"
 
 Evaluate:
-1. HOOK (first 30 seconds): Does it create a curiosity gap, pattern interrupt, or bold claim? Call out exactly what fails and why. Give 3 alternative hooks that would outperform it.
-2. WEAK SECTIONS: Find 2-4 moments where the viewer would drop off. Quote the exact phrase. Give a direct replacement, not a suggestion.
-3. IMPROVED SCRIPT: Rewrite the full script keeping the creator's authentic voice. Cut every word that doesn't earn its place. Strengthen every transition. Make the hook land harder.
+1. HOOK (first 30 seconds): Does it create a curiosity gap, pattern interrupt, or bold claim? Call out exactly what fails and why. Give 3 alternative hooks.
+2. WEAK SECTIONS: Find 2-4 moments where the viewer would drop off. Quote the exact phrase. Give a direct replacement.
+3. IMPROVED SCRIPT: Rewrite the full script keeping the creator's authentic voice. Cut every word that doesn't earn its place.
 
 Return STRICT JSON only:
 {
-  "hookSuggestions": ["hook 1 — opens with a curiosity gap or pattern interrupt", "hook 2", "hook 3"],
+  "hookSuggestions": ["hook 1", "hook 2", "hook 3"],
   "weakSections": [
-    {"text": "exact quote from transcript", "reason": "specific reason viewer drops off here", "replacement": "improved version that keeps them watching"}
+    {"text": "exact quote", "reason": "specific reason viewer drops off", "replacement": "improved version"}
   ],
-  "improvedScript": "full rewritten script with stronger hook, tighter flow, no filler"
+  "improvedScript": "full rewritten script"
 }`,
     }],
   });
   return parseJson(response.choices[0]?.message?.content ?? "{}", {
-    hookSuggestions: ["Open with the most surprising result or outcome", "Ask a question the viewer is already thinking", "Make a bold claim that challenges conventional wisdom"],
+    hookSuggestions: [],
     weakSections: [],
     improvedScript: transcript,
   });
-}
-
-// ─── Timestamp helpers ────────────────────────────────────────────────────────
-
-function fmtSecs(s: number): string {
-  const m = Math.floor(s / 60);
-  const sec = Math.floor(s % 60);
-  return `${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
 }
 
 function normText(t: string): string {
@@ -1033,7 +1335,6 @@ function matchTextToSegment(
   for (const seg of segments) {
     const normSeg = normText(seg.text);
     let score = 0;
-
     if (normSeg.includes(normSnippet) || normSnippet.includes(normSeg)) {
       score = Math.min(normSnippet.length, normSeg.length) / Math.max(normSnippet.length, normSeg.length);
     } else {
@@ -1042,11 +1343,7 @@ function matchTextToSegment(
       const overlap = segWords.filter(w => snippetWords.has(w)).length;
       score = overlap / Math.max(snippetWords.size, segWords.length);
     }
-
-    if (score > bestScore) {
-      bestScore = score;
-      bestSeg = seg;
-    }
+    if (score > bestScore) { bestScore = score; bestSeg = seg; }
   }
 
   if (!bestSeg || bestScore < 0.3) return null;
@@ -1088,18 +1385,14 @@ export async function analyzeEditingPoints(
   const totalDuration = lastSeg?.end ?? 0;
   const isFree = plan === "free";
 
-  const editingSystemPrompt = `You are a senior video editor and YouTube strategist with 10 years experience working with creators across YouTube, TikTok, and Instagram. You watch videos with a critical eye and give feedback like a professional editor reviewing a client's rough cut: specific, direct, and actionable. Never give vague advice.
+  const editingSystemPrompt = `You are a senior video editor and YouTube strategist with 10 years experience. You give feedback like a professional editor reviewing a client's rough cut: specific, direct, actionable.
 
 Rules:
-- Always reference exact timestamps or quote exact words from the transcript
-- If something should be cut, say exactly what and why in one sentence
-- Before suggesting to cut any line, ask yourself: does this line create tension, establish a problem, or advance the story? If yes, do NOT suggest cutting it — suggest repositioning it instead.
-- Only suggest cutting genuinely redundant content — repeated points, filler transitions, or off-topic tangents
-- When suggesting a cut, always explain what specific value is lost vs gained by cutting, in one sentence
-- If the hook is weak, rewrite it with a specific alternative
+- Always reference exact timestamps or quote exact words
+- Only suggest cutting genuinely redundant content
+- When suggesting a cut, explain what value is lost vs gained in one sentence
 - Reference platform-specific best practices
-- Never say "consider" or "you might want to": be direct
-- Keep each suggestion to 1-2 sentences maximum`;
+- Never say "consider" or "you might want to"`;
 
   const hookCount = isFree ? 1 : 4;
   const suggestionCount = isFree ? 1 : 5;
@@ -1111,18 +1404,18 @@ Rules:
       role: "user",
       content: `${editingSystemPrompt}
 
-Read this transcript. Identify the ${hookCount} strongest moment(s) that would stop a scroll: unexpected reveals, punchlines, or contrarian takes. Copy the EXACT text from the transcript.
+Read this transcript. Identify the ${hookCount} strongest moment(s) that would stop a scroll. Copy EXACT text from the transcript.
 
-Then give ${suggestionCount} specific editing suggestion(s). Not "improve pacing". Give actionable notes like "The setup at 0:45 is 30 seconds longer than it needs to be, cut to the punchline immediately" or "Hook lands too late, move the reveal at 2:10 to the first 15 seconds". Reference platform best practices where relevant (TikTok hooks in 2 seconds, YouTube retention cliff at 30%).
+Give ${suggestionCount} specific editing suggestion(s) referencing actual content and platform best practices.
 
-CRITICAL: Copy text EXACTLY as written. Do NOT invent timestamps.
+CRITICAL: Copy text EXACTLY. Do NOT invent timestamps.
 
 Transcript: "${transcript.substring(0, isFree ? 1500 : 3000)}"
 
 Return STRICT JSON only:
 {
   "hookTexts": ["exact sentence from transcript"],
-  "editingSuggestions": ["specific tip referencing the actual content"]
+  "editingSuggestions": ["specific tip referencing actual content"]
 }`,
     }],
   });
@@ -1133,7 +1426,7 @@ Return STRICT JSON only:
   );
 
   const hooks = hookData.hookTexts
-    .map((hookText) => {
+    .map(hookText => {
       const match = matchTextToSegment(hookText, segments);
       if (!match) return null;
       return {
@@ -1167,7 +1460,7 @@ Return STRICT JSON only:
         removeSections.push({
           start: fmtSecs(s.start),
           end: fmtSecs(s.end),
-          reason: `Dead air / silence gap (${(s.end - s.start).toFixed(1)}s)`,
+          reason: `Dead air / silence gap (${(s.end - s.start).toFixed(1)}s) — viewer likely to disengage`,
         });
       }
     }
@@ -1209,12 +1502,12 @@ Return STRICT JSON only:
         max_completion_tokens: 600,
         messages: [{
           role: "user",
-          content: `You are a short-form video strategist. Review these ${CHUNK_SEC}-second transcript chunks. Identify which ones work as standalone short videos (complete idea, natural start/end, no abrupt cut).
+          content: `You are a short-form video strategist. Which of these chunks work as standalone short videos?
 
 Chunks: ${JSON.stringify(chunkSummaries)}
 
-Return STRICT JSON using ONLY the provided index numbers — no invented timestamps:
-{"goodChunks":[{"index":0,"title":"short punchy title","reason":"why this works as a standalone short"}]}`,
+Return STRICT JSON using ONLY the provided index numbers:
+{"goodChunks":[{"index":0,"title":"short punchy title","reason":"why this works standalone"}]}`,
         }],
       });
 
@@ -1244,23 +1537,20 @@ Return STRICT JSON using ONLY the provided index numbers — no invented timesta
 
   function clampTs(ts: string): string {
     if (!totalDuration) return ts;
-    const secs = Math.min(parseTs(ts), totalDuration);
-    return fmtSecs(secs);
+    return fmtSecs(Math.min(parseTs(ts), totalDuration));
   }
 
   const clampedHooks = totalDuration
-    ? hooks.filter(h => h && parseTs(h!.start) < totalDuration)
-        .map(h => h ? { ...h, start: clampTs(h.start), end: clampTs(h.end) } : h)
+    ? hooks.filter(h => h && parseTs((h as { start: string }).start) < totalDuration)
+        .map(h => h ? { ...h, start: clampTs((h as { start: string }).start), end: clampTs((h as { end: string }).end) } : h)
     : hooks;
 
   const clampedRemovals = totalDuration
-    ? removeSections.filter(s => parseTs(s.start) < totalDuration)
-        .map(s => ({ ...s, end: clampTs(s.end) }))
+    ? removeSections.filter(s => parseTs(s.start) < totalDuration).map(s => ({ ...s, end: clampTs(s.end) }))
     : removeSections;
 
   const clampedShortVideos = totalDuration
-    ? shortVideos.filter(sv => parseTs(sv.start) < totalDuration)
-        .map(sv => ({ ...sv, end: clampTs(sv.end) }))
+    ? shortVideos.filter(sv => parseTs(sv.start) < totalDuration).map(sv => ({ ...sv, end: clampTs(sv.end) }))
     : shortVideos;
 
   const defaultSuggestions = [
@@ -1282,19 +1572,15 @@ Return STRICT JSON using ONLY the provided index numbers — no invented timesta
           role: "user",
           content: `${editingSystemPrompt}
 
-Rewrite this opening as a creator would actually say it on camera — natural, direct, and confident. It should sound like the creator is talking to a friend, not writing an ad headline.
-
-Good example: "If you sell products on more than one platform, you already know how painful it is to keep everything in sync. This is how I fixed it."
-Bad example: "Discover the secret trick that transforms your Tuesday forever!"
+Rewrite this opening as a creator would say it on camera — natural, direct, confident.
 
 Rules:
 - No exclamation marks
-- No words like "discover", "secret", "unlock", "transform", "game-changer", "revolutionary"
-- Must reference something specific from the actual video content below
+- No words like "discover", "secret", "unlock", "transform", "game-changer"
+- Must reference something specific from the actual video content
 - Should feel like the natural first sentence of the video
-- MUST be a complete sentence — never end mid-thought or mid-clause
+- MUST be a complete sentence — never end mid-thought
 - Maximum 2 sentences, maximum 30 words total
-- Write as if the creator is speaking directly to camera
 
 Original: "${hookText}"
 
@@ -1334,11 +1620,7 @@ function buildChapterPoints(
 
   for (const seg of segments) {
     if (seg.start >= nextTarget) {
-      chapters.push({
-        start: seg.start,
-        time: fmtSecs(seg.start),
-        text: seg.text.trim().substring(0, 80),
-      });
+      chapters.push({ start: seg.start, time: fmtSecs(seg.start), text: seg.text.trim().substring(0, 80) });
       nextTarget = seg.start + interval;
     }
     if (chapters.length >= maxChapters) break;
@@ -1359,11 +1641,11 @@ export async function generateSeo(
   const chapterPoints = buildChapterPoints(segments, 10);
 
   const chapterHint = chapterPoints.length
-    ? `\n\nReal chapter timestamps (use EXACTLY these times — write a short, complete, descriptive label for each that tells the viewer what they will learn or see in that section. Labels must be complete phrases, never sentence fragments or mid-sentence cuts. Bad label: "what they're talking about" — Good label: "Why most business videos get ignored"):\n${chapterPoints.map(c => `${c.time} - context: "${c.text}"`).join("\n")}`
+    ? `\n\nReal chapter timestamps:\n${chapterPoints.map(c => `${c.time} - context: "${c.text}"`).join("\n")}`
     : "";
 
   const platformGuide: Record<string, string> = {
-    youtube_long: "YouTube long-form: titles 60-70 chars, curiosity gap required, keyword in first 3 words. Strategy options: curiosity gap, how-to, number-based, problem/solution, bold claim.",
+    youtube_long: "YouTube long-form: titles 60-70 chars, curiosity gap required, keyword in first 3 words.",
     youtube_shorts: "YouTube Shorts: punchy titles under 50 chars, high-energy action verbs",
     tiktok: "TikTok: trend-aware, conversational, 3-5 hashtags from trending niches",
     instagram: "Instagram Reels: lifestyle-forward, mix of niche and broad hashtags",
@@ -1379,91 +1661,52 @@ export async function generateSeo(
       max_completion_tokens: 500,
       messages: [{ role: "user", content: `${BASE_SYSTEM_PROMPT}
 
-You are a ${platform} SEO expert. Generate ONE strong title using a curiosity gap strategy (keyword in first 3 words, under 70 chars). Write TWO compelling sentences for the description hook. Generate 3 high-relevance tags.
-
-Platform rules: ${guide}
-
+Generate ONE strong title, TWO description sentences, and 3 tags.
+Platform: ${guide}
 Transcript: "${transcript.substring(0, 800)}"
+TAGS: No # symbol.
 
-TAGS RULE: YouTube tags must NOT include the # symbol. Output plain tag text only.
-
-Return STRICT JSON only:
-{"titles":["one title only"],"description":"Two compelling sentences maximum.","hashtags":[{"tag":"Tag without hash symbol","effect":"why this tag"},{"tag":"Tag2","effect":"..."},{"tag":"Tag3","effect":"..."}],"timestamps":[{"time":"0:00","label":"Intro"}]}` }],
+Return STRICT JSON:
+{"titles":["one title"],"description":"Two sentences.","hashtags":[{"tag":"Tag","effect":"why"},{"tag":"Tag2","effect":"..."},{"tag":"Tag3","effect":"..."}],"timestamps":[{"time":"0:00","label":"Intro"}]}` }],
     });
 
     const parsed = parseJson<{ titles: string[]; description: string; hashtags: Array<{ tag: string; effect?: string }>; timestamps: Array<{ time: string; label: string }> }>(
       response.choices[0]?.message?.content ?? "{}",
-      {
-        titles: ["Your Video Title — Creator Plan Unlocks 4 More Options"],
-        description: "Your video covers important content your audience needs to see.",
-        hashtags: [{ tag: "VideoContent", effect: "Broad reach" }, { tag: "YouTube", effect: "Platform" }, { tag: "Creator", effect: "Niche" }],
-        timestamps: [{ time: "0:00", label: "Introduction" }],
-      }
+      { titles: ["Your Video Title"], description: "Your video content.", hashtags: [{ tag: "VideoContent", effect: "Broad reach" }], timestamps: [{ time: "0:00", label: "Introduction" }] }
     );
-    parsed.hashtags = (parsed.hashtags ?? []).map(h => ({
-      ...h,
-      tag: typeof h.tag === "string" ? h.tag.replace(/^#+/, "") : h.tag,
-    }));
+    parsed.hashtags = (parsed.hashtags ?? []).map(h => ({ ...h, tag: typeof h.tag === "string" ? h.tag.replace(/^#+/, "") : h.tag }));
     return parsed;
   }
 
   const isYouTube = platform === "youtube_long" || platform === "youtube_shorts";
-
   const response = await callOpenAI({
     model: "gpt-4o",
     max_completion_tokens: 2500,
     messages: [{ role: "user", content: `${BASE_SYSTEM_PROMPT}
 
-You are a ${platform} SEO expert who has helped channels grow from 0 to 100K through search. You write titles that create curiosity gaps, not summaries.
-
-Platform rules: ${guide}
-
+You are a ${platform} SEO expert. Platform rules: ${guide}
 Transcript: "${transcript.substring(0, 2000)}"${chapterHint}
 
-${isYouTube ? `Generate exactly 5 title options using these named strategies:
-1. Curiosity gap (create a knowledge gap the viewer must close)
-2. How-to / tutorial (clear instruction promise)
-3. Number-based (specific number in the title)
-4. Problem/solution direct (name the pain, promise the fix)
-5. Bold claim or result-driven (contrarian or surprising outcome)
-Each title: include primary keyword naturally, under 70 characters.` : `Generate 3 title options following platform best practices.`}
+${isYouTube ? `Generate exactly 5 title options (curiosity gap, how-to, number-based, problem/solution, bold claim). Under 70 chars each.` : `Generate 3 title options.`}
 
-Description rules:
-- First 2 lines must clearly state what the video is about and who it's for. No hype, no fluff.
-- Use the primary keyword naturally in the first sentence.
-- Include a ## Chapters section with complete, descriptive labels — never fragments.
-- Include a links section: "🔗 [Add your links here]"
-- End with ONE genuine call to action. One sentence only.
-- 150-400 words total. Never end with generic motivational closers.
+Description: First 2 lines state what the video is about. Use primary keyword naturally. Include ## Chapters. End with ONE CTA. 150-400 words. No hype.
 
-TAGS RULE: No # symbols. Plain text only, 25-30 tags.
+TAGS: No # symbols. 25-30 tags.
 
-Return STRICT JSON — use EXACT times from chapter list. Chapter labels must be complete phrases:
-{"titles":["title 1","title 2","title 3","title 4","title 5"],"description":"full description","hashtags":[{"tag":"Tag","effect":"audience"}],"timestamps":[{"time":"0:00","label":"complete label"}],"titleStrategies":["curiosity gap","how-to","number-based","problem/solution","bold claim"]}` }],
+Return STRICT JSON:
+{"titles":["t1","t2","t3","t4","t5"],"description":"full description","hashtags":[{"tag":"Tag","effect":"audience"}],"timestamps":[{"time":"0:00","label":"complete label"}],"titleStrategies":["curiosity gap","how-to","number-based","problem/solution","bold claim"]}` }],
   });
 
   const parsed = parseJson<{ titles: string[]; description: string; hashtags: object[]; timestamps: Array<{ time: string; label: string }>; titleStrategies?: string[] }>(
     response.choices[0]?.message?.content ?? "{}",
-    {
-      titles: ["Engaging title for your video", "How-to title with keywords", "5 Things About Your Topic", "The Problem Solved in One Video", "The Result You Actually Get"],
-      description: "Your video description with chapters and call to action.\n\n## Chapters\n0:00 Introduction\n\n[Links]\nSubscribe: ",
-      hashtags: [{ tag: "VideoContent", effect: "Broad reach" }],
-      timestamps: [{ time: "0:00", label: "Introduction" }],
-    }
+    { titles: ["Engaging title"], description: "Description.", hashtags: [], timestamps: [{ time: "0:00", label: "Introduction" }] }
   );
 
   if (chapterPoints.length) {
-    parsed.timestamps = parsed.timestamps.map((t, i) => ({
-      time: chapterPoints[i]?.time ?? t.time,
-      label: t.label,
-    }));
+    parsed.timestamps = parsed.timestamps.map((t, i) => ({ time: chapterPoints[i]?.time ?? t.time, label: t.label }));
   }
 
-  parsed.hashtags = (parsed.hashtags ?? []).map((h: any) => ({
-    ...h,
-    tag: typeof h.tag === "string" ? h.tag.replace(/^#+/, "") : h.tag,
-  }));
-
+  parsed.hashtags = (parsed.hashtags ?? []).map((h: any) => ({ ...h, tag: typeof h.tag === "string" ? h.tag.replace(/^#+/, "") : h.tag }));
   return parsed;
 }
 
@@ -1475,18 +1718,12 @@ export async function generateShortClipIdeas(
 ): Promise<object> {
   if (!segments.length) return { clips: [] };
   const isFree = plan === "free";
-
   const totalDuration = segments[segments.length - 1]!.end;
 
   const platformLabels: Record<string, string> = {
-    youtube_long: "YouTube Long",
-    youtube_shorts: "YouTube Shorts",
-    tiktok: "TikTok",
-    instagram: "Instagram Reels",
-    linkedin: "LinkedIn",
-    x: "X/Twitter",
+    youtube_long: "YouTube Long", youtube_shorts: "YouTube Shorts",
+    tiktok: "TikTok", instagram: "Instagram Reels", linkedin: "LinkedIn", x: "X/Twitter",
   };
-
   const targetPlatformList = platforms.map(p => platformLabels[p] ?? p).join(", ");
 
   const CHUNK_SEC = 90;
@@ -1499,16 +1736,12 @@ export async function generateShortClipIdeas(
   for (const seg of segments) {
     if (seg.start - chunkStart >= CHUNK_SEC && chunkText) {
       chunks.push({ start: chunkStart, end: chunkEnd, text: chunkText, index: chunks.length });
-      chunkStart = seg.start;
-      chunkEnd = seg.start;
-      chunkText = "";
+      chunkStart = seg.start; chunkEnd = seg.start; chunkText = "";
     }
     chunkText += " " + seg.text;
     chunkEnd = seg.end;
   }
-  if (chunkText) {
-    chunks.push({ start: chunkStart, end: chunkEnd, text: chunkText.trim(), index: chunks.length });
-  }
+  if (chunkText) chunks.push({ start: chunkStart, end: chunkEnd, text: chunkText.trim(), index: chunks.length });
 
   const chunkSummaries = chunks.map(c => ({
     index: c.index,
@@ -1519,7 +1752,6 @@ export async function generateShortClipIdeas(
   }));
 
   const clipCount = isFree ? 1 : 3;
-
   const response = await callOpenAI({
     model: "gpt-4o",
     max_completion_tokens: isFree ? 600 : 2000,
@@ -1527,46 +1759,17 @@ export async function generateShortClipIdeas(
       role: "user",
       content: `${BASE_SYSTEM_PROMPT}
 
-You are a short-form content strategist who has helped 500+ creators repurpose long videos into viral clips.
-
-Target platforms: ${targetPlatformList}
-Total video duration: ${Math.round(totalDuration)}s
-
-Identify the best ${clipCount} clip(s). For each:
-- Quote the exact opening line from the transcript
-- State which platforms fit and WHY
-${!isFree ? `- ONE tactical production note
-- Engagement potential: High / Medium / Low with a one-sentence reason` : ""}
-
-CRITICAL: Use ONLY the provided index numbers.
+Identify the best ${clipCount} clip(s) for: ${targetPlatformList}
+Total duration: ${Math.round(totalDuration)}s
 
 Chunks: ${JSON.stringify(chunkSummaries)}
 
-Return STRICT JSON:
-{
-  "clips": [
-    {
-      "chunkIndex": 0,
-      "startSec": 45,
-      "endSec": 105,
-      "title": "punchy clip title",
-      "hook": "exact opening words",
-      "whyItWorks": "one sentence",
-      "platforms": ["TikTok"],
-      "platformReason": "why"${!isFree ? `,
-      "tacticalNote": "one production tip",
-      "engagementPotential": "High/Medium/Low",
-      "engagementReason": "why"` : ""}
-    }
-  ]
-}`,
+Return STRICT JSON using ONLY the provided index numbers:
+{"clips":[{"chunkIndex":0,"startSec":45,"endSec":105,"title":"punchy title","hook":"exact opening words","whyItWorks":"one sentence","platforms":["TikTok"],"platformReason":"why"${!isFree ? `,"tacticalNote":"one tip","engagementPotential":"High/Medium/Low","engagementReason":"why"` : ""}}]}`,
     }],
   });
 
-  const raw = parseJson<{ clips: Array<Record<string, unknown>> }>(
-    response.choices[0]?.message?.content ?? "{}",
-    { clips: [] }
-  );
+  const raw = parseJson<{ clips: Array<Record<string, unknown>> }>(response.choices[0]?.message?.content ?? "{}", { clips: [] });
 
   function fmtSec(s: number): string {
     const m = Math.floor(s / 60);
@@ -1582,14 +1785,10 @@ Return STRICT JSON:
     return {
       start: fmtSec(Math.min(startSec, totalDuration)),
       end: fmtSec(Math.min(endSec, totalDuration)),
-      title: clip.title ?? "",
-      hook: clip.hook ?? "",
-      whyItWorks: clip.whyItWorks ?? "",
+      title: clip.title ?? "", hook: clip.hook ?? "", whyItWorks: clip.whyItWorks ?? "",
       platforms: Array.isArray(clip.platforms) ? clip.platforms : [],
-      platformReason: clip.platformReason ?? "",
-      tacticalNote: clip.tacticalNote ?? "",
-      engagementPotential: clip.engagementPotential ?? "",
-      engagementReason: clip.engagementReason ?? "",
+      platformReason: clip.platformReason ?? "", tacticalNote: clip.tacticalNote ?? "",
+      engagementPotential: clip.engagementPotential ?? "", engagementReason: clip.engagementReason ?? "",
     };
   });
 
@@ -1615,7 +1814,6 @@ export function computeQualityScore(visualAnalysis: object, audioAnalysis: objec
   const visual = visualAnalysis as Record<string, { numeric?: number }>;
   const audio = audioAnalysis as Record<string, { numeric?: number; score?: number }>;
 
-  // All inputs here are already deterministically computed — this remains stable
   const metrics = [
     visual.lighting?.numeric ?? 70,
     visual.brightness?.numeric ?? 70,
@@ -1633,3 +1831,36 @@ export function computeQualityScore(visualAnalysis: object, audioAnalysis: objec
 }
 
 export { logger };
+
+// ─── USAGE NOTES FOR CALLERS ─────────────────────────────────────────────────
+//
+// To integrate retention forecasting, after running analyzeVisuals + analyzeAudio:
+//
+//   const pacing = analyzePacing(segments, wordTimings);
+//   const visual = await analyzeVisuals(frames, platform, plan, transcript);
+//   const hookStrength = (visual as any).hookStrength ?? "moderate";
+//   const bgContext = (visual as any).background?.contextAppropriate ?? "neutral";
+//   const audioScore = computeQualityScore({}, audioAnalysis);
+//   const visualScore = (visual as any).overallVisualScore ?? 70;
+//
+//   const retention = buildRetentionForecast(
+//     visualScore, audioScore, pacing,
+//     fillerRatio, segments, hookStrength, bgContext, totalDurationSec
+//   );
+//
+//   // Then include in the job result:
+//   result.retention = retention;
+//   result.pacing = {
+//     wordsPerMinute: pacing.wordsPerMinute,
+//     pacingRating: pacing.pacingRating,
+//     longPauseCount: pacing.longPauseCount,
+//     engagementRisks: pacing.engagementRiskTimestamps,
+//     score: scorePacing(pacing),
+//   };
+//
+// The retention object includes:
+// - estimatedRetentionPct: number (e.g. 42)
+// - retentionGrade: "A" | "B" | "C" | "D" | "F"
+// - summary: string
+// - dropOffMoments: Array<{ at, atSec, severity, reason, fix }>
+// - retentionCurvePoints: Array<{ sec, pct }> — use this to render a chart
