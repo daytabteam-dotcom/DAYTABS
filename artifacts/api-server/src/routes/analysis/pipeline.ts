@@ -363,20 +363,20 @@ async function runVideoAnalyzer(
       await stopIfMemoryHigh(jobId, "audio analysis");
       const qualityScore = computeQualityScore(visualAnalysis, audioAnalysis);
       const pacing = analyzePacing(transcriptSegments, wordTimings);
-      const totalDurationSec = transcriptSegments[transcriptSegments.length - 1]?.end ?? await getMediaDuration(videoPath);
-      const wordCount = transcriptText.split(/\s+/).filter(Boolean).length;
-      const fillerWordCount = Number((audioAnalysis as { fillerWords?: { numeric?: unknown } }).fillerWords?.numeric ?? 0);
-      const fillerRatio = wordCount > 0 ? fillerWordCount / wordCount : 0;
-      const retention = buildRetentionForecast(
+      const retention = !isFree ? buildRetentionForecast(
         Number((visualAnalysis as { overallVisualScore?: unknown }).overallVisualScore ?? 70),
         computeQualityScore({}, audioAnalysis),
         pacing,
-        fillerRatio,
+        (() => {
+          const wordCount = transcriptText.split(/\s+/).filter(Boolean).length;
+          const fillerWordCount = Number((audioAnalysis as { fillerWords?: { numeric?: unknown } }).fillerWords?.numeric ?? 0);
+          return wordCount > 0 ? fillerWordCount / wordCount : 0;
+        })(),
         transcriptSegments,
         ((visualAnalysis as { hookStrength?: "strong" | "moderate" | "weak" }).hookStrength ?? "moderate"),
         ((visualAnalysis as { background?: { contextAppropriate?: "yes" | "neutral" | "no" } }).background?.contextAppropriate ?? "neutral"),
-        totalDurationSec,
-      );
+        transcriptSegments[transcriptSegments.length - 1]?.end ?? await getMediaDuration(videoPath),
+      ) : undefined;
       const pacingScore = scorePacing(pacing);
 
       result.quality = {
@@ -395,11 +395,11 @@ async function runVideoAnalyzer(
           longPauseCount: pacing.longPauseCount,
           engagementRisks: pacing.engagementRiskTimestamps,
         },
-        retention,
+        ...(retention ? { retention } : {}),
       };
-      result.retention = retention;
+      if (retention) result.retention = retention;
       result.totalScore = getTotalAnalysisScore(result);
-      await updateJob(jobId, { result: { quality: result.quality, retention, totalScore: result.totalScore } });
+      await updateJob(jobId, { result: { quality: result.quality, ...(retention ? { retention } : {}), totalScore: result.totalScore } });
       progress = 55;
     }
 

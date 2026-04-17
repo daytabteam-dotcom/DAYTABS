@@ -408,6 +408,32 @@ function QualityPanel({ data, isPaid }: { data: any; isPaid: boolean }) {
   if (!data) return <p className="text-white/40 text-sm">No quality data.</p>;
   const overallScore = data.score ?? data.overallScore ?? data.overallVisualScore ?? 0;
   const scoreColor = overallScore >= 85 ? "text-green-400" : overallScore >= 60 ? "text-yellow-400" : "text-red-400";
+  const retentionPreview = data.retention ?? (!isPaid ? {
+    estimatedRetentionPct: 43,
+    retentionGrade: "C",
+    summary: "Estimated average retention, predicted viewer drop-off points, and timestamp-specific fixes.",
+    retentionCurvePoints: [
+      { sec: 0, pct: 100 },
+      { sec: 5, pct: 74 },
+      { sec: 15, pct: 62 },
+      { sec: 30, pct: 52 },
+      { sec: 60, pct: 43 },
+    ],
+    dropOffMoments: [
+      {
+        at: "00:05",
+        severity: "medium",
+        reason: "Opening does not create enough urgency before the viewer decides whether to stay.",
+        fix: "Start with the strongest outcome or most painful problem before any setup.",
+      },
+      {
+        at: "00:28",
+        severity: "high",
+        reason: "Static pacing creates a likely attention drop after the initial context.",
+        fix: "Cut dead air and add a visual change, proof point, or B-roll before this moment.",
+      },
+    ],
+  } : null);
 
   return (
     <div className="space-y-6">
@@ -487,7 +513,11 @@ function QualityPanel({ data, isPaid }: { data: any; isPaid: boolean }) {
         </div>
       </div>
 
-      <RetentionForecastCard data={data.retention} />
+      {retentionPreview && (
+        <BlurSection blur={!isPaid} feature="retention-forecast" label="Unlock retention forecasting with estimated viewer drop-off points and timestamp-specific fixes">
+          <RetentionForecastCard data={retentionPreview} />
+        </BlurSection>
+      )}
 
       {data.colorGradingRecommendation && isPaid && (
         <div className="p-4 rounded-xl bg-background/60 border border-white/8">
