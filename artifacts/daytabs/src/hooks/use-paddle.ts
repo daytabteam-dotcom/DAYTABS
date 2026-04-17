@@ -14,6 +14,7 @@ export const PADDLE_PRICES = {
 } as const;
 
 let paddleInstance: Paddle | null = null;
+let paddleInitPromise: Promise<Paddle | null> | null = null;
 let globalDiscountCode = "";
 const discountListeners = new Set<(code: string) => void>();
 
@@ -49,9 +50,12 @@ async function handleCheckoutComplete(
   }
 }
 
-function ensurePaddleInitialized() {
-  if (paddleInstance || !CLIENT_TOKEN) return;
-  initializePaddle({
+async function ensurePaddleInitialized(): Promise<Paddle | null> {
+  if (paddleInstance) return paddleInstance;
+  if (!CLIENT_TOKEN) return null;
+  if (paddleInitPromise) return paddleInitPromise;
+
+  paddleInitPromise = initializePaddle({
     token: CLIENT_TOKEN,
     environment: ENVIRONMENT,
     checkout: {
@@ -72,8 +76,14 @@ function ensurePaddleInitialized() {
       }
     },
   }).then((instance) => {
-    if (instance) paddleInstance = instance;
+    paddleInstance = instance ?? null;
+    return paddleInstance;
+  }).catch(() => {
+    paddleInitPromise = null;
+    return null;
   });
+
+  return paddleInitPromise;
 }
 
 export function usePaddle() {
@@ -90,7 +100,9 @@ export function usePaddle() {
   useEffect(() => {
     if (paddleInstance) { setPaddle(paddleInstance); return; }
     if (!CLIENT_TOKEN) return;
-    ensurePaddleInitialized();
+    ensurePaddleInitialized().then((instance) => {
+      if (instance) setPaddle(instance);
+    });
     const interval = setInterval(() => {
       if (paddleInstance) { setPaddle(paddleInstance); clearInterval(interval); }
     }, 100);
@@ -103,22 +115,34 @@ export function usePaddle() {
     setCheckoutError(null);
   }, []);
 
-  const openCheckout = useCallback((priceId: string, userEmail?: string) => {
-    if (!paddle) return;
+  const openCheckout = useCallback(async (priceId: string, userEmail?: string): Promise<boolean> => {
     setCheckoutError(null);
+    if (!priceId) {
+      setCheckoutError("This plan is missing a Paddle price ID. Please check the deployment settings.");
+      return false;
+    }
+
+    const paddleClient = paddle ?? await ensurePaddleInitialized();
+    if (!paddleClient) {
+      setCheckoutError("Paddle checkout is not configured. Please check VITE_PADDLE_CLIENT_TOKEN and redeploy.");
+      return false;
+    }
+    setPaddle(paddleClient);
 
     const autoCode = ADMIN_EMAIL && userEmail === ADMIN_EMAIL ? "FREE100" : undefined;
     const userCode = globalDiscountCode.trim() !== "" ? globalDiscountCode.trim().toUpperCase() : undefined;
     const resolvedCode = autoCode ?? userCode;
 
     try {
-      paddle.Checkout.open({
+      paddleClient.Checkout.open({
         items: [{ priceId, quantity: 1 }],
         customer: userEmail ? { email: userEmail } : undefined,
         ...(resolvedCode ? { discountCode: resolvedCode } : {}),
       });
+      return true;
     } catch {
       setCheckoutError("Failed to open checkout. Please try again.");
+      return false;
     }
   }, [paddle]);
 

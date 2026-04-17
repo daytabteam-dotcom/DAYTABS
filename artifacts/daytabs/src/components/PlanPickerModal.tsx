@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLocation } from "wouter";
 import { X, Zap, Star, Building, Check, Loader2 } from "lucide-react";
@@ -76,9 +76,10 @@ const PLAN_META = [
 
 export function PlanPickerModal({ onClose, highlightPlan }: PlanPickerModalProps) {
   const { user } = useUser();
-  const { openCheckout } = usePaddle();
+  const { openCheckout, checkoutError } = usePaddle();
   const { prices, formatPrice, loading: pricesLoading } = usePaddlePrices();
   const [, navigate] = useLocation();
+  const [selectedPlan, setSelectedPlan] = useState<"creator" | "pro" | "studio" | null>(null);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -95,16 +96,25 @@ export function PlanPickerModal({ onClose, highlightPlan }: PlanPickerModalProps
     return "";
   };
 
-  const handleSelect = (planKey: "creator" | "pro" | "studio") => {
+  const handleSelect = async (planKey: "creator" | "pro" | "studio") => {
     if (planKey === "studio") {
       onClose();
       navigate("/contact");
       return;
     }
-    const priceId = getPriceId(planKey);
-    if (priceId && user) {
-      openCheckout(priceId, user.email);
+    if (!user) {
       onClose();
+      navigate("/login");
+      return;
+    }
+
+    const priceId = getPriceId(planKey);
+    setSelectedPlan(planKey);
+    try {
+      const opened = await openCheckout(priceId, user.email);
+      if (opened) onClose();
+    } finally {
+      setSelectedPlan(null);
     }
   };
 
@@ -179,16 +189,27 @@ export function PlanPickerModal({ onClose, highlightPlan }: PlanPickerModalProps
 
                   <button
                     onClick={() => handleSelect(plan.key)}
-                    disabled={plan.key !== "studio" && !hasCheckout}
+                    disabled={selectedPlan !== null || (plan.key !== "studio" && !hasCheckout)}
                     className={`w-full py-2.5 text-sm font-semibold text-white rounded-lg transition-all cursor-pointer ${plan.ctaClass} disabled:opacity-40 disabled:cursor-not-allowed`}
                     data-testid={`button-select-plan-${plan.key}`}
                   >
-                    {plan.key === "studio" ? "Contact us" : "Upgrade"}
+                    {selectedPlan === plan.key ? (
+                      <span className="inline-flex items-center justify-center gap-2">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Opening...
+                      </span>
+                    ) : plan.key === "studio" ? "Contact us" : "Upgrade"}
                   </button>
                 </div>
               );
             })}
           </div>
+
+          {checkoutError && (
+            <div className="mx-6 mb-4 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+              {checkoutError}
+            </div>
+          )}
 
           <p className="text-center text-xs text-white/25 pb-5">
             Secure checkout via Paddle · Cancel anytime
