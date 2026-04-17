@@ -11,6 +11,163 @@ import { toFile } from "openai";
 
 export const execAsync = promisify(exec);
 
+// ─── Deterministic Scoring Rubrics ───────────────────────────────────────────
+//
+// All numeric scores are computed here in TypeScript, not by the AI.
+// The AI returns structured boolean/enum observations; this layer maps them
+// to points. Same input → same score, every time.
+//
+// Each rubric is a list of { condition, points } rules applied to the
+// structured observation object the AI returns.
+
+interface VisualObservations {
+  // Lighting
+  lightSourceVisible: boolean;
+  lightSourceSide: "front" | "side" | "back" | "overhead" | "unknown";
+  catchLightsVisible: boolean;
+  hardShadowsOnFace: boolean;
+  colorTemperatureMismatch: boolean;
+  // Brightness
+  skinExposure: "clipped" | "correct" | "underexposed";
+  blownRegions: boolean;
+  // Contrast
+  blacksCrushed: boolean;
+  highlightsClipped: boolean;
+  imageLooksFlat: boolean;
+  // Background
+  backgroundObjects: "none" | "minimal" | "moderate" | "cluttered";
+  backgroundDistractsFromSubject: boolean;
+  backgroundColorClashesWithSubject: boolean;
+  depthOfFieldSeparation: "strong" | "moderate" | "weak" | "none";
+  // Framing
+  eyeLinePosition: "upper-third" | "center" | "lower-third" | "off-frame";
+  excessiveHeadroom: boolean;
+  shouldersCutAwkwardly: boolean;
+  // Sharpness
+  focusOnEyes: boolean;
+  motionBlurPresent: boolean;
+  // Stability
+  microJitterVisible: boolean;
+  driftVisible: boolean;
+  stabilizationArtifacts: boolean;
+  // Color temperature
+  colorCast: "none" | "warm" | "cool" | "green" | "mixed";
+  colorCastSeverity: "none" | "slight" | "moderate" | "strong";
+}
+
+function scoreLighting(obs: VisualObservations): number {
+  let score = 100;
+  if (!obs.lightSourceVisible) score -= 10;
+  if (obs.lightSourceSide === "front") score -= 20;
+  if (obs.lightSourceSide === "overhead") score -= 15;
+  if (obs.lightSourceSide === "back") score -= 25;
+  if (!obs.catchLightsVisible) score -= 10;
+  if (obs.hardShadowsOnFace) score -= 15;
+  if (obs.colorTemperatureMismatch) score -= 10;
+  return Math.max(0, Math.min(100, score));
+}
+
+function scoreBrightness(obs: VisualObservations): number {
+  let score = 100;
+  if (obs.skinExposure === "clipped") score -= 30;
+  if (obs.skinExposure === "underexposed") score -= 20;
+  if (obs.blownRegions) score -= 15;
+  return Math.max(0, Math.min(100, score));
+}
+
+function scoreContrast(obs: VisualObservations): number {
+  let score = 100;
+  if (obs.blacksCrushed) score -= 20;
+  if (obs.highlightsClipped) score -= 20;
+  if (obs.imageLooksFlat) score -= 25;
+  return Math.max(0, Math.min(100, score));
+}
+
+function scoreBackground(obs: VisualObservations): number {
+  let score = 100;
+  if (obs.backgroundObjects === "moderate") score -= 15;
+  if (obs.backgroundObjects === "cluttered") score -= 30;
+  if (obs.backgroundDistractsFromSubject) score -= 20;
+  if (obs.backgroundColorClashesWithSubject) score -= 10;
+  if (obs.depthOfFieldSeparation === "weak") score -= 10;
+  if (obs.depthOfFieldSeparation === "none") score -= 20;
+  return Math.max(0, Math.min(100, score));
+}
+
+function scoreFraming(obs: VisualObservations): number {
+  let score = 100;
+  if (obs.eyeLinePosition === "center") score -= 10;
+  if (obs.eyeLinePosition === "lower-third") score -= 20;
+  if (obs.eyeLinePosition === "off-frame") score -= 40;
+  if (obs.excessiveHeadroom) score -= 15;
+  if (obs.shouldersCutAwkwardly) score -= 10;
+  return Math.max(0, Math.min(100, score));
+}
+
+function scoreSharpness(obs: VisualObservations): number {
+  let score = 100;
+  if (!obs.focusOnEyes) score -= 30;
+  if (obs.motionBlurPresent) score -= 25;
+  return Math.max(0, Math.min(100, score));
+}
+
+function scoreStability(obs: VisualObservations): number {
+  let score = 100;
+  if (obs.microJitterVisible) score -= 20;
+  if (obs.driftVisible) score -= 15;
+  if (obs.stabilizationArtifacts) score -= 15;
+  return Math.max(0, Math.min(100, score));
+}
+
+function scoreColorTemperature(obs: VisualObservations): number {
+  let score = 100;
+  if (obs.colorCast === "mixed") score -= 30;
+  if (obs.colorCastSeverity === "strong") score -= 25;
+  else if (obs.colorCastSeverity === "moderate") score -= 15;
+  else if (obs.colorCastSeverity === "slight") score -= 5;
+  return Math.max(0, Math.min(100, score));
+}
+
+// Audio scoring is fully deterministic — no AI involved in the numbers
+function scoreAudioVolume(peakVariationDb: number, hasDropouts: boolean): number {
+  let score = 100;
+  if (peakVariationDb > 12) score -= 30;
+  else if (peakVariationDb > 8) score -= 20;
+  else if (peakVariationDb > 4) score -= 10;
+  if (hasDropouts) score -= 20;
+  return Math.max(0, Math.min(100, score));
+}
+
+function scoreAudioClarity(whisperConfidence: number): number {
+  // whisperConfidence is 0–1; map directly to 0–100
+  // Whisper confidence is itself a reliable signal of intelligibility
+  return Math.round(Math.max(0, Math.min(100, whisperConfidence * 100)));
+}
+
+function scoreBackgroundNoise(noiseFloorDb: number): number {
+  // noiseFloorDb is negative (e.g. -50 = quiet, -20 = loud hum)
+  // quieter = higher score
+  if (noiseFloorDb <= -50) return 100;
+  if (noiseFloorDb <= -45) return 90;
+  if (noiseFloorDb <= -40) return 80;
+  if (noiseFloorDb <= -35) return 70;
+  if (noiseFloorDb <= -30) return 55;
+  if (noiseFloorDb <= -25) return 40;
+  return 25;
+}
+
+function scoreFillerWords(fillerRatio: number): number {
+  // fillerRatio = fillerCount / wordCount
+  if (fillerRatio <= 0.02) return 100;
+  if (fillerRatio <= 0.04) return 85;
+  if (fillerRatio <= 0.06) return 70;
+  if (fillerRatio <= 0.08) return 55;
+  if (fillerRatio <= 0.12) return 40;
+  return 25;
+}
+
+// ─── End of scoring rubrics ───────────────────────────────────────────────────
+
 async function runMediaCommand(
   command: string,
   args: string[],
@@ -150,7 +307,6 @@ export async function transcribeAudio(audioPath: string): Promise<{ text: string
   const actualDuration = await getMediaDuration(audioPath);
   logger.info({ audioPath, actualDuration }, "Starting transcription");
 
-  // Attempt verbose transcription with word-level timestamps
   try {
     const file = await toFile(audioBuffer, "audio.mp3");
     logger.info({ audioPath }, "Calling Whisper verbose transcription");
@@ -190,7 +346,6 @@ export async function transcribeAudio(audioPath: string): Promise<{ text: string
     logger.warn({ err, audioPath }, "Whisper verbose transcription failed, falling back to basic");
   }
 
-  // Basic fallback
   try {
     const file = await toFile(audioBuffer, "audio.mp3");
     logger.info({ audioPath }, "Calling Whisper basic transcription");
@@ -261,6 +416,36 @@ export async function extractFrames(videoPath: string, framesDir: string, count 
   return frameBase64List;
 }
 
+// Measure audio noise floor and peak variation using ffmpeg/ffprobe
+export async function measureAudioSignals(audioPath: string): Promise<{
+  noiseFloorDb: number;
+  peakVariationDb: number;
+  hasDropouts: boolean;
+}> {
+  try {
+    // Use ffmpeg's volumedetect filter to get mean/max volume
+    const { stderr } = await execAsync(
+      `ffmpeg -i "${audioPath}" -af volumedetect -f null - 2>&1 || true`
+    );
+    const meanMatch = stderr.match(/mean_volume:\s*([-\d.]+)\s*dB/);
+    const maxMatch = stderr.match(/max_volume:\s*([-\d.]+)\s*dB/);
+    const meanDb = meanMatch ? parseFloat(meanMatch[1]!) : -30;
+    const maxDb = maxMatch ? parseFloat(maxMatch[1]!) : -10;
+    const peakVariationDb = Math.abs(maxDb - meanDb);
+
+    // Detect silences to find dropouts (gaps > 1.5s mid-speech)
+    const silences = await detectSilences(audioPath, 1.5, -40);
+    const hasDropouts = silences.length > 2;
+
+    // Estimate noise floor: run silencedetect at a quiet threshold to find the floor
+    const noiseFloorDb = meanDb - 20; // conservative approximation
+
+    return { noiseFloorDb, peakVariationDb, hasDropouts };
+  } catch {
+    return { noiseFloorDb: -35, peakVariationDb: 6, hasDropouts: false };
+  }
+}
+
 export function generateSrt(segments: Array<{ start: number; end: number; text: string }>): string {
   const fmt = (s: number) => {
     const ms = Math.round((s % 1) * 1000);
@@ -270,7 +455,6 @@ export function generateSrt(segments: Array<{ start: number; end: number; text: 
     return `${String(hrs).padStart(2, "0")}:${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")},${String(ms).padStart(3, "0")}`;
   };
 
-  // Split text into lines of max 42 chars, max 2 lines per card
   function splitToLines(text: string): string[] {
     const words = text.trim().split(/\s+/);
     const lines: string[] = [];
@@ -292,7 +476,6 @@ export function generateSrt(segments: Array<{ start: number; end: number; text: 
   for (const seg of segments) {
     const lines = splitToLines(seg.text);
     const segDur = seg.end - seg.start;
-    // If more than 2 lines, split into multiple cards proportionally
     for (let i = 0; i < lines.length; i += 2) {
       const chunk = lines.slice(i, i + 2);
       const ratio = (i / Math.max(lines.length, 1));
@@ -326,24 +509,174 @@ const BASE_SYSTEM_PROMPT = `You are an expert content strategist and video consu
 
 Never use: "Great job!", "Consider trying", "You might want to", "As a content creator", "In conclusion", or any filler phrase. Every sentence must contain a specific observation or action. Write in second person ("your video", "you open with"). Be direct but not harsh. Lead every section with the most important insight first. If something is genuinely good, say so in one word and move on.`;
 
-// ─── FIX: Detailed visual analysis instructions per dimension ─────────────────
 const VISUAL_DIMENSION_INSTRUCTIONS = `
 For EACH dimension, write exactly as a professional video producer giving paid notes to a client. Rules:
 - Reference where in the frame or when in the video the issue occurs (e.g. "upper-right corner", "your face in the closing segment", "the left edge throughout")
 - Never use vague praise like "decent", "balanced", "good", "acceptable" without backing it up with a specific physical observation
 - If something scores above 85, still name the ONE thing that would push it to 100
-- Suggest a concrete, measurable fix where possible (e.g. "drop highlights by 15%", "raise the camera 3 inches so the eyeline hits the upper third", "add a 10% warm LUT to counteract the blue daylight cast")
-- Tone: confident, direct, zero hedging. A sentence like "Lighting is decent" is a failure. "The key light is slightly front-on, flattening your face — move it 30-40 degrees to your right for depth" is correct.
+- Suggest a concrete, measurable fix where possible (e.g. "drop highlights by 15%", "raise the camera 3 inches so the eyeline hits the upper third")
+- Tone: confident, direct, zero hedging.
 
 Dimension-specific guidance:
-- lighting: Identify light source direction, shadow placement on face/background, any color temperature mismatch (warm tungsten vs cool daylight), and whether catch lights are visible in the eyes
-- brightness: Note whether the subject's skin is properly exposed or clipped, flag any region significantly darker/brighter than the subject, suggest a specific exposure adjustment if needed
-- contrast: State whether blacks are crushed, highlights clipped, or the image looks flat/washed. Reference specific areas — face, background, clothing
-- background: Note exactly what objects are visible, whether any are distracting or off-brand, whether depth of field separates subject from background, and if background color/tone clashes with clothing
-- framing: Describe headroom, exact eye-line position relative to the rule of thirds, whether shoulders are cut awkwardly, and whether the offset or centered choice serves the content style
-- sharpness: State whether focus is on the eyes specifically, note any motion blur, and whether background sharpness is appropriate for the subject separation
-- stability: Identify micro-jitter, drift, or any stabilization artifacts (warping edges). Note if the issue is consistent or only at cuts
-- colorTemperature: Name the cast (e.g. "blue daylight spill", "orange tungsten glow", "mixed sources creating green shadow"), and specify a correction value where relevant`;
+- lighting: Identify light source direction, shadow placement on face/background, any color temperature mismatch, and whether catch lights are visible in the eyes
+- brightness: Note whether the subject's skin is properly exposed or clipped, flag any region significantly darker/brighter than the subject
+- contrast: State whether blacks are crushed, highlights clipped, or the image looks flat/washed. Reference specific areas
+- background: Note exactly what objects are visible, whether any are distracting or off-brand, depth of field separation, background color vs clothing
+- framing: Describe headroom, exact eye-line position relative to the rule of thirds, whether shoulders are cut awkwardly
+- sharpness: State whether focus is on the eyes specifically, note any motion blur, background sharpness relative to subject
+- stability: Identify micro-jitter, drift, or stabilization artifacts and when they occur
+- colorTemperature: Name the cast (e.g. "blue daylight spill", "orange tungsten glow", "mixed sources creating green shadow") and a correction value`;
+
+// The AI now returns structured boolean/enum observations ONLY — no numeric scores.
+// Scores are computed deterministically by the rubric functions above.
+const VISUAL_OBSERVATIONS_SCHEMA = `
+Return STRICT JSON only (no markdown). Do NOT include any numeric scores — only the observations below:
+{
+  "observations": {
+    "lightSourceVisible": true/false,
+    "lightSourceSide": "front" | "side" | "back" | "overhead" | "unknown",
+    "catchLightsVisible": true/false,
+    "hardShadowsOnFace": true/false,
+    "colorTemperatureMismatch": true/false,
+    "skinExposure": "clipped" | "correct" | "underexposed",
+    "blownRegions": true/false,
+    "blacksCrushed": true/false,
+    "highlightsClipped": true/false,
+    "imageLooksFlat": true/false,
+    "backgroundObjects": "none" | "minimal" | "moderate" | "cluttered",
+    "backgroundDistractsFromSubject": true/false,
+    "backgroundColorClashesWithSubject": true/false,
+    "depthOfFieldSeparation": "strong" | "moderate" | "weak" | "none",
+    "eyeLinePosition": "upper-third" | "center" | "lower-third" | "off-frame",
+    "excessiveHeadroom": true/false,
+    "shouldersCutAwkwardly": true/false,
+    "focusOnEyes": true/false,
+    "motionBlurPresent": true/false,
+    "microJitterVisible": true/false,
+    "driftVisible": true/false,
+    "stabilizationArtifacts": true/false,
+    "colorCast": "none" | "warm" | "cool" | "green" | "mixed",
+    "colorCastSeverity": "none" | "slight" | "moderate" | "strong"
+  },
+  "assessments": {
+    "overallTopFix": "the single most impactful fix — specific, measurable",
+    "colorGradingRecommendation": "one specific color grading suggestion with a concrete value",
+    "lighting": "specific observation referencing light source, shadows, catch lights",
+    "lightingSuggestion": "exact measurable fix",
+    "brightness": "specific note on skin exposure, blown regions, or underexposed areas",
+    "brightnessSuggestion": "exact exposure adjustment",
+    "contrast": "specific note on crushed blacks, clipped highlights, or flat image — reference face, background, clothing",
+    "contrastSuggestion": "exact fix",
+    "colorTemperature": "name the specific cast and where it is most visible",
+    "colorTemperatureSuggestion": "specific correction value",
+    "background": "list exactly what objects are visible, note anything distracting or off-brand",
+    "backgroundSuggestion": "exact change",
+    "framing": "headroom, eye-line position, shoulder crop — be exact",
+    "framingSuggestion": "specific camera or posture adjustment",
+    "sharpness": "focus plane location, any motion blur, background sharpness relative to subject",
+    "sharpnessSuggestion": "exact fix",
+    "stability": "note micro-jitter, drift, or stabilization artifacts and when they occur",
+    "stabilitySuggestion": "exact fix"
+  }
+}`;
+
+function buildVisualResult(obs: VisualObservations, assessments: Record<string, string>, plan: string) {
+  const lightingScore = scoreLighting(obs);
+  const brightnessScore = scoreBrightness(obs);
+  const contrastScore = scoreContrast(obs);
+  const backgroundScore = scoreBackground(obs);
+  const framingScore = scoreFraming(obs);
+  const sharpnessScore = scoreSharpness(obs);
+  const stabilityScore = scoreStability(obs);
+  const colorTempScore = scoreColorTemperature(obs);
+
+  const overallVisualScore = Math.round(
+    (lightingScore * 0.18) +
+    (brightnessScore * 0.12) +
+    (contrastScore * 0.10) +
+    (backgroundScore * 0.12) +
+    (framingScore * 0.14) +
+    (sharpnessScore * 0.14) +
+    (stabilityScore * 0.12) +
+    (colorTempScore * 0.08)
+  );
+
+  const severityFor = (score: number): string => {
+    if (score >= 90) return "excellent";
+    if (score >= 75) return "good";
+    if (score >= 55) return "needs work";
+    return "critical";
+  };
+
+  const base = {
+    overallVisualScore,
+    topFix: assessments.overallTopFix ?? "",
+    colorGradingRecommendation: assessments.colorGradingRecommendation ?? "",
+    lighting: {
+      level: lightingScore >= 75 ? "high" : lightingScore >= 50 ? "medium" : "low",
+      numeric: lightingScore,
+      assessment: assessments.lighting ?? "",
+      suggestions: [assessments.lightingSuggestion ?? ""],
+      severity: severityFor(lightingScore),
+    },
+    brightness: {
+      level: brightnessScore >= 75 ? "high" : brightnessScore >= 50 ? "medium" : "low",
+      numeric: brightnessScore,
+      assessment: assessments.brightness ?? "",
+      suggestions: [assessments.brightnessSuggestion ?? ""],
+      severity: severityFor(brightnessScore),
+    },
+    contrast: {
+      level: contrastScore >= 75 ? "high" : contrastScore >= 50 ? "medium" : "low",
+      numeric: contrastScore,
+      assessment: assessments.contrast ?? "",
+      suggestions: [assessments.contrastSuggestion ?? ""],
+      severity: severityFor(contrastScore),
+    },
+    colorTemperature: {
+      value: obs.colorCast === "warm" ? "warm" : obs.colorCast === "cool" ? "cool" : "neutral",
+      assessment: assessments.colorTemperature ?? "",
+      suggestions: [assessments.colorTemperatureSuggestion ?? ""],
+      severity: severityFor(colorTempScore),
+    },
+    background: {
+      level: backgroundScore >= 75 ? "clean" : backgroundScore >= 50 ? "normal" : "distracting",
+      numeric: backgroundScore,
+      assessment: assessments.background ?? "",
+      suggestions: [assessments.backgroundSuggestion ?? ""],
+      severity: severityFor(backgroundScore),
+    },
+    framing: {
+      level: framingScore >= 75 ? "good" : framingScore >= 50 ? "acceptable" : "poor",
+      numeric: framingScore,
+      assessment: assessments.framing ?? "",
+      suggestions: [assessments.framingSuggestion ?? ""],
+      severity: severityFor(framingScore),
+    },
+    sharpness: {
+      level: sharpnessScore >= 75 ? "sharp" : sharpnessScore >= 50 ? "acceptable" : "blurry",
+      numeric: sharpnessScore,
+      assessment: assessments.sharpness ?? "",
+      suggestions: [assessments.sharpnessSuggestion ?? ""],
+      severity: severityFor(sharpnessScore),
+    },
+    stability: {
+      level: stabilityScore >= 75 ? "stable" : stabilityScore >= 50 ? "acceptable" : "shaky",
+      numeric: stabilityScore,
+      assessment: assessments.stability ?? "",
+      suggestions: [assessments.stabilitySuggestion ?? ""],
+      severity: severityFor(stabilityScore),
+    },
+  };
+
+  if (plan === "free") {
+    // Free plan: only return lighting + overall
+    const { brightness, contrast, colorTemperature, background, framing, sharpness, stability, ...freeBase } = base;
+    return freeBase;
+  }
+
+  return base;
+}
 
 export async function analyzeVisuals(frameBase64List: string[], platform: string, plan = "free"): Promise<object> {
   const imageContent = frameBase64List.map(b64 => ({
@@ -353,83 +686,95 @@ export async function analyzeVisuals(frameBase64List: string[], platform: string
 
   const isFree = plan === "free";
 
-  if (isFree) {
-    const freePrompt = `${BASE_SYSTEM_PROMPT}
-
-Analyze this frame from a ${platform} video. Give one specific observation for each dimension.
-
-CRITICAL RULE: Never reference frame numbers (frame 1, frame 2, etc.) in your output. The user cannot see the frames. Instead, reference approximate timestamps (e.g. "at around 0:45") or describe what is happening on screen (e.g. "in the segment where you demonstrate the product"). Always write as if you are describing what the viewer sees in the video.
-
-${VISUAL_DIMENSION_INSTRUCTIONS}
-
-Return STRICT JSON only:
-{
-  "overallVisualScore": 0-100,
-  "topFix": "the single most important visual fix — specific, measurable, referencing exactly what you see",
-  "lighting": {"level": "low/medium/high", "numeric": 0-100, "assessment": "one specific observation using descriptive references not frame numbers", "suggestions": ["one exact, measurable fix"], "severity": "critical/needs work/good/excellent"}
-}`;
-
-    const response = await callOpenAI({
-      model: "gpt-4o",
-      max_completion_tokens: 500,
-      messages: [{ role: "user", content: [{ type: "text", text: freePrompt }, ...imageContent] }],
-    });
-    return parseJson(response.choices[0]?.message?.content ?? "{}", {
-      overallVisualScore: 70,
-      topFix: "Move your key light 40 degrees to camera right — the current front-on placement is flattening your face and removing all depth.",
-      lighting: { level: "medium", numeric: 70, assessment: "Key light is front-facing, eliminating facial shadow and depth", suggestions: ["Shift key light 40 degrees to the right to create natural dimensionality"], severity: "needs work" },
-    });
-  }
-
   const prompt = `${BASE_SYSTEM_PROMPT}
 
-Analyze these ${frameBase64List.length} evenly-spaced frames from a ${platform} video.
+Analyze these ${frameBase64List.length} frame(s) from a ${platform} video.
 
 ${VISUAL_DIMENSION_INSTRUCTIONS}
 
-CRITICAL RULE: Never reference frame numbers (frame 1, frame 2, etc.) in any field. The user cannot see the frames. Instead reference approximate time positions (e.g. "in the opening segment", "around the midpoint", "in the closing section") or describe what is happening on screen. Always write as if describing what the viewer sees in the final video.
+CRITICAL RULE: Never reference frame numbers (frame 1, frame 2, etc.) in your output. Reference approximate time positions (e.g. "in the opening segment", "around the midpoint") or describe what is happening on screen. Always write as if describing what the viewer sees in the final video.
 
-Return STRICT JSON only (no markdown):
-{
-  "overallVisualScore": 0-100,
-  "topFix": "the single most impactful fix — specific, measurable, referencing what you see on screen",
-  "colorGradingRecommendation": "one specific color grading suggestion with a concrete value (e.g. '+10 warmth', 'reduce saturation 8%', 'lift shadows to 15 on the parade')",
-  "lighting": {"level": "low/medium/high", "numeric": 0-100, "assessment": "specific observation referencing light source, shadows, catch lights", "suggestions": ["exact measurable fix"], "severity": "critical/needs work/good/excellent"},
-  "brightness": {"level": "low/medium/high", "numeric": 0-100, "assessment": "specific note on skin exposure, blown regions, or underexposed areas", "suggestions": ["exact exposure adjustment"], "severity": "critical/needs work/good/excellent"},
-  "contrast": {"level": "low/medium/high", "numeric": 0-100, "assessment": "specific note on crushed blacks, clipped highlights, or flat image — reference face, background, clothing", "suggestions": ["exact fix"], "severity": "critical/needs work/good/excellent"},
-  "colorTemperature": {"value": "warm/cool/neutral", "assessment": "name the specific cast and where it's most visible", "suggestions": ["specific correction value"], "severity": "critical/needs work/good/excellent"},
-  "background": {"level": "distracting/normal/clean", "numeric": 0-100, "assessment": "list exactly what objects are visible, note anything distracting or off-brand", "suggestions": ["exact change"], "severity": "critical/needs work/good/excellent"},
-  "framing": {"level": "poor/acceptable/good", "numeric": 0-100, "assessment": "headroom, eye-line position, shoulder crop — be exact", "suggestions": ["specific camera or posture adjustment"], "severity": "critical/needs work/good/excellent"},
-  "sharpness": {"level": "blurry/acceptable/sharp", "numeric": 0-100, "assessment": "focus plane location, any motion blur, background sharpness relative to subject", "suggestions": ["exact fix"], "severity": "critical/needs work/good/excellent"},
-  "stability": {"level": "shaky/acceptable/stable", "numeric": 0-100, "assessment": "note micro-jitter, drift, or stabilization artifacts and when they occur", "suggestions": ["exact fix"], "severity": "critical/needs work/good/excellent"}
-}`;
+${VISUAL_OBSERVATIONS_SCHEMA}`;
 
-  const response = await callOpenAI({
-    model: "gpt-4o",
-    max_completion_tokens: 2000,
-    messages: [{ role: "user", content: [{ type: "text", text: prompt }, ...imageContent] }],
-  });
-  return parseJson(response.choices[0]?.message?.content ?? "{}", {
-    overallVisualScore: 70,
-    topFix: "Move your key light 40 degrees to camera right — the current front-on placement is flattening your face and removing all depth.",
+  const defaultObs: VisualObservations = {
+    lightSourceVisible: true,
+    lightSourceSide: "front",
+    catchLightsVisible: false,
+    hardShadowsOnFace: false,
+    colorTemperatureMismatch: false,
+    skinExposure: "correct",
+    blownRegions: false,
+    blacksCrushed: false,
+    highlightsClipped: false,
+    imageLooksFlat: false,
+    backgroundObjects: "minimal",
+    backgroundDistractsFromSubject: false,
+    backgroundColorClashesWithSubject: false,
+    depthOfFieldSeparation: "moderate",
+    eyeLinePosition: "center",
+    excessiveHeadroom: false,
+    shouldersCutAwkwardly: false,
+    focusOnEyes: true,
+    motionBlurPresent: false,
+    microJitterVisible: false,
+    driftVisible: false,
+    stabilizationArtifacts: false,
+    colorCast: "none",
+    colorCastSeverity: "none",
+  };
+
+  const defaultAssessments = {
+    overallTopFix: "Move your key light 40 degrees to camera right — the current front-on placement is flattening your face and removing all depth.",
     colorGradingRecommendation: "Add +10 warmth to counteract the cool daylight cast and make skin tones more natural.",
-    lighting: { level: "medium", numeric: 70, assessment: "Key light is front-facing, removing facial depth", suggestions: ["Shift key light 40 degrees right to introduce natural shadow and dimension"], severity: "needs work" },
-    brightness: { level: "medium", numeric: 65, assessment: "Exposure looks slightly hot on the forehead — highlights are close to clipping", suggestions: ["Pull exposure down 0.3 stops and recover highlights by 20%"], severity: "good" },
-    contrast: { level: "medium", numeric: 70, assessment: "Image looks slightly flat — blacks aren't fully seated", suggestions: ["Lower blacks by 10 points in your color grade to add depth without crushing shadow detail"], severity: "needs work" },
-    colorTemperature: { value: "neutral", assessment: "Mostly neutral but a faint blue cast in the shadows suggests a daylight source bleeding in from the side", suggestions: ["Add +5 warmth and +3 tint to neutralize the cool shadow cast"], severity: "good" },
-    background: { level: "normal", numeric: 70, assessment: "Background is clear but slightly out of focus in a way that doesn't fully separate subject from wall", suggestions: ["Move 2 feet forward from the background to increase depth-of-field separation"], severity: "good" },
-    framing: { level: "good", numeric: 78, assessment: "Eyes sit at mid-frame rather than the upper third — headroom is slightly excessive", suggestions: ["Lower the camera or raise your seat so eyes land at the upper-third line"], severity: "good" },
-    sharpness: { level: "acceptable", numeric: 75, assessment: "Focus is on the face but softens slightly in the lower frame — likely a shallow depth-of-field issue", suggestions: ["Stop down aperture by one stop or increase subject-to-camera distance"], severity: "good" },
-    stability: { level: "stable", numeric: 80, assessment: "Footage is solid with no visible shake, though a very slight drift is noticeable in the first few seconds", suggestions: ["Use a locking ballhead instead of a fluid head if shooting static — eliminates the subtle drift"], severity: "good" },
-  });
+    lighting: "Key light is front-facing, eliminating facial shadow and depth",
+    lightingSuggestion: "Shift key light 40 degrees to the right to create natural dimensionality",
+    brightness: "Exposure looks correct on the face but check for hot spots near any windows",
+    brightnessSuggestion: "Confirm highlights are not clipping by checking the histogram before recording",
+    contrast: "Image looks slightly flat — blacks are not fully seated",
+    contrastSuggestion: "Lower blacks by 10 points in your color grade to add depth without crushing shadow detail",
+    colorTemperature: "Neutral with a slight cool cast in the shadows",
+    colorTemperatureSuggestion: "Add +5 warmth to neutralize the shadow cast",
+    background: "Background is visible but not distracting — check for off-brand items",
+    backgroundSuggestion: "Move 2 feet forward from the background to increase depth-of-field separation",
+    framing: "Eyes sit at mid-frame rather than the upper third",
+    framingSuggestion: "Lower the camera or raise your seat so eyes land at the upper-third line",
+    sharpness: "Focus appears to be on the face — confirm it is locked on the eyes specifically",
+    sharpnessSuggestion: "Use manual focus and zoom in on the eyes during setup to confirm sharpness",
+    stability: "Footage appears stable — check for any drift at the start of each take",
+    stabilitySuggestion: "Use a locking ballhead to eliminate the subtle drift common with fluid heads on static shots",
+  };
+
+  try {
+    const response = await callOpenAI({
+      model: "gpt-4o",
+      max_completion_tokens: isFree ? 1000 : 2000,
+      messages: [{ role: "user", content: [{ type: "text", text: prompt }, ...imageContent] }],
+    });
+
+    const raw = parseJson<{ observations?: Partial<VisualObservations>; assessments?: Record<string, string> }>(
+      response.choices[0]?.message?.content ?? "{}",
+      {}
+    );
+
+    const obs: VisualObservations = { ...defaultObs, ...(raw.observations ?? {}) };
+    const assessments = { ...defaultAssessments, ...(raw.assessments ?? {}) };
+
+    return buildVisualResult(obs, assessments, plan);
+  } catch (err) {
+    logger.warn({ err }, "Visual analysis failed, using defaults");
+    return buildVisualResult(defaultObs, defaultAssessments, plan);
+  }
 }
 
-export async function analyzeAudio(transcript: string, whisperConfidence: number): Promise<object> {
+export async function analyzeAudio(
+  transcript: string,
+  whisperConfidence: number,
+  audioPath?: string
+): Promise<object> {
   const fillerWordPattern = /\b(um+|uh+|er+|ah+|like|you know|basically|literally|actually|so|right\?)\b/gi;
   const fillerWordMatches = transcript.match(fillerWordPattern) || [];
   const fillerWordCount = fillerWordMatches.length;
 
-  // FIX: Build a breakdown of which filler words were found and how many times each
   const fillerBreakdown: Record<string, number> = {};
   for (const match of fillerWordMatches) {
     const word = match.toLowerCase();
@@ -443,40 +788,100 @@ export async function analyzeAudio(transcript: string, whisperConfidence: number
   const wordCount = transcript.split(/\s+/).filter(w => w.length > 0).length;
   const fillerRatio = wordCount > 0 ? fillerWordCount / wordCount : 0;
   const fillerLevel = fillerRatio > 0.1 ? "high" : fillerRatio > 0.05 ? "medium" : "low";
-  const clarityNumeric = Math.round(whisperConfidence * 100);
 
+  // Measure audio signals deterministically if audioPath is available
+  let audioSignals = { noiseFloorDb: -35, peakVariationDb: 6, hasDropouts: false };
+  if (audioPath) {
+    audioSignals = await measureAudioSignals(audioPath);
+  }
+
+  // Compute all numeric scores deterministically
+  const clarityScore = scoreAudioClarity(whisperConfidence);
+  const volumeScore = scoreAudioVolume(audioSignals.peakVariationDb, audioSignals.hasDropouts);
+  const noiseScore = scoreBackgroundNoise(audioSignals.noiseFloorDb);
+  const fillerScore = scoreFillerWords(fillerRatio);
+
+  // AI is only asked to write the assessment text, never the numbers
   const response = await callOpenAI({
     model: "gpt-4o-mini",
     max_completion_tokens: 800,
-    messages: [{ role: "user", content: `You are a professional audio engineer and presentation coach. Analyze this transcript for audio and delivery quality.
+    messages: [{ role: "user", content: `You are a professional audio engineer and presentation coach. Write assessment text only — do NOT produce any numeric scores.
 
-Write exactly as a professional giving paid notes. Rules:
-- Reference actual words, patterns, or moments you detect — never give generic advice
-- For volume: identify specific moments where it dips or spikes rather than giving a general rating. Suggest a target LUFS level if relevant.
-- For clarity: note if consonants are clipping, if there's reverb suggesting an untreated room, proximity effect from mic placement, or compression artifacts
-- For background noise: identify the TYPE of noise (HVAC hum, street noise, keyboard, breathing) and at what point it's most noticeable — not just whether noise exists
-- For filler words: list the specific words detected and their counts, then name the most distracting one to fix first
+Rules:
+- Reference actual words, patterns, or moments you detect — never generic advice
+- For volume: identify specific moments where it dips or spikes
+- For clarity: note consonant clipping, room reverb, proximity effect, or compression artifacts
+- For background noise: identify the TYPE of noise (HVAC hum, street noise, keyboard, breathing) and when it is most noticeable
+- For filler words: name the most distracting one to fix first and give a specific replacement strategy
 - Never say "decent", "good", "acceptable", "generally" without a specific observation backing it up
 
 Transcript snippet: "${transcript.substring(0, 500)}"
-Filler words detected: ${fillerBreakdownStr || "none"} (${fillerWordCount} total out of ${wordCount} words — ${Math.round(fillerRatio * 100)}%)
-Whisper transcription confidence: ${clarityNumeric}%
+Filler words detected: ${fillerBreakdownStr || "none"} (${fillerWordCount} total — ${Math.round(fillerRatio * 100)}% of speech)
+Whisper transcription confidence: ${clarityScore}%
+Volume peak variation: ${audioSignals.peakVariationDb.toFixed(1)} dB
+Noise floor estimate: ${audioSignals.noiseFloorDb.toFixed(1)} dBFS
 
-SCORING RULE: All numeric scores represent QUALITY (not quantity or severity).
-- audioVolume.numeric: 100 = perfectly leveled, 0 = too quiet or too loud
-- audioClarity.numeric: 100 = crystal clear, 0 = totally unintelligible
-- backgroundNoise.numeric: 100 = perfectly clean/silent background, 0 = extremely noisy/distracting
-  (low noise level = HIGH score; high noise level = LOW score)
+Return STRICT JSON only — assessment strings, NO numbers:
+{
+  "volumeAssessment": "...",
+  "volumeSuggestion": "...",
+  "volumeEffect": "...",
+  "clarityAssessment": "...",
+  "claritySuggestion": "...",
+  "clarityEffect": "...",
+  "noiseAssessment": "...",
+  "noiseSuggestion": "...",
+  "noiseEffect": "...",
+  "fillerSuggestion": "...",
+  "fillerEffect": "..."
+}` }],
+  });
 
-Return STRICT JSON only:
-{"audioVolume":{"level":"low/medium/high","numeric":0-100,"assessment":"specific observation about loudness consistency, peaks, or dips","suggestions":["exact fix with target value if relevant"],"effect":"..."},"audioClarity":{"level":"poor/acceptable/good","numeric":${clarityNumeric},"assessment":"specific note on articulation, reverb, mic placement, or compression","suggestions":["exact fix"],"effect":"..."},"backgroundNoise":{"level":"high/medium/low","numeric":0-100 where 100=clean and 0=very noisy,"assessment":"type and timing of noise, not just whether it exists","suggestions":["exact fix"],"effect":"..."},"fillerWords":{"level":"${fillerLevel}","numeric":${fillerWordCount},"breakdown":${JSON.stringify(fillerBreakdown)},"assessment":"${fillerWordCount} filler words detected (${Math.round(fillerRatio * 100)}% of speech): ${fillerBreakdownStr || 'none found'}","suggestions":["name the most distracting filler word and give a specific replacement strategy"],"effect":"..."}}` }],
-  });
-  return parseJson(response.choices[0]?.message?.content ?? "{}", {
-    audioVolume: { level: "medium", numeric: 72, assessment: "Volume holds steady through the middle but dips noticeably in the final 20 seconds — likely moving away from the mic", suggestions: ["Aim for -14 LUFS for YouTube; normalize in post and add a limiter ceiling at -1dB"], effect: "Inconsistent volume forces viewers to adjust their device mid-watch" },
-    audioClarity: { level: clarityNumeric > 80 ? "good" : "acceptable", numeric: clarityNumeric, assessment: "Speech is intelligible but a slight room reverb is audible between sentences — the space isn't acoustically treated", suggestions: ["Record closer to the mic or hang a moving blanket behind camera to reduce reflections"], effect: "Reverb adds a distant, unprofessional feel that undermines authority" },
-    backgroundNoise: { level: "low", numeric: 88, assessment: "A faint HVAC hum sits under the entire recording — consistent enough to be filterable in post", suggestions: ["Run a noise reduction pass in Audacity or Premiere using a 0.5s room tone sample as the noise profile"], effect: "Subtle but audible in quiet moments; easily fixed in post" },
-    fillerWords: { level: fillerLevel, numeric: fillerWordCount, breakdown: fillerBreakdown, assessment: `${fillerWordCount} filler words detected (${Math.round(fillerRatio * 100)}% of speech): ${fillerBreakdownStr || "none found"}`, suggestions: ["Focus on eliminating 'like' first — it appears most frequently and reads as low-confidence. Replace with a deliberate pause."], effect: "Filler words at this frequency reduce perceived expertise and slow delivery pace" },
-  });
+  const txt = parseJson<Record<string, string>>(response.choices[0]?.message?.content ?? "{}", {});
+
+  const severityFor = (score: number): string => {
+    if (score >= 90) return "excellent";
+    if (score >= 75) return "good";
+    if (score >= 55) return "needs work";
+    return "critical";
+  };
+
+  return {
+    audioVolume: {
+      level: volumeScore >= 75 ? "high" : volumeScore >= 50 ? "medium" : "low",
+      numeric: volumeScore,
+      assessment: txt.volumeAssessment ?? `Peak variation of ${audioSignals.peakVariationDb.toFixed(1)} dB detected — aim for under 4 dB for broadcast-level consistency`,
+      suggestions: [txt.volumeSuggestion ?? "Normalize to -14 LUFS and add a limiter ceiling at -1 dBTP"],
+      effect: txt.volumeEffect ?? "Inconsistent volume forces viewers to adjust their device mid-watch",
+      severity: severityFor(volumeScore),
+    },
+    audioClarity: {
+      level: clarityScore >= 75 ? "good" : clarityScore >= 50 ? "acceptable" : "poor",
+      numeric: clarityScore,
+      assessment: txt.clarityAssessment ?? `Whisper confidence at ${clarityScore}% — speech is ${clarityScore >= 80 ? "highly intelligible" : "partially unclear"}`,
+      suggestions: [txt.claritySuggestion ?? "Record in a treated space or closer to the mic to improve intelligibility"],
+      effect: txt.clarityEffect ?? "Low clarity reduces comprehension and viewer retention",
+      severity: severityFor(clarityScore),
+    },
+    backgroundNoise: {
+      level: noiseScore >= 75 ? "low" : noiseScore >= 50 ? "medium" : "high",
+      numeric: noiseScore,
+      assessment: txt.noiseAssessment ?? `Noise floor estimated at ${audioSignals.noiseFloorDb.toFixed(1)} dBFS`,
+      suggestions: [txt.noiseSuggestion ?? "Run a noise reduction pass using a 0.5s room tone sample as the noise profile"],
+      effect: txt.noiseEffect ?? "Audible background noise undermines production quality",
+      severity: severityFor(noiseScore),
+    },
+    fillerWords: {
+      level: fillerLevel,
+      numeric: fillerWordCount,
+      score: fillerScore,
+      breakdown: fillerBreakdown,
+      assessment: `${fillerWordCount} filler words detected (${Math.round(fillerRatio * 100)}% of speech)${fillerBreakdownStr ? `: ${fillerBreakdownStr}` : ""}`,
+      suggestions: [txt.fillerSuggestion ?? "Replace the most frequent filler with a deliberate pause"],
+      effect: txt.fillerEffect ?? "Filler words at this frequency reduce perceived expertise and slow delivery pace",
+      severity: severityFor(fillerScore),
+    },
+  };
 }
 
 export async function generateVideoName(transcript: string, fallbackName?: string): Promise<string> {
@@ -639,7 +1044,7 @@ export async function analyzeEditingPoints(
 Rules:
 - Always reference exact timestamps or quote exact words from the transcript
 - If something should be cut, say exactly what and why in one sentence
-- Before suggesting to cut any line, ask yourself: does this line create tension, establish a problem, or advance the story? If yes, do NOT suggest cutting it — suggest repositioning it instead. Strong problem-framing lines are assets, not waste.
+- Before suggesting to cut any line, ask yourself: does this line create tension, establish a problem, or advance the story? If yes, do NOT suggest cutting it — suggest repositioning it instead.
 - Only suggest cutting genuinely redundant content — repeated points, filler transitions, or off-topic tangents
 - When suggesting a cut, always explain what specific value is lost vs gained by cutting, in one sentence
 - If the hook is weak, rewrite it with a specific alternative
@@ -817,7 +1222,6 @@ Return STRICT JSON using ONLY the provided index numbers — no invented timesta
     "Your hook needs to land before 15 seconds on YouTube",
   ];
 
-  // FIX: Rewritten hook — ensure it's a complete sentence, ≤2 sentences, ≤25 words, no hype language
   let rewrittenHook: string | undefined;
   if (!isFree && clampedHooks.length > 0) {
     try {
@@ -856,7 +1260,6 @@ Return STRICT JSON only: {"rewrittenHook": "your complete rewritten opening here
   }
 
   return {
-    // FIX: Sort hooks chronologically before returning
     hooks: [...clampedHooks].sort((a, b) => {
       if (!a || !b) return 0;
       return parseTs((a as { start: string }).start) - parseTs((b as { start: string }).start);
@@ -870,7 +1273,6 @@ Return STRICT JSON only: {"rewrittenHook": "your complete rewritten opening here
   };
 }
 
-// FIX: Chapters now use AI to generate complete, meaningful labels — not raw transcript fragments
 function buildChapterPoints(
   segments: Array<{ start: number; end: number; text: string }>,
   maxChapters = 10
@@ -886,7 +1288,6 @@ function buildChapterPoints(
       chapters.push({
         start: seg.start,
         time: fmtSecs(seg.start),
-        // Store the raw text — we'll label it cleanly in generateSeo via AI
         text: seg.text.trim().substring(0, 80),
       });
       nextTarget = seg.start + interval;
@@ -908,7 +1309,6 @@ export async function generateSeo(
   const isFree = plan === "free";
   const chapterPoints = buildChapterPoints(segments, 10);
 
-  // FIX: Chapter hint now instructs AI to write complete, descriptive labels — not raw transcript fragments
   const chapterHint = chapterPoints.length
     ? `\n\nReal chapter timestamps (use EXACTLY these times — write a short, complete, descriptive label for each that tells the viewer what they will learn or see in that section. Labels must be complete phrases, never sentence fragments or mid-sentence cuts. Bad label: "what they're talking about" — Good label: "Why most business videos get ignored"):\n${chapterPoints.map(c => `${c.time} - context: "${c.text}"`).join("\n")}`
     : "";
@@ -930,13 +1330,13 @@ export async function generateSeo(
       max_completion_tokens: 500,
       messages: [{ role: "user", content: `${BASE_SYSTEM_PROMPT}
 
-You are a ${platform} SEO expert. Generate ONE strong title using a curiosity gap strategy (keyword in first 3 words, under 70 chars). Write TWO compelling sentences for the description hook (these appear before "Show more"). Generate 3 high-relevance tags.
+You are a ${platform} SEO expert. Generate ONE strong title using a curiosity gap strategy (keyword in first 3 words, under 70 chars). Write TWO compelling sentences for the description hook. Generate 3 high-relevance tags.
 
 Platform rules: ${guide}
 
 Transcript: "${transcript.substring(0, 800)}"
 
-TAGS RULE: YouTube tags must NOT include the # symbol. Output plain tag text only, ready to paste directly into the YouTube tags field. Example: "Google Sheets, productivity, ecommerce" not "#GoogleSheets, #productivity"
+TAGS RULE: YouTube tags must NOT include the # symbol. Output plain tag text only.
 
 Return STRICT JSON only:
 {"titles":["one title only"],"description":"Two compelling sentences maximum.","hashtags":[{"tag":"Tag without hash symbol","effect":"why this tag"},{"tag":"Tag2","effect":"..."},{"tag":"Tag3","effect":"..."}],"timestamps":[{"time":"0:00","label":"Intro"}]}` }],
@@ -951,7 +1351,6 @@ Return STRICT JSON only:
         timestamps: [{ time: "0:00", label: "Introduction" }],
       }
     );
-    // Safety net: strip any # symbols the model added despite instructions
     parsed.hashtags = (parsed.hashtags ?? []).map(h => ({
       ...h,
       tag: typeof h.tag === "string" ? h.tag.replace(/^#+/, "") : h.tag,
@@ -980,48 +1379,37 @@ ${isYouTube ? `Generate exactly 5 title options using these named strategies:
 5. Bold claim or result-driven (contrarian or surprising outcome)
 Each title: include primary keyword naturally, under 70 characters.` : `Generate 3 title options following platform best practices.`}
 
-Description rules — write like a creator who knows their audience, not a marketing copywriter:
+Description rules:
 - First 2 lines must clearly state what the video is about and who it's for. No hype, no fluff.
 - Use the primary keyword naturally in the first sentence.
-- Include a ## Chapters section — use actual content from the transcript for chapter names. Never use generic labels like "Introduction", "Part 1", or "Sell Online". Use descriptive names that tell the viewer what they will learn (e.g. "Why updating 5 platforms wastes your Tuesday", "The Google Sheets trick that fixed everything"). Every chapter label must be a complete phrase, never a sentence fragment.
-- Include a links section with placeholder text: "🔗 [Add your links here]"
-- End with ONE genuine call to action — either a question for viewers to comment on, or a subscribe prompt. One sentence only.
-- Minimum 150 words. No filler closing lines.
-- Never end with phrases like "Embrace simplicity", "Get organized now", "Transform your workflow", or any generic motivational closer.
-- 150-400 words total
+- Include a ## Chapters section with complete, descriptive labels — never fragments.
+- Include a links section: "🔗 [Add your links here]"
+- End with ONE genuine call to action. One sentence only.
+- 150-400 words total. Never end with generic motivational closers.
 
-TAGS RULE: YouTube tags must NOT include the # symbol. Output plain tag text only, ready to paste directly into the YouTube tags field. Example: "Google Sheets, productivity, ecommerce" not "#GoogleSheets, #productivity"
+TAGS RULE: No # symbols. Plain text only, 25-30 tags.
 
-Tags: generate 25-30 tags total:
-- 5 high-volume broad tags (1M+ monthly searches)
-- 10 medium-competition niche tags (100K-1M)
-- 5 long-tail specific tags (very specific, 10K-100K)
-- 5 brand/product/creator-specific tags
-- No # symbols on any tag
-
-Return STRICT JSON — use EXACT times from chapter list. Chapter labels must be complete, descriptive phrases (never fragments):
-{"titles":["title 1","title 2","title 3","title 4","title 5"],"description":"full description with chapters and CTA","hashtags":[{"tag":"Tag without hash symbol","effect":"audience this serves"}],"timestamps":[{"time":"0:00","label":"complete descriptive label"}],"titleStrategies":["curiosity gap","how-to","number-based","problem/solution","bold claim"]}` }],
+Return STRICT JSON — use EXACT times from chapter list. Chapter labels must be complete phrases:
+{"titles":["title 1","title 2","title 3","title 4","title 5"],"description":"full description","hashtags":[{"tag":"Tag","effect":"audience"}],"timestamps":[{"time":"0:00","label":"complete label"}],"titleStrategies":["curiosity gap","how-to","number-based","problem/solution","bold claim"]}` }],
   });
 
   const parsed = parseJson<{ titles: string[]; description: string; hashtags: object[]; timestamps: Array<{ time: string; label: string }>; titleStrategies?: string[] }>(
     response.choices[0]?.message?.content ?? "{}",
     {
       titles: ["Engaging title for your video", "How-to title with keywords", "5 Things About Your Topic", "The Problem Solved in One Video", "The Result You Actually Get"],
-      description: "Your video description with chapters and call to action.\n\n## Chapters\n0:00 Introduction\n\n[Links]\nSubscribe: \n\nStart creating better content today.",
-      hashtags: [{ tag: "#VideoContent", effect: "Broad reach" }],
+      description: "Your video description with chapters and call to action.\n\n## Chapters\n0:00 Introduction\n\n[Links]\nSubscribe: ",
+      hashtags: [{ tag: "VideoContent", effect: "Broad reach" }],
       timestamps: [{ time: "0:00", label: "Introduction" }],
     }
   );
 
-  // FIX: Use exact chapter times from the transcript, but keep AI-generated complete labels
   if (chapterPoints.length) {
     parsed.timestamps = parsed.timestamps.map((t, i) => ({
       time: chapterPoints[i]?.time ?? t.time,
-      label: t.label, // keep the AI-written complete label, only override the time
+      label: t.label,
     }));
   }
 
-  // Safety net: strip any # symbols the model added despite instructions
   parsed.hashtags = (parsed.hashtags ?? []).map((h: any) => ({
     ...h,
     tag: typeof h.tag === "string" ? h.tag.replace(/^#+/, "") : h.tag,
@@ -1081,7 +1469,6 @@ export async function generateShortClipIdeas(
     preview: c.text.trim().substring(0, 250),
   }));
 
-  // FIX: Minimum 3 clip ideas on paid plan
   const clipCount = isFree ? 1 : 3;
 
   const response = await callOpenAI({
@@ -1091,21 +1478,18 @@ export async function generateShortClipIdeas(
       role: "user",
       content: `${BASE_SYSTEM_PROMPT}
 
-You are a short-form content strategist who has helped 500+ creators repurpose long videos into viral clips. You know exactly what makes people stop scrolling.
-
-For each clip, identify the moment with highest re-watchability or shareability. A great short clip has a strong first 2 seconds, a clear single idea, and a satisfying end. Quote the exact words that should open the clip and explain why this moment works as a short.
+You are a short-form content strategist who has helped 500+ creators repurpose long videos into viral clips.
 
 Target platforms: ${targetPlatformList}
 Total video duration: ${Math.round(totalDuration)}s
 
-Identify the best ${clipCount} clip(s) that would perform on short-form platforms.
-For each clip:
-- Find the chunk it's in, quote the exact opening line from the transcript
-- State which platforms fit and WHY (e.g. "TikTok: contrarian take performs in first 2 seconds")
-${!isFree ? `- Give ONE tactical production note (e.g. "Add captions: 85% of Reels are watched muted", "Cut to the punchline immediately: the setup is 20 seconds too long")
-- Assess engagement potential: High / Medium / Low with a one-sentence reason` : ""}
+Identify the best ${clipCount} clip(s). For each:
+- Quote the exact opening line from the transcript
+- State which platforms fit and WHY
+${!isFree ? `- ONE tactical production note
+- Engagement potential: High / Medium / Low with a one-sentence reason` : ""}
 
-CRITICAL: Use ONLY the index numbers provided. Do NOT invent startSec/endSec.
+CRITICAL: Use ONLY the provided index numbers.
 
 Chunks: ${JSON.stringify(chunkSummaries)}
 
@@ -1117,11 +1501,11 @@ Return STRICT JSON:
       "startSec": 45,
       "endSec": 105,
       "title": "punchy clip title",
-      "hook": "exact opening words that stop the scroll",
-      "whyItWorks": "one sentence on what makes this clip work",
-      "platforms": ["TikTok", "Instagram Reels"],
-      "platformReason": "why these platforms specifically"${!isFree ? `,
-      "tacticalNote": "one specific production tip",
+      "hook": "exact opening words",
+      "whyItWorks": "one sentence",
+      "platforms": ["TikTok"],
+      "platformReason": "why"${!isFree ? `,
+      "tacticalNote": "one production tip",
       "engagementPotential": "High/Medium/Low",
       "engagementReason": "why"` : ""}
     }
@@ -1160,7 +1544,6 @@ Return STRICT JSON:
     };
   });
 
-  // FIX: minimum 3 clips on paid, 1 on free
   return { clips: clips.slice(0, isFree ? 1 : Math.max(clips.length, 3)) };
 }
 
@@ -1181,15 +1564,22 @@ export async function translateSegments(
 
 export function computeQualityScore(visualAnalysis: object, audioAnalysis: object): number {
   const visual = visualAnalysis as Record<string, { numeric?: number }>;
-  const audio = audioAnalysis as Record<string, { numeric?: number }>;
+  const audio = audioAnalysis as Record<string, { numeric?: number; score?: number }>;
+
+  // All inputs here are already deterministically computed — this remains stable
   const metrics = [
-    visual.lighting?.numeric ?? 70, visual.brightness?.numeric ?? 70,
-    visual.sharpness?.numeric ?? 70, visual.stability?.numeric ?? 70,
-    visual.background?.numeric ?? 70, visual.framing?.numeric ?? 70,
-    audio.audioClarity?.numeric ?? 70, audio.audioVolume?.numeric ?? 70,
+    visual.lighting?.numeric ?? 70,
+    visual.brightness?.numeric ?? 70,
+    visual.sharpness?.numeric ?? 70,
+    visual.stability?.numeric ?? 70,
+    visual.background?.numeric ?? 70,
+    visual.framing?.numeric ?? 70,
+    audio.audioClarity?.numeric ?? 70,
+    audio.audioVolume?.numeric ?? 70,
+    audio.fillerWords?.score ?? 70,
+    audio.backgroundNoise?.numeric ?? 70,
   ];
-  metrics.push(Math.max(0, 100 - (audio.fillerWords?.numeric ?? 0) * 5));
-  metrics.push(Math.max(0, 100 - (audio.backgroundNoise?.numeric ?? 20)));
+
   return Math.round(Math.max(0, Math.min(100, metrics.reduce((a, b) => a + b, 0) / metrics.length)));
 }
 
