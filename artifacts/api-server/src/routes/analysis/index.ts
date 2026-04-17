@@ -345,6 +345,7 @@ router.get("/upload-health", (req, res) => {
 // ── Job status polling ────────────────────────────────────────────────────────
 router.get("/:jobId/status", async (req, res) => {
   try {
+    res.setHeader("Cache-Control", "no-store");
     const params = GetAnalysisStatusParams.parse(req.params);
     const job = await db.select().from(analysisJobsTable).where(eq(analysisJobsTable.id, params.jobId)).limit(1);
     if (!job.length) { res.status(404).json({ error: "Job not found" }); return; }

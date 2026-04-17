@@ -21,9 +21,28 @@ async function runStartupMigrations() {
   }
 }
 
+async function markInterruptedAnalysisJobs() {
+  try {
+    await db.execute(sql`
+      UPDATE analysis_jobs
+      SET
+        status = 'error',
+        progress = 0,
+        current_step = 'Analysis interrupted',
+        error = 'Analysis was interrupted by a server restart. Please upload the video again.',
+        updated_at = NOW()
+      WHERE status NOT IN ('complete', 'error')
+    `);
+    logger.info("Interrupted analysis jobs marked as failed");
+  } catch (err) {
+    logger.warn({ err }, "Unable to mark interrupted analysis jobs");
+  }
+}
+
 const PORT = parseInt(process.env.PORT ?? '3000', 10);
 
 await runStartupMigrations();
+await markInterruptedAnalysisJobs();
 
 const server = app.listen(PORT, '0.0.0.0', () => {
   logger.info({ port: PORT }, "Server listening");
