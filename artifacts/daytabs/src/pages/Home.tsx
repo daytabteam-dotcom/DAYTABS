@@ -1,11 +1,10 @@
-import React, { useState, useRef } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { UserProfileMenu } from "@/components/UserProfileMenu";
 import { LayoutDashboard, Wand2, Globe, MonitorPlay, Clapperboard, Zap, Video, FileText, TrendingUp, Lock } from "lucide-react";
 import VideoAnalyzerTab from "./tabs/VideoAnalyzerTab";
 import DubbingTab from "./tabs/DubbingTab";
 import TeleprompterTab from "./tabs/TeleprompterTab";
 import ScriptPlannerTab from "./tabs/ScriptPlannerTab";
-import { ExportWarningDialog } from "@/components/ExportWarningDialog";
 import { PlanPickerModal } from "@/components/PlanPickerModal";
 import { usePlan, getPlanBadgeColor, getPlanLabel, PLAN_DISPLAY_NAMES, getDurationLimitLabel, getFileSizeLimitLabel, getScriptPlannerChatLimit } from "@/hooks/use-plan";
 import { useUser } from "@/hooks/use-user";
@@ -19,6 +18,24 @@ const TABS = [
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
+
+function getTabFromUrl(): TabId {
+  const tab = new URLSearchParams(window.location.search).get("tab");
+  const match = TABS.find((item) => item.id === tab);
+  return match?.id ?? "dashboard";
+}
+
+function updateTabUrl(tabId: TabId, mode: "push" | "replace") {
+  const url = new URL(window.location.href);
+  if (tabId === "dashboard") {
+    url.searchParams.delete("tab");
+  } else {
+    url.searchParams.set("tab", tabId);
+  }
+  const nextUrl = `${url.pathname}${url.search}${url.hash}`;
+  if (`${window.location.pathname}${window.location.search}${window.location.hash}` === nextUrl) return;
+  window.history[mode === "push" ? "pushState" : "replaceState"]({ tab: tabId }, "", nextUrl);
+}
 
 function QuickActionCard({
   icon: Icon,
@@ -188,49 +205,33 @@ function Dashboard({ onNavigate, onUpgrade }: { onNavigate: (tab: TabId) => void
 }
 
 export default function Home() {
-  const [activeTab, setActiveTab] = useState<TabId>("dashboard");
+  const [activeTab, setActiveTab] = useState<TabId>(() => getTabFromUrl());
   const [activeTabHasData, setActiveTabHasData] = useState(false);
-  const [pendingTab, setPendingTab] = useState<TabId | null>(null);
-  const [showWarning, setShowWarning] = useState(false);
-  const [isDialogExporting, setIsDialogExporting] = useState(false);
   const [showPlanModal, setShowPlanModal] = useState(false);
   const exportFnRef = useRef<(() => Promise<void>) | null>(null);
 
+  useEffect(() => {
+    updateTabUrl(activeTab, "replace");
+
+    function handlePopState() {
+      doSwitch(getTabFromUrl(), "replace");
+    }
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   function handleTabClick(tabId: TabId) {
     if (tabId === activeTab) return;
-    if (activeTabHasData) {
-      setPendingTab(tabId);
-      setShowWarning(true);
-    } else {
-      doSwitch(tabId);
-    }
+    doSwitch(tabId, "push");
   }
 
-  function doSwitch(tabId: TabId) {
+  function doSwitch(tabId: TabId, historyMode: "push" | "replace" = "push") {
+    updateTabUrl(tabId, historyMode);
     setActiveTab(tabId);
     setActiveTabHasData(false);
     exportFnRef.current = null;
-  }
-
-  async function handleExportAndSwitch() {
-    if (exportFnRef.current) {
-      setIsDialogExporting(true);
-      try { await exportFnRef.current(); } finally { setIsDialogExporting(false); }
-    }
-    if (pendingTab) doSwitch(pendingTab);
-    setShowWarning(false);
-    setPendingTab(null);
-  }
-
-  function handleSwitchAnyway() {
-    if (pendingTab) doSwitch(pendingTab);
-    setShowWarning(false);
-    setPendingTab(null);
-  }
-
-  function handleCancel() {
-    setShowWarning(false);
-    setPendingTab(null);
   }
 
   const tabCallbacks = {
@@ -241,13 +242,6 @@ export default function Home() {
 
   return (
     <div className="min-h-screen relative overflow-x-hidden selection:bg-primary/30">
-      <ExportWarningDialog
-        open={showWarning}
-        isExporting={isDialogExporting}
-        onExportAndSwitch={handleExportAndSwitch}
-        onSwitchAnyway={handleSwitchAnyway}
-        onCancel={handleCancel}
-      />
       {showPlanModal && <PlanPickerModal onClose={() => setShowPlanModal(false)} />}
       <div className="fixed inset-0 pointer-events-none z-[-1] overflow-hidden">
         <img

@@ -234,6 +234,7 @@ router.post("/upload", (req, res, next) => {
     const translateSubtitles = req.body.translateSubtitles === "true" || req.body.translateSubtitles === true;
     const audioLanguage = req.body.audioLanguage || null;
     const audioVoice = req.body.audioVoice || "alloy";
+    const originalFileName = req.file.originalname;
 
     if (analysisQueue.size >= 10) {
       await fs.unlink(req.file.path).catch(() => {});
@@ -268,6 +269,7 @@ router.post("/upload", (req, res, next) => {
           subtitleLanguage: req.body.subtitleLanguage || undefined,
           audioLanguage: audioLanguage || undefined,
           audioVoice,
+          originalFileName,
           plan: rawPlan,
           maxDurationSeconds,
         },
@@ -291,6 +293,7 @@ router.post("/upload", (req, res, next) => {
             subtitleLanguage: req.body.subtitleLanguage || undefined,
             audioLanguage: audioLanguage || undefined,
             audioVoice,
+            originalFileName,
             plan: rawPlan,
             maxDurationSeconds,
           });

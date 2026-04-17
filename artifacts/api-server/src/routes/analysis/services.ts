@@ -479,6 +479,47 @@ Return STRICT JSON only:
   });
 }
 
+export async function generateVideoName(transcript: string, fallbackName?: string): Promise<string> {
+  const cleanFallback = (fallbackName ?? "Video analysis").replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim();
+  const fallback = cleanFallback || "Video analysis";
+
+  try {
+    const response = await callOpenAI({
+      model: "gpt-4o-mini",
+      max_completion_tokens: 60,
+      messages: [{
+        role: "user",
+        content: `Name this video based on the script. Return STRICT JSON only.
+
+Rules:
+- 3 to 7 words
+- Specific to the actual topic
+- No quotation marks in the title
+- No generic labels like "Video Analysis", "My Video", "Introduction", or "Untitled"
+
+Script:
+"${transcript.substring(0, 1800)}"
+
+Return:
+{"videoName":"specific video name"}`,
+      }],
+    });
+
+    const parsed = parseJson<{ videoName?: string }>(response.choices[0]?.message?.content ?? "{}", {});
+    const name = parsed.videoName?.trim();
+    return name && !/^video analysis$/i.test(name) ? name : fallback;
+  } catch (err) {
+    logger.warn({ err }, "Video name generation failed");
+    return fallback;
+  }
+}
+
+export function getTotalAnalysisScore(result: Record<string, unknown>): number | undefined {
+  const quality = result.quality as { score?: unknown; overallScore?: unknown; overallVisualScore?: unknown } | undefined;
+  const score = Number(quality?.score ?? quality?.overallScore ?? quality?.overallVisualScore);
+  return Number.isFinite(score) ? Math.max(0, Math.min(100, Math.round(score))) : undefined;
+}
+
 export async function analyzeScriptFeedback(transcript: string, segments: Array<{ start: number; end: number; text: string }>): Promise<object> {
   const first15sec = segments.filter(s => s.start <= 15).map(s => s.text).join(" ");
   const response = await callOpenAI({

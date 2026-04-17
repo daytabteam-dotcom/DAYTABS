@@ -58,7 +58,8 @@ const PROGRESS_STEPS = [
   { label: "Finalizing report",           statuses: [],                      threshold: 100 },
 ];
 
-const TERMINAL_STATUSES = new Set(["complete", "error", "cancelled"]);
+const TERMINAL_STATUSES = new Set(["complete", "successful", "success", "error", "failed", "cancelled"]);
+const HISTORY_BADGE_STATUSES = new Set(["complete", "successful", "success", "error", "failed", "cancelled"]);
 const RECOVERY_STORAGE_KEY = "daytabs:video-analyzer:pending-upload";
 
 interface PendingUploadRecovery {
@@ -76,9 +77,20 @@ interface AnalysisHistoryItem {
   currentStep: string;
   platform?: string;
   result?: {
+    videoName?: string;
+    totalScore?: number;
+    quality?: {
+      score?: number;
+      overallScore?: number;
+      overallVisualScore?: number;
+    };
+    publish?: Record<string, { titles?: string[] }>;
     analysisOptions?: {
       platforms?: string[];
       modules?: string[];
+      videoName?: string;
+      originalFileName?: string;
+      fileName?: string;
     };
   };
   error?: string;
@@ -163,9 +175,9 @@ function formatAnalysisDate(value: string | null) {
 }
 
 function getHistoryStatusLabel(status: string) {
-  if (status === "complete") return "Complete";
+  if (status === "complete" || status === "successful" || status === "success") return "Successful";
   if (status === "cancelled") return "Cancelled";
-  if (status === "error") return "Needs retry";
+  if (status === "error" || status === "failed") return "Failed";
   if (status === "queued") return "Queued";
   if (status === "transcribing") return "Transcribing";
   if (status === "analyzing_visual") return "Analyzing";
@@ -176,14 +188,40 @@ function getHistoryStatusLabel(status: string) {
 }
 
 function getHistoryStatusClasses(status: string) {
-  if (status === "complete") return "border-emerald-500/25 bg-emerald-500/10 text-emerald-300";
+  if (status === "complete" || status === "successful" || status === "success") return "border-emerald-500/25 bg-emerald-500/10 text-emerald-300";
   if (status === "cancelled") return "border-white/15 bg-white/5 text-white/40";
-  if (status === "error") return "border-red-500/25 bg-red-500/10 text-red-300";
+  if (status === "error" || status === "failed") return "border-red-500/25 bg-red-500/10 text-red-300";
   return "border-primary/25 bg-primary/10 text-primary";
 }
 
 function isCancellableAnalysis(status: string) {
   return !TERMINAL_STATUSES.has(status);
+}
+
+function isHistoryInProgress(status: string) {
+  return !HISTORY_BADGE_STATUSES.has(status);
+}
+
+function isSuccessfulAnalysis(status: string) {
+  return status === "complete" || status === "successful" || status === "success";
+}
+
+function getHistoryVideoName(item: AnalysisHistoryItem) {
+  const result = item.result;
+  const options = result?.analysisOptions;
+  const originalName = options?.originalFileName ?? options?.fileName;
+  const publishTitle = result?.publish
+    ? Object.values(result.publish).find((entry) => entry?.titles?.length)?.titles?.[0]
+    : undefined;
+  const name = result?.videoName ?? options?.videoName ?? publishTitle ?? originalName;
+  return (name ?? "Video analysis").replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim() || "Video analysis";
+}
+
+function getHistoryTotalScore(item: AnalysisHistoryItem) {
+  const result = item.result;
+  const raw = result?.totalScore ?? result?.quality?.score ?? result?.quality?.overallScore ?? result?.quality?.overallVisualScore;
+  const score = Number(raw);
+  return Number.isFinite(score) ? Math.max(0, Math.min(100, Math.round(score))) : null;
 }
 
 function navigateToPricing(feature?: string) {
@@ -1083,7 +1121,9 @@ function AnalysisHistoryCards({
         const modules = options?.modules?.length ? options.modules : ["quality", "editing"];
         const platforms = options?.platforms?.length ? options.platforms : [item.platform ?? "youtube_long"];
         const active = activeJobId === item.jobId;
-        const canOpen = item.status !== "error" && item.status !== "cancelled";
+        const inProgress = isHistoryInProgress(item.status);
+        const totalScore = getHistoryTotalScore(item);
+        const canOpen = item.status !== "error" && item.status !== "failed" && item.status !== "cancelled";
         const canCancel = isCancellableAnalysis(item.status);
         const isCancelling = cancellingJobId === item.jobId;
 
@@ -1104,7 +1144,7 @@ function AnalysisHistoryCards({
           >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-sm font-semibold text-white truncate">Video Analysis</p>
+                <p className="text-sm font-semibold text-white truncate">{getHistoryVideoName(item)}</p>
                 <p className="text-xs text-white/35 mt-1">{formatAnalysisDate(item.createdAt)}</p>
               </div>
               <span className={`px-2 py-1 rounded-md border text-[11px] font-semibold whitespace-nowrap ${getHistoryStatusClasses(item.status)}`}>
@@ -1112,15 +1152,31 @@ function AnalysisHistoryCards({
               </span>
             </div>
 
-            <div className="mt-4 h-1.5 rounded-full bg-white/8 overflow-hidden">
-              <div
-                className={`h-full rounded-full ${item.status === "error" ? "bg-red-400" : "bg-primary"}`}
-                style={{ width: `${Math.max(4, Math.min(100, Math.round(item.progress ?? 0)))}%` }}
-              />
+            <div className="mt-4">
+              {totalScore !== null ? (
+                <div>
+                  <p className="text-[10px] uppercase tracking-wider text-white/30">Total score</p>
+                  <p className="text-lg font-bold font-mono text-white">{totalScore}<span className="text-xs text-white/35">/100</span></p>
+                </div>
+              ) : (
+                <div>
+                  <p className="text-[10px] uppercase tracking-wider text-white/30">Total score</p>
+                  <p className="text-sm font-semibold text-white/35">Pending</p>
+                </div>
+              )}
             </div>
 
+            {inProgress && (
+              <div className="mt-4 h-1.5 rounded-full bg-white/8 overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-primary"
+                  style={{ width: `${Math.max(4, Math.min(100, Math.round(item.progress ?? 0)))}%` }}
+                />
+              </div>
+            )}
+
             <p className="text-xs text-white/45 mt-3 truncate">
-              {item.status === "error" ? item.error ?? "Analysis failed" : item.status === "cancelled" ? "Cancelled by user" : item.currentStep || "Analysis queued"}
+              {item.status === "error" || item.status === "failed" ? item.error ?? "Analysis failed" : item.status === "cancelled" ? "Cancelled by user" : item.currentStep || "Analysis queued"}
             </p>
 
             <div className="flex flex-wrap gap-1.5 mt-4">
@@ -1174,6 +1230,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
   const [historyResult, setHistoryResult] = useState<any | null>(null);
   const [openedHistoryJobId, setOpenedHistoryJobId] = useState<string | null>(null);
   const [cancellingJobId, setCancellingJobId] = useState<string | null>(null);
+  const [showUploadForm, setShowUploadForm] = useState(false);
 
   const { uploadAsync: uploadVideo, isPending: isUploading, uploadInfo, cancelUpload } = useVideoUpload();
   const { data: pollData } = useAnalysisPolling(jobId);
@@ -1211,6 +1268,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
       if (!res.ok) return;
       const data = await res.json() as { analyses?: AnalysisHistoryItem[] };
       setAnalysisHistory(data.analyses ?? []);
+      if ((data.analyses ?? []).length === 0) setShowUploadForm(true);
     } catch {
       // History is helpful but non-blocking; upload and polling remain the main path.
     } finally {
@@ -1275,7 +1333,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
       window.dispatchEvent(new CustomEvent("daytabs:plan-updated"));
       loadAnalysisHistory();
 
-      // Register real PDF export so ExportWarningDialog can trigger it
+      // Register real PDF export so parent-level actions can trigger it.
       const exportFn = async () => {
         if (!resultsRef.current) return;
         await generateAnalysisPDF(resultsRef.current, fileNameRef.current);
@@ -1311,6 +1369,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
     setHistoryResult(null);
     setOpenedHistoryJobId(null);
     setJobId(null);
+    setShowUploadForm(true);
 
     // If the plan hasn't loaded yet, accept the file optimistically, server will enforce limits
     if (planLoading) { setFile(f); return; }
@@ -1377,6 +1436,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
     if (uploadsRemaining === 0) { setShowLimitModal(true); return; }
 
     setIsSubmitting(true);
+    setShowUploadForm(true);
     setHistoryResult(null);
     setOpenedHistoryJobId(null);
     const recovery: PendingUploadRecovery = {
@@ -1438,8 +1498,9 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
     if (options?.platforms?.length) setSelectedPlatforms(options.platforms);
     if (options?.modules?.length) setSelectedModules(options.modules);
     setFile(null);
+    setShowUploadForm(true);
 
-    if (item.status === "complete" && item.result) {
+    if (isSuccessfulAnalysis(item.status) && item.result) {
       clearPendingUploadRecovery();
       setJobId(null);
       setHistoryResult(item.result);
@@ -1457,8 +1518,8 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
     }
 
     toast({
-      title: item.status === "complete" ? "Report opened" : "Analysis restored",
-      description: item.status === "complete" ? "Your saved analysis report is ready." : "We reconnected to the selected analysis.",
+      title: isSuccessfulAnalysis(item.status) ? "Report opened" : "Analysis restored",
+      description: isSuccessfulAnalysis(item.status) ? "Your saved analysis report is ready." : "We reconnected to the selected analysis.",
     });
   }
 
@@ -1501,6 +1562,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
     setJobId(null);
     setHistoryResult(null);
     setOpenedHistoryJobId(null);
+    setShowUploadForm(analysisHistory.length === 0);
     onDataReset();
   }
 
@@ -1521,6 +1583,8 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
     if (t.id === "transcript") return !!(displayedResults as any)?.transcript;
     return selectedModules.includes(t.id) && !!(displayedResults as any)?.[t.id];
   });
+  const hasHistory = analysisHistory.length > 0;
+  const showHistoryLanding = !hasResults && !showAnalyzing && !isError && hasHistory && !showUploadForm;
 
   return (
     <div className="space-y-8">
@@ -1533,7 +1597,45 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
           onUpgrade={() => navigateToPricing("monthly-limit")}
         />
       )}
-      {!hasResults && !showAnalyzing && !isError ? (
+      {showHistoryLanding ? (
+        <section className="space-y-6">
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <div>
+              <h1 className="text-3xl font-display font-bold text-white">Video Analyzer</h1>
+              <p className="text-white/50 mt-2">Open a recent report or reconnect to work still in progress.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                handleReset();
+                setShowUploadForm(true);
+              }}
+              className="px-4 py-2.5 rounded-xl text-sm font-semibold bg-gradient-to-r from-primary to-purple-500 text-white hover:opacity-90 transition-opacity flex items-center gap-2"
+            >
+              <Upload className="w-4 h-4" />
+              New Analysis
+            </button>
+          </div>
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={loadAnalysisHistory}
+              disabled={historyLoading}
+              className="px-3 py-2 rounded-xl text-xs font-semibold text-white/55 border border-white/10 hover:border-white/20 hover:text-white transition-all disabled:opacity-50"
+            >
+              Refresh
+            </button>
+          </div>
+          <AnalysisHistoryCards
+            items={analysisHistory}
+            loading={historyLoading}
+            activeJobId={openedHistoryJobId ?? jobId}
+            cancellingJobId={cancellingJobId}
+            onOpen={handleOpenHistoryItem}
+            onCancel={(item) => void handleCancelAnalysisJob(item.jobId)}
+          />
+        </section>
+      ) : !hasResults && !showAnalyzing && !isError ? (
         <>
           <div className="text-center">
             <h1 className="text-3xl font-display font-bold text-white">Video Analyzer</h1>
@@ -1627,32 +1729,34 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
             </div>
           </div>
 
-          <section className="space-y-4">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-xs text-white/40 uppercase tracking-wider flex items-center gap-2">
-                  <History className="w-3.5 h-3.5" />Previous Analyses
-                </p>
-                <p className="text-sm text-white/45 mt-1">Open a recent report or reconnect to work still in progress.</p>
+          {!hasHistory && (
+            <section className="space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs text-white/40 uppercase tracking-wider flex items-center gap-2">
+                    <History className="w-3.5 h-3.5" />Previous Analyses
+                  </p>
+                  <p className="text-sm text-white/45 mt-1">Open a recent report or reconnect to work still in progress.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={loadAnalysisHistory}
+                  disabled={historyLoading}
+                  className="px-3 py-2 rounded-xl text-xs font-semibold text-white/55 border border-white/10 hover:border-white/20 hover:text-white transition-all disabled:opacity-50"
+                >
+                  Refresh
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={loadAnalysisHistory}
-                disabled={historyLoading}
-                className="px-3 py-2 rounded-xl text-xs font-semibold text-white/55 border border-white/10 hover:border-white/20 hover:text-white transition-all disabled:opacity-50"
-              >
-                Refresh
-              </button>
-            </div>
-            <AnalysisHistoryCards
-              items={analysisHistory}
-              loading={historyLoading}
-              activeJobId={openedHistoryJobId ?? jobId}
-              cancellingJobId={cancellingJobId}
-              onOpen={handleOpenHistoryItem}
-              onCancel={(item) => void handleCancelAnalysisJob(item.jobId)}
-            />
-          </section>
+              <AnalysisHistoryCards
+                items={analysisHistory}
+                loading={historyLoading}
+                activeJobId={openedHistoryJobId ?? jobId}
+                cancellingJobId={cancellingJobId}
+                onOpen={handleOpenHistoryItem}
+                onCancel={(item) => void handleCancelAnalysisJob(item.jobId)}
+              />
+            </section>
+          )}
         </>
       ) : isError ? (
         <ErrorScreen error={errorMessage} onReset={handleReset} />

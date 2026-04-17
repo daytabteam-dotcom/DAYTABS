@@ -9,7 +9,7 @@ import {
   updateJob, transcribeAudio, extractAudio, extractFrames,
   analyzeVisuals, analyzeAudio, analyzeEditingPoints,
   generateSeo, generateShortClipIdeas, generateSrt, translateSegments,
-  computeQualityScore, getMediaDuration, logger,
+  computeQualityScore, getMediaDuration, logger, generateVideoName, getTotalAnalysisScore,
 } from "./services";
 
 async function withTimeout<T>(promise: Promise<T>, ms: number, label: string, jobId: string): Promise<T> {
@@ -138,6 +138,7 @@ export interface PipelineOptions {
   modules?: string[];
   platforms?: string[];
   maxDurationSeconds?: number;
+  originalFileName?: string;
 }
 
 export async function runAnalysisPipeline(
@@ -275,15 +276,41 @@ async function runVideoAnalyzer(
 
     await updateJob(jobId, { result: { transcript: { segments: transcriptSegments, fullText: transcriptText } } });
 
+    const videoName = await withTimeout(
+      generateVideoName(transcriptText, options.originalFileName),
+      30000,
+      "video name generation",
+      jobId,
+    ).catch((err) => {
+      logger.warn({ err, jobId }, "Video name generation skipped");
+      return options.originalFileName?.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim() || "Video analysis";
+    });
+
     let progress = 35;
     const result: Record<string, unknown> = {
       mode: "video-analyzer",
       jobId,
+      videoName,
       plan,
       platforms,
       modules,
       transcript: { segments: transcriptSegments, fullText: transcriptText },
+      analysisOptions: {
+        mode: "video-analyzer",
+        platform: platforms[0] ?? "youtube_long",
+        platforms,
+        modules,
+        translateSubtitles: options.translateSubtitles,
+        subtitleLanguage: options.subtitleLanguage,
+        audioLanguage: options.audioLanguage,
+        audioVoice: options.audioVoice,
+        originalFileName: options.originalFileName,
+        videoName,
+        plan,
+        maxDurationSeconds: maxDuration,
+      },
     };
+    await updateJob(jobId, { result: { videoName, analysisOptions: result.analysisOptions } });
 
     const isFree = plan === "free";
 
@@ -331,7 +358,8 @@ async function runVideoAnalyzer(
         ...visualAnalysis,
         ...audioAnalysis,
       };
-      await updateJob(jobId, { result: { quality: result.quality } });
+      result.totalScore = getTotalAnalysisScore(result);
+      await updateJob(jobId, { result: { quality: result.quality, totalScore: result.totalScore } });
       progress = 55;
     }
 

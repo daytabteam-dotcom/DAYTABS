@@ -79,6 +79,7 @@ async function recoverInterruptedAnalysisJobs() {
             subtitleLanguage: storedOptions.subtitleLanguage ?? job.subtitleLanguage ?? undefined,
             audioLanguage: storedOptions.audioLanguage ?? job.audioLanguage ?? undefined,
             audioVoice: storedOptions.audioVoice ?? "alloy",
+            originalFileName: storedOptions.originalFileName,
             plan: plan ?? "free",
             maxDurationSeconds: storedOptions.maxDurationSeconds,
           });

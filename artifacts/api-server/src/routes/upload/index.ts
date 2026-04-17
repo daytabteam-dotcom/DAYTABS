@@ -348,6 +348,7 @@ router.post("/complete", async (req, res) => {
           subtitleLanguage: session.subtitleLanguage ?? undefined,
           audioLanguage: session.audioLanguage ?? undefined,
           audioVoice: session.audioVoice,
+          originalFileName: session.filename,
           plan: rawPlan,
           maxDurationSeconds,
         },
@@ -371,6 +372,7 @@ router.post("/complete", async (req, res) => {
             subtitleLanguage: session.subtitleLanguage ?? undefined,
             audioLanguage: session.audioLanguage ?? undefined,
             audioVoice: session.audioVoice,
+            originalFileName: session.filename,
             plan: rawPlan,
             maxDurationSeconds,
           });
