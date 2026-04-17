@@ -58,7 +58,7 @@ const PROGRESS_STEPS = [
   { label: "Finalizing report",           statuses: [],                      threshold: 100 },
 ];
 
-const TERMINAL_STATUSES = new Set(["complete", "error"]);
+const TERMINAL_STATUSES = new Set(["complete", "error", "cancelled"]);
 const RECOVERY_STORAGE_KEY = "daytabs:video-analyzer:pending-upload";
 
 interface PendingUploadRecovery {
@@ -139,6 +139,17 @@ async function recoverPendingAnalysis(recovery: PendingUploadRecovery) {
   };
 }
 
+async function cancelAnalysisRequest(jobId: string) {
+  const res = await fetch(`/api/analysis/${jobId}/cancel`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({})) as { error?: string };
+    throw new Error(body.error ?? "Failed to cancel analysis");
+  }
+}
+
 function formatAnalysisDate(value: string | null) {
   if (!value) return "Recent";
   const date = new Date(value);
@@ -153,6 +164,7 @@ function formatAnalysisDate(value: string | null) {
 
 function getHistoryStatusLabel(status: string) {
   if (status === "complete") return "Complete";
+  if (status === "cancelled") return "Cancelled";
   if (status === "error") return "Needs retry";
   if (status === "queued") return "Queued";
   if (status === "transcribing") return "Transcribing";
@@ -165,8 +177,13 @@ function getHistoryStatusLabel(status: string) {
 
 function getHistoryStatusClasses(status: string) {
   if (status === "complete") return "border-emerald-500/25 bg-emerald-500/10 text-emerald-300";
+  if (status === "cancelled") return "border-white/15 bg-white/5 text-white/40";
   if (status === "error") return "border-red-500/25 bg-red-500/10 text-red-300";
   return "border-primary/25 bg-primary/10 text-primary";
+}
+
+function isCancellableAnalysis(status: string) {
+  return !TERMINAL_STATUSES.has(status);
 }
 
 function navigateToPricing(feature?: string) {
@@ -1029,12 +1046,16 @@ function AnalysisHistoryCards({
   items,
   loading,
   activeJobId,
+  cancellingJobId,
   onOpen,
+  onCancel,
 }: {
   items: AnalysisHistoryItem[];
   loading: boolean;
   activeJobId: string | null;
+  cancellingJobId: string | null;
   onOpen: (item: AnalysisHistoryItem) => void;
+  onCancel: (item: AnalysisHistoryItem) => void;
 }) {
   if (loading && items.length === 0) {
     return (
@@ -1062,15 +1083,24 @@ function AnalysisHistoryCards({
         const modules = options?.modules?.length ? options.modules : ["quality", "editing"];
         const platforms = options?.platforms?.length ? options.platforms : [item.platform ?? "youtube_long"];
         const active = activeJobId === item.jobId;
-        const canOpen = item.status !== "error";
+        const canOpen = item.status !== "error" && item.status !== "cancelled";
+        const canCancel = isCancellableAnalysis(item.status);
+        const isCancelling = cancellingJobId === item.jobId;
 
         return (
-          <button
+          <div
             key={item.jobId}
-            type="button"
             onClick={() => canOpen && onOpen(item)}
-            disabled={!canOpen}
-            className={`text-left rounded-2xl border p-4 transition-all bg-white/[0.035] ${active ? "border-primary/50 shadow-lg shadow-primary/10" : "border-white/10 hover:border-white/20 hover:bg-white/[0.055]"} ${!canOpen ? "opacity-70 cursor-not-allowed" : "cursor-pointer"}`}
+            className={`text-left rounded-2xl border p-4 transition-all bg-white/[0.035] ${active ? "border-primary/50 shadow-lg shadow-primary/10" : "border-white/10 hover:border-white/20 hover:bg-white/[0.055]"} ${!canOpen ? "opacity-70" : "cursor-pointer"}`}
+            role={canOpen ? "button" : undefined}
+            tabIndex={canOpen ? 0 : -1}
+            onKeyDown={(event) => {
+              if (!canOpen) return;
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                onOpen(item);
+              }
+            }}
           >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -1090,7 +1120,7 @@ function AnalysisHistoryCards({
             </div>
 
             <p className="text-xs text-white/45 mt-3 truncate">
-              {item.status === "error" ? item.error ?? "Analysis failed" : item.currentStep || "Analysis queued"}
+              {item.status === "error" ? item.error ?? "Analysis failed" : item.status === "cancelled" ? "Cancelled by user" : item.currentStep || "Analysis queued"}
             </p>
 
             <div className="flex flex-wrap gap-1.5 mt-4">
@@ -1105,7 +1135,21 @@ function AnalysisHistoryCards({
                 </span>
               ))}
             </div>
-          </button>
+
+            {canCancel && (
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onCancel(item);
+                }}
+                disabled={isCancelling}
+                className="mt-4 w-full px-3 py-2 rounded-lg text-xs font-semibold border border-red-500/25 text-red-300 bg-red-500/10 hover:bg-red-500/15 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {isCancelling ? "Cancelling..." : "Cancel analysis"}
+              </button>
+            )}
+          </div>
         );
       })}
     </div>
@@ -1129,6 +1173,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyResult, setHistoryResult] = useState<any | null>(null);
   const [openedHistoryJobId, setOpenedHistoryJobId] = useState<string | null>(null);
+  const [cancellingJobId, setCancellingJobId] = useState<string | null>(null);
 
   const { uploadAsync: uploadVideo, isPending: isUploading, uploadInfo, cancelUpload } = useVideoUpload();
   const { data: pollData } = useAnalysisPolling(jobId);
@@ -1417,6 +1462,39 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
     });
   }
 
+  async function handleCancelAnalysisJob(targetJobId: string) {
+    setCancellingJobId(targetJobId);
+    try {
+      await cancelAnalysisRequest(targetJobId);
+      clearPendingUploadRecovery();
+      setAnalysisHistory((items) =>
+        items.map((item) =>
+          item.jobId === targetJobId
+            ? { ...item, status: "cancelled", progress: 0, currentStep: "Analysis cancelled", error: undefined }
+            : item
+        )
+      );
+      if (jobId === targetJobId) {
+        setJobId(null);
+        setHistoryResult(null);
+        setOpenedHistoryJobId(null);
+      }
+      toast({
+        title: "Analysis cancelled",
+        description: "The request was stopped and removed from active processing.",
+      });
+      loadAnalysisHistory();
+    } catch (err) {
+      toast({
+        title: "Could not cancel analysis",
+        description: err instanceof Error ? err.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setCancellingJobId(null);
+    }
+  }
+
   function handleReset() {
     clearPendingUploadRecovery();
     setFile(null);
@@ -1428,7 +1506,11 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
 
   function handleCancel() {
     clearPendingUploadRecovery();
-    cancelUpload();
+    if (jobId) {
+      void handleCancelAnalysisJob(jobId);
+    } else {
+      cancelUpload();
+    }
   }
 
   const progress = statusData?.progress ?? (isSubmitting ? 5 : 0);
@@ -1566,7 +1648,9 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
               items={analysisHistory}
               loading={historyLoading}
               activeJobId={openedHistoryJobId ?? jobId}
+              cancellingJobId={cancellingJobId}
               onOpen={handleOpenHistoryItem}
+              onCancel={(item) => void handleCancelAnalysisJob(item.jobId)}
             />
           </section>
         </>

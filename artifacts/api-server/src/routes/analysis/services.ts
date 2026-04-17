@@ -66,8 +66,17 @@ async function runMediaCommand(
 
 export async function updateJob(jobId: string, updates: Partial<typeof analysisJobsTable.$inferInsert>) {
   const setData: any = { ...updates, updatedAt: new Date() };
+  const current = await db
+    .select({ status: analysisJobsTable.status, result: analysisJobsTable.result })
+    .from(analysisJobsTable)
+    .where(eq(analysisJobsTable.id, jobId))
+    .limit(1);
+
+  if (current[0]?.status === "cancelled" && updates.status !== "cancelled") {
+    return;
+  }
+
   if (updates.result) {
-    const current = await db.select({ result: analysisJobsTable.result }).from(analysisJobsTable).where(eq(analysisJobsTable.id, jobId)).limit(1);
     const existingResult = current[0]?.result || {};
     setData.result = { ...existingResult, ...updates.result };
   }

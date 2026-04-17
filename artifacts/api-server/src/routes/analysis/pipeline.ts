@@ -45,6 +45,21 @@ function getPipelineErrorMessage(err: unknown): string {
   return fallback || "Analysis failed unexpectedly.";
 }
 
+async function isAnalysisCancelled(jobId: string) {
+  const job = await db
+    .select({ status: analysisJobsTable.status })
+    .from(analysisJobsTable)
+    .where(eq(analysisJobsTable.id, jobId))
+    .limit(1);
+  return job[0]?.status === "cancelled";
+}
+
+async function stopIfCancelled(jobId: string) {
+  if (await isAnalysisCancelled(jobId)) {
+    throw new Error("Analysis cancelled");
+  }
+}
+
 export type PipelineMode = "video-analyzer";
 
 export interface PipelineOptions {
@@ -71,12 +86,14 @@ export async function runAnalysisPipeline(
 
   try {
     await fs.mkdir(workDir, { recursive: true });
+    await stopIfCancelled(jobId);
     if (sourceVideoPath) {
       logger.info({ jobId, sourceVideoPath, localVideoPath }, "Copying uploaded video from local storage for analysis");
       await fs.copyFile(sourceVideoPath, localVideoPath);
     } else {
       await downloadFromB2(b2Key, localVideoPath);
     }
+    await stopIfCancelled(jobId);
     await runVideoAnalyzer(jobId, localVideoPath, options);
 
     const job = await db
@@ -96,7 +113,7 @@ export async function runAnalysisPipeline(
       .limit(1)
       .catch(() => []);
 
-    if (job[0]?.status !== "complete" && job[0]?.status !== "error") {
+    if (job[0]?.status !== "complete" && job[0]?.status !== "error" && job[0]?.status !== "cancelled") {
       await updateJob(jobId, {
         status: "error",
         currentStep: "Analysis failed",
@@ -139,16 +156,19 @@ async function runVideoAnalyzer(
   try {
     await fs.mkdir(workDir, { recursive: true });
     await fs.mkdir(framesDir, { recursive: true });
+    await stopIfCancelled(jobId);
 
     // Step 1: Extract audio
     await updateJob(jobId, { status: "extracting_audio", progress: 12, currentStep: "Extracting audio" });
     logger.info({ jobId, videoPath, audioPath }, "Calling extractAudio");
     await extractAudio(videoPath, audioPath);
+    await stopIfCancelled(jobId);
     logger.info({ jobId, audioPath }, "Audio extraction complete");
 
     // Step 2: Duration check
     await updateJob(jobId, { status: "extracting_audio", progress: 18, currentStep: "Checking video duration" });
     const durationSec = await getMediaDuration(audioPath);
+    await stopIfCancelled(jobId);
     if (durationSec > maxDuration) {
       const planLabels: Record<string, string> = {
         free: "Free (5 min)", creator: "Creator (15 min)", pro: "Pro (30 min)", studio: "Studio (60 min)",
@@ -172,6 +192,7 @@ async function runVideoAnalyzer(
 
     try {
       const transcription = await transcribeAudio(audioPath);
+      await stopIfCancelled(jobId);
       transcriptText = transcription.text;
       transcriptSegments = transcription.segments;
       logger.info({ jobId, transcriptLength: transcriptText.length, segmentCount: transcriptSegments.length }, "Whisper transcription completed");
@@ -206,6 +227,7 @@ async function runVideoAnalyzer(
         "frame extraction",
         jobId,
       );
+      await stopIfCancelled(jobId);
       logger.info({ jobId, frameCount: frameBase64List.length }, "Frame extraction completed");
 
       progress = 45;
@@ -217,12 +239,14 @@ async function runVideoAnalyzer(
         "visual analysis",
         jobId,
       );
+      await stopIfCancelled(jobId);
       const audioAnalysis = await withTimeout(
         analyzeAudio(transcriptText, 0.9),
         90000,
         "audio analysis",
         jobId,
       );
+      await stopIfCancelled(jobId);
       const qualityScore = computeQualityScore(visualAnalysis, audioAnalysis);
 
       result.quality = {
@@ -243,6 +267,7 @@ async function runVideoAnalyzer(
         "editing analysis",
         jobId,
       );
+      await stopIfCancelled(jobId);
       result.editing = editingData;
       await updateJob(jobId, { result: { editing: editingData } });
       progress = 68;
@@ -260,6 +285,7 @@ async function runVideoAnalyzer(
             `SEO generation for ${platform}`,
             jobId,
           );
+          await stopIfCancelled(jobId);
           publishResults[platform] = seoResult;
         } catch (err) {
           logger.warn({ err, platform, jobId }, "SEO generation failed for platform");
@@ -281,6 +307,7 @@ async function runVideoAnalyzer(
               "subtitle translation",
               jobId,
             );
+            await stopIfCancelled(jobId);
           } catch (err) {
             logger.warn({ err, jobId }, "Subtitle translation failed");
           }
@@ -304,17 +331,20 @@ async function runVideoAnalyzer(
         "short clip generation",
         jobId,
       );
+      await stopIfCancelled(jobId);
       result.shortClips = shortClipsData;
       await updateJob(jobId, { result: { shortClips: shortClipsData } });
       progress = 95;
     }
 
-    await updateJob(jobId, {
-      status: "complete",
-      progress: 100,
-      currentStep: "Analysis complete",
-      result,
-    });
+    if (!(await isAnalysisCancelled(jobId))) {
+      await updateJob(jobId, {
+        status: "complete",
+        progress: 100,
+        currentStep: "Analysis complete",
+        result,
+      });
+    }
 
     await fs.rm(framesDir, { recursive: true, force: true }).catch(() => {});
   } catch (err) {

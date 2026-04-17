@@ -24,6 +24,7 @@ import { normalizePlan, getLimits, buildFileTooLargeError } from "../../lib/plan
 import { checkVideoAnalysisLimit, incrementVideoAnalysis, getOrCreateUsage } from "../../lib/usageService";
 import {
   buildR2ObjectKey,
+  deleteFromB2,
   getR2RequiredEnvStatus,
   uploadToB2,
 } from "../../lib/b2";
@@ -391,6 +392,59 @@ router.get("/recover", async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "Recover analysis error");
     res.status(500).json({ error: "Failed to recover analysis" });
+  }
+});
+
+// ── Cancel an in-progress analysis ───────────────────────────────────────────
+router.post("/:jobId/cancel", async (req, res) => {
+  try {
+    const userId = req.auth?.user_id;
+    if (!userId) {
+      res.status(401).json({ error: "Sign in to cancel an analysis" });
+      return;
+    }
+
+    const params = GetAnalysisStatusParams.parse(req.params);
+    const jobs = await db
+      .select()
+      .from(analysisJobsTable)
+      .where(sql`${analysisJobsTable.id} = ${params.jobId} AND ${analysisJobsTable.userId} = ${userId}`)
+      .limit(1);
+
+    if (!jobs.length) {
+      res.status(404).json({ error: "Analysis not found" });
+      return;
+    }
+
+    const job = jobs[0];
+    if (job.status === "complete") {
+      res.status(409).json({ error: "Completed analyses cannot be cancelled" });
+      return;
+    }
+
+    if (job.status !== "cancelled") {
+      await db
+        .update(analysisJobsTable)
+        .set({
+          status: "cancelled",
+          progress: 0,
+          currentStep: "Analysis cancelled",
+          error: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(analysisJobsTable.id, params.jobId));
+
+      if (job.b2Key) {
+        await deleteFromB2(job.b2Key).catch((err) => {
+          req.log.warn({ err, jobId: job.id, b2Key: job.b2Key }, "Failed to delete cancelled analysis source video");
+        });
+      }
+    }
+
+    res.json({ cancelled: true, jobId: job.id });
+  } catch (err) {
+    req.log.error({ err }, "Cancel analysis error");
+    res.status(500).json({ error: "Failed to cancel analysis" });
   }
 });
 
