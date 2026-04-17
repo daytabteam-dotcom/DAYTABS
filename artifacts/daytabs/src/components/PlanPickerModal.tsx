@@ -99,7 +99,7 @@ export function PlanPickerModal({ onClose, highlightPlan }: PlanPickerModalProps
   const handleSelect = async (planKey: "creator" | "pro" | "studio") => {
     if (planKey === "studio") {
       onClose();
-      navigate("/contact");
+      window.location.assign("/contact");
       return;
     }
     if (!user) {
