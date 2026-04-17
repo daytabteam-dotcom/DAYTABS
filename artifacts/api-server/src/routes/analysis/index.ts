@@ -260,8 +260,7 @@ router.post("/upload", (req, res, next) => {
     try {
       req.log.info({ jobId, b2Key, size: req.file.size, filePath: req.file.path }, "Starting B2 upload");
       await uploadToB2(b2Key, req.file.path, req.file.mimetype);
-      await fs.unlink(req.file.path).catch(() => {});
-      req.log.info({ jobId, b2Key }, "B2 upload succeeded, local file cleaned up");
+      req.log.info({ jobId, b2Key }, "B2 upload succeeded, local file retained for queued analysis");
     } catch (err) {
       await fs.unlink(req.file.path).catch(() => {});
       req.log.error({ err, jobId, b2Key, errorMessage: err instanceof Error ? err.message : String(err) }, "B2 upload failed");
@@ -304,21 +303,26 @@ router.post("/upload", (req, res, next) => {
     // Respond immediately — analysis will execute through the queue.
     res.json({ jobId, message: "Video uploaded. Analysis queued." });
 
+    const uploadedVideoPath = req.file.path;
     analysisQueue
       .add(async () => {
-        const completed = await runAnalysisPipeline(jobId, b2Key, {
-          mode: validatedMode,
-          platform: validatedPlatforms[0] ?? "youtube_long",
-          platforms: validatedPlatforms,
-          modules: validatedModules,
-          translateSubtitles,
-          subtitleLanguage: req.body.subtitleLanguage || undefined,
-          audioLanguage: audioLanguage || undefined,
-          audioVoice,
-          plan: rawPlan,
-          maxDurationSeconds,
-        });
-        if (completed && userId) await incrementVideoAnalysis(userId);
+        try {
+          const completed = await runAnalysisPipeline(jobId, b2Key, {
+            mode: validatedMode,
+            platform: validatedPlatforms[0] ?? "youtube_long",
+            platforms: validatedPlatforms,
+            modules: validatedModules,
+            translateSubtitles,
+            subtitleLanguage: req.body.subtitleLanguage || undefined,
+            audioLanguage: audioLanguage || undefined,
+            audioVoice,
+            plan: rawPlan,
+            maxDurationSeconds,
+          }, uploadedVideoPath);
+          if (completed && userId) await incrementVideoAnalysis(userId);
+        } finally {
+          await fs.unlink(uploadedVideoPath).catch(() => {});
+        }
       })
       .catch((err) => {
         req.log.error({ err, jobId }, "Queued pipeline error");

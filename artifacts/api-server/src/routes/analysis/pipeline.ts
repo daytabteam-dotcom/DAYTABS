@@ -34,6 +34,10 @@ function getPipelineErrorMessage(err: unknown): string {
     ? (err as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode
     : undefined;
 
+  if (/cap exceeded|Class B|download bandwidth/i.test(fallback)) {
+    return "Analysis failed because the Backblaze B2 download bandwidth or Class B transaction cap has been exceeded. Increase the cap in Backblaze Caps & Alerts, then upload the video again.";
+  }
+
   if (code === "AccessDenied" || statusCode === 403) {
     return "Analysis failed because the server could not read the uploaded video from temporary storage. Please check the Backblaze B2 bucket permissions and credentials, then upload the video again.";
   }
@@ -59,14 +63,20 @@ export interface PipelineOptions {
 export async function runAnalysisPipeline(
   jobId: string,
   b2Key: string,
-  options: PipelineOptions
+  options: PipelineOptions,
+  sourceVideoPath?: string,
 ): Promise<boolean> {
   const workDir = path.join(os.tmpdir(), "daytabs", jobId);
   const localVideoPath = path.join(workDir, "video.mp4");
 
   try {
     await fs.mkdir(workDir, { recursive: true });
-    await downloadFromB2(b2Key, localVideoPath);
+    if (sourceVideoPath) {
+      logger.info({ jobId, sourceVideoPath, localVideoPath }, "Copying uploaded video from local storage for analysis");
+      await fs.copyFile(sourceVideoPath, localVideoPath);
+    } else {
+      await downloadFromB2(b2Key, localVideoPath);
+    }
     await runVideoAnalyzer(jobId, localVideoPath, options);
 
     const job = await db

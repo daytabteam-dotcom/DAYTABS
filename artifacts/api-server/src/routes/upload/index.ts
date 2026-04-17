@@ -393,27 +393,27 @@ router.post("/complete", async (req, res) => {
 
     sessions.delete(uploadId);
 
-    // Clean up local assembled file after B2 upload
-    await fs.unlink(assembledPath).catch(() => {});
-
     res.json({ jobId, filePath: b2Key });
 
     analysisQueue
       .add(async () => {
-        const completed = await runAnalysisPipeline(jobId, b2Key, {
-          mode: validatedMode,
-          platform: session.platforms[0] ?? "youtube_long",
-          platforms: session.platforms,
-          modules: session.modules,
-          translateSubtitles: session.translateSubtitles,
-          subtitleLanguage: session.subtitleLanguage ?? undefined,
-          audioLanguage: session.audioLanguage ?? undefined,
-          audioVoice: session.audioVoice,
-          plan: rawPlan,
-          maxDurationSeconds,
-        });
-        if (completed && userId) await incrementVideoAnalysis(userId);
-        await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
+        try {
+          const completed = await runAnalysisPipeline(jobId, b2Key, {
+            mode: validatedMode,
+            platform: session.platforms[0] ?? "youtube_long",
+            platforms: session.platforms,
+            modules: session.modules,
+            translateSubtitles: session.translateSubtitles,
+            subtitleLanguage: session.subtitleLanguage ?? undefined,
+            audioLanguage: session.audioLanguage ?? undefined,
+            audioVoice: session.audioVoice,
+            plan: rawPlan,
+            maxDurationSeconds,
+          }, assembledPath);
+          if (completed && userId) await incrementVideoAnalysis(userId);
+        } finally {
+          await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
+        }
       })
       .catch(async (err) => {
         logger.error({ err, jobId }, "Queued pipeline error after chunked upload");
