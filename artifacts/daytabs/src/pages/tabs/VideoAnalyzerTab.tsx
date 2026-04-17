@@ -1673,7 +1673,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
         <>
           <div className="text-center">
             <h1 className="text-3xl font-display font-bold text-white">Video Analyzer</h1>
-            <p className="text-white/50 mt-2">Upload your video and get a full AI analysis; quality, editing, publishing, and more.</p>
+            <p className="text-white/50 mt-2">Upload a raw talking video for quality scores, editing tips, script insights, and a publish package.</p>
           </div>
 
           <div className="grid lg:grid-cols-3 gap-6">
@@ -1685,6 +1685,13 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
                 maxSizeLabel={getFileSizeLimitLabel(plan.plan)}
                 durationLabel={getDurationLimitLabel(plan.plan)}
               />
+
+              <div className="flex gap-3 rounded-lg border border-amber-500/20 bg-amber-500/8 px-4 py-3 text-left">
+                <AlertTriangle className="w-4 h-4 text-amber-300 mt-0.5 shrink-0" />
+                <p className="text-xs leading-relaxed text-white/55">
+                  Best for raw talking videos with clear speech. Silent videos, music-only clips, trailers, montages, and heavily edited versions may return weaker editing, script, and publishing recommendations.
+                </p>
+              </div>
 
               <div>
                 <p className="text-xs text-white/40 uppercase tracking-wider mb-3 flex items-center gap-2">
