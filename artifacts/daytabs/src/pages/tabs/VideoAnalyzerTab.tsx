@@ -5,7 +5,7 @@ import {
   Upload, Film, Wand2, Shield, Scissors, TrendingUp, Sparkles,
   CheckCircle2, AlertTriangle, XCircle, RefreshCcw,
   Volume2, Eye, Zap, Hash, FileText, Lock, Download,
-  Copy, Check, AlignLeft, ChevronRight, FileDown, X,
+  Copy, Check, AlignLeft, ChevronRight, FileDown, X, History,
 } from "lucide-react";
 import { useAnalysisPolling, useAnalysisResults } from "@/hooks/use-analysis";
 import { useVideoUpload, type UploadProgressInfo } from "@/hooks/use-video-upload";
@@ -59,6 +59,115 @@ const PROGRESS_STEPS = [
 ];
 
 const TERMINAL_STATUSES = new Set(["complete", "error"]);
+const RECOVERY_STORAGE_KEY = "daytabs:video-analyzer:pending-upload";
+
+interface PendingUploadRecovery {
+  startedAt: number;
+  fileName?: string;
+  jobId?: string;
+  platforms: string[];
+  modules: string[];
+}
+
+interface AnalysisHistoryItem {
+  jobId: string;
+  status: string;
+  progress: number;
+  currentStep: string;
+  platform?: string;
+  result?: {
+    analysisOptions?: {
+      platforms?: string[];
+      modules?: string[];
+    };
+  };
+  error?: string;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+function readPendingUploadRecovery(): PendingUploadRecovery | null {
+  try {
+    const raw = localStorage.getItem(RECOVERY_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PendingUploadRecovery;
+    if (!parsed.startedAt || Date.now() - parsed.startedAt > 6 * 60 * 60 * 1000) {
+      localStorage.removeItem(RECOVERY_STORAGE_KEY);
+      return null;
+    }
+    return parsed;
+  } catch {
+    localStorage.removeItem(RECOVERY_STORAGE_KEY);
+    return null;
+  }
+}
+
+function writePendingUploadRecovery(recovery: PendingUploadRecovery) {
+  localStorage.setItem(RECOVERY_STORAGE_KEY, JSON.stringify(recovery));
+}
+
+function clearPendingUploadRecovery() {
+  localStorage.removeItem(RECOVERY_STORAGE_KEY);
+}
+
+function getStoredAuthToken() {
+  return localStorage.getItem("daytabs_token");
+}
+
+function getAuthHeaders(): Record<string, string> {
+  const token = getStoredAuthToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+async function recoverPendingAnalysis(recovery: PendingUploadRecovery) {
+  const token = getStoredAuthToken();
+  if (!token) return null;
+
+  const res = await fetch(`/api/analysis/recover?since=${recovery.startedAt}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) return null;
+
+  return await res.json() as {
+    jobId?: string;
+    result?: {
+      analysisOptions?: {
+        platforms?: string[];
+        modules?: string[];
+      };
+    };
+  };
+}
+
+function formatAnalysisDate(value: string | null) {
+  if (!value) return "Recent";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Recent";
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function getHistoryStatusLabel(status: string) {
+  if (status === "complete") return "Complete";
+  if (status === "error") return "Needs retry";
+  if (status === "queued") return "Queued";
+  if (status === "transcribing") return "Transcribing";
+  if (status === "analyzing_visual") return "Analyzing";
+  if (status === "analyzing_content") return "Finding moments";
+  if (status === "generating_seo") return "Publishing";
+  if (status === "extracting_audio") return "Extracting audio";
+  return "Processing";
+}
+
+function getHistoryStatusClasses(status: string) {
+  if (status === "complete") return "border-emerald-500/25 bg-emerald-500/10 text-emerald-300";
+  if (status === "error") return "border-red-500/25 bg-red-500/10 text-red-300";
+  return "border-primary/25 bg-primary/10 text-primary";
+}
 
 function navigateToPricing(feature?: string) {
   const params = new URLSearchParams({ highlight: "creator" });
@@ -916,6 +1025,93 @@ function UploadZone({ onFile, currentFile, isPending, maxSizeLabel, durationLabe
   );
 }
 
+function AnalysisHistoryCards({
+  items,
+  loading,
+  activeJobId,
+  onOpen,
+}: {
+  items: AnalysisHistoryItem[];
+  loading: boolean;
+  activeJobId: string | null;
+  onOpen: (item: AnalysisHistoryItem) => void;
+}) {
+  if (loading && items.length === 0) {
+    return (
+      <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
+        <div className="flex items-center gap-2 text-sm text-white/60">
+          <div className="w-4 h-4 border-2 border-white/15 border-t-primary rounded-full animate-spin" />
+          Loading recent analyses...
+        </div>
+      </div>
+    );
+  }
+
+  if (items.length === 0) {
+    return (
+      <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5 text-sm text-white/45">
+        Your completed reports will appear here.
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-3">
+      {items.map((item) => {
+        const options = item.result?.analysisOptions;
+        const modules = options?.modules?.length ? options.modules : ["quality", "editing"];
+        const platforms = options?.platforms?.length ? options.platforms : [item.platform ?? "youtube_long"];
+        const active = activeJobId === item.jobId;
+        const canOpen = item.status !== "error";
+
+        return (
+          <button
+            key={item.jobId}
+            type="button"
+            onClick={() => canOpen && onOpen(item)}
+            disabled={!canOpen}
+            className={`text-left rounded-2xl border p-4 transition-all bg-white/[0.035] ${active ? "border-primary/50 shadow-lg shadow-primary/10" : "border-white/10 hover:border-white/20 hover:bg-white/[0.055]"} ${!canOpen ? "opacity-70 cursor-not-allowed" : "cursor-pointer"}`}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-white truncate">Video Analysis</p>
+                <p className="text-xs text-white/35 mt-1">{formatAnalysisDate(item.createdAt)}</p>
+              </div>
+              <span className={`px-2 py-1 rounded-md border text-[11px] font-semibold whitespace-nowrap ${getHistoryStatusClasses(item.status)}`}>
+                {getHistoryStatusLabel(item.status)}
+              </span>
+            </div>
+
+            <div className="mt-4 h-1.5 rounded-full bg-white/8 overflow-hidden">
+              <div
+                className={`h-full rounded-full ${item.status === "error" ? "bg-red-400" : "bg-primary"}`}
+                style={{ width: `${Math.max(4, Math.min(100, Math.round(item.progress ?? 0)))}%` }}
+              />
+            </div>
+
+            <p className="text-xs text-white/45 mt-3 truncate">
+              {item.status === "error" ? item.error ?? "Analysis failed" : item.currentStep || "Analysis queued"}
+            </p>
+
+            <div className="flex flex-wrap gap-1.5 mt-4">
+              {platforms.slice(0, 2).map((platform) => (
+                <span key={platform} className="px-2 py-1 rounded-md bg-white/5 border border-white/8 text-[11px] text-white/45">
+                  {PLATFORMS.find(p => p.id === platform)?.shortLabel ?? platform}
+                </span>
+              ))}
+              {modules.slice(0, 3).map((module) => (
+                <span key={module} className="px-2 py-1 rounded-md bg-white/5 border border-white/8 text-[11px] text-white/45">
+                  {MODULES.find(m => m.id === module)?.label ?? module}
+                </span>
+              ))}
+            </div>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterExport }: TabProps) {
   const { plan, loading: planLoading, getModeLimits } = usePlan();
   const { toast } = useToast();
@@ -929,6 +1125,8 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
   const [jobId, setJobId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [limitError, setLimitError] = useState<LimitError | null>(null);
+  const [analysisHistory, setAnalysisHistory] = useState<AnalysisHistoryItem[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   const { uploadAsync: uploadVideo, isPending: isUploading, uploadInfo, cancelUpload } = useVideoUpload();
   const { data: pollData } = useAnalysisPolling(jobId);
@@ -953,14 +1151,77 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
   useEffect(() => { resultsRef.current = results ?? null; }, [results]);
   useEffect(() => { if (file?.name) fileNameRef.current = file.name; }, [file]);
 
+  const loadAnalysisHistory = useCallback(async () => {
+    const token = getStoredAuthToken();
+    if (!token) return;
+
+    setHistoryLoading(true);
+    try {
+      const res = await fetch("/api/analysis/history?limit=12", {
+        headers: getAuthHeaders(),
+      });
+      if (!res.ok) return;
+      const data = await res.json() as { analyses?: AnalysisHistoryItem[] };
+      setAnalysisHistory(data.analyses ?? []);
+    } catch {
+      // History is helpful but non-blocking; upload and polling remain the main path.
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadAnalysisHistory();
+  }, [loadAnalysisHistory]);
+
+  useEffect(() => {
+    const recovery = readPendingUploadRecovery();
+    if (!recovery || jobId) return;
+
+    if (recovery.fileName) fileNameRef.current = recovery.fileName;
+    if (recovery.platforms?.length) setSelectedPlatforms(recovery.platforms);
+    if (recovery.modules?.length) setSelectedModules(recovery.modules);
+
+    if (recovery.jobId) {
+      setJobId(recovery.jobId);
+      toast({
+        title: "Analysis restored",
+        description: "We reconnected to your previous upload.",
+      });
+      return;
+    }
+
+    let cancelled = false;
+    recoverPendingAnalysis(recovery)
+      .then((data) => {
+        if (cancelled || !data?.jobId) return;
+        const options = data.result?.analysisOptions;
+        if (options?.platforms?.length) setSelectedPlatforms(options.platforms);
+        if (options?.modules?.length) setSelectedModules(options.modules);
+        setJobId(data.jobId);
+        writePendingUploadRecovery({ ...recovery, jobId: data.jobId });
+        toast({
+          title: "Analysis restored",
+          description: "Your upload kept processing, so we reconnected to it.",
+        });
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [jobId, toast]);
+
   useEffect(() => {
     if (hasResults) {
+      clearPendingUploadRecovery();
       onDataReady();
       const firstModule = selectedModules.find(m => (results as any)?.[m]);
       setActiveResultTab(firstModule ?? "quality");
 
       // Refresh plan usage so the Home page counter updates immediately
       window.dispatchEvent(new CustomEvent("daytabs:plan-updated"));
+      loadAnalysisHistory();
 
       // Register real PDF export so ExportWarningDialog can trigger it
       const exportFn = async () => {
@@ -971,7 +1232,13 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
     } else {
       onRegisterExport(null);
     }
-  }, [hasResults]);
+  }, [hasResults, loadAnalysisHistory]);
+
+  useEffect(() => {
+    if (statusData?.status === "error") {
+      clearPendingUploadRecovery();
+    }
+  }, [statusData?.status]);
 
   // Show the processing screen as soon as a jobId exists, even before first poll
   const showAnalyzing = isAnalyzing || (!!jobId && !isDone && !isError);
@@ -1054,6 +1321,13 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
     if (uploadsRemaining === 0) { setShowLimitModal(true); return; }
 
     setIsSubmitting(true);
+    const recovery: PendingUploadRecovery = {
+      startedAt: Date.now(),
+      fileName: file.name,
+      platforms: selectedPlatforms,
+      modules: selectedModules,
+    };
+    writePendingUploadRecovery(recovery);
     try {
       const { jobId: id } = await uploadVideo({
         file,
@@ -1063,10 +1337,12 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
           modules: selectedModules,
         },
       });
+      writePendingUploadRecovery({ ...recovery, jobId: id });
       setJobId(id);
     } catch (err: any) {
       // Silently reset if the user cancelled
       if (err?.message === "Upload cancelled") {
+        clearPendingUploadRecovery();
         setFile(null);
         return;
       }
@@ -1075,6 +1351,19 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
       if (structured?.code) {
         setLimitError(structured as LimitError);
       } else {
+        const recovered = await recoverPendingAnalysis(recovery).catch(() => null);
+        if (recovered?.jobId) {
+          const options = recovered.result?.analysisOptions;
+          if (options?.platforms?.length) setSelectedPlatforms(options.platforms);
+          if (options?.modules?.length) setSelectedModules(options.modules);
+          writePendingUploadRecovery({ ...recovery, jobId: recovered.jobId });
+          setJobId(recovered.jobId);
+          toast({
+            title: "Analysis restored",
+            description: "The upload continued on the server, so we reconnected to it.",
+          });
+          return;
+        }
         toast({ title: "Upload failed", description: err?.message ?? "Please try again.", variant: "destructive" });
       }
     } finally {
@@ -1082,13 +1371,33 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
     }
   }
 
+  function handleOpenHistoryItem(item: AnalysisHistoryItem) {
+    const options = item.result?.analysisOptions;
+    if (options?.platforms?.length) setSelectedPlatforms(options.platforms);
+    if (options?.modules?.length) setSelectedModules(options.modules);
+    setFile(null);
+    setJobId(item.jobId);
+    writePendingUploadRecovery({
+      startedAt: item.createdAt ? new Date(item.createdAt).getTime() : Date.now(),
+      jobId: item.jobId,
+      platforms: options?.platforms?.length ? options.platforms : [item.platform ?? "youtube_long"],
+      modules: options?.modules?.length ? options.modules : ["quality", "editing"],
+    });
+    toast({
+      title: item.status === "complete" ? "Report opened" : "Analysis restored",
+      description: item.status === "complete" ? "Your saved analysis report is ready." : "We reconnected to the selected analysis.",
+    });
+  }
+
   function handleReset() {
+    clearPendingUploadRecovery();
     setFile(null);
     setJobId(null);
     onDataReset();
   }
 
   function handleCancel() {
+    clearPendingUploadRecovery();
     cancelUpload();
   }
 
@@ -1205,6 +1514,31 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
               </div>
             </div>
           </div>
+
+          <section className="space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs text-white/40 uppercase tracking-wider flex items-center gap-2">
+                  <History className="w-3.5 h-3.5" />Previous Analyses
+                </p>
+                <p className="text-sm text-white/45 mt-1">Open a recent report or reconnect to work still in progress.</p>
+              </div>
+              <button
+                type="button"
+                onClick={loadAnalysisHistory}
+                disabled={historyLoading}
+                className="px-3 py-2 rounded-xl text-xs font-semibold text-white/55 border border-white/10 hover:border-white/20 hover:text-white transition-all disabled:opacity-50"
+              >
+                Refresh
+              </button>
+            </div>
+            <AnalysisHistoryCards
+              items={analysisHistory}
+              loading={historyLoading}
+              activeJobId={jobId}
+              onOpen={handleOpenHistoryItem}
+            />
+          </section>
         </>
       ) : isError ? (
         <ErrorScreen error={errorMessage} onReset={handleReset} />

@@ -8,7 +8,7 @@ import { exec } from "child_process";
 import { promisify } from "util";
 import { db } from "@workspace/db";
 import { analysisJobsTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { runAnalysisPipeline, type PipelineMode } from "./pipeline";
 import { updateJob } from "./services";
 import { analysisQueue, getQueueStatus } from "../../lib/analysisQueue";
@@ -310,6 +310,88 @@ router.post("/upload", (req, res, next) => {
 
 router.get("/queue-status", (req, res) => {
   res.json(getQueueStatus());
+});
+
+// ── User analysis history ────────────────────────────────────────────────────
+router.get("/history", async (req, res) => {
+  try {
+    res.setHeader("Cache-Control", "no-store");
+    const userId = req.auth?.user_id;
+    if (!userId) {
+      res.status(401).json({ error: "Sign in to view analysis history" });
+      return;
+    }
+
+    const limitParam = typeof req.query.limit === "string" ? Number(req.query.limit) : 12;
+    const limit = Number.isFinite(limitParam) ? Math.max(1, Math.min(24, Math.floor(limitParam))) : 12;
+
+    const jobs = await db
+      .select()
+      .from(analysisJobsTable)
+      .where(sql`${analysisJobsTable.userId} = ${userId} AND ${analysisJobsTable.mode} = 'video-analyzer'`)
+      .orderBy(desc(analysisJobsTable.createdAt))
+      .limit(limit);
+
+    res.json({
+      analyses: jobs.map((job) => ({
+        jobId: job.id,
+        status: job.status,
+        progress: job.progress,
+        currentStep: job.currentStep,
+        platform: job.platform,
+        result: job.result,
+        error: job.error || undefined,
+        createdAt: job.createdAt?.toISOString?.() ?? null,
+        updatedAt: job.updatedAt?.toISOString?.() ?? null,
+      })),
+    });
+  } catch (err) {
+    req.log.error({ err }, "Analysis history error");
+    res.status(500).json({ error: "Failed to load analysis history" });
+  }
+});
+
+// ── Recover latest user job after a browser disconnect/reload ────────────────
+router.get("/recover", async (req, res) => {
+  try {
+    res.setHeader("Cache-Control", "no-store");
+    const userId = req.auth?.user_id;
+    if (!userId) {
+      res.status(401).json({ error: "Sign in to recover an upload" });
+      return;
+    }
+
+    const sinceParam = typeof req.query.since === "string" ? Number(req.query.since) : 0;
+    const since = Number.isFinite(sinceParam) && sinceParam > 0
+      ? new Date(sinceParam)
+      : new Date(Date.now() - 6 * 60 * 60 * 1000);
+
+    const jobs = await db
+      .select()
+      .from(analysisJobsTable)
+      .where(sql`${analysisJobsTable.userId} = ${userId} AND ${analysisJobsTable.createdAt} >= ${since}`)
+      .orderBy(desc(analysisJobsTable.createdAt))
+      .limit(1);
+
+    if (!jobs.length) {
+      res.status(404).json({ error: "No recent analysis found" });
+      return;
+    }
+
+    const job = jobs[0];
+    res.json({
+      jobId: job.id,
+      status: job.status,
+      progress: job.progress,
+      currentStep: job.currentStep,
+      error: job.error || undefined,
+      result: job.result,
+      createdAt: job.createdAt?.toISOString?.() ?? null,
+    });
+  } catch (err) {
+    req.log.error({ err }, "Recover analysis error");
+    res.status(500).json({ error: "Failed to recover analysis" });
+  }
 });
 
 // ── Upload health check ───────────────────────────────────────────────────────
