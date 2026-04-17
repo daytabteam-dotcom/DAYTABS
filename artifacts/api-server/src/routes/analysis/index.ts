@@ -22,6 +22,11 @@ import {
 import { optionalAuth } from "../../middlewares/auth";
 import { normalizePlan, getLimits, buildFileTooLargeError } from "../../lib/planLimits";
 import { checkVideoAnalysisLimit, incrementVideoAnalysis, getOrCreateUsage } from "../../lib/usageService";
+import {
+  buildR2ObjectKey,
+  getR2RequiredEnvStatus,
+  uploadToB2,
+} from "../../lib/b2";
 
 const execAsync = promisify(exec);
 
@@ -108,8 +113,7 @@ router.get("/voice-preview/:voice", async (req, res) => {
 });
 
 // ── Video upload + analysis ───────────────────────────────────────────────────
-// Files are streamed from the client directly to disk via multer.
-// The pipeline runs on the local file, then deletes it.
+// Legacy multipart path: files land briefly on disk, then move to R2 for processing.
 router.post("/upload", (req, res, next) => {
   req.log.info({
     body: req.body,
@@ -236,7 +240,8 @@ router.post("/upload", (req, res, next) => {
       return;
     }
 
-    const b2Key = "";
+    const b2Key = buildR2ObjectKey(jobId, req.file.originalname, userId);
+    await uploadToB2(b2Key, req.file.path, req.file.mimetype || "video/mp4");
 
     await db.insert(analysisJobsTable).values({
       id: jobId,
@@ -250,7 +255,7 @@ router.post("/upload", (req, res, next) => {
       subtitleLanguage: req.body.subtitleLanguage || null,
       replaceAudio: 0,
       audioLanguage,
-      videoPath: req.file.path,
+      videoPath: null,
       b2Key,
       result: {
         analysisOptions: {
@@ -287,7 +292,7 @@ router.post("/upload", (req, res, next) => {
             audioVoice,
             plan: rawPlan,
             maxDurationSeconds,
-          }, uploadedVideoPath);
+          });
           if (completed && userId) await incrementVideoAnalysis(userId);
         } finally {
           await fs.unlink(uploadedVideoPath).catch(() => {});
@@ -310,16 +315,15 @@ router.get("/queue-status", (req, res) => {
 // ── Upload health check ───────────────────────────────────────────────────────
 router.get("/upload-health", (req, res) => {
   const uploadDir = path.join(os.tmpdir(), "daytabs-uploads");
-  const b2EnvVars = ["B2_ENDPOINT", "B2_ACCESS_KEY_ID", "B2_SECRET_ACCESS_KEY", "B2_BUCKET_NAME"];
-  const missingVars = b2EnvVars.filter(v => !process.env[v]);
+  const r2Status = getR2RequiredEnvStatus();
 
   res.json({
     status: "ok",
     timestamp: new Date().toISOString(),
     uploadDir: uploadDir,
     uploadDirExists: require("fs").existsSync(uploadDir),
-    b2Configured: missingVars.length === 0,
-    missingB2Vars: missingVars,
+    r2Configured: r2Status.configured,
+    missingR2Vars: r2Status.missing,
     queueSize: analysisQueue.size,
     queuePending: analysisQueue.pending,
     multerLimits: {

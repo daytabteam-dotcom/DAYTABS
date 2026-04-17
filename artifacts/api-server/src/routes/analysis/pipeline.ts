@@ -35,11 +35,11 @@ function getPipelineErrorMessage(err: unknown): string {
     : undefined;
 
   if (/cap exceeded|Class B|download bandwidth/i.test(fallback)) {
-    return "Analysis failed because the Backblaze B2 download bandwidth or Class B transaction cap has been exceeded. Increase the cap in Backblaze Caps & Alerts, then upload the video again.";
+    return "Analysis failed because the Cloudflare R2 object could not be downloaded. Check the R2 bucket settings and try again.";
   }
 
   if (code === "AccessDenied" || statusCode === 403) {
-    return "Analysis failed because the server could not read the uploaded video from temporary storage. Please check the Backblaze B2 bucket permissions and credentials, then upload the video again.";
+    return "Analysis failed because the server could not read the uploaded video from Cloudflare R2. Please check the R2 bucket permissions and credentials, then upload the video again.";
   }
 
   return fallback || "Analysis failed unexpectedly.";
@@ -85,14 +85,6 @@ export async function runAnalysisPipeline(
       .where(eq(analysisJobsTable.id, jobId))
       .limit(1);
 
-    if (job[0]?.status === "complete" && b2Key) {
-      try {
-        await deleteFromB2(b2Key);
-      } catch (err) {
-        logger.error({ err, jobId, b2Key }, "Analysis completed, but B2 video cleanup failed");
-      }
-    }
-
     return job[0]?.status === "complete";
   } catch (err) {
     logger.error({ err, jobId, b2Key }, "Analysis pipeline failed before completion");
@@ -116,6 +108,11 @@ export async function runAnalysisPipeline(
 
     throw err;
   } finally {
+    if (b2Key) {
+      await deleteFromB2(b2Key).catch((err) => {
+        logger.error({ err, jobId, b2Key }, "Analysis finished, but R2 video cleanup failed");
+      });
+    }
     await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
   }
 }

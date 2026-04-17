@@ -3,9 +3,6 @@ import multer from "multer";
 import { v4 as uuidv4 } from "uuid";
 import path from "path";
 import fs from "fs/promises";
-import { createWriteStream } from "fs";
-import { exec } from "child_process";
-import { promisify } from "util";
 import { db } from "@workspace/db";
 import { analysisJobsTable } from "@workspace/db";
 import { runAnalysisPipeline, type PipelineMode } from "../analysis/pipeline";
@@ -15,7 +12,6 @@ import {
   normalizePlan,
   getLimits,
   buildFileTooLargeError,
-  buildVideoTooLongError,
 } from "../../lib/planLimits";
 import {
   checkVideoAnalysisLimit,
@@ -23,8 +19,13 @@ import {
 } from "../../lib/usageService";
 import { logger } from "../../lib/logger";
 import { analysisQueue } from "../../lib/analysisQueue";
+import {
+  buildR2ObjectKey,
+  createR2UploadUrl,
+  deleteFromB2,
+  getR2ObjectMetadata,
+} from "../../lib/b2";
 
-const execAsync = promisify(exec);
 const router: IRouter = Router();
 router.use(optionalAuth);
 
@@ -49,6 +50,7 @@ interface UploadSession {
   subtitleLanguage: string | null;
   audioLanguage: string | null;
   audioVoice: string;
+  r2Key: string;
 }
 
 const sessions = new Map<string, UploadSession>();
@@ -62,6 +64,9 @@ setInterval(async () => {
   for (const [id, session] of sessions) {
     if (now - session.createdAt > SESSION_MAX_AGE_MS) {
       sessions.delete(id);
+      await deleteFromB2(session.r2Key).catch((err) => {
+        logger.warn({ err, r2Key: session.r2Key }, "Failed to delete abandoned R2 upload");
+      });
       const dir = path.join(UPLOAD_BASE, id);
       await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
       cleaned++;
@@ -132,8 +137,8 @@ router.post("/init", async (req, res) => {
     }
 
     const uploadId = uuidv4();
-    const dir = path.join(UPLOAD_BASE, uploadId);
-    await fs.mkdir(dir, { recursive: true });
+    const r2Key = buildR2ObjectKey(uploadId, filename ?? "upload.mp4", userId);
+    const uploadTarget = await createR2UploadUrl(r2Key, mimeType || "video/mp4");
 
     const validPlatforms = [
       "youtube_long",
@@ -190,9 +195,10 @@ router.post("/init", async (req, res) => {
       subtitleLanguage: subtitleLanguage ?? null,
       audioLanguage: audioLanguage ?? null,
       audioVoice: audioVoice ?? "alloy",
+      r2Key,
     });
 
-    res.json({ uploadId });
+    res.json({ uploadId, ...uploadTarget });
   } catch (err) {
     logger.error({ err }, "Upload init error");
     res.status(500).json({ error: "Failed to initialize upload" });
@@ -292,58 +298,31 @@ router.post("/complete", async (req, res) => {
       return;
     }
 
-    if (session.chunksReceived.size < session.totalChunks) {
-      res.status(400).json({
-        error: `Incomplete upload: received ${session.chunksReceived.size} of ${session.totalChunks} chunks`,
-      });
+    const dir = path.join(UPLOAD_BASE, uploadId);
+
+    const rawPlan = session.rawPlan;
+    const planLimits = getLimits(rawPlan);
+    const maxDurationSeconds = planLimits.max_video_duration_seconds;
+    const b2Key = session.r2Key;
+    let metadata: Awaited<ReturnType<typeof getR2ObjectMetadata>>;
+    try {
+      metadata = await getR2ObjectMetadata(b2Key);
+    } catch (err) {
+      logger.error({ err, uploadId, b2Key }, "Uploaded R2 object was not found");
+      res.status(400).json({ error: "Upload did not complete. Please try again." });
       return;
     }
 
-    const dir = path.join(UPLOAD_BASE, uploadId);
-    const ext = path.extname(session.filename) || ".mp4";
-    const assembledPath = path.join(dir, `assembled${ext}`);
-
-    const ws = createWriteStream(assembledPath);
-    for (let i = 0; i < session.totalChunks; i++) {
-      const chunkPath = path.join(dir, `chunk_${i}`);
-      const data = await fs.readFile(chunkPath);
-      await new Promise<void>((resolve, reject) => {
-        ws.write(data, (err) => (err ? reject(err) : resolve()));
-      });
-      await fs.unlink(chunkPath).catch(() => {});
-    }
-    await new Promise<void>((resolve, reject) => {
-      ws.once("error", reject);
-      ws.end(resolve);
-    });
-
-    const rawPlan = session.rawPlan;
-    const normalizedPlan = normalizePlan(rawPlan);
-    const planLimits = getLimits(rawPlan);
-    const maxDurationSeconds = planLimits.max_video_duration_seconds;
-
-    let duration = 0;
-    try {
-      const { stdout } = await execAsync(
-        `ffprobe -v quiet -print_format json -show_format "${assembledPath}"`
-      );
-      const info = JSON.parse(stdout);
-      duration = parseFloat(info?.format?.duration ?? "0");
-    } catch {
-      // Skip duration check if ffprobe fails
-    }
-
-    if (duration > 0 && duration > maxDurationSeconds) {
+    if (metadata.contentLength !== session.fileSize) {
+      await deleteFromB2(b2Key).catch(() => {});
       sessions.delete(uploadId);
-      await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
-      res.status(422).json(buildVideoTooLongError(normalizedPlan, duration));
+      res.status(400).json({ error: "Uploaded file size does not match. Please try again." });
       return;
     }
 
     const jobId = uuidv4();
     const userId = session.userId;
     const validatedMode: PipelineMode = "video-analyzer";
-    const b2Key = "";
 
     await db.insert(analysisJobsTable).values({
       id: jobId,
@@ -357,7 +336,7 @@ router.post("/complete", async (req, res) => {
       subtitleLanguage: session.subtitleLanguage ?? null,
       replaceAudio: 0,
       audioLanguage: session.audioLanguage ?? null,
-      videoPath: assembledPath,
+      videoPath: null,
       b2Key: b2Key,
       result: {
         analysisOptions: {
@@ -394,7 +373,7 @@ router.post("/complete", async (req, res) => {
             audioVoice: session.audioVoice,
             plan: rawPlan,
             maxDurationSeconds,
-          }, assembledPath);
+          });
           if (completed && userId) await incrementVideoAnalysis(userId);
         } finally {
           await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
@@ -417,6 +396,9 @@ router.delete("/:uploadId", async (req, res) => {
     const session = sessions.get(uploadId);
     if (session) {
       sessions.delete(uploadId);
+      await deleteFromB2(session.r2Key).catch((err) => {
+        logger.warn({ err, r2Key: session.r2Key }, "Failed to delete cancelled R2 upload");
+      });
       const dir = path.join(UPLOAD_BASE, uploadId);
       await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
     }

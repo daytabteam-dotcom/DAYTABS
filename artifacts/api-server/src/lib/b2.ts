@@ -1,4 +1,5 @@
-import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import fs from "fs";
 import { createReadStream } from "fs";
 import path from "path";
@@ -7,56 +8,138 @@ import { logger } from "./logger";
 function requireEnv(name: string): string {
   const value = process.env[name];
   if (!value) {
-    throw new Error(`Environment variable ${name} is required for Backblaze B2 integration`);
+    throw new Error(`Environment variable ${name} is required for Cloudflare R2 integration`);
   }
   return value;
 }
 
-let b2Client: S3Client | null = null;
-let b2Bucket: string | null = null;
+interface R2Config {
+  endpoint: string;
+  bucket: string;
+  publicUrl?: string;
+}
 
-function getB2Client(): S3Client {
-  if (!b2Client) {
+let r2Client: S3Client | null = null;
+let r2Config: R2Config | null = null;
+
+function stripTrailingSlash(value: string): string {
+  return value.replace(/\/+$/, "");
+}
+
+function readR2Config(): R2Config {
+  if (r2Config) return r2Config;
+
+  const configuredEndpoint = process.env.R2_ENDPOINT || (
+    process.env.R2_ACCOUNT_ID
+      ? `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`
+      : undefined
+  );
+  if (!configuredEndpoint) {
+    throw new Error("Environment variable R2_ENDPOINT or R2_ACCOUNT_ID is required for Cloudflare R2 integration");
+  }
+
+  const url = new URL(configuredEndpoint);
+  const pathBucket = url.pathname.replace(/^\/+|\/+$/g, "").split("/")[0] || undefined;
+  const bucket = process.env.R2_BUCKET_NAME || pathBucket;
+  if (!bucket) {
+    throw new Error("Environment variable R2_BUCKET_NAME is required unless R2_ENDPOINT includes the bucket path");
+  }
+
+  url.pathname = "/";
+  url.search = "";
+  url.hash = "";
+
+  r2Config = {
+    endpoint: stripTrailingSlash(url.toString()),
+    bucket,
+    publicUrl: process.env.R2_PUBLIC_URL ? stripTrailingSlash(process.env.R2_PUBLIC_URL) : undefined,
+  };
+  return r2Config;
+}
+
+function getR2Client(): S3Client {
+  if (!r2Client) {
     try {
-      b2Client = new S3Client({
-        region: "us-east-1",
-        endpoint: requireEnv("B2_ENDPOINT"),
+      const config = readR2Config();
+      r2Client = new S3Client({
+        region: "auto",
+        endpoint: config.endpoint,
+        forcePathStyle: true,
         credentials: {
-          accessKeyId: requireEnv("B2_ACCESS_KEY_ID"),
-          secretAccessKey: requireEnv("B2_SECRET_ACCESS_KEY"),
+          accessKeyId: requireEnv("R2_ACCESS_KEY_ID"),
+          secretAccessKey: requireEnv("R2_SECRET_ACCESS_KEY"),
         },
       });
     } catch (err) {
-      logger.error({ err }, "Failed to initialize B2 client. Check B2_ENDPOINT, B2_ACCESS_KEY_ID, B2_SECRET_ACCESS_KEY env vars");
+      logger.error({ err }, "Failed to initialize R2 client. Check R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY env vars");
       throw err;
     }
   }
-  return b2Client;
+  return r2Client;
 }
 
-function getB2Bucket(): string {
-  if (!b2Bucket) {
-    try {
-      b2Bucket = requireEnv("B2_BUCKET_NAME");
-    } catch (err) {
-      logger.error({ err }, "B2_BUCKET_NAME not set");
-      throw err;
-    }
+function getR2Bucket(): string {
+  return readR2Config().bucket;
+}
+
+export function getR2RequiredEnvStatus() {
+  const missing: string[] = [];
+  if (!process.env.R2_ENDPOINT && !process.env.R2_ACCOUNT_ID) missing.push("R2_ENDPOINT");
+  if (!process.env.R2_ACCESS_KEY_ID) missing.push("R2_ACCESS_KEY_ID");
+  if (!process.env.R2_SECRET_ACCESS_KEY) missing.push("R2_SECRET_ACCESS_KEY");
+  if (!process.env.R2_BUCKET_NAME) {
+    const endpoint = process.env.R2_ENDPOINT;
+    const pathBucket = endpoint ? new URL(endpoint).pathname.replace(/^\/+|\/+$/g, "").split("/")[0] : "";
+    if (!pathBucket) missing.push("R2_BUCKET_NAME");
   }
-  return b2Bucket;
+  return { configured: missing.length === 0, missing };
+}
+
+export function buildR2ObjectKey(uploadId: string, filename: string, userId?: number | null): string {
+  const ext = path.extname(filename) || ".mp4";
+  const owner = userId ? `users/${userId}` : "anonymous";
+  return `${owner}/uploads/${uploadId}${ext.toLowerCase()}`;
+}
+
+export async function createR2UploadUrl(key: string, contentType: string) {
+  const config = readR2Config();
+  const command = new PutObjectCommand({
+    Bucket: config.bucket,
+    Key: key,
+    ContentType: contentType,
+  });
+  const uploadUrl = await getSignedUrl(getR2Client(), command, { expiresIn: 15 * 60 });
+  return {
+    uploadUrl,
+    fileKey: key,
+    fileUrl: config.publicUrl ? `${config.publicUrl}/${key}` : undefined,
+  };
+}
+
+export async function getR2ObjectMetadata(key: string) {
+  const response = await getR2Client().send(
+    new HeadObjectCommand({
+      Bucket: getR2Bucket(),
+      Key: key,
+    }),
+  );
+  return {
+    contentLength: response.ContentLength ?? 0,
+    contentType: response.ContentType,
+  };
 }
 
 export async function uploadToB2(key: string, filePath: string, contentType: string) {
-  logger.info({ key, filePath, contentType }, "uploadToB2 called");
+  logger.info({ key, filePath, contentType }, "uploadToR2 called");
 
-  const client = getB2Client();
-  const bucket = getB2Bucket();
+  const client = getR2Client();
+  const bucket = getR2Bucket();
 
-  logger.info({ bucket, endpoint: process.env.B2_ENDPOINT }, "B2 client and bucket initialized");
+  logger.info({ bucket, endpoint: readR2Config().endpoint }, "R2 client and bucket initialized");
 
   try {
     const stats = await fs.promises.stat(filePath);
-    logger.info({ key, filePath, size: stats.size }, "Starting B2 upload");
+    logger.info({ key, filePath, size: stats.size }, "Starting R2 upload");
 
     // For very large files, stream; for smaller files, buffer
     let body: any;
@@ -78,19 +161,19 @@ export async function uploadToB2(key: string, filePath: string, contentType: str
         ContentType: contentType,
       }),
     );
-    logger.info({ key }, "B2 upload completed successfully");
+    logger.info({ key }, "R2 upload completed successfully");
   } catch (err) {
-    logger.error({ err, key, filePath }, "B2 upload failed");
+    logger.error({ err, key, filePath }, "R2 upload failed");
     throw err;
   }
 }
 
 export async function downloadFromB2(key: string, destPath: string) {
-  const client = getB2Client();
-  const bucket = getB2Bucket();
+  const client = getR2Client();
+  const bucket = getR2Bucket();
 
   try {
-    logger.info({ key, destPath }, "Starting B2 download");
+    logger.info({ key, destPath }, "Starting R2 download");
     const response = await client.send(
       new GetObjectCommand({
         Bucket: bucket,
@@ -104,33 +187,33 @@ export async function downloadFromB2(key: string, destPath: string) {
     return new Promise<void>((resolve, reject) => {
       (response.Body as any).pipe(writeStream);
       writeStream.on("finish", () => {
-        logger.info({ key }, "B2 download completed successfully");
+        logger.info({ key }, "R2 download completed successfully");
         resolve();
       });
       writeStream.on("error", reject);
       (response.Body as any).on("error", reject);
     });
   } catch (err) {
-    logger.error({ err, key, destPath }, "B2 download failed");
+    logger.error({ err, key, destPath }, "R2 download failed");
     throw err;
   }
 }
 
 export async function deleteFromB2(key: string) {
-  const client = getB2Client();
-  const bucket = getB2Bucket();
+  const client = getR2Client();
+  const bucket = getR2Bucket();
 
   try {
-    logger.info({ key }, "Deleting B2 object");
+    logger.info({ key }, "Deleting R2 object");
     await client.send(
       new DeleteObjectCommand({
         Bucket: bucket,
         Key: key,
       }),
     );
-    logger.info({ key }, "B2 object deleted successfully");
+    logger.info({ key }, "R2 object deleted successfully");
   } catch (err) {
-    logger.error({ err, key }, "B2 delete failed");
+    logger.error({ err, key }, "R2 delete failed");
     throw err;
   }
 }

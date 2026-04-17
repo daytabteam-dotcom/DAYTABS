@@ -31,6 +31,40 @@ function authHeaders(): Record<string, string> {
 
 const CHUNK_SIZE = 5 * 1024 * 1024;
 
+function uploadToSignedUrl({
+  uploadUrl,
+  file,
+  onProgress,
+  onAbortReady,
+}: {
+  uploadUrl: string;
+  file: File;
+  onProgress: (loaded: number) => void;
+  onAbortReady: (abort: () => void) => void;
+}) {
+  return new Promise<void>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    onAbortReady(() => xhr.abort());
+
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) onProgress(event.loaded);
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        onProgress(file.size);
+        resolve();
+      } else {
+        reject(new Error(`Cloudflare upload failed (HTTP ${xhr.status})`));
+      }
+    };
+    xhr.onerror = () => reject(new Error("Cloudflare upload failed. Check your connection and try again."));
+    xhr.onabort = () => reject(new Error("Upload cancelled"));
+    xhr.open("PUT", uploadUrl);
+    xhr.setRequestHeader("Content-Type", file.type || "video/mp4");
+    xhr.send(file);
+  });
+}
+
 export function useVideoUpload() {
   const [isPending, setIsPending] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -39,11 +73,11 @@ export function useVideoUpload() {
 
   const cancelledRef = useRef(false);
   const uploadIdRef = useRef<string | null>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
+  const abortUploadRef = useRef<(() => void) | null>(null);
 
   const cancelUpload = useCallback(() => {
     cancelledRef.current = true;
-    abortControllerRef.current?.abort();
+    abortUploadRef.current?.();
     const id = uploadIdRef.current;
     if (id) {
       fetch(`/api/upload/${id}`, {
@@ -103,88 +137,42 @@ export function useVideoUpload() {
           throw err;
         }
 
-        const { uploadId } = await initRes.json();
+        const { uploadId, uploadUrl } = await initRes.json();
+        if (!uploadUrl) throw new Error("Upload URL was not returned by the server");
         uploadIdRef.current = uploadId;
 
         if (cancelledRef.current) throw new Error("Upload cancelled");
 
         const startTime = Date.now();
-        let bytesUploaded = 0;
+        await uploadToSignedUrl({
+          uploadUrl,
+          file,
+          onAbortReady: (abort) => {
+            abortUploadRef.current = abort;
+          },
+          onProgress: (bytesUploaded) => {
+            const pct = Math.max(1, Math.min(100, Math.round((bytesUploaded / file.size) * 100)));
+            setUploadProgress(pct);
 
-        for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
-          if (cancelledRef.current) throw new Error("Upload cancelled");
+            const elapsed = (Date.now() - startTime) / 1000;
+            const speed = elapsed > 0 ? bytesUploaded / elapsed : 0;
+            const remaining = file.size - bytesUploaded;
+            const etaSec = speed > 0 ? Math.round(remaining / speed) : null;
 
-          const start = chunkIndex * CHUNK_SIZE;
-          const end = Math.min(start + CHUNK_SIZE, file.size);
-          const chunk = file.slice(start, end);
-
-          let attempts = 0;
-          let success = false;
-
-          while (attempts < 3 && !success) {
-            if (cancelledRef.current) throw new Error("Upload cancelled");
-
-            if (attempts > 0) {
-              setUploadInfo((prev) => prev ? { ...prev, retrying: true } : null);
-              await new Promise((r) => setTimeout(r, 1000));
-            }
-
-            const ac = new AbortController();
-            abortControllerRef.current = ac;
-
-            try {
-              const form = new FormData();
-              form.append("uploadId", uploadId);
-              form.append("chunkIndex", String(chunkIndex));
-              form.append("totalChunks", String(totalChunks));
-              form.append("chunk", chunk, `chunk_${chunkIndex}`);
-
-              const chunkRes = await fetch("/api/upload/chunk", {
-                method: "POST",
-                headers: authHeaders(),
-                body: form,
-                signal: ac.signal,
-              });
-
-              if (!chunkRes.ok) {
-                const body = await chunkRes.json().catch(() => ({}));
-                throw new Error(body.error ?? `Chunk ${chunkIndex} failed (HTTP ${chunkRes.status})`);
-              }
-
-              success = true;
-            } catch (fetchErr: any) {
-              if (fetchErr.name === "AbortError" || cancelledRef.current) {
-                throw new Error("Upload cancelled");
-              }
-              attempts++;
-              if (attempts >= 3) {
-                throw new Error(
-                  `Upload failed after 3 attempts on chunk ${chunkIndex + 1}. Check your connection and try again.`
-                );
-              }
-            }
-          }
-
-          bytesUploaded += chunk.size;
-          const pct = Math.round(((chunkIndex + 1) / totalChunks) * 100);
-          setUploadProgress(pct);
-
-          const elapsed = (Date.now() - startTime) / 1000;
-          const speed = elapsed > 0 ? bytesUploaded / elapsed : 0;
-          const remaining = file.size - bytesUploaded;
-          const etaSec = speed > 0 ? Math.round(remaining / speed) : null;
-
-          setUploadInfo({
-            phase: "uploading",
-            pct,
-            mbUploaded: bytesUploaded / (1024 * 1024),
-            totalMb,
-            etaSec,
-            retrying: false,
-          });
-        }
+            setUploadInfo({
+              phase: "uploading",
+              pct,
+              mbUploaded: bytesUploaded / (1024 * 1024),
+              totalMb,
+              etaSec,
+              retrying: false,
+            });
+          },
+        });
 
         if (cancelledRef.current) throw new Error("Upload cancelled");
+
+        setUploadProgress(100);
 
         setUploadInfo({
           phase: "assembling",
@@ -214,12 +202,20 @@ export function useVideoUpload() {
         uploadIdRef.current = null;
         return { jobId };
       } catch (err: any) {
+        const id = uploadIdRef.current;
+        if (id) {
+          fetch(`/api/upload/${id}`, {
+            method: "DELETE",
+            headers: authHeaders(),
+          }).catch(() => {});
+          uploadIdRef.current = null;
+        }
         setError(err);
         throw err;
       } finally {
         setIsPending(false);
         setUploadInfo(null);
-        abortControllerRef.current = null;
+        abortUploadRef.current = null;
       }
     },
     []
