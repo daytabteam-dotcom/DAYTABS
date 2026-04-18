@@ -29,10 +29,8 @@ function getPublicBaseUrl(req: import("express").Request): string {
 
 function getGoogleRedirectUri(req: import("express").Request): string {
   const configuredRedirectUri = process.env.GOOGLE_REDIRECT_URI;
-  const callbackPath = configuredRedirectUri
-    ? new URL(configuredRedirectUri, "https://daytabs.local").pathname
-    : "/api/auth/google/callback";
-  return `${getPublicBaseUrl(req)}${callbackPath}`;
+  if (configuredRedirectUri) return configuredRedirectUri;
+  return `${getPublicBaseUrl(req)}/api/auth/google/callback`;
 }
 
 function getCoreAppPath(): string {
