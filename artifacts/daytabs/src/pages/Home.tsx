@@ -1,10 +1,11 @@
 import React, { useEffect, useState, useRef } from "react";
 import { UserProfileMenu } from "@/components/UserProfileMenu";
-import { LayoutDashboard, Wand2, Globe, MonitorPlay, Clapperboard, Zap, Video, FileText, TrendingUp, Lock } from "lucide-react";
+import { LayoutDashboard, Wand2, Globe, MonitorPlay, Clapperboard, Zap, Video, FileText, TrendingUp, Lock, CalendarDays, Bell } from "lucide-react";
 import VideoAnalyzerTab from "./tabs/VideoAnalyzerTab";
 import DubbingTab from "./tabs/DubbingTab";
 import TeleprompterTab from "./tabs/TeleprompterTab";
 import ScriptPlannerTab from "./tabs/ScriptPlannerTab";
+import GrowthPlannerTab, { getGrowthPlannerNotificationCounts, getGrowthPlannerNotifications } from "./tabs/GrowthPlannerTab";
 import { PlanPickerModal } from "@/components/PlanPickerModal";
 import { usePlan, getPlanBadgeColor, getPlanLabel, PLAN_DISPLAY_NAMES, getDurationLimitLabel, getFileSizeLimitLabel, getScriptPlannerChatLimit } from "@/hooks/use-plan";
 import { useUser } from "@/hooks/use-user";
@@ -13,6 +14,7 @@ const TABS = [
   { id: "dashboard",       label: "Home",            icon: LayoutDashboard,  desc: "Overview" },
   { id: "video-analyzer",  label: "Video Analyzer",  icon: Wand2,            desc: "Full Analysis" },
   { id: "script-planner",  label: "Script Planner",  icon: Clapperboard,     desc: "AI Scripts" },
+  { id: "growth-planner",  label: "Growth Planner",  icon: CalendarDays,     desc: "Studio" },
   { id: "teleprompter",    label: "Teleprompter",     icon: MonitorPlay,      desc: "Read Live" },
   { id: "dubbing",         label: "Dubbing",          icon: Globe,            desc: "Coming Soon" },
 ] as const;
@@ -35,6 +37,141 @@ function updateTabUrl(tabId: TabId, mode: "push" | "replace") {
   const nextUrl = `${url.pathname}${url.search}${url.hash}`;
   if (`${window.location.pathname}${window.location.search}${window.location.hash}` === nextUrl) return;
   window.history[mode === "push" ? "pushState" : "replaceState"]({ tab: tabId }, "", nextUrl);
+}
+
+function NotificationBell({ onOpenGrowthPlanner }: { onOpenGrowthPlanner: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [counts, setCounts] = useState(() => getGrowthPlannerNotificationCounts());
+  const [notifications, setNotifications] = useState(() => getGrowthPlannerNotifications());
+  const [expandedType, setExpandedType] = useState<"today" | "overdue" | null>(null);
+  const total = counts.today + counts.overdue;
+
+  useEffect(() => {
+    const refresh = () => {
+      setCounts(getGrowthPlannerNotificationCounts());
+      setNotifications(getGrowthPlannerNotifications());
+    };
+    refresh();
+    window.addEventListener("storage", refresh);
+    window.addEventListener("focus", refresh);
+    window.addEventListener("daytabs:growth-planner-updated", refresh);
+    return () => {
+      window.removeEventListener("storage", refresh);
+      window.removeEventListener("focus", refresh);
+      window.removeEventListener("daytabs:growth-planner-updated", refresh);
+    };
+  }, []);
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        className="relative w-10 h-10 rounded-lg border border-white/10 bg-white/[0.03] flex items-center justify-center text-white/55 hover:text-white hover:bg-white/[0.06] transition-colors"
+        aria-label="Notifications"
+      >
+        <Bell className="w-5 h-5" />
+        {total > 0 && (
+          <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full bg-amber-300 text-amber-950 text-[11px] font-bold flex items-center justify-center">
+            {total > 9 ? "9+" : total}
+          </span>
+        )}
+      </button>
+      {open && (
+        <div className="absolute right-0 mt-3 w-80 max-w-[calc(100vw-2rem)] rounded-xl border border-white/10 bg-card shadow-2xl p-4 z-50">
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <p className="text-sm font-semibold text-white">Notifications</p>
+            {total > 0 && <span className="text-xs text-amber-200">{total} active</span>}
+          </div>
+          {total === 0 ? (
+            <p className="text-sm text-white/45">No scheduled posts need attention right now.</p>
+          ) : (
+            <div className="space-y-2">
+              {counts.today > 0 && (
+                <NotificationGroup
+                  type="today"
+                  title={`${counts.today} post${counts.today === 1 ? "" : "s"} should be posted today.`}
+                  helper="Click to see which cards are due."
+                  expanded={expandedType === "today"}
+                  items={notifications.filter((item) => item.type === "today")}
+                  onToggle={() => setExpandedType(expandedType === "today" ? null : "today")}
+                  onOpenGrowthPlanner={(cardId) => {
+                    setOpen(false);
+                    onOpenGrowthPlanner();
+                    window.setTimeout(() => {
+                      window.dispatchEvent(new CustomEvent("daytabs:growth-planner-focus-card", { detail: { cardId } }));
+                    }, 120);
+                  }}
+                />
+              )}
+              {counts.overdue > 0 && (
+                <NotificationGroup
+                  type="overdue"
+                  title={`${counts.overdue} overdue post${counts.overdue === 1 ? "" : "s"} need an update.`}
+                  helper="Click to see which cards need a posted URL or skipped status."
+                  expanded={expandedType === "overdue"}
+                  items={notifications.filter((item) => item.type === "overdue")}
+                  onToggle={() => setExpandedType(expandedType === "overdue" ? null : "overdue")}
+                  onOpenGrowthPlanner={(cardId) => {
+                    setOpen(false);
+                    onOpenGrowthPlanner();
+                    window.setTimeout(() => {
+                      window.dispatchEvent(new CustomEvent("daytabs:growth-planner-focus-card", { detail: { cardId } }));
+                    }, 120);
+                  }}
+                />
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NotificationGroup({
+  title,
+  helper,
+  expanded,
+  items,
+  onToggle,
+  onOpenGrowthPlanner,
+}: {
+  type: "today" | "overdue";
+  title: string;
+  helper: string;
+  expanded: boolean;
+  items: ReturnType<typeof getGrowthPlannerNotifications>;
+  onToggle: () => void;
+  onOpenGrowthPlanner: (cardId: string) => void;
+}) {
+  return (
+    <div className="rounded-lg border border-amber-400/20 bg-amber-400/10 overflow-hidden">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="w-full text-left p-3 hover:bg-amber-400/10 transition-colors"
+      >
+        <p className="text-sm font-semibold text-amber-100">{title}</p>
+        <p className="text-xs text-amber-100/60 mt-1">{helper}</p>
+      </button>
+      {expanded && (
+        <div className="border-t border-amber-400/15 p-2 space-y-2">
+          {items.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => onOpenGrowthPlanner(item.id)}
+              className="w-full rounded-md bg-background/50 border border-white/8 p-2 text-left hover:border-primary/35 transition-colors"
+            >
+              <p className="text-xs font-semibold text-white/85 leading-snug">{item.title}</p>
+              <p className="text-[11px] text-white/40 mt-1">{item.platform} · {item.date} · {item.stage}</p>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function QuickActionCard({
@@ -161,6 +298,14 @@ function Dashboard({ onNavigate, onUpgrade }: { onNavigate: (tab: TabId) => void
             onClick={() => onNavigate("teleprompter")}
           />
           <QuickActionCard
+            icon={CalendarDays}
+            title="Build Growth Calendar"
+            desc="Studio social strategy and weekly plans"
+            color="bg-pink-500/15 border border-pink-500/20 text-pink-400"
+            onClick={() => onNavigate("growth-planner")}
+            badge={!plan.isStudio ? "Studio" : undefined}
+          />
+          <QuickActionCard
             icon={Globe}
             title="Dub Your Video"
             desc="Translate and dub into other languages"
@@ -245,12 +390,11 @@ export default function Home() {
       {showPlanModal && <PlanPickerModal onClose={() => setShowPlanModal(false)} />}
       <div className="fixed inset-0 pointer-events-none z-[-1] overflow-hidden">
         <img
-          src={`${import.meta.env.BASE_URL}images/hero-bg.png`}
+          src={`${import.meta.env.BASE_URL}images/panel-bg-purple-minimal.png`}
           alt=""
-          className="absolute inset-0 w-full h-full object-cover opacity-40 mix-blend-screen"
+          className="absolute inset-0 w-full h-full object-cover opacity-55"
         />
-        <div className="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] bg-primary/20 blur-[150px] rounded-full" />
-        <div className="absolute bottom-[-20%] right-[-10%] w-[50%] h-[50%] bg-purple-600/10 blur-[150px] rounded-full" />
+        <div className="absolute inset-0 bg-background/55" />
       </div>
       <header className="w-full border-b border-white/5 bg-background/50 backdrop-blur-xl sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
@@ -258,7 +402,10 @@ export default function Home() {
             <img src={`${import.meta.env.BASE_URL}images/logo.jpg`} alt="DayTabs" className="w-10 h-10 object-contain rounded-lg drop-shadow-[0_0_15px_rgba(124,58,237,0.5)]" />
             <span className="text-2xl font-display font-bold tracking-tight text-white">Day<span className="text-primary">Tabs</span></span>
           </div>
-          <UserProfileMenu />
+          <div className="flex items-center gap-3">
+            <NotificationBell onOpenGrowthPlanner={() => handleTabClick("growth-planner")} />
+            <UserProfileMenu />
+          </div>
         </div>
       </header>
       <div className="w-full border-b border-white/5 bg-background/30 backdrop-blur-md sticky top-20 z-40">
@@ -297,6 +444,7 @@ export default function Home() {
         {activeTab === "dashboard"      && <Dashboard onNavigate={handleTabClick} onUpgrade={() => setShowPlanModal(true)} />}
         {activeTab === "video-analyzer" && <VideoAnalyzerTab {...tabCallbacks} />}
         {activeTab === "script-planner" && <ScriptPlannerTab />}
+        {activeTab === "growth-planner" && <GrowthPlannerTab />}
         {activeTab === "teleprompter"   && <TeleprompterTab />}
         {activeTab === "dubbing"        && <DubbingTab {...tabCallbacks} />}
       </main>

@@ -242,7 +242,7 @@ function UpgradeOverlay({ feature, label }: { feature: string; label: string }) 
         <p className="text-xs text-white/70 leading-snug">{label}</p>
         <button
           onClick={() => navigateToPricing(feature)}
-          className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-gradient-to-r from-primary to-purple-500 text-white hover:opacity-90 transition-opacity whitespace-nowrap"
+          className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors whitespace-nowrap"
         >
           Upgrade to Creator, $19/mo
         </button>
@@ -994,7 +994,7 @@ function AnalyzingScreen({
     return (
       <div className="max-w-lg mx-auto py-12">
         <div className="text-center mb-10">
-          <div className="w-16 h-16 rounded-2xl bg-primary/15 border border-primary/25 flex items-center justify-center mx-auto mb-4">
+          <div className="w-16 h-16 rounded-lg bg-primary/15 border border-primary/25 flex items-center justify-center mx-auto mb-4">
             <Upload className="w-8 h-8 text-primary animate-pulse" />
           </div>
           <h2 className="text-xl font-semibold text-white">
@@ -1016,7 +1016,7 @@ function AnalyzingScreen({
             <motion.div
               animate={{ width: `${isAssembling ? 100 : pct}%` }}
               transition={{ duration: 0.4, ease: "easeOut" }}
-              className={`h-full rounded-full ${retrying ? "bg-amber-400" : "bg-gradient-to-r from-primary to-purple-500"}`}
+              className={`h-full rounded-full ${retrying ? "bg-amber-400" : "bg-primary"}`}
             />
           </div>
           {retrying && (
@@ -1028,7 +1028,7 @@ function AnalyzingScreen({
           <div className="flex justify-center">
             <button
               onClick={onCancel}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold text-white/40 border border-white/10 hover:border-white/25 hover:text-white/60 transition-all"
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold text-white/40 border border-white/10 hover:border-white/25 hover:text-white/60 transition-all"
             >
               <X className="w-3.5 h-3.5" />Cancel upload
             </button>
@@ -1043,7 +1043,7 @@ function AnalyzingScreen({
   return (
     <div className="max-w-lg mx-auto py-12">
       <div className="text-center mb-10">
-        <div className="w-16 h-16 rounded-2xl bg-primary/15 border border-primary/25 flex items-center justify-center mx-auto mb-4">
+        <div className="w-16 h-16 rounded-lg bg-primary/15 border border-primary/25 flex items-center justify-center mx-auto mb-4">
           <Wand2 className="w-8 h-8 text-primary animate-pulse" />
         </div>
         <h2 className="text-xl font-semibold text-white">Analyzing your video</h2>
@@ -1059,7 +1059,7 @@ function AnalyzingScreen({
           <motion.div
             animate={{ width: `${progress}%` }}
             transition={{ duration: 0.5, ease: "easeOut" }}
-            className="h-full bg-gradient-to-r from-primary to-purple-500 rounded-full"
+            className="h-full bg-primary rounded-full"
           />
         </div>
       </div>
@@ -1069,7 +1069,7 @@ function AnalyzingScreen({
           const completed = i < activeIdx || (i === activeIdx && progress >= step.threshold);
           const active = i === activeIdx && !completed;
           return (
-            <div key={i} className={`flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all ${active ? "bg-primary/10 border border-primary/25" : completed ? "opacity-50" : "opacity-20"}`}>
+            <div key={i} className={`flex items-center gap-3 px-4 py-2.5 rounded-lg transition-all ${active ? "bg-primary/10 border border-primary/25" : completed ? "opacity-50" : "opacity-20"}`}>
               <div className={`w-5 h-5 rounded-full border flex items-center justify-center shrink-0 ${completed ? "bg-green-500 border-green-500" : active ? "border-primary bg-primary/20" : "border-white/20"}`}>
                 {completed ? <Check className="w-3 h-3 text-white" /> : active ? <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" /> : <span className="text-[9px] text-white/30">{i + 1}</span>}
               </div>
@@ -1086,14 +1086,14 @@ function AnalyzingScreen({
 function ErrorScreen({ error, onReset }: { error: string; onReset: () => void }) {
   return (
     <div className="max-w-md mx-auto py-12 text-center">
-      <div className="w-16 h-16 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-center mx-auto mb-4">
+      <div className="w-16 h-16 rounded-lg bg-red-500/10 border border-red-500/20 flex items-center justify-center mx-auto mb-4">
         <XCircle className="w-8 h-8 text-red-400" />
       </div>
       <h2 className="text-xl font-semibold text-white mb-2">Analysis failed</h2>
       <p className="text-sm text-white/50 mb-6 leading-relaxed">{error}</p>
       <button
         onClick={onReset}
-        className="flex items-center gap-2 mx-auto px-5 py-2.5 rounded-xl text-sm font-semibold bg-primary/15 border border-primary/30 text-primary hover:bg-primary/25 transition-all"
+        className="flex items-center gap-2 mx-auto px-5 py-2.5 rounded-lg text-sm font-semibold bg-primary/15 border border-primary/30 text-primary hover:bg-primary/25 transition-all"
       >
         <RefreshCcw className="w-4 h-4" />Try again
       </button>
@@ -1107,9 +1107,9 @@ function LimitReachedModal({ limit, onClose, onUpgrade }: { limit: number; onClo
       <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
-        className="bg-[#1a1025] border border-white/10 rounded-2xl p-8 max-w-sm mx-4 text-center"
+        className="bg-[#1a1025] border border-white/10 rounded-lg p-8 max-w-sm mx-4 text-center"
       >
-        <div className="w-14 h-14 rounded-2xl bg-primary/15 border border-primary/25 flex items-center justify-center mx-auto mb-4">
+        <div className="w-14 h-14 rounded-lg bg-primary/15 border border-primary/25 flex items-center justify-center mx-auto mb-4">
           <Shield className="w-7 h-7 text-primary" />
         </div>
         <h2 className="text-xl font-semibold text-white mb-2">Monthly limit reached</h2>
@@ -1118,7 +1118,7 @@ function LimitReachedModal({ limit, onClose, onUpgrade }: { limit: number; onClo
         </p>
         <button
           onClick={onUpgrade}
-          className="w-full py-3 rounded-xl text-sm font-semibold bg-gradient-to-r from-primary to-purple-500 text-white hover:opacity-90 transition-opacity mb-3"
+          className="w-full py-3 rounded-lg text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors mb-3"
         >
           View Plans, from $19/mo
         </button>
@@ -1740,7 +1740,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
                 handleReset();
                 setShowUploadForm(true);
               }}
-              className="px-4 py-2.5 rounded-xl text-sm font-semibold bg-gradient-to-r from-primary to-purple-500 text-white hover:opacity-90 transition-opacity flex items-center gap-2"
+              className="px-4 py-2.5 rounded-lg text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors flex items-center gap-2"
             >
               <Upload className="w-4 h-4" />
               New Analysis
@@ -1751,7 +1751,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
               type="button"
               onClick={loadAnalysisHistory}
               disabled={historyLoading}
-              className="px-3 py-2 rounded-xl text-xs font-semibold text-white/55 border border-white/10 hover:border-white/20 hover:text-white transition-all disabled:opacity-50"
+              className="px-3 py-2 rounded-lg text-xs font-semibold text-white/55 border border-white/10 hover:border-white/20 hover:text-white transition-all disabled:opacity-50"
             >
               Refresh
             </button>
@@ -1767,12 +1767,24 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
         </section>
       ) : !hasResults && !showAnalyzing && !isError ? (
         <>
-          <div className="text-center">
-            <h1 className="text-3xl font-display font-bold text-white">Video Analyzer</h1>
-            <p className="text-white/50 mt-2">Upload a raw talking video for quality scores, editing tips, script insights, and a publish package.</p>
+          <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+            <div>
+              <h1 className="text-3xl font-display font-bold text-white">Video Analyzer</h1>
+              <p className="text-white/50 mt-2 max-w-2xl">Upload a raw talking video for quality scores, editing tips, script insights, and a publish package.</p>
+            </div>
+            {hasHistory && (
+              <button
+                type="button"
+                onClick={loadAnalysisHistory}
+                disabled={historyLoading}
+                className="px-3 py-2 rounded-lg text-xs font-semibold text-white/55 border border-white/10 hover:border-white/20 hover:text-white transition-all disabled:opacity-50"
+              >
+                Refresh history
+              </button>
+            )}
           </div>
 
-          <div className="grid lg:grid-cols-3 gap-6">
+          <div className="grid lg:grid-cols-3 gap-5">
             <div className="lg:col-span-2 space-y-5">
               <UploadZone
                 onFile={handleFileSelected}
@@ -1789,9 +1801,9 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
                 </p>
               </div>
 
-              <div>
+              <div className="rounded-lg border border-white/8 bg-white/[0.025] p-4">
                 <p className="text-xs text-white/40 uppercase tracking-wider mb-3 flex items-center gap-2">
-                  <TrendingUp className="w-3.5 h-3.5" />Target Platform
+                  <TrendingUp className="w-3.5 h-3.5" />Target platform
                 </p>
                 <div className="flex flex-wrap gap-2">
                   {PLATFORMS.map(pl => {
@@ -1810,9 +1822,9 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
               </div>
             </div>
 
-            <div className="space-y-4">
+            <div className="space-y-4 rounded-lg border border-white/8 bg-white/[0.025] p-4 self-start">
               <p className="text-xs text-white/40 uppercase tracking-wider flex items-center gap-2">
-                <Wand2 className="w-3.5 h-3.5" />Analysis Modules
+                <Wand2 className="w-3.5 h-3.5" />Analysis modules
               </p>
               <div className="space-y-2">
                 {MODULES.map(mod => {
@@ -1823,7 +1835,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
                     <button
                       key={mod.id}
                       onClick={() => toggleModule(mod.id, locked)}
-                      className={`w-full flex items-center gap-3 p-3 rounded-xl text-left transition-all border ${active && !locked ? `${MODULE_COLORS[mod.color]} border-opacity-40` : locked ? "bg-white/3 border-white/8 opacity-60" : "bg-white/3 border-white/8 hover:border-white/15"}`}
+                      className={`w-full flex items-center gap-3 p-3 rounded-lg text-left transition-all border ${active && !locked ? `${MODULE_COLORS[mod.color]} border-opacity-40` : locked ? "bg-white/3 border-white/8 opacity-60" : "bg-white/3 border-white/8 hover:border-white/15"}`}
                     >
                       <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${active && !locked ? MODULE_COLORS[mod.color] : "bg-white/5"}`}>
                         {locked ? <Lock className="w-4 h-4 text-white/30" /> : <Icon className="w-4 h-4" />}
@@ -1852,13 +1864,13 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
                 <button
                   onClick={handleAnalyze}
                   disabled={!file || isSubmitting}
-                  className="w-full py-3.5 rounded-xl font-semibold text-sm transition-all bg-gradient-to-r from-primary to-purple-500 hover:from-primary/90 hover:to-purple-500/90 text-white disabled:opacity-40 disabled:cursor-not-allowed shadow-lg shadow-primary/25 flex items-center justify-center gap-2"
+                  className="w-full py-3.5 rounded-lg font-semibold text-sm transition-colors bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
                   <Wand2 className="w-4 h-4" />
                   {isSubmitting ? "Uploading..." : "Analyze Video"}
                 </button>
                 {uploadsRemaining === 0 && (
-                  <button onClick={() => setShowLimitModal(true)} className="w-full mt-2 py-2.5 rounded-xl text-xs font-semibold text-primary border border-primary/30 hover:bg-primary/10 transition-all">
+                  <button onClick={() => setShowLimitModal(true)} className="w-full mt-2 py-2.5 rounded-lg text-xs font-semibold text-primary border border-primary/30 hover:bg-primary/10 transition-all">
                     Upgrade for more analyses
                   </button>
                 )}
@@ -1879,7 +1891,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
                   type="button"
                   onClick={loadAnalysisHistory}
                   disabled={historyLoading}
-                  className="px-3 py-2 rounded-xl text-xs font-semibold text-white/55 border border-white/10 hover:border-white/20 hover:text-white transition-all disabled:opacity-50"
+                  className="px-3 py-2 rounded-lg text-xs font-semibold text-white/55 border border-white/10 hover:border-white/20 hover:text-white transition-all disabled:opacity-50"
                 >
                   Refresh
                 </button>
