@@ -183,6 +183,23 @@ function dayName(isoDate: string) {
   return Number.isNaN(date.getTime()) ? `Day` : date.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 }
 
+function postingTime(day: PlanDay) {
+  return day.bestPostingTime?.trim() || "12:00";
+}
+
+function isVideoInPlanWindow(video: RecentVideo, plan: YoutubeWeeklyPlan | null) {
+  if (!plan || !video.publishedAt) return false;
+  const published = new Date(video.publishedAt).getTime();
+  const start = new Date(`${plan.startDate}T00:00:00`).getTime();
+  const end = new Date(`${plan.endDate}T23:59:59`).getTime();
+  return Number.isFinite(published) && published >= start && published <= end;
+}
+
+function videoOptionLabel(video: RecentVideo) {
+  const date = video.publishedAt ? new Date(video.publishedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "No date";
+  return `${date} - ${video.title}`;
+}
+
 function toCardId(day: PlanDay) {
   return day.id || `${day.day}-${day.date}-${day.contentIdea}`;
 }
@@ -275,7 +292,7 @@ function IdeaCard({ day, onDragStart, compact = false }: { day: PlanDay; onDragS
         <div className="min-w-0">
           <p className="text-sm font-semibold leading-5 text-white">{day.contentIdea}</p>
           {!compact && <p className="mt-2 text-xs leading-5 text-red-100/75">Hook: {day.hook}</p>}
-          <p className="mt-2 text-xs text-white/35">{day.bestPostingTime || "Best time pending"}</p>
+          <p className="mt-2 text-xs text-white/35">{postingTime(day)}</p>
         </div>
       </div>
     </div>
@@ -298,8 +315,12 @@ export default function YouTubeGrowthPlannerV2Tab() {
   const latestPlan = status?.latestPlan ?? null;
   const planPayload = latestPlan?.plan ?? {};
   const recentVideos = status?.channel?.recentVideos ?? [];
+  const weekVideos = recentVideos.filter((video) => isVideoInPlanWindow(video, latestPlan));
   const linkedVideoIds = new Set((status?.latestResults ?? []).map((result) => result.videoId));
   const selectedVideoIds = new Set(Object.values(resultSelections).filter(Boolean));
+  const hasSelectedResults = Object.values(resultSelections).some(Boolean);
+  const usefulTags = (planPayload.viralTags ?? []).filter((tag) => tag.tag && tag.why).slice(0, 10);
+  const usefulSounds = (planPayload.viralSounds ?? []).filter((sound) => sound.soundOrSong && sound.whyItIsWorking).slice(0, 6);
   const hasResults = Boolean(status?.latestResults?.length);
 
   useEffect(() => {
@@ -400,6 +421,19 @@ export default function YouTubeGrowthPlannerV2Tab() {
     }
   }
 
+  async function discoverCompetitorsOnly() {
+    setWorking("competitors");
+    setError(null);
+    try {
+      await jsonFetch("/api/youtube/competitors/discover", { method: "POST", body: "{}" });
+      await loadStatus();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not discover competitors");
+    } finally {
+      setWorking(null);
+    }
+  }
+
   async function submitResults(items?: Array<{ dayIndex: number; plannedTitle: string; videoId: string }>) {
     if (!latestPlan) return;
     const results = items ?? days
@@ -489,18 +523,18 @@ export default function YouTubeGrowthPlannerV2Tab() {
           <PanelSubtitle className="max-w-3xl">Connect any YouTube account, analyze the channel, pull live trends and comparable competitors, then generate weekly plans that learn from actual results.</PanelSubtitle>
         </div>
         {status?.connected && (
-          <div className="flex flex-wrap gap-2">
-            <Button variant="secondary" className="rounded-lg" onClick={syncChannel} disabled={Boolean(working)}>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button className="rounded-lg bg-red-500 px-5 text-white hover:bg-red-400" onClick={generatePlan} disabled={Boolean(working)}>
+              {working === "plan" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Youtube className="mr-2 h-4 w-4" />}
+              Generate weekly plan
+            </Button>
+            <Button variant="secondary" className="rounded-lg px-3 text-white/65" onClick={syncChannel} disabled={Boolean(working)}>
               {working === "sync" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="mr-2 h-4 w-4" />}
               Refresh channel
             </Button>
-            <Button variant="secondary" className="rounded-lg" onClick={() => setCustomOpen(true)}>
+            <Button variant="secondary" className="rounded-lg px-3 text-white/65" onClick={() => setCustomOpen(true)}>
               <Plus className="mr-2 h-4 w-4" />
               Add idea
-            </Button>
-            <Button className="rounded-lg bg-red-500 text-white hover:bg-red-400" onClick={generatePlan} disabled={Boolean(working)}>
-              {working === "plan" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Youtube className="mr-2 h-4 w-4" />}
-              Generate weekly plan
             </Button>
           </div>
         )}
@@ -543,8 +577,8 @@ export default function YouTubeGrowthPlannerV2Tab() {
         </section>
       ) : (
         <>
-          <section className="grid gap-4 md:grid-cols-4">
-            <PanelCardSoft className="p-4"><p className="text-xs uppercase tracking-[0.18em] text-white/35">Channel</p><p className="mt-2 text-lg font-semibold text-white">{status.channel?.channelName ?? "Connected"}</p></PanelCardSoft>
+          <section className="grid gap-4 md:grid-cols-5">
+            <PanelCardSoft className="p-4 md:col-span-2"><p className="text-xs uppercase tracking-[0.18em] text-white/35">Connected Channel</p><p className="mt-2 text-xl font-semibold text-white">{status.channel?.channelName ?? "Connected"}</p><p className="mt-1 text-xs text-white/35">{status.channel?.nicheProfile?.niche ?? "Niche profile ready"}</p></PanelCardSoft>
             <PanelCardSoft className="p-4"><p className="text-xs uppercase tracking-[0.18em] text-white/35">Subscribers</p><p className="mt-2 text-lg font-semibold text-white">{formatNumber(status.channel?.subscriberCount)}</p></PanelCardSoft>
             <PanelCardSoft className="p-4"><p className="text-xs uppercase tracking-[0.18em] text-white/35">Total Views</p><p className="mt-2 text-lg font-semibold text-white">{formatNumber(status.channel?.totalViewCount)}</p></PanelCardSoft>
             <PanelCardSoft className="p-4"><p className="text-xs uppercase tracking-[0.18em] text-white/35">Videos</p><p className="mt-2 text-lg font-semibold text-white">{formatNumber(status.channel?.videoCount)}</p></PanelCardSoft>
@@ -552,7 +586,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
 
           <section className="grid gap-6 lg:grid-cols-[1fr_380px]">
             <PanelCard className="p-6">
-              <div className="flex items-center gap-3"><BarChart3 className="h-5 w-5 text-emerald-300" /><h2 className="text-xl font-semibold text-white">What is working on your channel</h2></div>
+              <div className="flex items-center gap-3"><BarChart3 className="h-5 w-5 text-emerald-300" /><h2 className="text-xl font-semibold text-white">Channel Overview</h2></div>
               <p className="mt-4 text-sm leading-6 text-white/60">{status.channel?.nicheProfile?.summary ?? "Refresh the channel to generate a niche profile."}</p>
               <div className="mt-5 grid gap-3 md:grid-cols-2">
                 {["whatWorked", "whyItWorked", "underperformers", "recommendations"].map((key) => (
@@ -568,6 +602,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
             </PanelCard>
             <PanelCard className="p-6">
               <div className="flex items-center gap-3"><TrendingUp className="h-5 w-5 text-sky-300" /><h2 className="text-xl font-semibold text-white">Recent Videos</h2></div>
+              <p className="mt-2 text-sm text-white/45">Used as source material for channel voice, title patterns, tags, and performance analysis. Open any video on YouTube.</p>
               <div className="mt-4 space-y-3">
                 {recentVideos.slice(0, 5).map((video) => (
                   <a key={video.id} href={video.url} target="_blank" rel="noreferrer" className="block rounded-lg border border-white/10 p-3 text-sm text-white/70 transition-colors hover:bg-white/5">
@@ -583,28 +618,26 @@ export default function YouTubeGrowthPlannerV2Tab() {
             <PanelCard className="p-6">
               <div className="flex items-center gap-3"><Tags className="h-5 w-5 text-amber-300" /><h2 className="text-xl font-semibold text-white">Viral Tag Opportunities</h2></div>
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                {(planPayload.viralTags ?? []).slice(0, 10).map((tag) => (
+                {usefulTags.length >= 3 ? usefulTags.map((tag) => (
                   <PanelCardSoft key={tag.tag} className="p-3">
                     <p className="font-medium text-white">{tag.tag}</p>
                     <p className="mt-2 text-xs leading-5 text-white/50">{tag.why}</p>
                     <p className="mt-2 text-xs text-amber-100/70">{tag.bestUse}</p>
                   </PanelCardSoft>
-                ))}
-                {!planPayload.viralTags?.length && <p className="text-sm text-white/45">Generate a plan to get niche-specific tag recommendations.</p>}
+                )) : <p className="text-sm text-white/45">Not enough reliable tag data yet. Generate again after fresh trend data or recent uploads are available.</p>}
               </div>
             </PanelCard>
             <PanelCard className="p-6">
               <div className="flex items-center gap-3"><Music className="h-5 w-5 text-pink-300" /><h2 className="text-xl font-semibold text-white">Current Sound Signals</h2></div>
               <div className="mt-4 space-y-3">
-                {(planPayload.viralSounds ?? []).slice(0, 6).map((sound) => (
+                {usefulSounds.length >= 2 ? usefulSounds.map((sound) => (
                   <PanelCardSoft key={`${sound.soundOrSong}-${sound.sourceVideoOrTrend}`} className="p-3">
                     <p className="font-medium text-white">{sound.soundOrSong}</p>
                     <p className="mt-2 text-xs text-white/40">{sound.sourceVideoOrTrend}</p>
                     <p className="mt-2 text-sm leading-5 text-white/55">{sound.whyItIsWorking}</p>
                     <p className="mt-2 text-xs text-pink-100/70">{sound.howToUse}</p>
                   </PanelCardSoft>
-                ))}
-                {!planPayload.viralSounds?.length && <p className="text-sm text-white/45">Generate a plan to surface audio and sound pattern ideas from current trend data.</p>}
+                )) : <p className="text-sm text-white/45">No reliable external sound pattern was found. DayTabs will avoid inventing viral audio until trend data supports it.</p>}
               </div>
             </PanelCard>
           </section>
@@ -623,7 +656,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
                 {calendarDays.map((day) => (
                   <div key={`${day.day}-${day.date}`} onDragOver={(event) => event.preventDefault()} onDrop={() => handleDropOnDate(day.date)} className="min-h-[220px] rounded-lg border border-white/10 bg-white/[0.025] p-3">
                     <p className="text-sm font-semibold text-white">{dayName(day.date)}</p>
-                    <p className="mb-3 mt-1 text-xs text-white/35">Day {day.day}</p>
+                    <p className="mb-3 mt-1 text-xs text-white/35">Day {day.day} · {postingTime(day)}</p>
                     <IdeaCard day={day} onDragStart={handleDragStart} compact />
                   </div>
                 ))}
@@ -645,7 +678,16 @@ export default function YouTubeGrowthPlannerV2Tab() {
 
           <section className="grid gap-6 lg:grid-cols-[1fr_420px]">
             <PanelCard className="p-6">
-              <h2 className="text-xl font-semibold text-white">Competitor Intelligence</h2>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-xl font-semibold text-white">Competitor Intelligence</h2>
+                  <p className="mt-1 text-sm text-white/45">Comparable channels are discovered from your niche keywords and subscriber range.</p>
+                </div>
+                <Button variant="secondary" className="rounded-lg" onClick={discoverCompetitorsOnly} disabled={Boolean(working)}>
+                  {working === "competitors" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="mr-2 h-4 w-4" />}
+                  Discover competitors
+                </Button>
+              </div>
               <div className="mt-4 grid gap-4 md:grid-cols-2">
                 {(status.competitors ?? []).slice(0, 6).map((competitor) => {
                   const insight = planPayload.competitorInsights?.find((item) => item.channelName === competitor.channelName);
@@ -663,7 +705,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
                     </PanelCardSoft>
                   );
                 })}
-                {!status.competitors?.length && <p className="text-sm text-white/45">Generate a plan to discover comparable channels and get competitor reports.</p>}
+                {!status.competitors?.length && <PanelCardSoft className="p-4 text-sm text-white/55 md:col-span-2">No competitors are saved yet. Run competitor discovery and DayTabs will search YouTube for comparable channels in this niche.</PanelCardSoft>}
               </div>
             </PanelCard>
 
@@ -671,7 +713,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
               <PanelCard className="p-6">
                 <div className="flex items-center justify-between gap-3">
                   <div><h2 className="text-xl font-semibold text-white">End of Week Results</h2><p className="mt-1 text-sm text-white/45">Choose the posted YouTube video for each idea.</p></div>
-                  <Button className="rounded-lg bg-emerald-500 text-emerald-950 hover:bg-emerald-400" onClick={() => submitResults()} disabled={working === "results"}>
+                  <Button className="rounded-lg bg-emerald-500 text-emerald-950 hover:bg-emerald-400 disabled:bg-white/10 disabled:text-white/30" onClick={() => submitResults()} disabled={working === "results" || !hasSelectedResults}>
                     {working === "results" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}Fetch results
                   </Button>
                 </div>
@@ -680,10 +722,10 @@ export default function YouTubeGrowthPlannerV2Tab() {
                     <div key={`result-${toCardId(day)}`} className="rounded-lg border border-white/10 p-3">
                       <p className="text-sm font-medium text-white">Day {day.day}: {day.contentIdea}</p>
                       <select value={resultSelections[day.day] ?? ""} onChange={(event) => setResultSelections((current) => ({ ...current, [day.day]: event.target.value }))} className="mt-3 w-full rounded-lg border border-white/10 bg-[#120d1f] px-3 py-2 text-sm text-white">
-                        <option value="">Choose posted video</option>
-                        {recentVideos.map((video) => {
+                        <option value="">{weekVideos.length ? "No video posted this day - skip" : "No videos uploaded during this week"}</option>
+                        {weekVideos.map((video) => {
                           const disabled = linkedVideoIds.has(video.id) || (selectedVideoIds.has(video.id) && resultSelections[day.day] !== video.id);
-                          return <option key={video.id} value={video.id} disabled={disabled}>{video.title}</option>;
+                          return <option key={video.id} value={video.id} disabled={disabled}>{videoOptionLabel(video)}</option>;
                         })}
                       </select>
                     </div>
@@ -716,10 +758,10 @@ export default function YouTubeGrowthPlannerV2Tab() {
             <div className="space-y-4">
               <p className="text-sm text-white/70">{publishDay.contentIdea}</p>
               <select value={resultSelections[publishDay.day] ?? ""} onChange={(event) => setResultSelections((current) => ({ ...current, [publishDay.day]: event.target.value }))} className="w-full rounded-lg border border-white/10 bg-[#120d1f] px-3 py-2 text-sm text-white">
-                <option value="">Choose posted video</option>
-                {recentVideos.map((video) => {
+                <option value="">{weekVideos.length ? "No video posted this day - skip" : "No videos uploaded during this week"}</option>
+                {weekVideos.map((video) => {
                   const disabled = linkedVideoIds.has(video.id) || (selectedVideoIds.has(video.id) && resultSelections[publishDay.day] !== video.id);
-                  return <option key={video.id} value={video.id} disabled={disabled}>{video.title}</option>;
+                  return <option key={video.id} value={video.id} disabled={disabled}>{videoOptionLabel(video)}</option>;
                 })}
               </select>
               <Button className="w-full rounded-lg bg-emerald-500 text-emerald-950 hover:bg-emerald-400" disabled={!resultSelections[publishDay.day] || working === "results"} onClick={() => submitResults([{ dayIndex: publishDay.day, plannedTitle: publishDay.contentIdea, videoId: resultSelections[publishDay.day] }]).then(() => updateDay(toCardId(publishDay), { stage: "published" }))}>

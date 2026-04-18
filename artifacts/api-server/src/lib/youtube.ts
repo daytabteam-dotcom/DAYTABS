@@ -532,12 +532,14 @@ export async function discoverCompetitors(userId: number, profile: typeof youtub
     maxResults: "25",
   }), { cacheKey: `competitor-channels:${ids.join(",")}`, quotaCost: 1, ttlMs: 24 * 60 * 60 * 1000 });
 
-  const comparable = asArray(channels.items).filter((item) => {
+  const channelItems = asArray(channels.items);
+  let comparable = channelItems.filter((item) => {
     const stats = asRecord(asRecord(item).statistics);
     const subscribers = parseNumber(stats.subscriberCount);
     if (!userSubscribers || !subscribers) return true;
     return subscribers >= userSubscribers / 10 && subscribers <= userSubscribers * 10;
   }).slice(0, 5);
+  if (!comparable.length) comparable = channelItems.slice(0, 5);
 
   await db.delete(youtubeCompetitorsTable).where(eq(youtubeCompetitorsTable.userId, userId));
 
@@ -615,7 +617,11 @@ export async function generateYoutubeWeeklyPlan(userId: number) {
   const analytics = await analyticsSummary(userId);
   const pastPerformance = await previousPerformanceSummary(userId);
   const [lastPlan] = await db.select().from(youtubeWeeklyPlansTable).where(eq(youtubeWeeklyPlansTable.userId, userId)).orderBy(desc(youtubeWeeklyPlansTable.weekNumber)).limit(1);
-  const weekNumber = (lastPlan?.weekNumber ?? 0) + 1;
+  const lastPlanResults = lastPlan
+    ? await db.select().from(youtubePlanResultsTable).where(eq(youtubePlanResultsTable.planId, lastPlan.id)).limit(1)
+    : [];
+  const shouldReplaceDraftPlan = Boolean(lastPlan && lastPlanResults.length === 0);
+  const weekNumber = shouldReplaceDraftPlan ? lastPlan!.weekNumber : (lastPlan?.weekNumber ?? 0) + 1;
   const startDate = isoDate(new Date());
   const endDate = isoDate(addDays(new Date(), 6));
   const recentVideos = Array.isArray(profile.recentVideos) ? profile.recentVideos : [];
@@ -673,11 +679,14 @@ export async function generateYoutubeWeeklyPlan(userId: number) {
 }
 
 Rules:
-- Generate exactly 7 day objects.
+- Generate exactly 7 day objects and every day must include a concrete bestPostingTime in HH:MM format.
 - Rationale must reference actual trend, competitor, analytics, or past performance data from the context.
 - If this is week 2 or later, explicitly reference past performance in each rationale.
 - Analyze the user's own recent videos using their titles, descriptions, tags, durations, and metrics. If script/transcript data is absent, say title/description/tags were used instead.
+- Identify repeatable channel DNA from the user's real titles, hooks, topics, emotional tone, and formats. The 7 ideas must sound like this creator, not generic niche tutorials.
+- For accountAnalysis, compare multiple videos and name specific titles and metrics. Underperformers must list more than one weak pattern when source data supports it.
 - competitorInsights must only use channels in the competitors context.
+- viralTags should include 5-8 niche-specific tags when source data allows it; avoid generic one-word tags unless paired with a clear reason.
 - viralSounds should be based on trend titles/source videos when available, and should avoid claiming private audio metrics.
 - Do not invent metrics or competitor names.`,
       },
@@ -688,6 +697,20 @@ Rules:
   });
 
   const plan = parseAiJson(completion.choices[0]?.message?.content ?? "{}");
+  if (shouldReplaceDraftPlan && lastPlan) {
+    const [saved] = await db.update(youtubeWeeklyPlansTable)
+      .set({
+        startDate,
+        endDate,
+        plan,
+        contextSnapshot: context,
+        updatedAt: new Date(),
+      })
+      .where(eq(youtubeWeeklyPlansTable.id, lastPlan.id))
+      .returning();
+    return saved;
+  }
+
   const [saved] = await db.insert(youtubeWeeklyPlansTable).values({
     userId,
     weekNumber,

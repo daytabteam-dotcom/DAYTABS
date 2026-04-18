@@ -1,9 +1,12 @@
 import { Router } from "express";
 import jwt from "jsonwebtoken";
 import { OAuth2Client } from "google-auth-library";
+import { eq } from "drizzle-orm";
+import { db, youtubeChannelProfilesTable } from "@workspace/db";
 import { requireAuth } from "../../middlewares/auth";
 import {
   createYoutubeAuthUrl,
+  discoverCompetitors,
   generateYoutubeWeeklyPlan,
   getYoutubeAppRedirect,
   getYoutubeRedirectUri,
@@ -91,6 +94,21 @@ router.post("/sync", requireAuth, async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "YouTube sync error");
     res.status(500).json({ error: err instanceof Error ? err.message : "Failed to sync YouTube channel" });
+  }
+});
+
+router.post("/competitors/discover", requireAuth, async (req, res) => {
+  try {
+    const [profile] = await db.select().from(youtubeChannelProfilesTable).where(eq(youtubeChannelProfilesTable.userId, req.auth!.user_id)).limit(1);
+    if (!profile) {
+      res.status(400).json({ error: "Connect YouTube before discovering competitors" });
+      return;
+    }
+    const competitors = await discoverCompetitors(req.auth!.user_id, profile);
+    res.json({ competitors });
+  } catch (err) {
+    req.log.error({ err }, "YouTube competitor discovery error");
+    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to discover competitors" });
   }
 });
 
