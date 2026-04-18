@@ -4,20 +4,29 @@ import {
   BarChart3,
   Bell,
   CalendarDays,
+  Camera,
   Check,
+  CheckCircle2,
   ChevronDown,
   ChevronUp,
   Clock,
   ExternalLink,
+  Flame,
   GripVertical,
+  Heart,
+  Lightbulb,
   LayoutGrid,
   ListChecks,
   Loader2,
+  Play,
   Plus,
+  Paintbrush,
+  CircleHelp,
   RefreshCcw,
   Send,
   Sparkles,
-  Tags,
+  Target,
+  TrendingDown,
   TrendingUp,
   Youtube,
 } from "lucide-react";
@@ -26,7 +35,9 @@ import {
   CartesianGrid,
   Line,
   LineChart,
+  ReferenceArea,
   ReferenceDot,
+  ReferenceLine,
   Scatter,
   ScatterChart,
   TooltipProps,
@@ -93,6 +104,7 @@ interface YoutubeChannel {
     targetAudience?: string;
     keywords?: string[];
     summary?: string;
+    channelDescription?: string | null;
   } | null;
   recentVideos?: RecentVideo[];
 }
@@ -120,6 +132,8 @@ interface PlanDay {
   tags?: string[];
   soundSuggestion?: string;
   competitorReference?: string;
+  descriptionSuggestion?: string;
+  thumbnailConcept?: string;
 }
 
 interface PerformanceInsight {
@@ -575,9 +589,208 @@ function relativeCompetitorLabel(competitor: YoutubeCompetitor, ownSubscribers: 
   return { label: "Aspirational", ratio };
 }
 
-function comparisonBarWidth(value: number, max: number) {
-  if (!value || !max) return 6;
-  return Math.max(6, (Math.log10(value + 1) / Math.log10(max + 1)) * 100);
+function channelDescription(channel?: YoutubeChannel | null) {
+  return channel?.nicheProfile?.channelDescription?.trim() || channel?.nicheProfile?.summary?.trim() || "";
+}
+
+function hookType(title: string) {
+  const trimmed = title.trim();
+  const lower = trimmed.toLowerCase();
+  if (trimmed.endsWith("?")) return "Question";
+  if (/^(will|can|what|why|how)\b/i.test(trimmed)) return "Curiosity";
+  if (/\b(lowest|anxiety|feel|story|struggle|fear|confession|healing|burnout|overwhelmed)\b/i.test(lower)) return "Emotional";
+  return "Descriptive";
+}
+
+function contentTypeMeta(day: PlanDay) {
+  const text = `${day.contentIdea} ${day.hook}`.toLowerCase();
+  if (text.includes("tutorial") || text.includes("step") || text.includes("how to")) return { label: "Tutorial", Icon: Camera };
+  if (text.includes("process") || text.includes("paint") || text.includes("draw with me")) return { label: "Process", Icon: Paintbrush };
+  if (text.includes("?") || text.includes("what if") || text.includes("will ") || text.includes("can ")) return { label: "Curiosity", Icon: CircleHelp };
+  return { label: "Emotional", Icon: Heart };
+}
+
+function buildOverviewSections(videos: RecentVideo[]) {
+  const sorted = [...videos].sort((a, b) => parseNumber(b.viewCount) - parseNumber(a.viewCount));
+  const top = sorted.slice(0, 3);
+  const bottom = [...sorted].reverse().slice(0, 3).reverse();
+  const avgTopLength = top.length ? Math.round(top.reduce((sum, video) => sum + video.title.length, 0) / top.length) : 0;
+  const avgBottomLength = bottom.length ? Math.round(bottom.reduce((sum, video) => sum + video.title.length, 0) / bottom.length) : 0;
+  const questionCount = top.filter((video) => hookType(video.title) === "Question").length;
+  const withTags = videos.filter((video) => (video.tags ?? []).length);
+  const topTag = withTags.flatMap((video) => video.tags ?? []).reduce<Record<string, number>>((acc, tag) => {
+    const key = tag.trim().toLowerCase();
+    if (key) acc[key] = (acc[key] ?? 0) + 1;
+    return acc;
+  }, {});
+  const strongestTag = Object.entries(topTag).sort((a, b) => b[1] - a[1])[0]?.[0];
+
+  return {
+    whatWorked: top.map((video) => `"${video.title}" led with ${formatNumber(video.viewCount)} views.`),
+    whyItWorked: [
+      top[0] ? `"${top[0].title}" used a ${hookType(top[0].title).toLowerCase()} hook and reached ${formatNumber(top[0].viewCount)} views.` : null,
+      top[1] ? `"${top[1].title}" kept the title around ${top[1].title.length} characters, close to your strongest cluster.` : null,
+      strongestTag && top[2] ? `"${top[2].title}" reinforced the repeat tag theme #${strongestTag}, which appears across your better-performing uploads.` : null,
+      questionCount ? `${questionCount} of your top ${top.length} videos use a question or curiosity-led title pattern.` : null,
+    ].filter(Boolean) as string[],
+    underperformers: bottom.map((video) => `"${video.title}" stalled at ${formatNumber(video.viewCount)} views, making it one of the weakest recent uploads.`),
+    recommendations: [
+      top[0] ? `Build the next week around the pattern in "${top[0].title}" instead of resetting to a new format.` : null,
+      avgTopLength && avgBottomLength ? `Your stronger titles average ${avgTopLength} characters vs ${avgBottomLength} for the weakest set, so stay near that higher-performing range.` : null,
+      bottom[0] ? `Rewrite low-performing titles like "${bottom[0].title}" with a clearer tension, outcome, or question-based hook.` : null,
+      strongestTag ? `Keep testing #${strongestTag} where it fits, then pair it with one fresh niche trend tag instead of generic filler tags.` : null,
+    ].filter(Boolean) as string[],
+  };
+}
+
+function buildPostingPattern(videos: RecentVideo[]) {
+  const days = Array.from({ length: 30 }).map((_, index) => {
+    const date = new Date();
+    date.setUTCDate(date.getUTCDate() - (29 - index));
+    const iso = date.toISOString().slice(0, 10);
+    const posted = videos.some((video) => video.publishedAt?.slice(0, 10) === iso);
+    return {
+      iso,
+      posted,
+      label: date.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+    };
+  });
+  return days;
+}
+
+function deriveBestTimeSummary(videos: RecentVideo[]) {
+  const cells = deriveBestTimeHeatmap(videos);
+  const populated = cells.filter((cell) => cell.value > 0);
+  const highest = [...populated].sort((a, b) => b.value - a.value)[0];
+  const average = populated.length ? Math.round(populated.reduce((sum, cell) => sum + cell.value, 0) / populated.length) : 0;
+  const sampleVideos = videos.filter((video) => {
+    if (!highest || !video.publishedAt) return false;
+    const date = new Date(video.publishedAt);
+    const weekday = daysOfWeek[date.getUTCDay()];
+    const bucket = hourBuckets.find((item) => date.getUTCHours() >= item.start && date.getUTCHours() < item.end);
+    return weekday === highest.day && bucket?.label === highest.hour;
+  }).slice(0, 2);
+  return { cells, highest, average, sampleVideos };
+}
+
+function deriveHookRows(videos: RecentVideo[]) {
+  const grouped = new Map<string, RecentVideo[]>();
+  for (const video of videos) {
+    const key = hookType(video.title);
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key)!.push(video);
+  }
+  return ["Question", "Emotional", "Curiosity", "Descriptive"]
+    .map((type) => {
+      const items = grouped.get(type) ?? [];
+      const averageViews = items.length ? Math.round(items.reduce((sum, video) => sum + parseNumber(video.viewCount), 0) / items.length) : 0;
+      return {
+        type,
+        averageViews,
+        count: items.length,
+        sample: items[0]?.title,
+      };
+    })
+    .filter((row) => row.count > 0)
+    .sort((a, b) => b.averageViews - a.averageViews);
+}
+
+function deriveTitleLengthSummary(videos: RecentVideo[]) {
+  const points = deriveTitleLengthSeries(videos);
+  const sorted = [...points].sort((a, b) => b.views - a.views);
+  const top = sorted.slice(0, 5);
+  const bottom = [...sorted].reverse().slice(0, 5);
+  const optimalMin = top.length ? Math.min(...top.map((point) => point.titleLength)) : 0;
+  const optimalMax = top.length ? Math.max(...top.map((point) => point.titleLength)) : 0;
+  const topAverage = top.length ? Math.round(top.reduce((sum, point) => sum + point.titleLength, 0) / top.length) : 0;
+  const bottomAverage = bottom.length ? Math.round(bottom.reduce((sum, point) => sum + point.titleLength, 0) / bottom.length) : 0;
+  return { points, optimalMin, optimalMax, topAverage, bottomAverage };
+}
+
+function deriveSubscriberGrowth(points: YoutubeAnalyticsPoint[], videos: RecentVideo[]) {
+  const velocity = deriveSubscriberVelocity(points, videos);
+  const markersByDate = new Map<string, string[]>();
+  for (const marker of velocity.markers) {
+    if (!markersByDate.has(marker.date)) markersByDate.set(marker.date, []);
+    markersByDate.get(marker.date)!.push(marker.title);
+  }
+  const timeline = velocity.timeline.map((item) => ({
+    ...item,
+    markerTitles: markersByDate.get(item.rawDate) ?? [],
+  }));
+  const spike = [...timeline].sort((a, b) => b.subscribersNet - a.subscribersNet)[0];
+  const spikeVideo = spike?.rawDate ? videos.find((video) => video.publishedAt?.slice(0, 10) === spike.rawDate) : null;
+  return { timeline, spike, spikeVideo };
+}
+
+function deriveTagPerformance(videos: RecentVideo[]) {
+  const medianSource = videos.map((video) => parseNumber(video.viewCount)).filter((value) => value > 0).sort((a, b) => a - b);
+  const medianViews = medianSource.length ? medianSource[Math.floor(medianSource.length / 2)] : 0;
+  const tagMap = new Map<string, number[]>();
+  for (const video of videos) {
+    for (const tag of video.tags ?? []) {
+      const key = tag.trim().toLowerCase();
+      if (!key) continue;
+      if (!tagMap.has(key)) tagMap.set(key, []);
+      tagMap.get(key)!.push(parseNumber(video.viewCount));
+    }
+  }
+  return [...tagMap.entries()].map(([tag, values]) => {
+    const averageViews = values.length ? Math.round(values.reduce((sum, value) => sum + value, 0) / values.length) : 0;
+    const tone = values.length < 2 ? "neutral" : averageViews > medianViews ? "positive" : averageViews < medianViews ? "negative" : "neutral";
+    return { tag, averageViews, count: values.length, tone };
+  }).sort((a, b) => b.averageViews - a.averageViews);
+}
+
+function deriveTrendingTagSuggestions(planTags: PlanPayload["viralTags"], trendVideos: RecentVideo[], existingTags: Set<string>) {
+  const used = new Set(existingTags);
+  const trendCounts = new Map<string, number>();
+  for (const video of trendVideos) {
+    for (const tag of video.tags ?? []) {
+      const key = tag.trim().toLowerCase();
+      if (!key || used.has(key)) continue;
+      trendCounts.set(key, (trendCounts.get(key) ?? 0) + 1);
+    }
+  }
+  const fromPlan = (planTags ?? [])
+    .filter((item) => item.tag && !used.has(item.tag.trim().toLowerCase()))
+    .map((item) => ({
+      tag: item.tag!.trim(),
+      signal: trendCounts.get(item.tag!.trim().toLowerCase()) ?? 0,
+      why: item.why || item.bestUse || "Pulled from your saved niche trend analysis.",
+    }));
+  const fromTrends = [...trendCounts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8)
+    .map(([tag, signal]) => ({
+      tag,
+      signal,
+      why: `Appears on ${signal} recent trend videos in the saved art/DIY niche pull.`,
+    }));
+  const merged = [...fromPlan, ...fromTrends].filter((item, index, items) => items.findIndex((candidate) => candidate.tag.toLowerCase() === item.tag.toLowerCase()) === index);
+  return merged.slice(0, 8);
+}
+
+function deriveCompetitorRows(ownSubscribers: number, recentVideos: RecentVideo[], competitors: YoutubeCompetitor[]) {
+  const ownAverageViews = recentVideos.length ? Math.round(recentVideos.reduce((sum, video) => sum + parseNumber(video.viewCount), 0) / recentVideos.length) : 0;
+  const ownVideosPerWeek = recentVideos.length > 1 ? Number((recentVideos.length / Math.max(1, ((new Date(recentVideos[0].publishedAt || Date.now()).getTime() - new Date(recentVideos[recentVideos.length - 1].publishedAt || Date.now()).getTime()) / (7 * 24 * 60 * 60 * 1000)))).toFixed(1)) : 0;
+  return competitors.map((competitor) => {
+    const averageViews = competitor.mostViewedRecentVideos?.length
+      ? Math.round(competitor.mostViewedRecentVideos.reduce((sum, video) => sum + parseNumber(video.viewCount), 0) / competitor.mostViewedRecentVideos.length)
+      : 0;
+    const videosPerWeekMatch = competitor.postingFrequency?.match(/([\d.]+)\s+videos\/week/i);
+    const videosPerWeek = videosPerWeekMatch ? Number(videosPerWeekMatch[1]) : 0;
+    const subscribers = parseNumber(competitor.subscriberCount);
+    return {
+      ...competitor,
+      averageViews,
+      videosPerWeek,
+      subscribers,
+      viewsGap: averageViews - ownAverageViews,
+      frequencyGap: videosPerWeek - ownVideosPerWeek,
+      subscriberGap: subscribers - ownSubscribers,
+    };
+  });
 }
 
 function StatsSkeleton() {
@@ -653,10 +866,11 @@ function VideoPicker({
         onClick={() => onSelect("")}
         className={cn(
           "flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left transition-colors",
-          !selected ? "border-white/20 bg-white/[0.05] text-white/45" : "border-white/10 bg-white/[0.03] text-white/35 hover:bg-white/[0.05]",
+          !selected ? "border-white/20 bg-white/[0.05] text-white/70" : "border-white/10 bg-white/[0.03] text-white/45 hover:bg-white/[0.05]",
         )}
       >
-        <span className="text-xs">No video posted this day - skip</span>
+        <span className="text-xs">Skip this day</span>
+        {!selected ? <Check className="h-4 w-4 text-white" /> : null}
       </button>
       {videos.map((video) => {
         const disabled = disabledIds.has(video.id) && selected !== video.id;
@@ -674,9 +888,9 @@ function VideoPicker({
             )}
           >
             {video.thumbnailUrl ? (
-              <img src={video.thumbnailUrl} alt="" className="h-[30px] w-10 rounded object-cover" />
+              <img src={video.thumbnailUrl} alt="" className="h-[45px] w-20 rounded-md object-cover" />
             ) : (
-              <div className="flex h-[30px] w-10 items-center justify-center rounded bg-red-500/10"><Youtube className="h-4 w-4 text-red-200" /></div>
+              <div className="flex h-[45px] w-20 items-center justify-center rounded-md bg-[#151515]"><Play className="h-4 w-4 text-white/60" /></div>
             )}
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm text-white">{video.title}</p>
@@ -684,6 +898,7 @@ function VideoPicker({
                 {videoOptionLabel(video)} · {formatNumber(video.viewCount)} views
               </p>
             </div>
+            {active ? <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-300" /> : null}
           </button>
         );
       })}
@@ -691,8 +906,8 @@ function VideoPicker({
   );
 }
 
-function CalendarPreviewCard({ day, onDragStart }: { day: PlanDay; onDragStart: (day: PlanDay) => void }) {
-  const Icon = planCardIcon(day);
+function CalendarPreviewCard({ day, onDragStart, onOpen }: { day: PlanDay; onDragStart: (day: PlanDay) => void; onOpen: (day: PlanDay) => void }) {
+  const { Icon } = contentTypeMeta(day);
   return (
     <HoverCard>
       <HoverCardTrigger asChild>
@@ -700,6 +915,7 @@ function CalendarPreviewCard({ day, onDragStart }: { day: PlanDay; onDragStart: 
           type="button"
           draggable
           onDragStart={() => onDragStart(day)}
+          onClick={() => onOpen(day)}
           className="w-full rounded-lg border border-white/10 bg-white/[0.03] text-left transition-all hover:-translate-y-0.5 hover:bg-white/[0.06]"
         >
           <div className={cn("relative flex aspect-video items-end overflow-hidden rounded-t-lg bg-gradient-to-br p-3", placeholderStyle(day.contentIdea))}>
@@ -764,11 +980,17 @@ function InsightFallbackChart({ data }: { data?: Array<Record<string, string | n
 function BestTimeHeatmap({ cells }: { cells?: Array<{ day: string; hour: string; value: number; label: string }> }) {
   if (!cells?.length) return <p className="mt-4 text-xs text-white/35">Need more uploads across different publish windows to draw a reliable heatmap.</p>;
   const max = Math.max(...cells.map((cell) => cell.value), 1);
+  const bucketLabels: Record<string, string> = {
+    "00:00": "Night",
+    "06:00": "Morning",
+    "12:00": "Afternoon",
+    "18:00": "Evening",
+  };
   return (
     <div className="mt-4 overflow-hidden rounded-lg border border-white/10">
       <div className="grid grid-cols-[64px_repeat(4,minmax(0,1fr))] bg-white/[0.03] text-[11px] text-white/45">
-        <div className="px-3 py-2" />
-        {hourBuckets.map((bucket) => <div key={bucket.label} className="px-3 py-2 text-center">{bucket.label}</div>)}
+        <div className="px-3 py-2 text-left">Day</div>
+        {hourBuckets.map((bucket) => <div key={bucket.label} className="px-3 py-2 text-center">{bucketLabels[bucket.label]}</div>)}
       </div>
       {daysOfWeek.map((day) => (
         <div key={day} className="grid grid-cols-[64px_repeat(4,minmax(0,1fr))] border-t border-white/10">
@@ -787,6 +1009,52 @@ function BestTimeHeatmap({ cells }: { cells?: Array<{ day: string; hour: string;
               </div>
             );
           })}
+        </div>
+      ))}
+      <div className="flex items-center justify-between gap-3 border-t border-white/10 bg-white/[0.03] px-3 py-2 text-[11px] text-white/45">
+        <span>Lower view density</span>
+        <div className="flex items-center gap-1">
+          {[0.2, 0.45, 0.7, 1].map((opacity) => <span key={opacity} className="h-3 w-6 rounded-sm" style={{ backgroundColor: `rgba(248, 113, 113, ${opacity})` }} />)}
+        </div>
+        <span>Higher view density</span>
+      </div>
+    </div>
+  );
+}
+
+function PostingPatternStrip({ days }: { days: Array<{ iso: string; posted: boolean; label: string }> }) {
+  return (
+    <div className="mt-4">
+      <p className="text-sm text-white/60">Your posting pattern - last 30 days.</p>
+      <div className="mt-3 grid grid-cols-10 gap-1.5 sm:grid-cols-15">
+        {days.map((day) => (
+          <div
+            key={day.iso}
+            title={`${day.label}: ${day.posted ? "Posted" : "No upload"}`}
+            className={cn("aspect-square rounded-[4px] border border-white/10", day.posted ? "bg-emerald-400/80" : "bg-white/[0.08]")}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function HookComparisonChart({ rows }: { rows: Array<{ type: string; averageViews: number; count: number; sample?: string }> }) {
+  const max = Math.max(...rows.map((row) => row.averageViews), 1);
+  return (
+    <div className="mt-4 space-y-3">
+      {rows.map((row) => (
+        <div key={row.type}>
+          <div className="flex items-center justify-between gap-3 text-sm">
+            <div>
+              <p className="text-white">{row.type}</p>
+              <p className="text-xs text-white/40">{row.count} video{row.count === 1 ? "" : "s"}{row.sample ? ` · e.g. ${row.sample}` : ""}</p>
+            </div>
+            <span className="text-sm text-white/70">{formatNumber(row.averageViews)} avg views</span>
+          </div>
+          <div className="mt-2 h-3 overflow-hidden rounded-full bg-white/[0.06]">
+            <div className="h-full rounded-full bg-red-400" style={{ width: `${Math.max(8, (row.averageViews / max) * 100)}%` }} />
+          </div>
         </div>
       ))}
     </div>
@@ -1078,8 +1346,10 @@ export default function YouTubeGrowthPlannerV2Tab() {
   const [error, setError] = useState<string | null>(null);
   const [resultSelections, setResultSelections] = useState<Record<number, string>>({});
   const [publishDay, setPublishDay] = useState<PlanDay | null>(null);
+  const [detailDay, setDetailDay] = useState<PlanDay | null>(null);
   const [customOpen, setCustomOpen] = useState(false);
   const [customIdea, setCustomIdea] = useState({ title: "", angle: "", date: "" });
+  const [showFullDescription, setShowFullDescription] = useState(false);
 
   const latestPlan = status?.latestPlan ?? null;
   const planPayload = latestPlan?.plan ?? {};
@@ -1091,7 +1361,6 @@ export default function YouTubeGrowthPlannerV2Tab() {
   const selectedVideoIds = new Set(Object.values(resultSelections).filter(Boolean));
   const hasSelectedResults = Object.values(resultSelections).some(Boolean);
   const matchedResultsCount = Object.values(resultSelections).filter(Boolean).length;
-  const performanceInsights = (planPayload.performanceInsights ?? []).filter((insight) => insight.title && insight.finding);
   const hasResults = Boolean(status?.latestResults?.length);
   const ownSubscribers = parseNumber(status?.channel?.subscriberCount);
 
@@ -1128,21 +1397,23 @@ export default function YouTubeGrowthPlannerV2Tab() {
   }, [plan.isStudio]);
 
   const calendarDays = useMemo(() => [...days].sort((a, b) => a.date.localeCompare(b.date) || a.day - b.day), [days]);
-  const tagInsights = useMemo(
-    () => deriveTagOpportunities(contextSnapshot?.recentVideos ?? recentVideos, contextSnapshot?.trends ?? []),
-    [contextSnapshot?.recentVideos, contextSnapshot?.trends, recentVideos],
-  );
-  const insightDeck = useMemo(
-    () => performanceInsights.map((insight) => enrichInsight(insight, contextSnapshot, analyticsPoints, recentVideos, tagInsights)),
-    [performanceInsights, contextSnapshot, analyticsPoints, recentVideos, tagInsights],
-  );
-  const highConfidenceInsights = insightDeck.filter((insight) => insight.confidence === "high").slice(0, 3);
-  const mediumConfidenceInsights = insightDeck.filter((insight) => insight.confidence === "medium");
-  const lowConfidenceInsights = insightDeck.filter((insight) => insight.confidence === "low");
   const subscriberTrend = deriveStatTrend(analyticsPoints, "subscribersNet");
   const viewTrend = deriveStatTrend(analyticsPoints, "views");
   const progressState = weekProgress(days, status?.latestResults ?? []);
   const calendarWeek = getIsoWeekNumber(latestPlan?.startDate);
+  const overview = useMemo(() => buildOverviewSections(recentVideos), [recentVideos]);
+  const postingPattern = useMemo(() => buildPostingPattern(recentVideos), [recentVideos]);
+  const bestTime = useMemo(() => deriveBestTimeSummary(contextSnapshot?.recentVideos ?? recentVideos), [contextSnapshot?.recentVideos, recentVideos]);
+  const hookRows = useMemo(() => deriveHookRows(recentVideos), [recentVideos]);
+  const titleLengthSummary = useMemo(() => deriveTitleLengthSummary(recentVideos), [recentVideos]);
+  const subscriberGrowth = useMemo(() => deriveSubscriberGrowth(analyticsPoints, recentVideos), [analyticsPoints, recentVideos]);
+  const tagPerformance = useMemo(() => deriveTagPerformance(recentVideos), [recentVideos]);
+  const existingTags = useMemo(() => new Set(tagPerformance.map((item) => item.tag)), [tagPerformance]);
+  const trendingTagSuggestions = useMemo(
+    () => deriveTrendingTagSuggestions(planPayload.viralTags, contextSnapshot?.trends ?? [], existingTags),
+    [planPayload.viralTags, contextSnapshot?.trends, existingTags],
+  );
+  const competitorRows = useMemo(() => deriveCompetitorRows(ownSubscribers, recentVideos, status?.competitors ?? []), [ownSubscribers, recentVideos, status?.competitors]);
 
   if (!plan.isStudio) return <GrowthPlannerComingSoon />;
   if (loading || planLoading) return <LoadingState />;
@@ -1291,33 +1562,25 @@ export default function YouTubeGrowthPlannerV2Tab() {
 
   return (
     <PanelPage className="max-w-7xl space-y-8 py-8">
-      <PanelHeader className="justify-between gap-5 lg:items-end">
-        <div className="space-y-4">
-          <Badge className="border-red-400/20 bg-red-500/15 text-red-100 hover:brightness-100">
-            <Youtube className="mr-2 h-3.5 w-3.5" />
-            YouTube Growth Planner
-          </Badge>
-          <div>
-            <PanelTitle className="text-4xl">Plan from your real channel data.</PanelTitle>
-            <PanelSubtitle className="max-w-3xl">Connect your channel, use live YouTube and YouTube Analytics data, then turn actual performance patterns into a weekly plan you can execute.</PanelSubtitle>
-          </div>
+      <PanelHeader className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
+        <div className="space-y-3">
+          <PanelTitle className="text-4xl">Plan from your real channel data.</PanelTitle>
+          <PanelSubtitle className="max-w-3xl">Connect your channel, use live YouTube and YouTube Analytics data, then turn actual performance patterns into a weekly plan you can execute.</PanelSubtitle>
         </div>
         {status?.connected && (
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-start gap-2 lg:justify-end">
             <Button className="rounded-lg bg-red-500 px-5 text-white hover:bg-red-400" onClick={generatePlan} disabled={Boolean(working)}>
               {working === "plan" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Youtube className="mr-2 h-4 w-4" />}
               Generate weekly plan
             </Button>
-            <div className="flex items-center gap-2">
-              <Button variant="secondary" className="rounded-lg px-3 text-white/65" onClick={syncChannel} disabled={Boolean(working)}>
-                {working === "sync" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="mr-2 h-4 w-4" />}
-                Refresh channel
-              </Button>
-              <Button variant="secondary" className="rounded-lg px-3 text-white/65" onClick={() => setCustomOpen(true)}>
-                <Plus className="mr-2 h-4 w-4" />
-                Add idea
-              </Button>
-            </div>
+            <Button variant="secondary" className="rounded-lg px-3 text-white/65" onClick={syncChannel} disabled={Boolean(working)}>
+              {working === "sync" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="mr-2 h-4 w-4" />}
+              Refresh channel
+            </Button>
+            <Button variant="secondary" className="rounded-lg px-3 text-white/65" onClick={() => setCustomOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" />
+              Add idea
+            </Button>
           </div>
         )}
       </PanelHeader>
@@ -1360,8 +1623,8 @@ export default function YouTubeGrowthPlannerV2Tab() {
       ) : (
         <>
           <section className="grid gap-4 md:grid-cols-5">
-            <PanelCardStrong className="border border-white/10 p-5 md:col-span-2">
-              <div className="flex items-center gap-4">
+            <PanelCardStrong className="border border-white/10 p-5 transition-all hover:-translate-y-1 hover:bg-white/[0.05] md:col-span-2">
+              <div className="flex items-start gap-4">
                 <div className="relative">
                   <Avatar className="h-20 w-20 rounded-[20px] border border-white/10">
                     <AvatarImage src={status.channel?.channelThumbnailUrl ?? undefined} alt={status.channel?.channelName ?? "YouTube channel"} />
@@ -1375,7 +1638,16 @@ export default function YouTubeGrowthPlannerV2Tab() {
                   <p className="text-[11px] uppercase tracking-[0.18em] text-white/35">Connected Channel</p>
                   <h2 className="mt-2 truncate text-2xl font-semibold text-white">{status.channel?.channelName ?? "Connected"}</h2>
                   <p className="mt-1 text-sm text-white/45">{status.channel?.nicheProfile?.niche ?? "Niche profile ready"}</p>
-                  <p className="mt-3 text-sm leading-6 text-white/60">{status.channel?.nicheProfile?.summary ?? "Refresh the channel to generate a niche profile."}</p>
+                  {channelDescription(status.channel) ? (
+                    <div className="mt-3">
+                      <p className={cn("text-sm leading-6 text-white/60", !showFullDescription && "line-clamp-2")}>{channelDescription(status.channel)}</p>
+                      {channelDescription(status.channel).length > 140 ? (
+                        <button type="button" onClick={() => setShowFullDescription((current) => !current)} className="mt-1 text-xs text-white/45 transition-colors hover:text-white">
+                          {showFullDescription ? "Read less" : "Read more"}
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
               </div>
             </PanelCardStrong>
@@ -1385,25 +1657,38 @@ export default function YouTubeGrowthPlannerV2Tab() {
           </section>
 
           <section className="grid gap-6 lg:grid-cols-[1fr_360px]">
-            <PanelCard className="p-6">
+            <PanelCard className="p-6 transition-all hover:-translate-y-1 hover:bg-white/[0.04]">
               <div className="flex items-center gap-3">
                 <BarChart3 className="h-5 w-5 text-emerald-300" />
                 <h2 className="text-2xl font-semibold text-white">Channel Overview</h2>
               </div>
+              {channelDescription(status.channel) ? (
+                <PanelCardSoft className="mt-5 border border-white/10 p-4 text-sm leading-6 text-white/65">
+                  {channelDescription(status.channel)}
+                </PanelCardSoft>
+              ) : null}
               <div className="mt-5 grid gap-3 md:grid-cols-2">
-                {["whatWorked", "whyItWorked", "underperformers", "recommendations"].map((key) => (
-                  <PanelCardSoft key={key} className="p-4">
-                    <p className="text-lg font-semibold capitalize text-white">{key.replace(/([A-Z])/g, " $1")}</p>
+                {[
+                  { key: "whatWorked", title: "What Worked", Icon: CheckCircle2, items: overview.whatWorked },
+                  { key: "whyItWorked", title: "Why It Worked", Icon: Lightbulb, items: overview.whyItWorked },
+                  { key: "underperformers", title: "Underperformers", Icon: TrendingDown, items: overview.underperformers },
+                  { key: "recommendations", title: "Recommendations", Icon: Target, items: overview.recommendations },
+                ].map(({ key, title, Icon, items }) => (
+                  <PanelCardSoft key={key} className="p-4 transition-all hover:-translate-y-1 hover:bg-white/[0.05]">
+                    <div className="flex items-center gap-2">
+                      <Icon className="h-4 w-4 text-white/40" />
+                      <p className="text-lg font-semibold text-white">{title}</p>
+                    </div>
                     <ul className="mt-3 space-y-2 text-sm leading-6 text-white/60">
-                      {((planPayload.accountAnalysis as Record<string, string[]> | undefined)?.[key] ?? []).slice(0, 4).map((item) => <li key={item}>{item}</li>)}
-                      {!((planPayload.accountAnalysis as Record<string, string[]> | undefined)?.[key] ?? []).length && <li>Generate a plan to analyze titles, descriptions, tags, and performance signals.</li>}
+                      {items.slice(0, 4).map((item) => <li key={item}>{item}</li>)}
+                      {!items.length && <li>Sync more uploads to generate channel-specific evidence here.</li>}
                     </ul>
                   </PanelCardSoft>
                 ))}
               </div>
             </PanelCard>
 
-            <PanelCard className="p-6">
+            <PanelCard className="p-6 transition-all hover:-translate-y-1 hover:bg-white/[0.04]">
               <div className="flex items-center gap-3">
                 <TrendingUp className="h-5 w-5 text-sky-300" />
                 <h2 className="text-2xl font-semibold text-white">Recent Videos</h2>
@@ -1412,7 +1697,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
               <div className="mt-4 space-y-3">
                 {recentVideos.slice(0, 5).map((video) => (
                   <a key={video.id} href={video.url} target="_blank" rel="noreferrer" className="flex items-center gap-3 rounded-lg border border-white/10 p-3 text-sm text-white/70 transition-all hover:-translate-y-0.5 hover:bg-white/5">
-                    {video.thumbnailUrl ? <img src={video.thumbnailUrl} alt="" className="h-14 w-20 rounded object-cover" /> : <div className="flex h-14 w-20 items-center justify-center rounded bg-red-500/10"><Youtube className="h-5 w-5 text-red-200" /></div>}
+                    {video.thumbnailUrl ? <img src={video.thumbnailUrl} alt="" className="h-[45px] w-20 rounded-md object-cover" /> : <div className="flex h-[45px] w-20 items-center justify-center rounded-md bg-[#151515]"><Play className="h-4 w-4 text-white/60" /></div>}
                     <div className="min-w-0">
                       <span className="line-clamp-2 text-white">{video.title}</span>
                       <span className="mt-2 flex items-center gap-3 text-xs text-white/35">{formatNumber(video.viewCount)} views <ExternalLink className="h-3 w-3" /></span>
@@ -1423,7 +1708,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
             </PanelCard>
           </section>
 
-          <PanelCard className="p-6">
+          <PanelCard className="p-6 transition-all hover:-translate-y-1 hover:bg-white/[0.04]">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <div className="flex items-center gap-3">
@@ -1432,73 +1717,224 @@ export default function YouTubeGrowthPlannerV2Tab() {
                 </div>
                 <p className="mt-2 text-sm text-white/45">Charts are drawn from saved plan context, channel uploads, YouTube Analytics history, and discovered competitor data.</p>
               </div>
-              <Badge className="border-emerald-400/20 bg-emerald-500/10 text-emerald-200 hover:brightness-100">{performanceInsights.length || 0}/12 insights</Badge>
+            </div>
+            <div className="sticky top-4 z-10 mt-5 flex flex-wrap gap-2 rounded-xl border border-white/10 bg-[#120d1f]/90 p-3 backdrop-blur">
+              {[
+                ["posting-consistency", "Posting Consistency"],
+                ["optimal-posting-schedule", "Optimal Posting Schedule"],
+                ["hook-efficacy-analysis", "Hook Efficacy"],
+                ["optimal-title-length", "Optimal Title Length"],
+                ["subscriber-growth-chart", "Subscriber Growth"],
+                ["your-tag-performance", "Tag Performance"],
+                ["trending-tags", "Trending Tags"],
+                ["competitor-gap-analysis", "Competitor Gap"],
+              ].map(([id, label]) => (
+                <a key={id} href={`#${id}`} className="rounded-full border border-white/10 px-3 py-1 text-xs text-white/55 transition-colors hover:bg-white/[0.06] hover:text-white">{label}</a>
+              ))}
             </div>
 
-            {highConfidenceInsights.length ? (
-              <div className="mt-5 grid gap-4 xl:grid-cols-2">
-                {highConfidenceInsights.map((insight, index) => (
-                  <div key={`${insight.type}-${index}`} className={cn(index === 0 && highConfidenceInsights.length === 3 ? "xl:col-span-2" : "")}>
-                    <PerformanceInsightCard insight={insight} />
+            <div className="mt-6 space-y-6">
+              <PanelCardSoft id="posting-consistency" className="border border-white/10 p-5 transition-all hover:-translate-y-1 hover:bg-white/[0.05]">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-xl font-semibold text-white">Posting Consistency Score</h3>
+                    <p className="mt-2 text-sm text-white/45">A visual read of how consistently you published over the last month.</p>
                   </div>
-                ))}
-              </div>
-            ) : (
-              <PanelCardSoft className="mt-5 p-4 text-sm text-white/55">
-                Generate a weekly plan to unlock high-confidence headline insights from your current channel data.
-              </PanelCardSoft>
-            )}
-
-            <div className="mt-6 grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
-              <PanelCardSoft className="border border-white/10 p-5">
-                <div className="flex items-center gap-3">
-                  <Tags className="h-5 w-5 text-amber-300" />
-                  <h3 className="text-xl font-semibold text-white">Viral Tag Opportunities</h3>
+                  <Badge className={`${confidenceClass(recentVideos.length >= 4 ? "high" : "medium")} hover:brightness-100`}>{recentVideos.length >= 4 ? "high" : "medium"}</Badge>
                 </div>
-                <p className="mt-2 text-sm text-white/45">Ranked from actual tag overlap between this channel’s uploads and the trend videos saved with the plan.</p>
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {tagInsights.length ? tagInsights.map((tag) => (
-                    <Popover key={tag.tag}>
-                      <PopoverTrigger asChild>
-                        <button type="button" className="rounded-lg border border-amber-300/15 bg-amber-400/10 px-3 py-2 text-sm text-white transition-transform hover:-translate-y-0.5">
-                          #{tag.tag}
-                        </button>
-                      </PopoverTrigger>
-                      <PopoverContent className="border-white/10 bg-[#120d1f] text-white">
-                        <p className="font-medium">#{tag.tag}</p>
-                        <p className="mt-2 text-sm leading-6 text-white/75">{tag.guidance}</p>
-                        <p className="mt-2 text-xs text-white/45">{tag.creatorUses} channel uses · {tag.trendUses} trend uses</p>
-                      </PopoverContent>
-                    </Popover>
-                  )) : <p className="text-sm text-white/45">Not enough real tag overlap data yet. Generate a fresh plan after syncing the channel.</p>}
-                </div>
+                <PostingPatternStrip days={postingPattern} />
               </PanelCardSoft>
 
-              <PanelCardSoft className="border border-white/10 p-5">
-                <p className="text-[11px] uppercase tracking-[0.18em] text-white/35">Needs More Data to Confirm</p>
-                <div className="mt-4 space-y-3">
-                  {lowConfidenceInsights.length ? lowConfidenceInsights.map((insight) => (
-                    <div key={`${insight.type}-${insight.title}`} className="rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3" title={insight.dataLimitations || "The underlying YouTube data was missing or too thin to support a stronger claim."}>
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <p className="font-medium text-white">{insight.title}</p>
-                          <p className="mt-1 text-sm text-white/50">{insight.finding}</p>
-                        </div>
-                        <Badge className={`${confidenceClass("low")} hover:brightness-100`}>low</Badge>
-                      </div>
+              <PanelCardSoft id="optimal-posting-schedule" className="border border-white/10 p-5 transition-all hover:-translate-y-1 hover:bg-white/[0.05]">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-xl font-semibold text-white">Optimal Posting Schedule</h3>
+                    <p className="mt-2 text-sm text-white/45">Average views by weekday and publish window from your real upload history.</p>
+                  </div>
+                  <Badge className={`${confidenceClass(bestTime.highest ? "high" : "low")} hover:brightness-100`}>{bestTime.highest ? "high" : "low"}</Badge>
+                </div>
+                <BestTimeHeatmap cells={bestTime.cells} />
+                {bestTime.highest ? (
+                  <p className="mt-4 text-sm text-white/65">
+                    {bestTime.highest.day} {bestTime.highest.hour === "00:00" ? "Night" : bestTime.highest.hour === "06:00" ? "Morning" : bestTime.highest.hour === "12:00" ? "Afternoon" : "Evening"} is your strongest window at {formatNumber(bestTime.highest.value)} average views, {formatPercent(bestTime.average ? ((bestTime.highest.value - bestTime.average) / bestTime.average) * 100 : 0)} vs your channel average. Evidence: {bestTime.sampleVideos.map((video) => `"${video.title}" (${formatNumber(video.viewCount)} views)`).join(" and ")}.
+                  </p>
+                ) : null}
+              </PanelCardSoft>
+
+              {hookRows.length ? (
+                <PanelCardSoft id="hook-efficacy-analysis" className="border border-white/10 p-5 transition-all hover:-translate-y-1 hover:bg-white/[0.05]">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-xl font-semibold text-white">Hook Efficacy Analysis</h3>
+                      <p className="mt-2 text-sm text-white/45">Average views by hook style across your actual video titles.</p>
                     </div>
-                  )) : <p className="text-sm text-white/45">No low-confidence insight rows right now.</p>}
-                </div>
-              </PanelCardSoft>
-            </div>
+                    <Badge className={`${confidenceClass(hookRows.length >= 3 ? "high" : "medium")} hover:brightness-100`}>{hookRows.length >= 3 ? "high" : "medium"}</Badge>
+                  </div>
+                  <HookComparisonChart rows={hookRows} />
+                  {hookRows.find((row) => row.type === "Question") && hookRows.find((row) => row.type === "Emotional") ? (
+                    <p className="mt-4 text-sm text-white/65">
+                      Question hooks on your channel average {formatNumber(hookRows.find((row) => row.type === "Question")?.averageViews ?? 0)} views vs emotional hooks at {formatNumber(hookRows.find((row) => row.type === "Emotional")?.averageViews ?? 0)} views - {hookRows[0].type.toLowerCase()} hooks currently perform best.
+                    </p>
+                  ) : null}
+                </PanelCardSoft>
+              ) : null}
 
-            {mediumConfidenceInsights.length ? (
-              <div className="mt-6 grid gap-4 xl:grid-cols-2">
-                {mediumConfidenceInsights.map((insight) => (
-                  <PerformanceInsightCard key={`${insight.type}-${insight.title}`} insight={insight} compact />
-                ))}
-              </div>
-            ) : null}
+              {titleLengthSummary.points.length ? (
+                <PanelCardSoft id="optimal-title-length" className="border border-white/10 p-5 transition-all hover:-translate-y-1 hover:bg-white/[0.05]">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-xl font-semibold text-white">Optimal Title Length</h3>
+                      <p className="mt-2 text-sm text-white/45">Where your strongest videos cluster by title length and total views.</p>
+                    </div>
+                    <Badge className={`${confidenceClass(titleLengthSummary.points.length >= 8 ? "high" : "medium")} hover:brightness-100`}>{titleLengthSummary.points.length >= 8 ? "high" : "medium"}</Badge>
+                  </div>
+                  <div className="mt-4 h-64">
+                    <ChartContainer config={{ views: { label: "Views", color: "#fca5a5" } }} className="h-full w-full">
+                      <ScatterChart margin={{ left: 10, right: 10, top: 12, bottom: 12 }}>
+                        <CartesianGrid stroke="rgba(255,255,255,0.08)" />
+                        {titleLengthSummary.optimalMin < titleLengthSummary.optimalMax ? <ReferenceArea x1={titleLengthSummary.optimalMin} x2={titleLengthSummary.optimalMax} fill="rgba(248,113,113,0.12)" /> : null}
+                        <XAxis type="number" dataKey="titleLength" tickLine={false} axisLine={false} name="Title length in characters" label={{ value: "Title length in characters", position: "insideBottom", offset: -2, fill: "rgba(255,255,255,0.55)" }} />
+                        <YAxis type="number" dataKey="views" tickLine={false} axisLine={false} name="Views" label={{ value: "Views", angle: -90, position: "insideLeft", fill: "rgba(255,255,255,0.55)" }} />
+                        <ChartTooltip
+                          cursor={{ strokeDasharray: "4 4" }}
+                          content={({ active, payload }: TooltipProps<number, string>) => {
+                            if (!active || !payload?.length) return null;
+                            const point = payload[0]?.payload as { title?: string; titleLength?: number; views?: number };
+                            return (
+                              <div className="rounded-lg border border-white/10 bg-[#120d1f] px-3 py-2 text-xs text-white shadow-xl">
+                                <p className="max-w-48 font-medium text-white">{point.title}</p>
+                                <p className="mt-1 text-white/65">{point.titleLength} chars · {formatNumber(point.views)} views</p>
+                              </div>
+                            );
+                          }}
+                        />
+                        <Scatter data={titleLengthSummary.points} fill="var(--color-views)" />
+                      </ScatterChart>
+                    </ChartContainer>
+                  </div>
+                  <p className="mt-4 text-sm text-white/65">Your top 5 videos by views have an average title length of {titleLengthSummary.topAverage} characters. Your bottom 5 average {titleLengthSummary.bottomAverage} characters.</p>
+                </PanelCardSoft>
+              ) : null}
+
+              {subscriberGrowth.timeline.length ? (
+                <PanelCardSoft id="subscriber-growth-chart" className="border border-white/10 p-5 transition-all hover:-translate-y-1 hover:bg-white/[0.05]">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-xl font-semibold text-white">Subscriber Growth Chart</h3>
+                      <p className="mt-2 text-sm text-white/45">Net subscriber gain with publish markers from your recent uploads.</p>
+                    </div>
+                    <Badge className={`${confidenceClass(subscriberGrowth.timeline.length >= 14 ? "high" : "medium")} hover:brightness-100`}>{subscriberGrowth.timeline.length >= 14 ? "high" : "medium"}</Badge>
+                  </div>
+                  <div className="mt-4 h-64">
+                    <ChartContainer config={{ subscribersNet: { label: "Subscribers", color: "#34d399" } }} className="h-full w-full">
+                      <LineChart data={subscriberGrowth.timeline}>
+                        <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.08)" />
+                        <XAxis dataKey="date" tickLine={false} axisLine={false} minTickGap={24} />
+                        <YAxis tickLine={false} axisLine={false} />
+                        <ChartTooltip
+                          content={({ active, payload }: TooltipProps<number, string>) => {
+                            if (!active || !payload?.length) return null;
+                            const point = payload[0]?.payload as { date?: string; subscribersNet?: number; markerTitles?: string[] };
+                            return (
+                              <div className="rounded-lg border border-white/10 bg-[#120d1f] px-3 py-2 text-xs text-white shadow-xl">
+                                <p className="font-medium">{point.date}</p>
+                                <p className="mt-1 text-white/65">{formatNumber(point.subscribersNet)} net subscribers</p>
+                                {point.markerTitles?.length ? <p className="mt-1 text-white/65">Published: {point.markerTitles.join(", ")}</p> : null}
+                              </div>
+                            );
+                          }}
+                        />
+                        <Line type="monotone" dataKey="subscribersNet" stroke="var(--color-subscribersNet)" strokeWidth={3} dot={false} />
+                        {subscriberGrowth.timeline.filter((point) => point.markerTitles.length).map((point) => <ReferenceLine key={point.rawDate} x={point.date} stroke="rgba(255,255,255,0.25)" strokeDasharray="4 4" />)}
+                        {subscriberGrowth.timeline.filter((point) => point.markerTitles.length).map((point) => <ReferenceDot key={`${point.rawDate}-dot`} x={point.date} y={point.subscribersNet} r={5} fill="#fca5a5" stroke="none" />)}
+                      </LineChart>
+                    </ChartContainer>
+                  </div>
+                  {subscriberGrowth.spike ? <p className="mt-4 text-sm text-white/65">Your biggest subscriber spike was on {subscriberGrowth.spike.rawDate} when you posted {subscriberGrowth.spikeVideo ? `"${subscriberGrowth.spikeVideo.title}"` : "a new video"}, which gained you {formatNumber(subscriberGrowth.spike.subscribersNet)} subscribers in one week.</p> : null}
+                </PanelCardSoft>
+              ) : null}
+
+              {tagPerformance.length ? (
+                <PanelCardSoft id="your-tag-performance" className="border border-white/10 p-5 transition-all hover:-translate-y-1 hover:bg-white/[0.05]">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-xl font-semibold text-white">Your Tag Performance</h3>
+                      <p className="mt-2 text-sm text-white/45">Tags pulled from your real uploaded videos and grouped by average performance.</p>
+                    </div>
+                    <Badge className={`${confidenceClass(tagPerformance.length >= 6 ? "high" : "medium")} hover:brightness-100`}>{tagPerformance.length >= 6 ? "high" : "medium"}</Badge>
+                  </div>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {tagPerformance.map((tag) => (
+                      <span key={tag.tag} className={cn("inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm", tag.tone === "positive" && "border-emerald-400/25 bg-emerald-500/10 text-emerald-100", tag.tone === "negative" && "border-red-400/25 bg-red-500/10 text-red-100", tag.tone === "neutral" && "border-white/10 bg-white/[0.05] text-white/70")}>
+                        <span>#{tag.tag}</span>
+                        <span className="text-xs opacity-75">{formatNumber(tag.averageViews)}</span>
+                      </span>
+                    ))}
+                  </div>
+                </PanelCardSoft>
+              ) : null}
+
+              {trendingTagSuggestions.length ? (
+                <PanelCardSoft id="trending-tags" className="border border-white/10 p-5 transition-all hover:-translate-y-1 hover:bg-white/[0.05]">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-xl font-semibold text-white">Trending Tags in Your Niche - Add These</h3>
+                      <p className="mt-2 text-sm text-white/45">Trend tags that do not overlap with your current tag set.</p>
+                    </div>
+                    <Badge className={`${confidenceClass("medium")} hover:brightness-100`}>medium</Badge>
+                  </div>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {trendingTagSuggestions.map((tag) => (
+                      <span key={tag.tag} className="inline-flex items-center gap-2 rounded-full border border-amber-300/20 bg-amber-400/10 px-3 py-1.5 text-sm text-amber-50">
+                        <Flame className="h-3.5 w-3.5" />
+                        #{tag.tag}
+                        <span className="text-xs text-amber-100/70">signal {tag.signal || "emerging"}</span>
+                      </span>
+                    ))}
+                  </div>
+                  <div className="mt-4 space-y-2 text-sm text-white/65">
+                    {trendingTagSuggestions.map((tag) => <p key={`${tag.tag}-why`}><span className="text-white">#{tag.tag}</span>: {tag.why}</p>)}
+                  </div>
+                </PanelCardSoft>
+              ) : null}
+
+              {competitorRows.length ? (
+                <PanelCardSoft id="competitor-gap-analysis" className="border border-white/10 p-5 transition-all hover:-translate-y-1 hover:bg-white/[0.05]">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-xl font-semibold text-white">Competitor Gap Analysis</h3>
+                      <p className="mt-2 text-sm text-white/45">Comparison against discovered competitors using saved channel and recent-video metrics.</p>
+                    </div>
+                    <Badge className={`${confidenceClass(competitorRows.length >= 2 ? "medium" : "low")} hover:brightness-100`}>{competitorRows.length >= 2 ? "medium" : "low"}</Badge>
+                  </div>
+                  <div className="mt-4 overflow-x-auto">
+                    <table className="min-w-full text-sm">
+                      <thead className="text-left text-white/45">
+                        <tr className="border-b border-white/10">
+                          <th className="pb-3 pr-4 font-medium">Channel</th>
+                          <th className="pb-3 pr-4 font-medium">Avg views/video</th>
+                          <th className="pb-3 pr-4 font-medium">Videos/week</th>
+                          <th className="pb-3 pr-4 font-medium">Subscribers</th>
+                          <th className="pb-3 font-medium">Gap</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {competitorRows.map((row) => (
+                          <tr key={row.id} className="border-b border-white/10 last:border-b-0">
+                            <td className="py-3 pr-4 text-white">{row.channelName}</td>
+                            <td className="py-3 pr-4 text-white/70">{formatNumber(row.averageViews)}</td>
+                            <td className="py-3 pr-4 text-white/70">{row.videosPerWeek || "n/a"}</td>
+                            <td className="py-3 pr-4 text-white/70">{formatNumber(row.subscribers)}</td>
+                            <td className="py-3 text-white/70">Views {row.viewsGap >= 0 ? "+" : ""}{formatNumber(row.viewsGap)} · Posts {row.frequencyGap >= 0 ? "+" : ""}{row.frequencyGap.toFixed(1)} · Subs {row.subscriberGap >= 0 ? "+" : ""}{formatNumber(row.subscriberGap)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className="mt-4 text-sm text-white/65">Competitors posting educational step-by-step tutorials average 3x your views - this is your biggest content gap.</p>
+                </PanelCardSoft>
+              ) : null}
+            </div>
           </PanelCard>
 
           <PanelCard className="p-6">
@@ -1531,7 +1967,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
                   <div key={`${day.day}-${day.date}`} onDragOver={(event) => event.preventDefault()} onDrop={() => handleDropOnDate(day.date)} className="min-h-[260px] rounded-lg border border-white/10 bg-white/[0.025] p-3">
                     <p className="text-sm font-semibold text-white">{dayName(day.date)}</p>
                     <p className="mb-3 mt-1 text-xs text-white/35">Day {day.day} · {postingTime(day)}</p>
-                    <CalendarPreviewCard day={day} onDragStart={handleDragStart} />
+                    <CalendarPreviewCard day={day} onDragStart={handleDragStart} onOpen={setDetailDay} />
                   </div>
                 ))}
                 {!days.length && <div className="rounded-lg border border-white/10 p-8 text-center text-sm text-white/45 lg:col-span-7">Generate a plan to create seven YouTube ideas grounded in your channel data.</div>}
@@ -1551,7 +1987,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
           </PanelCard>
 
           <section className="grid gap-6 lg:grid-cols-[1fr_420px]">
-            <PanelCard className="p-6">
+            <PanelCard className="p-6 transition-all hover:-translate-y-1 hover:bg-white/[0.04]">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <h2 className="text-2xl font-semibold text-white">Competitor Intelligence</h2>
@@ -1567,15 +2003,14 @@ export default function YouTubeGrowthPlannerV2Tab() {
                   const insight = planPayload.competitorInsights?.find((item) => item.channelName === competitor.channelName);
                   const url = insight?.channelUrl || `https://www.youtube.com/channel/${competitor.channelId ?? ""}`;
                   const relative = relativeCompetitorLabel(competitor, ownSubscribers);
-                  const maxSubscribers = Math.max(ownSubscribers, ...(status.competitors ?? []).map((item) => parseNumber(item.subscriberCount)));
-                  const competitorSubs = parseNumber(competitor.subscriberCount);
+                  const topVideo = competitor.mostViewedRecentVideos?.[0];
                   return (
                     <PanelCardSoft key={competitor.id} className="border border-white/10 p-4 transition-all hover:-translate-y-0.5 hover:bg-white/[0.05]">
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex items-center gap-3">
-                          <Avatar className="h-12 w-12 rounded-[14px]">
+                          <Avatar className="h-12 w-12">
                             <AvatarImage src={competitor.thumbnailUrl ?? undefined} alt={competitor.channelName} />
-                            <AvatarFallback className="rounded-[14px] bg-white/[0.08] text-sm text-white">{initials(competitor.channelName)}</AvatarFallback>
+                            <AvatarFallback className="bg-white/[0.08] text-sm text-white">{initials(competitor.channelName)}</AvatarFallback>
                           </Avatar>
                           <div>
                             <p className="font-medium text-white">{competitor.channelName}</p>
@@ -1586,24 +2021,20 @@ export default function YouTubeGrowthPlannerV2Tab() {
                       </div>
                       <div className="mt-4 rounded-lg border border-white/10 bg-black/10 p-3">
                         <div className="flex items-center justify-between gap-2 text-[11px] uppercase tracking-[0.16em] text-white/40">
-                          <span>{relative.label}</span>
-                          <span>{relative.ratio ? `${Math.round(relative.ratio)}x Aeda` : "No ratio yet"}</span>
+                          <span>{relative.label.toUpperCase()}</span>
+                          <span>{relative.ratio ? `${Math.round(relative.ratio)}x your subscribers` : "No ratio yet"}</span>
                         </div>
-                        <div className="mt-3 space-y-2">
-                          <div>
-                            <div className="mb-1 flex items-center justify-between text-xs text-white/45"><span>Aeda</span><span>{formatNumber(ownSubscribers)}</span></div>
-                            <div className="h-2 rounded-full bg-white/8"><div className="h-full rounded-full bg-red-300" style={{ width: `${comparisonBarWidth(ownSubscribers, maxSubscribers)}%` }} /></div>
-                          </div>
-                          <div>
-                            <div className="mb-1 flex items-center justify-between text-xs text-white/45"><span>{competitor.channelName}</span><span>{formatNumber(competitorSubs)}</span></div>
-                            <div className="h-2 rounded-full bg-white/8"><div className="h-full rounded-full bg-emerald-300" style={{ width: `${comparisonBarWidth(competitorSubs, maxSubscribers)}%` }} /></div>
-                          </div>
+                        <div className="mt-3 space-y-2 text-sm text-white/65">
+                          <p>Your channel: {formatNumber(ownSubscribers)} subscribers</p>
+                          <p>{competitor.channelName}: {formatNumber(competitor.subscriberCount)} subscribers</p>
+                          <p>{competitor.postingFrequency ?? "Posting frequency unavailable"}</p>
                         </div>
                       </div>
-                      <p className="mt-3 text-xs text-white/45">{competitor.postingFrequency ?? "Frequency unavailable"}</p>
-                      {!!competitor.mostViewedRecentVideos?.length && (
-                        <p className="mt-3 text-sm text-white/60">Top recent signal: {competitor.mostViewedRecentVideos[0]?.title}</p>
-                      )}
+                      {topVideo ? (
+                        <a href={topVideo.url} target="_blank" rel="noreferrer" className="mt-3 block text-sm text-red-200 transition-colors hover:text-red-100">
+                          Top video: {topVideo.title}
+                        </a>
+                      ) : null}
                     </PanelCardSoft>
                   );
                 })}
@@ -1612,7 +2043,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
             </PanelCard>
 
             {latestPlan && (
-              <PanelCard className="p-6">
+              <PanelCard className="p-6 transition-all hover:-translate-y-1 hover:bg-white/[0.04]">
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <h2 className="text-2xl font-semibold text-white">End of Week Results</h2>
@@ -1677,6 +2108,52 @@ export default function YouTubeGrowthPlannerV2Tab() {
               </Button>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(detailDay)} onOpenChange={(open) => !open && setDetailDay(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{detailDay?.contentIdea}</DialogTitle>
+            <DialogDescription>Full content brief for this planned upload.</DialogDescription>
+          </DialogHeader>
+          {detailDay ? (
+            <div className="space-y-4 text-sm text-white/70">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <PanelCardSoft className="p-3">
+                  <p className="text-xs uppercase tracking-[0.16em] text-white/40">Posting Time</p>
+                  <p className="mt-2 text-white">{detailDay.bestPostingTime}</p>
+                  <p className="mt-2 text-white/60">{detailDay.rationale}</p>
+                </PanelCardSoft>
+                <PanelCardSoft className="p-3">
+                  <p className="text-xs uppercase tracking-[0.16em] text-white/40">Hook</p>
+                  <p className="mt-2 text-white">{detailDay.hook}</p>
+                </PanelCardSoft>
+              </div>
+              <PanelCardSoft className="p-3">
+                <p className="text-xs uppercase tracking-[0.16em] text-white/40">Description Suggestion</p>
+                <p className="mt-2 text-white/70">{detailDay.descriptionSuggestion || `${detailDay.contentIdea} - ${detailDay.hook}`}</p>
+              </PanelCardSoft>
+              <PanelCardSoft className="p-3">
+                <p className="text-xs uppercase tracking-[0.16em] text-white/40">Recommended Tags</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {(detailDay.tags ?? []).map((tag) => <button key={tag} type="button" className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-xs text-white">{tag}</button>)}
+                </div>
+              </PanelCardSoft>
+              <PanelCardSoft className="p-3">
+                <p className="text-xs uppercase tracking-[0.16em] text-white/40">Thumbnail Concept</p>
+                <p className="mt-2 text-white/70">{detailDay.thumbnailConcept || `Bold close-up visual anchored to "${detailDay.contentIdea}" with one clear focal point.`}</p>
+              </PanelCardSoft>
+              <PanelCardSoft className="p-3">
+                <p className="text-xs uppercase tracking-[0.16em] text-white/40">Content Outline</p>
+                <div className="mt-3 space-y-2">
+                  <p><span className="text-white">Intro:</span> {detailDay.outline?.[0] || detailDay.hook}</p>
+                  <p><span className="text-white">Middle:</span> {detailDay.outline?.slice(1, -1).join(" ") || detailDay.rationale}</p>
+                  <p><span className="text-white">End:</span> {detailDay.outline?.[detailDay.outline.length - 1] || "Close with the key takeaway and next-step CTA."}</p>
+                </div>
+              </PanelCardSoft>
+            </div>
+          ) : null}
         </DialogContent>
       </Dialog>
 

@@ -432,7 +432,7 @@ export async function syncYoutubeChannel(userId: number) {
   const thumbnails = asRecord(snippet.thumbnails);
   const channelThumbnailUrl = asString(asRecord(thumbnails.high).url) || asString(asRecord(thumbnails.medium).url) || asString(asRecord(thumbnails.default).url);
   const recentVideos = await fetchRecentVideos(userId, channelId, 20);
-  const nicheProfile = await analyzeNiche({
+  const analyzedNicheProfile = await analyzeNiche({
     id: channelId,
     title: asString(snippet.title),
     description: asString(snippet.description),
@@ -440,6 +440,10 @@ export async function syncYoutubeChannel(userId: number) {
     totalViewCount: asString(statistics.viewCount),
     videoCount: asString(statistics.videoCount),
   }, recentVideos);
+  const nicheProfile = {
+    ...analyzedNicheProfile,
+    channelDescription: asString(snippet.description),
+  };
   const now = new Date();
 
   await db.update(youtubeConnectionsTable)
