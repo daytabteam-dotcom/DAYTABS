@@ -8,6 +8,7 @@ import {
   getYoutubeAppRedirect,
   getYoutubeRedirectUri,
   getYoutubeStatus,
+  improveYoutubeIdea,
   savePlanResults,
   storeYoutubeTokens,
   syncYoutubeChannel,
@@ -106,7 +107,7 @@ router.post("/plans/generate", requireAuth, async (req, res) => {
 router.post("/plans/:planId/results", requireAuth, async (req, res) => {
   try {
     const planId = Number(req.params.planId);
-    const results = Array.isArray(req.body?.results) ? req.body.results : [];
+    const results = (Array.isArray(req.body?.results) ? req.body.results : []) as Array<{ dayIndex: number; plannedTitle: string; videoId?: string; videoUrl?: string }>;
     if (!Number.isInteger(planId) || planId <= 0) {
       res.status(400).json({ error: "Valid plan ID is required" });
       return;
@@ -115,11 +116,27 @@ router.post("/plans/:planId/results", requireAuth, async (req, res) => {
       res.status(400).json({ error: "At least one video URL is required" });
       return;
     }
+    const videoIds = results.map((result) => result?.videoId || result?.videoUrl).filter(Boolean);
+    if (new Set(videoIds).size !== videoIds.length) {
+      res.status(400).json({ error: "One YouTube video cannot be linked to more than one content idea" });
+      return;
+    }
     const saved = await savePlanResults(req.auth!.user_id, planId, results);
     res.json({ results: saved });
   } catch (err) {
     req.log.error({ err }, "YouTube plan result collection error");
     res.status(500).json({ error: err instanceof Error ? err.message : "Failed to collect YouTube results" });
+  }
+});
+
+router.post("/ideas/improve", requireAuth, async (req, res) => {
+  try {
+    const idea = req.body?.idea && typeof req.body.idea === "object" ? req.body.idea : {};
+    const improved = await improveYoutubeIdea(req.auth!.user_id, idea);
+    res.json({ idea: improved });
+  } catch (err) {
+    req.log.error({ err }, "YouTube idea improvement error");
+    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to improve idea" });
   }
 });
 

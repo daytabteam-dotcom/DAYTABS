@@ -19,7 +19,7 @@ import ScriptPlannerTab from "./tabs/ScriptPlannerTab";
 import GrowthPlannerTab, {
   getGrowthPlannerNotificationCounts,
   getGrowthPlannerNotifications,
-} from "./tabs/YouTubeGrowthPlannerTab";
+} from "./tabs/YouTubeGrowthPlannerV2Tab";
 import { PlanPickerModal } from "@/components/PlanPickerModal";
 import {
   usePlan,

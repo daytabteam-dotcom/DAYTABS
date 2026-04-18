@@ -618,14 +618,15 @@ export async function generateYoutubeWeeklyPlan(userId: number) {
   const weekNumber = (lastPlan?.weekNumber ?? 0) + 1;
   const startDate = isoDate(new Date());
   const endDate = isoDate(addDays(new Date(), 6));
-  const context = { profile, nicheProfile, trends, competitors, analytics, pastPerformance, weekNumber, startDate, endDate };
+  const recentVideos = Array.isArray(profile.recentVideos) ? profile.recentVideos : [];
+  const context = { profile, nicheProfile, recentVideos, trends, competitors, analytics, pastPerformance, weekNumber, startDate, endDate };
 
   const completion = await openai.chat.completions.create({
     model: "gpt-4o",
     messages: [
       {
         role: "system",
-        content: "Generate a YouTube-only 7 day content plan from real channel, trend, competitor, analytics, and past-result data. Return JSON only.",
+        content: "Generate a YouTube-only growth plan from real channel, video, trend, competitor, analytics, and past-result data. Return JSON only. Never invent metrics; say unavailable when source data is missing.",
       },
       {
         role: "user",
@@ -633,15 +634,40 @@ export async function generateYoutubeWeeklyPlan(userId: number) {
 {
   "weekNumber": ${weekNumber},
   "summary": "",
+  "accountAnalysis": {
+    "whatWorked": [],
+    "whyItWorked": [],
+    "underperformers": [],
+    "recommendations": []
+  },
+  "competitorInsights": [
+    {
+      "channelName": "",
+      "channelUrl": "",
+      "whatIsWorking": [],
+      "whyVideosGoViral": [],
+      "ideasToAdapt": []
+    }
+  ],
+  "viralTags": [
+    { "tag": "", "why": "", "bestUse": "" }
+  ],
+  "viralSounds": [
+    { "soundOrSong": "", "sourceVideoOrTrend": "", "whyItIsWorking": "", "howToUse": "" }
+  ],
   "days": [
     {
       "day": 1,
       "date": "${startDate}",
+      "stage": "idea",
       "contentIdea": "",
       "hook": "",
       "outline": [],
       "bestPostingTime": "",
-      "rationale": ""
+      "rationale": "",
+      "tags": [],
+      "soundSuggestion": "",
+      "competitorReference": ""
     }
   ]
 }
@@ -650,6 +676,9 @@ Rules:
 - Generate exactly 7 day objects.
 - Rationale must reference actual trend, competitor, analytics, or past performance data from the context.
 - If this is week 2 or later, explicitly reference past performance in each rationale.
+- Analyze the user's own recent videos using their titles, descriptions, tags, durations, and metrics. If script/transcript data is absent, say title/description/tags were used instead.
+- competitorInsights must only use channels in the competitors context.
+- viralSounds should be based on trend titles/source videos when available, and should avoid claiming private audio metrics.
 - Do not invent metrics or competitor names.`,
       },
       { role: "user", content: JSON.stringify(context) },
@@ -669,6 +698,32 @@ Rules:
     updatedAt: new Date(),
   }).returning();
   return saved;
+}
+
+export async function improveYoutubeIdea(userId: number, idea: { title?: string; angle?: string; date?: string }) {
+  const [profile] = await db.select().from(youtubeChannelProfilesTable).where(eq(youtubeChannelProfilesTable.userId, userId)).limit(1);
+  if (!profile) throw new Error("Connect YouTube before improving ideas");
+  const [lastPlan] = await db.select().from(youtubeWeeklyPlansTable).where(eq(youtubeWeeklyPlansTable.userId, userId)).orderBy(desc(youtubeWeeklyPlansTable.weekNumber)).limit(1);
+  const completion = await openai.chat.completions.create({
+    model: "gpt-4o",
+    messages: [
+      {
+        role: "system",
+        content: "Improve a YouTube content idea using the creator's channel profile and current plan context. Return JSON only with contentIdea, hook, outline, bestPostingTime, rationale, tags, soundSuggestion, and competitorReference.",
+      },
+      {
+        role: "user",
+        content: JSON.stringify({
+          idea,
+          channelProfile: profile,
+          latestPlan: lastPlan?.plan ?? null,
+        }),
+      },
+    ],
+    response_format: { type: "json_object" },
+    max_completion_tokens: 1400,
+  });
+  return parseAiJson(completion.choices[0]?.message?.content ?? "{}");
 }
 
 export function extractYoutubeVideoId(url: string) {
@@ -705,20 +760,24 @@ async function fetchVideoAnalytics(userId: number, videoId: string) {
   return metrics;
 }
 
-export async function savePlanResults(userId: number, planId: number, results: Array<{ dayIndex: number; plannedTitle: string; videoUrl: string }>) {
+export async function savePlanResults(userId: number, planId: number, results: Array<{ dayIndex: number; plannedTitle: string; videoUrl?: string; videoId?: string }>) {
   const [plan] = await db.select().from(youtubeWeeklyPlansTable).where(and(eq(youtubeWeeklyPlansTable.id, planId), eq(youtubeWeeklyPlansTable.userId, userId))).limit(1);
   if (!plan) throw new Error("Plan not found");
   const saved = [];
+  const seenVideoIds = new Set<string>();
   for (const result of results) {
-    const videoId = extractYoutubeVideoId(result.videoUrl);
+    const videoId = result.videoId || (result.videoUrl ? extractYoutubeVideoId(result.videoUrl) : null);
     if (!videoId) throw new Error(`Invalid YouTube URL for day ${result.dayIndex}`);
+    if (seenVideoIds.has(videoId)) throw new Error("One YouTube video cannot be linked to more than one content idea");
+    seenVideoIds.add(videoId);
     const metrics = await fetchVideoAnalytics(userId, videoId);
+    const videoUrl = result.videoUrl || `https://www.youtube.com/watch?v=${videoId}`;
     const [row] = await db.insert(youtubePlanResultsTable).values({
       userId,
       planId,
       dayIndex: result.dayIndex,
       plannedTitle: result.plannedTitle,
-      videoUrl: result.videoUrl,
+      videoUrl,
       videoId,
       metrics,
       updatedAt: new Date(),
