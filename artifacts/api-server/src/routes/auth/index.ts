@@ -9,6 +9,7 @@ import { requireAuth } from "../../middlewares/auth";
 import { normalizePlan, PLAN_LIMITS } from "../../lib/planLimits";
 import { getOrCreateUsage } from "../../lib/usageService";
 import { CONTACT_EMAIL, SMTP_USER, assertMailConfigured, createMailTransport, escapeHtml } from "../../lib/email";
+import { syncUserPlanFromPaddle } from "../../lib/paddlePlanSync";
 
 const router = Router();
 
@@ -80,14 +81,19 @@ router.get("/me", requireAuth, async (req, res) => {
   try {
     const [user] = await db.select().from(usersTable).where(eq(usersTable.id, req.auth!.user_id)).limit(1);
     if (!user) { res.status(404).json({ error: "User not found" }); return; }
-    const plan = normalizePlan(user.plan);
+    const { planToStore, synced, freshUser } = await syncUserPlanFromPaddle(user, req.log);
+    const plan = normalizePlan(planToStore);
     const planConfig = PLAN_LIMITS[plan];
-    const usage = await getOrCreateUsage(user.id);
+    const usage = await getOrCreateUsage(freshUser.id);
+    const freshToken = synced
+      ? signToken(freshUser.id, freshUser.email, freshUser.name, planToStore)
+      : null;
     res.json({
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      plan: user.plan,
+      id: freshUser.id,
+      email: freshUser.email,
+      name: freshUser.name,
+      plan: planToStore,
+      freshToken,
       uploadCounts: { "video-analyzer": usage.videoAnalysesUsed },
       scriptPlannerChats: usage.scriptPlannerChatsUsed,
       features: planConfig.features,

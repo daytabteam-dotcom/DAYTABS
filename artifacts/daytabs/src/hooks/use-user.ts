@@ -23,33 +23,47 @@ export function useUser() {
   const [user, setUser] = useState<UserInfo | null>(null);
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const urlToken = params.get("token");
+    const syncUserFromToken = () => {
+      const params = new URLSearchParams(window.location.search);
+      const urlToken = params.get("token");
 
-    if (urlToken) {
-      localStorage.setItem("daytabs_token", urlToken);
-      params.delete("token");
-      const newUrl = params.toString()
-        ? `${window.location.pathname}?${params.toString()}`
-        : window.location.pathname;
-      window.history.replaceState({}, "", newUrl);
-    }
+      if (urlToken) {
+        localStorage.setItem("daytabs_token", urlToken);
+        params.delete("token");
+        const newUrl = params.toString()
+          ? `${window.location.pathname}?${params.toString()}`
+          : window.location.pathname;
+        window.history.replaceState({}, "", newUrl);
+      }
 
-    const token = urlToken || localStorage.getItem("daytabs_token");
-    if (!token) return;
+      const token = urlToken || localStorage.getItem("daytabs_token");
+      if (!token) {
+        setUser(null);
+        return;
+      }
 
-    const payload = decodeJwtPayload(token);
-    if (!payload) {
-      localStorage.removeItem("daytabs_token");
-      return;
-    }
+      const payload = decodeJwtPayload(token);
+      if (!payload) {
+        localStorage.removeItem("daytabs_token");
+        setUser(null);
+        return;
+      }
 
-    const email = (payload.email as string) || "";
-    const jwtName = (payload.name as string) || "";
-    const name = jwtName || email.split("@")[0].replace(/[._]/g, " ");
-    const plan = (payload.plan as string) || "free";
+      const email = (payload.email as string) || "";
+      const jwtName = (payload.name as string) || "";
+      const name = jwtName || email.split("@")[0].replace(/[._]/g, " ");
+      const plan = (payload.plan as string) || "free";
 
-    setUser({ userId: payload.user_id as number, email, name, plan });
+      setUser({ userId: payload.user_id as number, email, name, plan });
+    };
+
+    syncUserFromToken();
+    window.addEventListener("daytabs:plan-updated", syncUserFromToken);
+    window.addEventListener("storage", syncUserFromToken);
+    return () => {
+      window.removeEventListener("daytabs:plan-updated", syncUserFromToken);
+      window.removeEventListener("storage", syncUserFromToken);
+    };
   }, []);
 
   const logout = () => {

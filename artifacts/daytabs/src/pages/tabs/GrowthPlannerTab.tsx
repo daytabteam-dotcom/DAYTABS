@@ -2,14 +2,17 @@ import React, { useEffect, useMemo, useState } from "react";
 import {
   ArrowRight,
   BarChart3,
+  Bell,
   CalendarDays,
   Check,
   ChevronLeft,
+  Clock,
   Columns3,
   FileUp,
   Globe2,
   Instagram,
   Linkedin,
+  Loader2,
   Lock,
   Music2,
   Plus,
@@ -698,6 +701,107 @@ function getWorkspaceIcon(viewMode: PlannerViewMode) {
   return Target;
 }
 
+function GrowthPlannerComingSoon() {
+  const [email, setEmail] = useState("");
+  const [submitted, setSubmitted] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const features = [
+    { label: "Weekly content calendar tailored to your niche" },
+    { label: "Platform-by-platform cadence and post mix" },
+    { label: "Competitor inspiration and trend prompts" },
+    { label: "Next-week refresh from posted results" },
+  ];
+
+  const handleNotify = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!email.trim()) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const token = localStorage.getItem("daytabs_token");
+      const res = await fetch("/api/growth-planner/notify", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ email: email.trim() }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(data.error || "Failed to submit");
+      }
+      setSubmitted(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="max-w-4xl mx-auto py-8">
+      <div className="rounded-lg border border-white/8 bg-white/[0.025] p-6 md:p-8">
+        <div className="flex flex-col md:flex-row md:items-start justify-between gap-6">
+          <div className="space-y-4 max-w-xl">
+            <div className="flex items-center gap-3">
+              <div className="relative w-11 h-11 rounded-lg border border-white/10 bg-white/[0.04] flex items-center justify-center">
+                <CalendarDays className="w-5 h-5 text-pink-300" />
+                <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-amber-300 text-amber-950 flex items-center justify-center">
+                  <Clock className="w-3 h-3" />
+                </span>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wider text-white/35">Coming soon</p>
+                <h2 className="text-3xl font-bold text-white">Growth Planner</h2>
+              </div>
+            </div>
+            <p className="text-white/50 text-sm leading-relaxed">
+              Build a niche-aware content system with weekly calendars, platform mix, competitor ideas, and next-step planning from your results.
+            </p>
+            <div className="grid sm:grid-cols-2 gap-3">
+              {features.map((feature) => (
+                <div key={feature.label} className="flex items-center gap-3 rounded-lg border border-white/8 bg-background/40 p-3 text-sm text-white/60">
+                  <Check className="w-4 h-4 text-pink-300 shrink-0" />
+                  {feature.label}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="w-full md:w-[320px]">
+            {submitted ? (
+              <div className="flex items-center gap-2 px-4 py-3 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-emerald-300 text-sm font-medium">
+                <Check className="w-4 h-4" />
+                We'll notify you when Growth Planner launches.
+              </div>
+            ) : (
+              <form onSubmit={handleNotify} className="space-y-3">
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="your@email.com"
+                  required
+                  disabled={loading}
+                  className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-sm text-white placeholder-white/25 focus:outline-none focus:border-pink-400/45 transition-colors disabled:opacity-50"
+                />
+                {error && <p className="text-xs text-red-400">{error}</p>}
+                <Button type="submit" disabled={loading} className="w-full rounded-lg bg-pink-500 text-white hover:bg-pink-400">
+                  {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Bell className="w-4 h-4 mr-2" />}
+                  {loading ? "Submitting..." : "Notify me"}
+                </Button>
+              </form>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function GrowthPlannerTab() {
   const { plan } = usePlan();
   const saved = useMemo(loadState, []);
@@ -908,27 +1012,7 @@ export default function GrowthPlannerTab() {
   }
 
   if (!isAllowed) {
-    return (
-      <div className="max-w-5xl space-y-6">
-        <div className="glass-card rounded-2xl p-8 border-pink-500/20">
-          <div className="flex flex-col sm:flex-row sm:items-center gap-5">
-            <div className="w-12 h-12 rounded-xl bg-pink-500/15 border border-pink-500/20 flex items-center justify-center">
-              <Lock className="w-6 h-6 text-pink-300" />
-            </div>
-            <div className="flex-1">
-              <p className="text-xs uppercase tracking-wider text-pink-300 mb-2">Studio only</p>
-              <h1 className="text-3xl font-display font-bold text-white">Growth Planner is included with Studio and Professional plans.</h1>
-              <p className="text-white/50 mt-2 max-w-2xl">
-                Build a niche-aware social strategy, weekly content calendar, platform tabs, and result-based next-week plans once your workspace is on Studio.
-              </p>
-            </div>
-            <Button onClick={() => window.location.href = "/pricing?highlight=studio"} className="rounded-lg bg-pink-500 hover:bg-pink-400 text-white">
-              Upgrade
-            </Button>
-          </div>
-        </div>
-      </div>
-    );
+    return <GrowthPlannerComingSoon />;
   }
 
   return (

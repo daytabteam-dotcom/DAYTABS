@@ -153,10 +153,15 @@ export function usePlan() {
       if (resp.ok) {
         const data = await resp.json() as {
           plan: string;
+          freshToken?: string | null;
           uploadCounts: Record<string, number>;
           scriptPlannerChats?: number;
           features?: PlanFeatures;
         };
+        if (data.freshToken) {
+          localStorage.setItem("daytabs_token", data.freshToken);
+          window.dispatchEvent(new CustomEvent("daytabs:plan-updated"));
+        }
         const rawPlan = (data.plan || "free") as PlanName;
         const norm = normalizePlan(rawPlan);
         setPlanInfo({

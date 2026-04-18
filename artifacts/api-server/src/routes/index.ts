@@ -5,6 +5,7 @@ import authRouter from "./auth/index";
 import paddleRouter from "./paddle/index";
 import scriptPlannerRouter from "./script-planner/index";
 import dubbingRouter from "./dubbing/index";
+import growthPlannerRouter from "./growth-planner/index";
 import userRouter from "./user/index";
 import uploadRouter from "./upload/index";
 
@@ -17,6 +18,7 @@ router.use("/auth", authRouter);
 router.use("/paddle", paddleRouter);
 router.use("/script-planner", scriptPlannerRouter);
 router.use("/dubbing", dubbingRouter);
+router.use("/growth-planner", growthPlannerRouter);
 router.use("/user", userRouter);
 
 export default router;

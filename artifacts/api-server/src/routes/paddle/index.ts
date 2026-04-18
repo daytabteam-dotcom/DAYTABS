@@ -7,12 +7,12 @@ import { requireAuth } from "../../middlewares/auth";
 import {
   fetchAllPrices,
   fetchSubscriptionById,
-  fetchSubscriptionsByCustomerId,
   fetchCustomerByEmail,
   cancelSubscription,
   reactivateSubscription,
   createPortalSession,
 } from "../../lib/paddle";
+import { syncUserPlanFromPaddle } from "../../lib/paddlePlanSync";
 
 const router = Router();
 
@@ -30,8 +30,8 @@ const PRICE_FREE = process.env.PADDLE_PRICE_FREE || process.env.VITE_PADDLE_PRIC
 
 const PRICE_TO_PLAN: Record<string, string> = {
   [PRICE_PREMIUM]: "creator",
-  [PRICE_PROFESSIONAL]: "studio",
   [PRICE_PRO]: "pro",
+  [PRICE_PROFESSIONAL]: "studio",
   [PRICE_FREE]: "free",
 };
 
@@ -108,98 +108,9 @@ router.get("/subscription", requireAuth, async (req, res) => {
 
     if (!user) { res.status(404).json({ error: "User not found" }); return; }
 
-    let subscription = null;
-    let syncedPlan: string | null = null;
-    let syncedSubscriptionId: string | null = null;
-    let syncedCustomerId: string | null = null;
-    let clearCancelsAt = false;
+    const { subscription, planToStore, synced } = await syncUserPlanFromPaddle(user, req.log);
 
-    // 1. Try by stored subscription ID first (fastest)
-    if (user.paddleSubscriptionId) {
-      subscription = await fetchSubscriptionById(user.paddleSubscriptionId);
-      if (subscription?.status === "canceled") {
-        // Subscription is fully cancelled in Paddle.
-        // Check if user still has access (subscriptionCancelsAt is in the future).
-        const cancelsAt = user.subscriptionCancelsAt;
-        if (cancelsAt && cancelsAt > new Date()) {
-          // Access period still active — keep paid plan, show as "cancels on [date]"
-          // Inject scheduledChange if Paddle didn't return one
-          if (!subscription.scheduledChange) {
-            subscription = {
-              ...subscription,
-              status: "active" as const,
-              scheduledChange: { action: "cancel" as const, effectiveAt: cancelsAt.toISOString() },
-            };
-          } else {
-            // Keep as-is but override status to active so frontend shows correctly
-            subscription = { ...subscription, status: "active" as const };
-          }
-        } else {
-          // Period has ended, downgrade to free
-          subscription = null;
-          syncedPlan = "free";
-          syncedSubscriptionId = "";
-          clearCancelsAt = true;
-        }
-      } else if (subscription?.status === "active" && !subscription.scheduledChange && user.subscriptionCancelsAt) {
-        // Paddle API hasn't reflected the scheduled cancellation yet (eventual consistency).
-        // Fall back to what we stored in the DB.
-        const cancelsAt = user.subscriptionCancelsAt;
-        if (cancelsAt > new Date()) {
-          subscription = {
-            ...subscription,
-            scheduledChange: { action: "cancel" as const, effectiveAt: cancelsAt.toISOString() },
-          };
-        }
-      } else if (subscription?.status === "active" && subscription.scheduledChange?.action !== "cancel") {
-        // Subscription is active without pending cancellation — clear any stale cancelsAt
-        if (user.subscriptionCancelsAt) clearCancelsAt = true;
-      }
-    }
-
-    // 2. Fall back to customer ID lookup
-    if (!subscription && user.paddleCustomerId) {
-      const subs = await fetchSubscriptionsByCustomerId(user.paddleCustomerId);
-      subscription = subs.find((s) => s.status === "active" || s.status === "trialing") ?? subs[0] ?? null;
-      if (subscription) {
-        syncedPlan = priceIdToPlan(subscription.priceId) ?? null;
-        syncedSubscriptionId = subscription.id;
-      }
-    }
-
-    // 3. Email-based fallback — catches users whose Paddle IDs were never stored
-    if (!subscription) {
-      const customer = await fetchCustomerByEmail(user.email);
-      if (customer) {
-        syncedCustomerId = customer.id;
-        const subs = await fetchSubscriptionsByCustomerId(customer.id);
-        subscription = subs.find((s) => s.status === "active" || s.status === "trialing") ?? subs[0] ?? null;
-        if (subscription) {
-          syncedPlan = priceIdToPlan(subscription.priceId) ?? null;
-          syncedSubscriptionId = subscription.id;
-        }
-      }
-    }
-
-    // 4. Persist any discovered changes
-    const planToStore = syncedPlan ?? user.plan;
-    const needsUpdate =
-      (syncedPlan !== null && syncedPlan !== user.plan) ||
-      (syncedSubscriptionId !== null && syncedSubscriptionId !== user.paddleSubscriptionId) ||
-      (syncedCustomerId !== null && syncedCustomerId !== user.paddleCustomerId) ||
-      clearCancelsAt;
-
-    if (needsUpdate) {
-      const updates: Record<string, unknown> = { plan: planToStore };
-      if (syncedSubscriptionId !== null) updates.paddleSubscriptionId = syncedSubscriptionId || null;
-      if (syncedCustomerId !== null) updates.paddleCustomerId = syncedCustomerId;
-      if (clearCancelsAt) updates.subscriptionCancelsAt = null;
-      await db.update(usersTable).set(updates as never).where(eq(usersTable.id, user.id));
-      req.log.info({ userId: user.id, planToStore, syncedSubscriptionId, clearCancelsAt }, "Synced plan from Paddle");
-    }
-
-    // 5. Return fresh JWT so the client can update its token immediately
-    const freshToken = needsUpdate
+    const freshToken = synced
       ? signToken(user.id, user.email, user.name, planToStore)
       : null;
 
