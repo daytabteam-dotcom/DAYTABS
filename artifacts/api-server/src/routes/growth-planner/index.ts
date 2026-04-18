@@ -1,25 +1,34 @@
 import { Router } from "express";
 import { requireAuth } from "../../middlewares/auth";
 import { CONTACT_EMAIL, SMTP_USER, assertMailConfigured, createMailTransport, escapeHtml } from "../../lib/email";
+import { fetchTrendingTopics, scrapePublicProfile } from "../../lib/enrichment";
 import { GROWTH_PLANNER_JSON_SHAPE, GROWTH_PLANNER_SYSTEM_PROMPT } from "../../lib/growthPlannerPrompts";
 import { openai } from "../../lib/openai";
 import { normalizePlan } from "../../lib/planLimits";
 
 const router = Router();
 
-const GROWTH_PLANNER_USER_PROMPT = `Generate Growth Planner data for the DayTabs app.
+const GROWTH_PLANNER_USER_PROMPT = `Generate a realistic, trend-anchored Growth Planner calendar.
 
-Return valid JSON only, matching this shape:
+INPUTS AVAILABLE TO YOU:
+1. profile - user's niche, goals, audience, uploaded context names, and brand details
+2. platforms - selected platforms with posts_per_week targets and profile URLs
+3. profileData - scraped from actual public profile pages during this request; use this for real numbers
+4. trendData.googleTrends - RSS from Google Trends pulled during this request
+5. trendData.redditHot - top 10 posts from a relevant subreddit pulled during this request
+6. previousCalendar, posted URLs, skipped ideas, and result notes for next-week mode
+
+CALENDAR REQUIREMENTS:
+- scheduled_date: ISO YYYY-MM-DD, starting from startDate
+- At least 60% of posts must tie to a trend from trendData when trendData has usable items
+- Each post needs: title, hook, format, platform, scheduled_date, rationale, cta
+- rationale must explain why this topic and timing are strong based on real data
+- Mark any field you cannot verify as discovery_needed: true
+- posts_per_week must exactly match the selected cadence per platform
+
+Return valid JSON matching this schema. No fabricated data:
 ${GROWTH_PLANNER_JSON_SHAPE}
-
-Important product behavior:
-- You do not have browser access in this request. Use the user's provided profile URLs, post URLs, uploaded context names, niche, audience, goals, selected platforms, and posting cadence.
-- For external facts you cannot verify, do not fabricate. Mark data limitations clearly.
-- Still generate a useful production-ready calendar from the user's inputs, even when competitor/trend evidence is insufficient.
-- Use source_inspirations only when the source is a user-provided URL or a safe platform search/profile URL clearly marked as discovery_needed.
-- scheduled_date must be ISO YYYY-MM-DD.
-- Calendar length should match selected platforms and their posts_per_week as closely as practical for one week.
-- If this is next-week generation, use the previous calendar, posted URLs, skipped ideas, and result notes to adjust topics and avoid repeating weak ideas.`;
+`;
 
 type PlannerGenerateMode = "initial" | "next-week" | "custom-idea";
 
@@ -30,6 +39,27 @@ function parseAiJson(raw: string) {
     .replace(/^```\s*/i, "")
     .replace(/\s*```$/i, "");
   return JSON.parse(withoutFence);
+}
+
+function objectRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function getProfileNiche(profile: unknown) {
+  const record = objectRecord(profile);
+  return typeof record.niche === "string" ? record.niche : "";
+}
+
+function getSelectedPlatformEntries(platforms: unknown) {
+  const records = objectRecord(platforms);
+  return Object.entries(records)
+    .map(([platform, config]) => ({ platform, config: objectRecord(config) }))
+    .filter(({ config }) => config.selected === true)
+    .map(({ platform, config }) => ({
+      platform,
+      url: typeof config.url === "string" ? config.url.trim() : "",
+      postsPerWeek: typeof config.postsPerWeek === "number" ? config.postsPerWeek : null,
+    }));
 }
 
 router.post("/notify", async (req, res) => {
@@ -107,6 +137,13 @@ router.post("/generate", requireAuth, async (req, res) => {
       return;
     }
 
+    const selectedPlatforms = getSelectedPlatformEntries(platforms);
+    const profileUrls = selectedPlatforms.filter((entry) => entry.url);
+    const [profileData, trendData] = await Promise.all([
+      Promise.all(profileUrls.map((entry) => scrapePublicProfile(entry.url, entry.platform))),
+      fetchTrendingTopics(getProfileNiche(profile), selectedPlatforms.map((entry) => entry.platform)),
+    ]);
+
     const completion = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: [
@@ -123,6 +160,14 @@ router.post("/generate", requireAuth, async (req, res) => {
             customIdea,
             startDate,
             currentDate: new Date().toISOString().slice(0, 10),
+            profileData,
+            trendData,
+            enrichment: {
+              selectedPlatforms,
+              profileUrlsRequested: profileUrls.length,
+              profileUrlsFetched: profileData.filter((item) => !item.error).length,
+              trendErrors: trendData.errors,
+            },
           }),
         },
       ],

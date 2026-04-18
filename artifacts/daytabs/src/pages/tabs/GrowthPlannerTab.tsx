@@ -76,6 +76,14 @@ interface CalendarItem {
   outline?: string[];
   captionDirection?: string;
   cta?: string;
+  bestPostingTime?: string;
+  rationale?: string;
+  engagementEstimate?: {
+    estimated_reach?: number | string | null;
+    basis?: string;
+    discovery_needed?: boolean;
+  };
+  discoveryNeeded?: boolean;
   sourceInspirations?: string[];
   status?: "posted" | "not-posted";
   result?: string;
@@ -144,6 +152,14 @@ interface AiPlannerData {
     thumbnail_or_visual_direction?: string;
     caption_direction?: string;
     cta?: string;
+    best_posting_time?: string;
+    rationale?: string;
+    engagement_estimate?: {
+      estimated_reach?: number | string | null;
+      basis?: string;
+      discovery_needed?: boolean;
+    };
+    discovery_needed?: boolean;
     platform_specific_notes?: string;
     source_inspirations?: Array<string | { source_url?: string; url?: string; title?: string }>;
   }>;
@@ -331,6 +347,10 @@ function calendarFromAi(data: AiPlannerData, weekId: number, fallbackStartDate: 
         outline,
         captionDirection: item.caption_direction,
         cta: item.cta,
+        bestPostingTime: item.best_posting_time,
+        rationale: item.rationale,
+        engagementEstimate: item.engagement_estimate,
+        discoveryNeeded: item.discovery_needed,
         sourceInspirations,
         stage: "idea",
       } satisfies CalendarItem;
@@ -1750,6 +1770,22 @@ export default function GrowthPlannerTab() {
                 {selectedCard.outline?.length ? <Brief label="Outline" value={selectedCard.outline.join("\n")} /> : null}
                 {selectedCard.captionDirection && <Brief label="Caption direction" value={selectedCard.captionDirection} />}
                 {selectedCard.cta && <Brief label="CTA" value={selectedCard.cta} />}
+                {selectedCard.bestPostingTime && <Brief label="Best posting time" value={selectedCard.bestPostingTime} icon={Clock} />}
+                {selectedCard.rationale && <Brief label="Real-data rationale" value={selectedCard.rationale} icon={BarChart3} />}
+                {selectedCard.engagementEstimate && (
+                  <Brief
+                    label="Engagement estimate"
+                    value={[
+                      selectedCard.engagementEstimate.estimated_reach !== undefined && selectedCard.engagementEstimate.estimated_reach !== null
+                        ? `Estimated reach: ${selectedCard.engagementEstimate.estimated_reach}`
+                        : "Estimated reach: discovery needed",
+                      selectedCard.engagementEstimate.basis ? `Basis: ${selectedCard.engagementEstimate.basis}` : "",
+                      selectedCard.engagementEstimate.discovery_needed ? "Discovery needed: true" : "",
+                    ].filter(Boolean).join("\n")}
+                    icon={TrendingUp}
+                  />
+                )}
+                {selectedCard.discoveryNeeded && <Brief label="Discovery needed" value="AI marked parts of this idea as requiring more source data before treating them as verified." />}
                 <Brief label="Thumbnail or footage idea" value={selectedCard.thumbnail} />
                 <Brief label="Song or audio idea" value={selectedCard.song} />
                 {selectedCard.sourceInspirations?.length ? <Brief label="AI source inspirations" value={selectedCard.sourceInspirations.join("\n")} /> : null}
