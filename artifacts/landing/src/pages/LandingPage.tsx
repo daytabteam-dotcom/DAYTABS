@@ -638,11 +638,11 @@ export default function LandingPage() {
           </div>
           <p>© {new Date().getFullYear()} DayTabs. All rights reserved.</p>
           <div className="flex gap-6">
-            <button onClick={() => navigate("/blog")} className="hover:text-white transition-colors cursor-pointer">Blog</button>
-            <button onClick={() => navigate("/pricing")} className="hover:text-white transition-colors cursor-pointer">Pricing</button>
-            <button onClick={() => navigate("/contact")} className="hover:text-white transition-colors cursor-pointer">Contact</button>
-            <button onClick={() => navigate("/privacy")} className="hover:text-white transition-colors cursor-pointer">Privacy Policy</button>
-            <button onClick={() => navigate("/terms")} className="hover:text-white transition-colors cursor-pointer">Terms</button>
+            <Link href="/blog" className="hover:text-white transition-colors">Blog</Link>
+            <Link href="/pricing" className="hover:text-white transition-colors">Pricing</Link>
+            <Link href="/contact" className="hover:text-white transition-colors">Contact</Link>
+            <Link href="/privacy" className="hover:text-white transition-colors">Privacy Policy</Link>
+            <Link href="/terms" className="hover:text-white transition-colors">Terms</Link>
           </div>
         </div>
       </footer>
