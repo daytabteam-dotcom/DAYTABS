@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { requireAuth } from "../../middlewares/auth";
 import { CONTACT_EMAIL, SMTP_USER, assertMailConfigured, createMailTransport, escapeHtml } from "../../lib/email";
-import { fetchTrendingTopics, scrapePublicProfile, type PublicProfileData, type TrendData } from "../../lib/enrichment";
+import { fetchTrendingTopics, findCompetitors, scrapePublicProfile, type PublicProfileData, type TrendData } from "../../lib/enrichment";
 import { GROWTH_PLANNER_JSON_SHAPE, GROWTH_PLANNER_SYSTEM_PROMPT } from "../../lib/growthPlannerPrompts";
 import { openai } from "../../lib/openai";
 import { normalizePlan } from "../../lib/planLimits";
@@ -77,6 +77,76 @@ function getSelectedPlatformEntries(platforms: unknown) {
     }));
 }
 
+function isIsoDate(value: unknown): value is string {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00.000Z`));
+}
+
+function addDaysIso(isoDate: string, days: number) {
+  const date = new Date(`${isoDate}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function dateWindow(startDate: string) {
+  return Array.from({ length: 7 }, (_, index) => addDaysIso(startDate, index));
+}
+
+function datesForCadence(startDate: string, postsPerWeek: number | null) {
+  const count = Math.max(1, Math.min(7, Number.isFinite(postsPerWeek) ? Number(postsPerWeek) : 1));
+  const dates = dateWindow(startDate);
+  if (count === 7) return dates;
+
+  const weekday = (isoDate: string) => new Date(`${isoDate}T00:00:00.000Z`).getUTCDay();
+  const preferredByCount: Record<number, number[]> = {
+    1: [2, 3, 1, 4, 5, 0, 6],
+    2: [2, 4, 1, 3, 5, 0, 6],
+    3: [1, 3, 5, 2, 4, 0, 6],
+    4: [1, 2, 4, 5, 3, 0, 6],
+    5: [1, 2, 3, 4, 5, 0, 6],
+    6: [1, 2, 3, 4, 5, 0, 6],
+  };
+  const preferred = preferredByCount[count] ?? [1, 2, 3, 4, 5, 0, 6];
+  const ranked = [...dates].sort((a, b) => {
+    const aRank = preferred.indexOf(weekday(a));
+    const bRank = preferred.indexOf(weekday(b));
+    if (aRank !== bRank) return aRank - bRank;
+    return dates.indexOf(a) - dates.indexOf(b);
+  });
+
+  return ranked.slice(0, count).sort((a, b) => dates.indexOf(a) - dates.indexOf(b));
+}
+
+function buildScheduleConstraints(selectedPlatforms: ReturnType<typeof getSelectedPlatformEntries>, startDate: string) {
+  return {
+    startDate,
+    endDate: addDaysIso(startDate, 6),
+    platforms: selectedPlatforms.map((entry) => ({
+      platform: entry.platform,
+      postsPerWeek: Math.max(1, Math.min(7, Number.isFinite(entry.postsPerWeek) ? Number(entry.postsPerWeek) : 1)),
+      scheduledDates: datesForCadence(startDate, entry.postsPerWeek),
+    })),
+  };
+}
+
+function enforceCalendarDates(planner: unknown, selectedPlatforms: ReturnType<typeof getSelectedPlatformEntries>, startDate: string) {
+  const record = objectRecord(planner);
+  if (!Array.isArray(record.calendar)) return planner;
+
+  const schedule = buildScheduleConstraints(selectedPlatforms, startDate);
+  const queues = new Map(schedule.platforms.map((entry) => [entry.platform, [...entry.scheduledDates]]));
+  const fallbackDates = dateWindow(startDate);
+
+  record.calendar = record.calendar.map((item, index) => {
+    const card = objectRecord(item);
+    const platform = typeof card.platform === "string" ? card.platform : "";
+    const queue = queues.get(platform);
+    const scheduledDate = queue?.shift() ?? fallbackDates[index % fallbackDates.length];
+    return { ...card, scheduled_date: scheduledDate };
+  });
+
+  return record;
+}
+
 function sanitizeProfileData(profileData: PublicProfileData[]) {
   return profileData.map((item) => {
     const metricsUnavailable = Boolean(item.error || item.parseError);
@@ -132,14 +202,23 @@ ${JSON.stringify(platformTargets)}
 Generate exactly these counts per platform, with total calendar cards equal to the sum of postsPerWeek.`;
 }
 
+function buildSchedulePrompt(scheduleConstraints: ReturnType<typeof buildScheduleConstraints>) {
+  return `CALENDAR DATE CONSTRAINTS - REQUIRED:
+Generate content only inside this seven-day window: ${scheduleConstraints.startDate} through ${scheduleConstraints.endDate}.
+For each platform, use exactly the listed dates and exactly the listed count:
+${JSON.stringify(scheduleConstraints.platforms, null, 2)}
+
+Every calendar item must have scheduled_date equal to one of the listed dates for that platform.`;
+}
+
 const COMPETITOR_PROMPT = `COMPETITOR SECTION - REQUIRED:
-Generate up to 3 competitor accounts per selected platform based only on real accounts found in trendData.platformTrends creator fields, user-provided competitor data, or user-provided profile URLs.
+Generate up to 3 competitor accounts per selected platform based only on real accounts found in competitorData, trendData.platformTrends creator fields, user-provided competitor data, or user-provided profile URLs.
 For each competitor include:
 - handle: real @username or account name from source data
 - why_relevant: what they do that's similar to this account
 - what_to_steal: one specific content strategy or format they use that this account should adopt
 - follower_range: approximate size tier only when source metrics support it; otherwise "unknown"
-- discovery_needed: true unless the source URL and account name came directly from trendData
+- discovery_needed: false when the source URL and account name came directly from competitorData or trendData; otherwise true
 
 If there are not enough real competitor accounts for a platform, return fewer competitors and add a data_limitations entry. Never invent competitor handles.`;
 
@@ -219,10 +298,21 @@ router.post("/generate", requireAuth, async (req, res) => {
     }
 
     const selectedPlatforms = getSelectedPlatformEntries(platforms);
+    const selectedPlatformIds = selectedPlatforms.map((entry) => entry.platform);
+    const niche = getProfileNiche(profile);
     const profileUrls = selectedPlatforms.filter((entry) => entry.url);
-    const [profileData, trendData] = await Promise.all([
+    const today = new Date().toISOString().slice(0, 10);
+    const effectiveStartDate = mode === "initial"
+      ? today
+      : isIsoDate(startDate)
+        ? startDate
+        : today;
+    const scheduleConstraints = buildScheduleConstraints(selectedPlatforms, effectiveStartDate);
+
+    const [profileData, trendData, competitorData] = await Promise.all([
       Promise.all(profileUrls.map((entry) => scrapePublicProfile(entry.url, entry.platform))),
-      fetchTrendingTopics(getProfileNiche(profile), selectedPlatforms.map((entry) => entry.platform)),
+      fetchTrendingTopics(niche, selectedPlatformIds),
+      findCompetitors(niche, selectedPlatformIds),
     ]);
     const sanitizedProfileData = sanitizeProfileData(profileData);
 
@@ -232,6 +322,7 @@ router.post("/generate", requireAuth, async (req, res) => {
         username: item.username,
         normalizedUrl: item.normalizedUrl,
         hasFollowerCount: Boolean(item.followerCount ?? item.subscriberCount ?? item.possibleFollowerCount),
+        recentPostCount: item.recentVideos?.length ?? item.recentPosts?.length ?? 0,
         hasDescription: Boolean(item.description ?? item.bio ?? item.metaDescription),
         error: item.error ?? null,
         parseError: item.parseError ?? null,
@@ -244,6 +335,8 @@ router.post("/generate", requireAuth, async (req, res) => {
         errors: trendData.errors,
         platformErrors: trendData.platformTrendErrors,
       },
+      competitorResults: Object.fromEntries(Object.entries(competitorData).map(([platform, competitors]) => [platform, competitors.length])),
+      scheduleConstraints,
     }, "Enrichment results before AI call");
 
     const completion = await openai.chat.completions.create({
@@ -252,6 +345,7 @@ router.post("/generate", requireAuth, async (req, res) => {
         { role: "system", content: GROWTH_PLANNER_SYSTEM_PROMPT },
         { role: "user", content: GROWTH_PLANNER_USER_PROMPT },
         { role: "user", content: buildTrendScanPrompt(trendData, selectedPlatforms) },
+        { role: "user", content: buildSchedulePrompt(scheduleConstraints) },
         { role: "user", content: COMPETITOR_PROMPT },
         {
           role: "user",
@@ -262,10 +356,12 @@ router.post("/generate", requireAuth, async (req, res) => {
             weekNumber,
             previousCalendar,
             customIdea,
-            startDate,
-            currentDate: new Date().toISOString().slice(0, 10),
+            startDate: effectiveStartDate,
+            currentDate: today,
             profileData: sanitizedProfileData,
             trendData,
+            competitorData,
+            scheduleConstraints,
             enrichment: {
               selectedPlatforms,
               profileUrlsRequested: profileUrls.length,
@@ -289,7 +385,8 @@ router.post("/generate", requireAuth, async (req, res) => {
       return;
     }
 
-    res.json({ planner, raw });
+    const scheduledPlanner = mode === "custom-idea" ? planner : enforceCalendarDates(planner, selectedPlatforms, effectiveStartDate);
+    res.json({ planner: scheduledPlanner, raw });
   } catch (err) {
     req.log.error({ err }, "Growth Planner AI generation error");
     res.status(500).json({ error: "Failed to generate Growth Planner data. Please try again." });

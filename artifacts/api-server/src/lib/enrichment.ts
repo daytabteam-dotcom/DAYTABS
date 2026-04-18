@@ -27,11 +27,29 @@ export interface PublicProfileData {
   bio?: string | null;
   description?: string | null;
   ogTitle?: string | null;
+  recentPosts?: PublicPostData[];
+  recentVideos?: PublicPostData[];
   parseError?: string | null;
   apiSource?: string | null;
   sourceUrl?: string | null;
   fetchedAt: string;
   error?: string | null;
+}
+
+export interface PublicPostData {
+  id: string | null;
+  title: string | null;
+  url?: string | null;
+  format?: string | null;
+  publishedAt?: string | null;
+  duration?: string | null;
+  thumbnail?: string | null;
+  viewCount?: string | number | null;
+  playCount?: string | number | null;
+  likeCount?: string | number | null;
+  commentCount?: string | number | null;
+  shareCount?: string | number | null;
+  caption?: string | null;
 }
 
 export interface RedditTrendItem {
@@ -63,6 +81,21 @@ export interface TrendData {
   subreddit: string;
   fetchedAt: string;
   errors: string[];
+}
+
+export interface CompetitorCandidate {
+  platform: string;
+  name: string | null;
+  handle: string | null;
+  profileUrl: string | null;
+  followerCount: string | number | null;
+  subscriberCount: string | null;
+  videoCount: string | null;
+  totalLikes: string | number | null;
+  description: string | null;
+  verified: boolean | null;
+  source: string;
+  evidence: string[];
 }
 
 function withTimeout(ms = FETCH_TIMEOUT_MS) {
@@ -273,6 +306,123 @@ function firstString(...values: unknown[]) {
   return null;
 }
 
+function scalarToString(value: unknown) {
+  if (typeof value === "string" && value.trim()) return value;
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return null;
+}
+
+function getNestedRecord(value: unknown, path: string[]) {
+  return path.reduce<Record<string, unknown>>((record, key) => getRecord(record[key]), getRecord(value));
+}
+
+function getTextFromRuns(value: unknown) {
+  const record = getRecord(value);
+  if (typeof record.simpleText === "string") return record.simpleText;
+  const runs = getArray(record.runs);
+  return runs
+    .map((run) => firstString(getRecord(run).text))
+    .filter(Boolean)
+    .join("")
+    .trim() || null;
+}
+
+function parseTikTokUniversalData(html: string) {
+  const jsonText = extractScriptJson(html, ["__UNIVERSAL_DATA_FOR_REHYDRATION__=", "window['SIGI_STATE']="]);
+  if (!jsonText) return null;
+  try {
+    return getRecord(JSON.parse(jsonText) as unknown);
+  } catch {
+    return null;
+  }
+}
+
+function extractTikTokRecentVideos(html: string): PublicPostData[] {
+  const raw = parseTikTokUniversalData(html);
+  if (!raw) return [];
+  const userDetail = getNestedRecord(raw, ["__DEFAULT_SCOPE__", "webapp.user-detail"]);
+  const candidateLists = [
+    getArray(getNestedRecord(userDetail, ["userInfo", "user", "videoList"])),
+    getArray(userDetail.itemList),
+  ];
+  const videos = candidateLists.find((items) => items.length) ?? [];
+
+  return videos.slice(0, 20).map((item) => {
+    const record = getRecord(item);
+    const stats = getRecord(record.stats);
+    const id = firstString(record.id);
+    return {
+      id,
+      title: firstString(record.desc),
+      url: id && firstString(getNestedRecord(userDetail, ["userInfo", "user"]).uniqueId)
+        ? `https://www.tiktok.com/@${firstString(getNestedRecord(userDetail, ["userInfo", "user"]).uniqueId)}/video/${id}`
+        : null,
+      format: "video",
+      publishedAt: firstString(record.createTime),
+      playCount: firstString(stats.playCount),
+      likeCount: firstString(stats.diggCount),
+      commentCount: firstString(stats.commentCount),
+      shareCount: firstString(stats.shareCount),
+    };
+  });
+}
+
+function extractYouTubeVideos(html: string): PublicPostData[] {
+  const initialDataJson = extractScriptJson(html, ["var ytInitialData =", "window[\"ytInitialData\"] ="]);
+  if (!initialDataJson) return [];
+
+  try {
+    const data = getRecord(JSON.parse(initialDataJson) as unknown);
+    const tabs = getArray(getNestedRecord(data, ["contents", "twoColumnBrowseResultsRenderer"]).tabs);
+    const selectedTab = tabs.find((tab) => {
+      const renderer = getRecord(getRecord(tab).tabRenderer);
+      return renderer.title === "Videos" || renderer.selected === true;
+    });
+    const contents = getArray(getNestedRecord(selectedTab, ["tabRenderer", "content", "richGridRenderer"]).contents);
+
+    return contents
+      .map((content) => getNestedRecord(content, ["richItemRenderer", "content", "videoRenderer"]))
+      .filter((video) => Object.keys(video).length > 0)
+      .slice(0, 20)
+      .map((video) => {
+        const id = firstString(video.videoId);
+        const thumbnail = getRecord(getArray(getRecord(video.thumbnail).thumbnails).at(-1));
+        return {
+          id,
+          title: getTextFromRuns(video.title),
+          url: id ? `https://www.youtube.com/watch?v=${id}` : null,
+          format: "video",
+          viewCount: getTextFromRuns(video.viewCountText),
+          publishedAt: getTextFromRuns(video.publishedTimeText),
+          duration: getTextFromRuns(video.lengthText),
+          thumbnail: firstString(thumbnail.url),
+        };
+      });
+  } catch {
+    return [];
+  }
+}
+
+function extractInstagramRecentPosts(user: Record<string, unknown>): PublicPostData[] {
+  const timeline = getRecord(user.edge_owner_to_timeline_media);
+  return getArray(timeline.edges).slice(0, 12).map((edge) => {
+    const node = getRecord(getRecord(edge).node);
+    const captionEdges = getArray(getRecord(node.edge_media_to_caption).edges);
+    const caption = firstString(getRecord(getRecord(captionEdges[0]).node).text);
+    return {
+      id: firstString(node.id, node.shortcode),
+      title: caption ? caption.slice(0, 120) : null,
+      url: firstString(node.shortcode) ? `https://www.instagram.com/p/${firstString(node.shortcode)}/` : null,
+      format: firstString(node.__typename),
+      publishedAt: typeof node.taken_at_timestamp === "number" ? String(node.taken_at_timestamp) : null,
+      likeCount: typeof getRecord(node.edge_liked_by).count === "number" ? getRecord(node.edge_liked_by).count as number : null,
+      commentCount: typeof getRecord(node.edge_media_to_comment).count === "number" ? getRecord(node.edge_media_to_comment).count as number : null,
+      thumbnail: firstString(node.thumbnail_src, node.display_url),
+      caption: caption ? caption.slice(0, 300) : null,
+    };
+  });
+}
+
 async function fetchYouTubeApi(path: string, params: Record<string, string>) {
   if (!YOUTUBE_API_KEY) throw new Error("YOUTUBE_API_KEY is not configured");
   const search = new URLSearchParams({ ...params, key: YOUTUBE_API_KEY });
@@ -389,6 +539,7 @@ async function scrapeYouTubeChannel(profile: PublicProfileData) {
       subscriberCount: null,
       videoCount: null,
       description: htmlData.metaDescription,
+      recentVideos: [],
       parseError: "ytInitialData not found",
       error: "YouTube channel metrics could not be parsed from public HTML",
     };
@@ -411,6 +562,11 @@ async function scrapeYouTubeChannel(profile: PublicProfileData) {
     const videoRuns = Array.isArray(firstVideoCountRun.runs) ? firstVideoCountRun.runs : [];
     const firstVideoRun = getRecord(videoRuns[0]);
 
+    const videosUrl = profile.normalizedUrl.endsWith("/videos") ? profile.normalizedUrl : `${profile.normalizedUrl}/videos`;
+    const recentVideos = await fetchText(videosUrl)
+      .then(({ text: videosHtml }) => extractYouTubeVideos(videosHtml))
+      .catch(() => []);
+
     return {
       ...htmlData,
       subscriberCount: typeof subscriberCountText.simpleText === "string"
@@ -420,6 +576,7 @@ async function scrapeYouTubeChannel(profile: PublicProfileData) {
           : null,
       videoCount: typeof firstVideoRun.text === "string" ? firstVideoRun.text : null,
       description: typeof metadata.description === "string" ? metadata.description : htmlData.metaDescription,
+      recentVideos,
       parseError: null,
       error: htmlData.error,
     };
@@ -429,6 +586,7 @@ async function scrapeYouTubeChannel(profile: PublicProfileData) {
       subscriberCount: null,
       videoCount: null,
       description: htmlData.metaDescription,
+      recentVideos: extractYouTubeVideos(text),
       parseError: err instanceof Error ? err.message : "ytInitialData parse failed",
       error: "YouTube channel metrics could not be parsed from public HTML",
     };
@@ -438,6 +596,10 @@ async function scrapeYouTubeChannel(profile: PublicProfileData) {
 async function scrapeTikTokProfile(profile: PublicProfileData) {
   const { response, text } = await fetchText(profile.normalizedUrl);
   const htmlData = mergeHtmlProfile(profile, text, response.ok, response.status);
+  const raw = parseTikTokUniversalData(text);
+  const userInfo = getNestedRecord(raw, ["__DEFAULT_SCOPE__", "webapp.user-detail", "userInfo"]);
+  const user = getRecord(userInfo.user);
+  const stats = getRecord(userInfo.stats);
   const followerMatch = text.match(/"followerCount":(\d+)/);
   const likeMatch = text.match(/"heartCount":(\d+)/);
   const videoMatch = text.match(/"videoCount":(\d+)/);
@@ -445,10 +607,15 @@ async function scrapeTikTokProfile(profile: PublicProfileData) {
 
   return {
     ...htmlData,
-    followerCount: followerMatch?.[1] ?? htmlData.possibleFollowerCount,
-    totalLikes: likeMatch?.[1] ?? null,
-    videoCount: videoMatch?.[1] ?? htmlData.possiblePostCount,
-    bio: bioMatch?.[1] ? decodeHtmlEntities(bioMatch[1]) : htmlData.metaDescription,
+    username: firstString(user.uniqueId) ?? profile.username,
+    fullName: firstString(user.nickname),
+    followerCount: scalarToString(stats.followerCount) ?? followerMatch?.[1] ?? htmlData.possibleFollowerCount,
+    followingCount: scalarToString(stats.followingCount),
+    totalLikes: scalarToString(stats.heartCount) ?? likeMatch?.[1] ?? null,
+    videoCount: scalarToString(stats.videoCount) ?? videoMatch?.[1] ?? htmlData.possiblePostCount,
+    bio: firstString(user.signature) ?? (bioMatch?.[1] ? decodeHtmlEntities(bioMatch[1]) : htmlData.metaDescription),
+    isVerified: typeof user.verified === "boolean" ? user.verified : null,
+    recentVideos: extractTikTokRecentVideos(text),
   };
 }
 
@@ -487,6 +654,7 @@ async function scrapeInstagramProfile(profile: PublicProfileData) {
           bio: typeof user.biography === "string" ? user.biography : null,
           fullName: typeof user.full_name === "string" ? user.full_name : null,
           isVerified: typeof user.is_verified === "boolean" ? user.is_verified : null,
+          recentPosts: extractInstagramRecentPosts(user),
           parseError: null,
           error: null,
         };
@@ -513,6 +681,7 @@ async function scrapeInstagramProfile(profile: PublicProfileData) {
       bio: ogDesc,
       fullName: ogTitle,
       ogTitle,
+      recentPosts: [],
       parseError: followerMatch || followingMatch || postMatch ? null : "Instagram metrics not found in public Open Graph metadata",
       error: response.ok ? null : `HTTP ${response.status}`,
     };
@@ -524,6 +693,7 @@ async function scrapeInstagramProfile(profile: PublicProfileData) {
       postCount: null,
       bio: null,
       fullName: null,
+      recentPosts: [],
       parseError: err instanceof Error ? err.message : "Instagram profile scrape failed",
       error: err instanceof Error ? err.message : "Instagram profile scrape failed",
     };
@@ -604,11 +774,17 @@ export async function scrapePublicProfile(url: string, platform: string): Promis
     }
 
     if (platform === "linkedin") {
-      return unavailableApiProfile(
-        profile,
-        "linkedin-api",
-        "LinkedIn API does not provide public arbitrary profile metrics from a URL without member/organization authorization",
-      );
+      const scraped = await genericScrape(profile);
+      const followerCount = scraped.rawHtml ? extractCount(scraped.rawHtml, ["followers"]) : null;
+      const connectionCount = scraped.rawHtml ? extractCount(scraped.rawHtml, ["connections"]) : null;
+      return {
+        ...scraped,
+        followerCount,
+        followingCount: connectionCount,
+        apiSource: "public-html",
+        parseError: followerCount || connectionCount ? null : "LinkedIn public HTML only exposed limited metadata; analytics access is required for reliable metrics",
+        error: scraped.error,
+      };
     }
 
     return genericScrape(profile);
@@ -650,6 +826,44 @@ function parseYouTubeTrendingTitles(html: string) {
     .filter((title) => title && !title.includes("\\u") && !title.includes("YouTube"))
     .slice(0, 8);
   return [...new Set(titles)];
+}
+
+function parseTikTokHashtags(html: string, niche: string): PlatformTrendItem[] {
+  const hashtagNames = [...html.matchAll(/"hashtagName":"([^"]+)"/g)]
+    .map((match) => decodeHtmlEntities(match[1] ?? ""))
+    .filter(Boolean);
+
+  return [...new Set(hashtagNames)].slice(0, 10).map((tag) => ({
+    platform: "tiktok",
+    topic: `#${tag}`,
+    title: `#${tag}`,
+    creator: null,
+    url: `https://www.tiktok.com/tag/${encodeURIComponent(tag)}`,
+    source: "tiktok-public-search",
+    format: "hashtag trend",
+    metricSignals: { hashtag: `#${tag}` },
+    whyRelevant: `TikTok public search surfaced this hashtag while scanning ${niche || "the niche"}.`,
+  }));
+}
+
+function parseInstagramHashtagTrend(html: string, niche: string): PlatformTrendItem[] {
+  const tag = niche.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const count = html.match(/"edge_hashtag_to_media":\{"count":(\d+)/)?.[1]
+    ?? html.match(/([\d,.]+[KMB]?)\s+posts/i)?.[1]
+    ?? null;
+  const description = extractMeta(html, "og:description");
+
+  return [{
+    platform: "instagram",
+    topic: `#${tag}`,
+    title: description ?? `#${tag}`,
+    creator: null,
+    url: `https://www.instagram.com/explore/tags/${tag}/`,
+    source: "instagram-public-hashtag",
+    format: "hashtag / reel exploration",
+    metricSignals: { postCount: count },
+    whyRelevant: `Instagram public hashtag page for ${niche || "this niche"}.`,
+  }];
 }
 
 function platformSearchUrl(platform: string, topic: string) {
@@ -787,10 +1001,168 @@ async function fetchXNicheTrends(niche: string): Promise<PlatformTrendItem[]> {
   }).slice(0, 10);
 }
 
+async function fetchTikTokPublicTrends(niche: string): Promise<PlatformTrendItem[]> {
+  const query = encodeURIComponent(niche || "creator growth");
+  const { response, text } = await fetchText(`https://www.tiktok.com/search?q=${query}&t=${Date.now()}`);
+  if (!response.ok) throw new Error(`TikTok search HTTP ${response.status}`);
+  return parseTikTokHashtags(text, niche);
+}
+
+async function fetchInstagramPublicTrends(niche: string): Promise<PlatformTrendItem[]> {
+  const tag = (niche || "creator growth").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const { response, text } = await fetchText(`https://www.instagram.com/explore/tags/${tag}/`);
+  if (!response.ok) throw new Error(`Instagram hashtag HTTP ${response.status}`);
+  return parseInstagramHashtagTrend(text, niche);
+}
+
 async function fetchPlatformTrends(platform: string, niche: string, googleTrendItems: string[], redditHot: RedditTrendItem[]) {
   if (platform === "youtube" && YOUTUBE_API_KEY) return fetchYouTubeNicheTrends(niche);
   if (platform === "x" && X_BEARER_TOKEN) return fetchXNicheTrends(niche);
+  if (platform === "tiktok") {
+    const native = await fetchTikTokPublicTrends(niche).catch(() => []);
+    if (native.length) return native;
+  }
+  if (platform === "instagram") {
+    const native = await fetchInstagramPublicTrends(niche).catch(() => []);
+    if (native.length) return native;
+  }
   return fallbackPlatformTrends(platform, niche, googleTrendItems, redditHot);
+}
+
+function competitorFromTrend(trend: PlatformTrendItem): CompetitorCandidate | null {
+  if (!trend.creator) return null;
+  const creator = trend.creator.trim();
+  if (!creator) return null;
+  return {
+    platform: trend.platform,
+    name: creator,
+    handle: creator.startsWith("@") ? creator : null,
+    profileUrl: null,
+    followerCount: null,
+    subscriberCount: null,
+    videoCount: null,
+    totalLikes: null,
+    description: trend.title,
+    verified: null,
+    source: trend.source,
+    evidence: [`Appeared as creator/source for "${trend.title}"`, trend.url],
+  };
+}
+
+function parseYouTubeCompetitors(html: string, niche: string): CompetitorCandidate[] {
+  const initialDataJson = extractScriptJson(html, ["var ytInitialData =", "window[\"ytInitialData\"] ="]);
+  if (!initialDataJson) return [];
+
+  try {
+    const data = getRecord(JSON.parse(initialDataJson) as unknown);
+    const contents = getArray(getNestedRecord(data, [
+      "contents",
+      "twoColumnSearchResultsRenderer",
+      "primaryContents",
+      "sectionListRenderer",
+    ]).contents).flatMap((section) => getArray(getNestedRecord(section, ["itemSectionRenderer"]).contents));
+
+    return contents
+      .map((content) => getRecord(getRecord(content).channelRenderer))
+      .filter((channel) => Object.keys(channel).length > 0)
+      .slice(0, 5)
+      .map((channel) => {
+        const handle = firstString(getNestedRecord(channel, ["navigationEndpoint", "browseEndpoint"]).canonicalBaseUrl);
+        return {
+          platform: "youtube",
+          name: firstString(getRecord(channel.title).simpleText),
+          handle,
+          profileUrl: handle ? `https://www.youtube.com${handle}` : null,
+          followerCount: null,
+          subscriberCount: getTextFromRuns(channel.subscriberCountText),
+          videoCount: getTextFromRuns(channel.videoCountText),
+          totalLikes: null,
+          description: getTextFromRuns(channel.descriptionSnippet),
+          verified: getArray(channel.ownerBadges).length > 0,
+          source: "youtube-public-channel-search",
+          evidence: [`YouTube channel search result for "${niche}"`],
+        };
+      });
+  } catch {
+    return [];
+  }
+}
+
+function parseTikTokCompetitors(html: string, niche: string): CompetitorCandidate[] {
+  const raw = parseTikTokUniversalData(html);
+  if (!raw) return [];
+  const users = getArray(getNestedRecord(raw, ["__DEFAULT_SCOPE__", "webapp.search-result-list"]).searchResultList);
+
+  return users
+    .map((item) => getRecord(item))
+    .filter((item) => item.cardType === 1 || Object.keys(getRecord(item.userInfo)).length > 0)
+    .slice(0, 5)
+    .map((item) => {
+      const userInfo = getRecord(item.userInfo);
+      const user = getRecord(userInfo.user);
+      const stats = getRecord(userInfo.stats);
+      const username = firstString(user.uniqueId);
+      return {
+        platform: "tiktok",
+        name: firstString(user.nickname),
+        handle: username ? `@${username}` : null,
+        profileUrl: username ? `https://www.tiktok.com/@${username}` : null,
+        followerCount: scalarToString(stats.followerCount),
+        subscriberCount: null,
+        videoCount: scalarToString(stats.videoCount),
+        totalLikes: scalarToString(stats.heartCount),
+        description: firstString(user.signature),
+        verified: typeof user.verified === "boolean" ? user.verified : null,
+        source: "tiktok-public-user-search",
+        evidence: [`TikTok user search result for "${niche}"`],
+      };
+    });
+}
+
+async function findYouTubeCompetitors(niche: string) {
+  const query = encodeURIComponent(niche || "creator growth");
+  const { response, text } = await fetchText(`https://www.youtube.com/results?search_query=${query}&sp=EgIQAg%3D%3D`);
+  if (!response.ok) throw new Error(`YouTube competitor search HTTP ${response.status}`);
+  return parseYouTubeCompetitors(text, niche);
+}
+
+async function findTikTokCompetitors(niche: string) {
+  const query = encodeURIComponent(niche || "creator growth");
+  const { response, text } = await fetchText(`https://www.tiktok.com/search/user?q=${query}`);
+  if (!response.ok) throw new Error(`TikTok competitor search HTTP ${response.status}`);
+  return parseTikTokCompetitors(text, niche);
+}
+
+export async function findCompetitors(
+  niche: string,
+  platforms: string[],
+  platformTrends: Record<string, PlatformTrendItem[]> = {},
+): Promise<Record<string, CompetitorCandidate[]>> {
+  const results: Record<string, CompetitorCandidate[]> = {};
+
+  await Promise.all(platforms.map(async (platform) => {
+    const fromTrends = (platformTrends[platform] ?? [])
+      .map(competitorFromTrend)
+      .filter((candidate): candidate is CompetitorCandidate => Boolean(candidate));
+
+    let native: CompetitorCandidate[] = [];
+    try {
+      if (platform === "youtube") native = await findYouTubeCompetitors(niche);
+      if (platform === "tiktok") native = await findTikTokCompetitors(niche);
+    } catch {
+      native = [];
+    }
+
+    const seen = new Set<string>();
+    results[platform] = [...native, ...fromTrends].filter((candidate) => {
+      const key = candidate.profileUrl ?? candidate.handle ?? candidate.name ?? "";
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }).slice(0, 5);
+  }));
+
+  return results;
 }
 
 export async function fetchTrendingTopics(niche: string, _platforms: string[]): Promise<TrendData> {

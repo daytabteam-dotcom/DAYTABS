@@ -3,7 +3,7 @@ import { Link, useLocation } from "wouter";
 import { motion, useInView } from "framer-motion";
 import { Helmet } from "react-helmet-async";
 import {
-  Upload, Brain, BarChart3, Globe, Mic, Star,
+  Upload, Brain, BarChart3, Globe, CalendarDays, Star,
   ChevronRight, Play, CheckCircle, Sparkles, Zap, Shield, Plus, Minus
 } from "lucide-react";
 import Navbar from "../components/Navbar";
@@ -45,9 +45,9 @@ const features = [
     color: "from-blue-500 to-violet-500",
   },
   {
-    icon: Mic,
-    title: "AI Dubbing",
-    desc: "Translate and dub your videos in any language with timestamp-accurate AI voices.",
+    icon: CalendarDays,
+    title: "Content Growth",
+    desc: "Turn trend signals into weekly content plans for every platform you publish on.",
     color: "from-green-500 to-emerald-500",
   },
   {
@@ -143,31 +143,35 @@ const steps = [
   },
 ];
 
-const languages = ["Hello!", "Hola!", "Bonjour!", "Ciao!", "Hallo!", "こんにちは!", "مرحبا!", "Olá!"];
-
-function LanguageAnimate() {
+function GrowthPlanAnimate() {
   return (
-    <div className="relative h-48 flex items-center justify-center overflow-hidden" aria-label="AI dubbing in multiple languages, DayTabs AI Dubbing">
-      <div className="glass rounded-2xl px-8 py-4 text-center min-w-[160px]">
-        <motion.div
-          key="lang"
-          className="text-2xl font-bold gradient-text"
-          animate={{ opacity: [0, 1, 1, 0], y: [10, 0, 0, -10] }}
-          transition={{
-            repeat: Infinity,
-            duration: 2,
-            times: [0, 0.15, 0.85, 1],
-          }}
-        >
-          {languages[Math.floor(Date.now() / 2000) % languages.length]}
-        </motion.div>
-        <p className="text-xs text-white/40 mt-1">AI Dubbed</p>
+    <div className="relative h-48 flex items-center justify-center overflow-hidden" aria-label="Content growth calendar, DayTabs Growth Planner">
+      <div className="glass rounded-2xl px-6 py-5 min-w-[220px]">
+        <div className="flex items-center justify-between mb-4">
+          <p className="text-xs text-white/45 uppercase tracking-[0.18em]">This week</p>
+          <span className="text-[10px] px-2 py-1 rounded-full border border-emerald-400/25 text-emerald-200 bg-emerald-400/10">
+            Coming Soon
+          </span>
+        </div>
+        <div className="grid grid-cols-7 gap-1.5">
+          {[0, 1, 2, 3, 4, 5, 6].map((day) => (
+            <motion.div
+              key={day}
+              className="h-12 rounded-lg border border-white/10 bg-white/5 flex items-end justify-center p-1"
+              animate={{ opacity: [0.45, 1, 0.45] }}
+              transition={{ repeat: Infinity, duration: 2.5, delay: day * 0.12 }}
+            >
+              <div className={`w-full rounded ${day % 3 === 0 ? "h-7 bg-emerald-400/70" : day % 2 === 0 ? "h-5 bg-violet-400/70" : "h-3 bg-cyan-400/70"}`} />
+            </motion.div>
+          ))}
+        </div>
+        <p className="text-xs text-white/40 mt-3">Trend-backed posts</p>
       </div>
       <div className="absolute inset-0 -z-10">
         {[...Array(6)].map((_, i) => (
           <motion.div
             key={i}
-            className="absolute w-1 h-1 rounded-full bg-violet-400/40"
+            className="absolute w-1 h-1 rounded-full bg-emerald-400/40"
             style={{ left: `${15 + i * 14}%`, top: `${30 + (i % 2) * 30}%` }}
             animate={{ scale: [1, 1.5, 1], opacity: [0.4, 0.8, 0.4] }}
             transition={{ repeat: Infinity, duration: 2, delay: i * 0.3 }}
@@ -447,20 +451,20 @@ export default function LandingPage() {
               Advanced <span className="gradient-text">Capabilities</span>
             </h2>
             <p className="text-white/50 text-lg max-w-2xl mx-auto">
-              Go beyond analysis with AI-powered translation and dubbing
+              Go beyond analysis with trend-aware planning and publishing support
             </p>
           </FadeIn>
 
           <div className="grid md:grid-cols-2 gap-8 items-center">
             <FadeIn>
-              <LanguageAnimate />
+              <GrowthPlanAnimate />
             </FadeIn>
             <FadeIn delay={0.2}>
               <div className="space-y-6">
                 {[
                   { icon: "📝", title: "Transcript Generation", desc: "Full speech-to-text with timestamps, perfect for captions and subtitles." },
-                  { icon: "🌍", title: "AI Translation", desc: "Translate your transcript to any language while preserving meaning and tone." },
-                  { icon: "🎙️", title: "Voice Dubbing", desc: "Replace your audio with a natural AI voice in the translated language, synced to your original timing." },
+                  { icon: "📈", title: "Growth Planner", desc: "Build weekly content calendars from niche trends, profile signals, and platform cadence." },
+                  { icon: "🎯", title: "Competitor Insights", desc: "Spot real accounts and formats worth learning from before planning your next posts." },
                 ].map((item, i) => (
                   <motion.div
                     key={i}

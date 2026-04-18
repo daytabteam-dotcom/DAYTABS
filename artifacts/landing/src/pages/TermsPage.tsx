@@ -29,7 +29,7 @@ const sections: Section[] = [
     bullets: [
       "AI-powered video analysis and quality insights",
       "Content and SEO analysis",
-      "Transcription, translation, and dubbing features",
+      "Transcription, subtitle, and publishing support features",
       "Growth Planner: AI-generated content calendars and strategy recommendations",
       "Social media account analytics and trend analysis",
       "Connected platform data insights, including TikTok, Instagram, YouTube, and LinkedIn",
