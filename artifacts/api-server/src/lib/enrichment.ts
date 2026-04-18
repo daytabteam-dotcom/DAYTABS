@@ -2,6 +2,8 @@ const FETCH_TIMEOUT_MS = 7000;
 const BROWSER_USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
 const BOT_USER_AGENT = "DayTabs growth-planner-bot/1.0 (+https://daytabs.com)";
+const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY || process.env.GOOGLE_YOUTUBE_API_KEY || "";
+const X_BEARER_TOKEN = process.env.X_BEARER_TOKEN || process.env.TWITTER_BEARER_TOKEN || "";
 
 export interface PublicProfileData {
   platform: string;
@@ -26,6 +28,8 @@ export interface PublicProfileData {
   description?: string | null;
   ogTitle?: string | null;
   parseError?: string | null;
+  apiSource?: string | null;
+  sourceUrl?: string | null;
   fetchedAt: string;
   error?: string | null;
 }
@@ -37,11 +41,25 @@ export interface RedditTrendItem {
   url: string;
 }
 
+export interface PlatformTrendItem {
+  platform: string;
+  topic: string;
+  title: string;
+  creator: string | null;
+  url: string;
+  source: string;
+  format: string;
+  metricSignals: Record<string, string | number | null>;
+  whyRelevant?: string | null;
+}
+
 export interface TrendData {
   googleTrends: string | null;
   googleTrendItems: string[];
   redditHot: RedditTrendItem[];
   youtubeTrending: string[];
+  platformTrends: Record<string, PlatformTrendItem[]>;
+  platformTrendErrors: Record<string, string[]>;
   subreddit: string;
   fetchedAt: string;
   errors: string[];
@@ -204,6 +222,16 @@ function extractUsername(url: string) {
   }
 }
 
+function extractYouTubeChannelId(url: string) {
+  try {
+    const path = new URL(normalizeProfileUrl(url, "youtube")).pathname;
+    const match = path.match(/\/channel\/([^/?#]+)/);
+    return match?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function baseProfile(platform: string, url: string, fetchedAt: string): PublicProfileData {
   return {
     platform,
@@ -232,6 +260,122 @@ function mergeHtmlProfile(profile: PublicProfileData, html: string, responseOk: 
 
 function getRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function getArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function firstString(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  return null;
+}
+
+async function fetchYouTubeApi(path: string, params: Record<string, string>) {
+  if (!YOUTUBE_API_KEY) throw new Error("YOUTUBE_API_KEY is not configured");
+  const search = new URLSearchParams({ ...params, key: YOUTUBE_API_KEY });
+  const { response, json } = await fetchJson(`https://www.googleapis.com/youtube/v3/${path}?${search.toString()}`);
+  if (!response.ok) throw new Error(`YouTube API HTTP ${response.status}`);
+  return getRecord(json);
+}
+
+async function fetchXApi(path: string, params: Record<string, string>) {
+  if (!X_BEARER_TOKEN) throw new Error("X_BEARER_TOKEN or TWITTER_BEARER_TOKEN is not configured");
+  const search = new URLSearchParams(params);
+  const { response, json } = await fetchJson(
+    `https://api.twitter.com/2/${path}?${search.toString()}`,
+    "application/json",
+    { Authorization: `Bearer ${X_BEARER_TOKEN}` },
+  );
+  if (!response.ok) throw new Error(`X API HTTP ${response.status}`);
+  return getRecord(json);
+}
+
+async function scrapeYouTubeChannelWithApi(profile: PublicProfileData) {
+  const channelId = extractYouTubeChannelId(profile.normalizedUrl);
+  let resolvedChannelId = channelId;
+
+  if (!resolvedChannelId) {
+    const query = profile.username ? `@${profile.username}` : profile.normalizedUrl;
+    const search = await fetchYouTubeApi("search", {
+      part: "snippet",
+      type: "channel",
+      q: query,
+      maxResults: "1",
+    });
+    const item = getRecord(getArray(search.items)[0]);
+    resolvedChannelId = firstString(getRecord(item.id).channelId);
+  }
+
+  if (!resolvedChannelId) throw new Error("YouTube channel could not be resolved from URL");
+
+  const data = await fetchYouTubeApi("channels", {
+    part: "snippet,statistics",
+    id: resolvedChannelId,
+    maxResults: "1",
+  });
+  const item = getRecord(getArray(data.items)[0]);
+  if (!Object.keys(item).length) throw new Error("YouTube channel not found");
+  const snippet = getRecord(item.snippet);
+  const statistics = getRecord(item.statistics);
+
+  return {
+    ...profile,
+    normalizedUrl: `https://www.youtube.com/channel/${resolvedChannelId}`,
+    channelName: firstString(snippet.title),
+    subscriberCount: firstString(statistics.subscriberCount),
+    videoCount: firstString(statistics.videoCount),
+    description: firstString(snippet.description),
+    apiSource: "youtube-data-api",
+    sourceUrl: `https://www.googleapis.com/youtube/v3/channels?id=${resolvedChannelId}`,
+    parseError: null,
+    error: null,
+  };
+}
+
+async function scrapeXProfileWithApi(profile: PublicProfileData) {
+  if (!profile.username) throw new Error("no X username extracted");
+  const data = await fetchXApi(`users/by/username/${encodeURIComponent(profile.username)}`, {
+    "user.fields": "description,public_metrics,verified,url",
+  });
+  const user = getRecord(data.data);
+  if (!Object.keys(user).length) throw new Error("X user not found");
+  const metrics = getRecord(user.public_metrics);
+
+  return {
+    ...profile,
+    fullName: firstString(user.name),
+    followerCount: typeof metrics.followers_count === "number" ? metrics.followers_count : null,
+    followingCount: typeof metrics.following_count === "number" ? metrics.following_count : null,
+    postCount: typeof metrics.tweet_count === "number" ? metrics.tweet_count : null,
+    bio: firstString(user.description),
+    isVerified: typeof user.verified === "boolean" ? user.verified : null,
+    apiSource: "x-api-v2",
+    sourceUrl: `https://api.twitter.com/2/users/by/username/${profile.username}`,
+    parseError: null,
+    error: null,
+  };
+}
+
+function unavailableApiProfile(profile: PublicProfileData, apiName: string, reason: string) {
+  return {
+    ...profile,
+    possibleFollowerCount: null,
+    possiblePostCount: null,
+    followerCount: null,
+    subscriberCount: null,
+    followingCount: null,
+    postCount: null,
+    videoCount: null,
+    totalLikes: null,
+    bio: null,
+    description: null,
+    apiSource: apiName,
+    parseError: reason,
+    error: reason,
+  };
 }
 
 async function scrapeYouTubeChannel(profile: PublicProfileData) {
@@ -412,6 +556,9 @@ export async function scrapePublicProfile(url: string, platform: string): Promis
 
   try {
     if (platform === "youtube") {
+      if (YOUTUBE_API_KEY) {
+        return await scrapeYouTubeChannelWithApi(profile);
+      }
       const [oembed, scraped] = await Promise.allSettled([
         fetchOEmbed(profile.normalizedUrl, "youtube"),
         scrapeYouTubeChannel(profile),
@@ -438,7 +585,30 @@ export async function scrapePublicProfile(url: string, platform: string): Promis
     }
 
     if (platform === "instagram") {
-      return scrapeInstagramProfile(profile);
+      const scraped = await scrapeInstagramProfile(profile);
+      if (scraped.error || scraped.parseError) {
+        return unavailableApiProfile(
+          profile,
+          "instagram-graph-api",
+          "Instagram Graph API cannot fetch arbitrary public profile metrics from a URL without authorized account access",
+        );
+      }
+      return scraped;
+    }
+
+    if (platform === "x") {
+      if (X_BEARER_TOKEN) {
+        return await scrapeXProfileWithApi(profile);
+      }
+      return unavailableApiProfile(profile, "x-api-v2", "X_BEARER_TOKEN or TWITTER_BEARER_TOKEN is not configured");
+    }
+
+    if (platform === "linkedin") {
+      return unavailableApiProfile(
+        profile,
+        "linkedin-api",
+        "LinkedIn API does not provide public arbitrary profile metrics from a URL without member/organization authorization",
+      );
     }
 
     return genericScrape(profile);
@@ -480,6 +650,147 @@ function parseYouTubeTrendingTitles(html: string) {
     .filter((title) => title && !title.includes("\\u") && !title.includes("YouTube"))
     .slice(0, 8);
   return [...new Set(titles)];
+}
+
+function platformSearchUrl(platform: string, topic: string) {
+  const encoded = encodeURIComponent(topic);
+  if (platform === "youtube") return `https://www.youtube.com/results?search_query=${encoded}`;
+  if (platform === "tiktok") return `https://www.tiktok.com/search?q=${encoded}`;
+  if (platform === "instagram") return `https://www.instagram.com/explore/tags/${encoded.replace(/%20/g, "")}/`;
+  if (platform === "linkedin") return `https://www.linkedin.com/search/results/content/?keywords=${encoded}`;
+  if (platform === "x") return `https://x.com/search?q=${encoded}&src=typed_query&f=top`;
+  return `https://www.google.com/search?q=${encoded}`;
+}
+
+function fallbackPlatformTrends(platform: string, niche: string, googleTrendItems: string[], redditHot: RedditTrendItem[]): PlatformTrendItem[] {
+  const baseTopics = [
+    ...googleTrendItems.map((topic) => ({ topic, source: "googleTrends", score: null as number | null })),
+    ...redditHot.map((post) => ({ topic: post.title, source: "reddit", score: post.score })),
+  ].slice(0, 8);
+  const formatByPlatform: Record<string, string> = {
+    tiktok: "creator search insight / short-form hook",
+    instagram: "viral reel / carousel angle",
+    youtube: "trend video / search-led idea",
+    linkedin: "viral niche post / expert POV",
+    x: "trend hashtag / short POV post",
+  };
+
+  return baseTopics.map((item) => ({
+    platform,
+    topic: item.topic,
+    title: `${item.topic} for ${niche || "this niche"}`,
+    creator: null,
+    url: platformSearchUrl(platform, item.topic),
+    source: item.source,
+    format: formatByPlatform[platform] ?? "platform-native idea",
+    metricSignals: item.score == null ? { score: null } : { score: item.score },
+    whyRelevant: "Platform API trend data was unavailable, so this is adapted from cross-platform trend inputs.",
+  }));
+}
+
+async function fetchYouTubeNicheTrends(niche: string): Promise<PlatformTrendItem[]> {
+  const publishedAfter = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const search = await fetchYouTubeApi("search", {
+    part: "snippet",
+    type: "video",
+    q: niche || "creator growth",
+    order: "viewCount",
+    publishedAfter,
+    maxResults: "10",
+    regionCode: "US",
+  });
+  const items = getArray(search.items);
+  const videoIds = items
+    .map((item) => firstString(getRecord(getRecord(item).id).videoId))
+    .filter((id): id is string => Boolean(id));
+  const statsById = new Map<string, Record<string, unknown>>();
+
+  if (videoIds.length) {
+    const stats = await fetchYouTubeApi("videos", {
+      part: "statistics,snippet",
+      id: videoIds.join(","),
+      maxResults: "10",
+    });
+    for (const item of getArray(stats.items)) {
+      const record = getRecord(item);
+      const id = firstString(record.id);
+      if (id) statsById.set(id, record);
+    }
+  }
+
+  return items.map((item) => {
+    const record = getRecord(item);
+    const snippet = getRecord(record.snippet);
+    const videoId = firstString(getRecord(record.id).videoId) ?? "";
+    const stats = getRecord(getRecord(statsById.get(videoId)).statistics);
+    return {
+      platform: "youtube",
+      topic: niche || "creator growth",
+      title: firstString(snippet.title) ?? "YouTube trend video",
+      creator: firstString(snippet.channelTitle),
+      url: videoId ? `https://www.youtube.com/watch?v=${videoId}` : platformSearchUrl("youtube", niche),
+      source: "youtube-data-api",
+      format: "high-view niche video",
+      metricSignals: {
+        views: firstString(stats.viewCount),
+        likes: firstString(stats.likeCount),
+        comments: firstString(stats.commentCount),
+      },
+      whyRelevant: "YouTube Data API search ordered by view count for this niche.",
+    };
+  }).slice(0, 10);
+}
+
+async function fetchXNicheTrends(niche: string): Promise<PlatformTrendItem[]> {
+  const query = `${niche || "creator growth"} lang:en -is:retweet`;
+  const data = await fetchXApi("tweets/search/recent", {
+    query,
+    max_results: "10",
+    "tweet.fields": "created_at,public_metrics,author_id",
+    expansions: "author_id",
+    "user.fields": "username,name,public_metrics,verified",
+  });
+  const users = new Map<string, Record<string, unknown>>();
+  for (const user of getArray(getRecord(data.includes).users)) {
+    const record = getRecord(user);
+    const id = firstString(record.id);
+    if (id) users.set(id, record);
+  }
+
+  return getArray(data.data).map((tweet) => {
+    const record = getRecord(tweet);
+    const metrics = getRecord(record.public_metrics);
+    const author = users.get(firstString(record.author_id) ?? "") ?? {};
+    const username = firstString(author.username);
+    const tweetId = firstString(record.id);
+    const text = firstString(record.text) ?? "X trend post";
+    return {
+      platform: "x",
+      topic: niche || "creator growth",
+      title: text.slice(0, 140),
+      creator: username ? `@${username}` : firstString(author.name),
+      url: username && tweetId ? `https://x.com/${username}/status/${tweetId}` : platformSearchUrl("x", niche),
+      source: "x-api-v2",
+      format: "viral recent post / hashtag idea",
+      metricSignals: {
+        likes: typeof metrics.like_count === "number" ? metrics.like_count : null,
+        reposts: typeof metrics.retweet_count === "number" ? metrics.retweet_count : null,
+        replies: typeof metrics.reply_count === "number" ? metrics.reply_count : null,
+        quotes: typeof metrics.quote_count === "number" ? metrics.quote_count : null,
+      },
+      whyRelevant: "X recent search API result for this niche, with public engagement metrics.",
+    };
+  }).sort((a, b) => {
+    const aScore = Number(a.metricSignals.likes ?? 0) + Number(a.metricSignals.reposts ?? 0);
+    const bScore = Number(b.metricSignals.likes ?? 0) + Number(b.metricSignals.reposts ?? 0);
+    return bScore - aScore;
+  }).slice(0, 10);
+}
+
+async function fetchPlatformTrends(platform: string, niche: string, googleTrendItems: string[], redditHot: RedditTrendItem[]) {
+  if (platform === "youtube" && YOUTUBE_API_KEY) return fetchYouTubeNicheTrends(niche);
+  if (platform === "x" && X_BEARER_TOKEN) return fetchXNicheTrends(niche);
+  return fallbackPlatformTrends(platform, niche, googleTrendItems, redditHot);
 }
 
 export async function fetchTrendingTopics(niche: string, _platforms: string[]): Promise<TrendData> {
@@ -555,12 +866,38 @@ export async function fetchTrendingTopics(niche: string, _platforms: string[]): 
     redditPromise,
     youtubePromise,
   ]);
+  const platformTrends: Record<string, PlatformTrendItem[]> = {};
+  const platformTrendErrors: Record<string, string[]> = {};
+
+  await Promise.all(_platforms.map(async (platform) => {
+    try {
+      const trends = await fetchPlatformTrends(platform, niche || "creator growth", googleTrendItems, redditHot);
+      platformTrends[platform] = trends.slice(0, 10);
+      if ((platform === "instagram" || platform === "linkedin" || platform === "tiktok") && trends.every((trend) => trend.source !== `${platform}-api`)) {
+        platformTrendErrors[platform] = [
+          `${platform} official trend/search API is not configured or does not allow arbitrary niche trend reads in this server context; using cross-platform trend inputs with platform-specific search URLs.`,
+        ];
+      }
+      if (platform === "youtube" && !YOUTUBE_API_KEY) {
+        platformTrendErrors[platform] = ["YOUTUBE_API_KEY is not configured; using cross-platform trend inputs for YouTube."];
+      }
+      if (platform === "x" && !X_BEARER_TOKEN) {
+        platformTrendErrors[platform] = ["X_BEARER_TOKEN or TWITTER_BEARER_TOKEN is not configured; using cross-platform trend inputs for X."];
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "platform trend fetch failed";
+      platformTrendErrors[platform] = [message];
+      platformTrends[platform] = fallbackPlatformTrends(platform, niche || "creator growth", googleTrendItems, redditHot).slice(0, 10);
+    }
+  }));
 
   return {
     googleTrends: googleTrendItems.length > 0 ? googleTrendItems.join(", ") : null,
     googleTrendItems,
     redditHot,
     youtubeTrending,
+    platformTrends,
+    platformTrendErrors,
     subreddit,
     fetchedAt,
     errors,

@@ -1456,7 +1456,7 @@ export default function GrowthPlannerTab() {
               </div>
             )}
             <div className="overflow-x-auto pb-2">
-            <div className="grid grid-cols-7 gap-3 min-w-[980px]">
+            <div className="grid grid-cols-7 gap-3 min-w-[980px] xl:min-w-0">
               {calendarDays.map((date) => {
                 const dayLabel = formatCalendarDay(date);
                 const itemsForDate = visibleCalendar.filter((item) => resolveItemDate(item, fallbackCalendarDate) === date);
@@ -1474,7 +1474,7 @@ export default function GrowthPlannerTab() {
                     <p className="text-xs uppercase tracking-wider text-white/35">{dayLabel.day}</p>
                     <p className="text-sm font-semibold text-white/75">{dayLabel.date}</p>
                   </div>
-                  <div className="space-y-2">
+                  <div className="space-y-2 max-h-[52vh] overflow-y-auto pr-1">
                     {itemsForDate.map((item) => {
                       const attention = getCalendarItemAttention(item);
                       return (
@@ -1484,7 +1484,7 @@ export default function GrowthPlannerTab() {
                           draggable={item.status !== "posted" && item.stage !== "published"}
                           onDragStart={(event) => setDragPayload(event, item.id)}
                           onClick={() => setSelectedCard(item)}
-                          className={`w-full min-w-0 text-left rounded-lg border p-3 transition-all overflow-hidden ${item.status !== "posted" && item.stage !== "published" ? "cursor-grab active:cursor-grabbing" : ""} ${highlightedCardId === item.id ? "ring-2 ring-amber-300 shadow-lg shadow-amber-300/20" : ""} ${getCalendarCardClass(attention)}`}
+                          className={`w-full min-w-0 text-left rounded-lg border p-3 transition-all ${item.status !== "posted" && item.stage !== "published" ? "cursor-grab active:cursor-grabbing" : ""} ${highlightedCardId === item.id ? "ring-2 ring-amber-300 shadow-lg shadow-amber-300/20" : ""} ${getCalendarCardClass(attention)}`}
                         >
                           <div className="flex flex-wrap items-start gap-1.5 mb-2 min-w-0">
                             <PlatformBadge platform={item.platform} />
@@ -1496,8 +1496,8 @@ export default function GrowthPlannerTab() {
                               {item.custom && <Badge className="bg-amber-500/10 text-amber-200 border-amber-500/20 hover:brightness-100">Custom</Badge>}
                             </div>
                           </div>
-                          <p className="text-sm font-semibold text-white/85 leading-snug break-words">{item.title}</p>
-                          <p className="text-xs text-white/35 mt-2 break-words">{item.format}</p>
+                          <p className="text-sm font-semibold text-white/85 leading-snug break-words line-clamp-3">{item.title}</p>
+                          <p className="text-xs text-white/35 mt-2 break-words line-clamp-2">{item.format}</p>
                           {item.stage && (
                             <p className="text-[11px] uppercase tracking-wider text-white/30 mt-2">{CONTENT_STAGES.find((stage) => stage.id === item.stage)?.label}</p>
                           )}
@@ -1780,14 +1780,14 @@ export default function GrowthPlannerTab() {
       </Dialog>
 
       <Dialog open={!!selectedCard} onOpenChange={(open) => !open && setSelectedCard(null)}>
-        <DialogContent className="max-w-2xl rounded-2xl border-white/10 bg-card">
+        <DialogContent className="max-w-3xl max-h-[88vh] overflow-hidden rounded-2xl border-white/10 bg-card">
           {selectedCard && (
             <>
               <DialogHeader>
                 <DialogTitle>{selectedCard.title}</DialogTitle>
                 <DialogDescription>{PLATFORM_META[selectedCard.platform].label} · {selectedCard.day} · {selectedCard.format}</DialogDescription>
               </DialogHeader>
-              <div className="grid gap-3">
+              <div className="grid max-h-[calc(88vh-110px)] gap-3 overflow-y-auto pr-2 pb-1">
                 <Brief label="Content angle" value={selectedCard.angle} />
                 {selectedCard.hook && <Brief label="Hook" value={selectedCard.hook} />}
                 {selectedCard.outline?.length ? <Brief label="Outline" value={selectedCard.outline.join("\n")} /> : null}

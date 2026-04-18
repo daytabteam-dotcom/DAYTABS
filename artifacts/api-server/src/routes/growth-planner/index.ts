@@ -102,15 +102,30 @@ function buildTrendScanPrompt(trendData: TrendData, selectedPlatforms: ReturnTyp
     postsPerWeek: entry.postsPerWeek,
   }));
   const redditTitles = trendData.redditHot.map((item) => `${item.title} (${item.score} score, ${item.comments} comments)`);
+  const platformTrendSummary = Object.fromEntries(
+    selectedPlatforms.map((entry) => [
+      entry.platform,
+      (trendData.platformTrends[entry.platform] ?? []).slice(0, 10).map((trend) => ({
+        title: trend.title,
+        creator: trend.creator,
+        source: trend.source,
+        format: trend.format,
+        url: trend.url,
+        metricSignals: trend.metricSignals,
+      })),
+    ]),
+  );
 
   return `TREND SCAN REQUIREMENT:
 Here is the exact trendData you must reference for trend_scan_last_7_weeks:
+- platformTrends by platform: ${JSON.stringify(platformTrendSummary)}
 - googleTrends items: ${trendData.googleTrendItems.length ? trendData.googleTrendItems.join(" | ") : "unavailable"}
 - redditHot titles: ${redditTitles.length ? redditTitles.join(" | ") : "unavailable"}
 - youtubeTrending: ${trendData.youtubeTrending.length ? trendData.youtubeTrending.join(" | ") : "unavailable"}
 - trend source errors: ${trendData.errors.length ? trendData.errors.join(" | ") : "none"}
+- platform trend source errors: ${Object.keys(trendData.platformTrendErrors).length ? JSON.stringify(trendData.platformTrendErrors) : "none"}
 
-For each selected platform's trend_scan_last_7_weeks, take at least 3 of the above items and explain how this creator should use them this week. Be specific and name the trend.
+For each selected platform's trend_scan_last_7_weeks, use at least 5 unique platformTrends for that exact platform when available. Do not copy the same trends across all platforms. Be specific and name each trend.
 
 STRICT PLATFORM POST COUNTS:
 ${JSON.stringify(platformTargets)}
@@ -118,16 +133,15 @@ Generate exactly these counts per platform, with total calendar cards equal to t
 }
 
 const COMPETITOR_PROMPT = `COMPETITOR SECTION - REQUIRED:
-Generate 3 competitor accounts per selected platform based on the user's niche.
-Since you cannot browse in this call, use your knowledge of real accounts in the niche.
+Generate up to 3 competitor accounts per selected platform based only on real accounts found in trendData.platformTrends creator fields, user-provided competitor data, or user-provided profile URLs.
 For each competitor include:
-- handle: real @username on that platform when you know it
+- handle: real @username or account name from source data
 - why_relevant: what they do that's similar to this account
 - what_to_steal: one specific content strategy or format they use that this account should adopt
-- follower_range: approximate size tier (nano <10k / micro 10-100k / mid 100k-1M / macro 1M+)
-- discovery_needed: true
+- follower_range: approximate size tier only when source metrics support it; otherwise "unknown"
+- discovery_needed: true unless the source URL and account name came directly from trendData
 
-Focus on accounts that are 1-2 tiers above the user's current size for achievable benchmarks. Do not provide exact follower counts unless they came from provided data.`;
+If there are not enough real competitor accounts for a platform, return fewer competitors and add a data_limitations entry. Never invent competitor handles.`;
 
 router.post("/notify", async (req, res) => {
   try {
@@ -226,7 +240,9 @@ router.post("/generate", requireAuth, async (req, res) => {
         googleTrendsItems: trendData.googleTrendItems.length,
         redditItems: trendData.redditHot.length,
         youtubeItems: trendData.youtubeTrending.length,
+        platformTrendItems: Object.fromEntries(Object.entries(trendData.platformTrends).map(([platform, trends]) => [platform, trends.length])),
         errors: trendData.errors,
+        platformErrors: trendData.platformTrendErrors,
       },
     }, "Enrichment results before AI call");
 
