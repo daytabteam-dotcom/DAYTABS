@@ -14,9 +14,10 @@ INPUTS AVAILABLE TO YOU:
 1. profile - user's niche, goals, audience, uploaded context names, and brand details
 2. platforms - selected platforms with posts_per_week targets and profile URLs
 3. profileData - scraped from actual public profile pages during this request; use this for real numbers
-4. trendData.googleTrends - RSS from Google Trends pulled during this request
+4. trendData.googleTrendItems - parsed Google Trends titles pulled during this request
 5. trendData.redditHot - top 10 posts from a relevant subreddit pulled during this request
-6. previousCalendar, posted URLs, skipped ideas, and result notes for next-week mode
+6. trendData.youtubeTrending - parsed titles from YouTube Trending when available
+7. previousCalendar, posted URLs, skipped ideas, and result notes for next-week mode
 
 CALENDAR REQUIREMENTS:
 - scheduled_date: ISO YYYY-MM-DD, starting from startDate
@@ -143,6 +144,23 @@ router.post("/generate", requireAuth, async (req, res) => {
       Promise.all(profileUrls.map((entry) => scrapePublicProfile(entry.url, entry.platform))),
       fetchTrendingTopics(getProfileNiche(profile), selectedPlatforms.map((entry) => entry.platform)),
     ]);
+
+    req.log.info({
+      profileResults: profileData.map((item) => ({
+        platform: item.platform,
+        username: item.username,
+        normalizedUrl: item.normalizedUrl,
+        hasFollowerCount: Boolean(item.followerCount ?? item.subscriberCount ?? item.possibleFollowerCount),
+        hasDescription: Boolean(item.description ?? item.bio ?? item.metaDescription),
+        error: item.error ?? null,
+      })),
+      trendResults: {
+        googleTrendsItems: trendData.googleTrendItems.length,
+        redditItems: trendData.redditHot.length,
+        youtubeItems: trendData.youtubeTrending.length,
+        errors: trendData.errors,
+      },
+    }, "Enrichment results before AI call");
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o",
