@@ -47,3 +47,6 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# Large local media artifacts
+attached_assets/*.mp4
