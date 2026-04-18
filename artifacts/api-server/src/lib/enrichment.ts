@@ -21,9 +21,11 @@ export interface PublicProfileData {
   channelName?: string | null;
   authorName?: string | null;
   fullName?: string | null;
+  isVerified?: boolean | null;
   bio?: string | null;
   description?: string | null;
   ogTitle?: string | null;
+  parseError?: string | null;
   fetchedAt: string;
   error?: string | null;
 }
@@ -116,6 +118,52 @@ function extractMetaDescription(html: string) {
   return extractMeta(html, "og:description") ?? extractMeta(html, "description");
 }
 
+function parseJsonObject(text: string, startIndex: number) {
+  const firstBrace = text.indexOf("{", startIndex);
+  if (firstBrace < 0) return null;
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = firstBrace; index < text.length; index++) {
+    const char = text[index];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === "\"") {
+      inString = true;
+    } else if (char === "{") {
+      depth++;
+    } else if (char === "}") {
+      depth--;
+      if (depth === 0) return text.slice(firstBrace, index + 1);
+    }
+  }
+
+  return null;
+}
+
+function extractScriptJson(html: string, markers: string[]) {
+  for (const marker of markers) {
+    const markerIndex = html.indexOf(marker);
+    if (markerIndex >= 0) {
+      const jsonText = parseJsonObject(html, markerIndex + marker.length);
+      if (jsonText) return jsonText;
+    }
+  }
+  return null;
+}
+
 function extractCount(html: string, labels: string[]) {
   const text = stripTags(html).slice(0, 8000);
   for (const label of labels) {
@@ -189,16 +237,58 @@ function getRecord(value: unknown): Record<string, unknown> {
 async function scrapeYouTubeChannel(profile: PublicProfileData) {
   const { response, text } = await fetchText(profile.normalizedUrl);
   const htmlData = mergeHtmlProfile(profile, text, response.ok, response.status);
-  const subscriberMatch = text.match(/"subscriberCountText":\{"simpleText":"([^"]+)"/);
-  const videoCountMatch = text.match(/"videosCountText":\{"runs":\[\{"text":"([^"]+)"/);
-  const descMatch = text.match(/"description":\{"simpleText":"([^"]{0,300})/);
+  const initialDataJson = extractScriptJson(text, ["var ytInitialData =", "window[\"ytInitialData\"] ="]);
 
-  return {
-    ...htmlData,
-    subscriberCount: subscriberMatch?.[1] ?? htmlData.possibleFollowerCount,
-    videoCount: videoCountMatch?.[1] ?? htmlData.possiblePostCount,
-    description: descMatch?.[1] ? decodeHtmlEntities(descMatch[1]) : htmlData.metaDescription,
-  };
+  if (!initialDataJson) {
+    return {
+      ...htmlData,
+      subscriberCount: null,
+      videoCount: null,
+      description: htmlData.metaDescription,
+      parseError: "ytInitialData not found",
+      error: "YouTube channel metrics could not be parsed from public HTML",
+    };
+  }
+
+  try {
+    const data = getRecord(JSON.parse(initialDataJson) as unknown);
+    const header = getRecord(getRecord(data.header).pageHeaderRenderer ?? getRecord(data.header).c4TabbedHeaderRenderer);
+    const subscriberCountText = getRecord(header.subscriberCountText);
+    const subscriberRuns = Array.isArray(subscriberCountText.runs) ? subscriberCountText.runs : [];
+    const subscriberRun = getRecord(subscriberRuns[0]);
+    const metadata = getRecord(getRecord(data.metadata).channelMetadataRenderer);
+    const tabs = Array.isArray(getRecord(getRecord(data.contents).twoColumnBrowseResultsRenderer).tabs)
+      ? getRecord(getRecord(data.contents).twoColumnBrowseResultsRenderer).tabs as unknown[]
+      : [];
+    const videosTab = tabs.find((tab) => getRecord(getRecord(tab).tabRenderer).title === "Videos");
+    const videoCountText = getRecord(getRecord(getRecord(getRecord(getRecord(getRecord(videosTab).tabRenderer).content).richGridRenderer).header).feedFilterChipBarRenderer);
+    const videoCountContents = Array.isArray(videoCountText.contents) ? videoCountText.contents : [];
+    const firstVideoCountRun = getRecord(getRecord(getRecord(videoCountContents[0]).chipCloudChipRenderer).text);
+    const videoRuns = Array.isArray(firstVideoCountRun.runs) ? firstVideoCountRun.runs : [];
+    const firstVideoRun = getRecord(videoRuns[0]);
+
+    return {
+      ...htmlData,
+      subscriberCount: typeof subscriberCountText.simpleText === "string"
+        ? subscriberCountText.simpleText
+        : typeof subscriberRun.text === "string"
+          ? subscriberRun.text
+          : null,
+      videoCount: typeof firstVideoRun.text === "string" ? firstVideoRun.text : null,
+      description: typeof metadata.description === "string" ? metadata.description : htmlData.metaDescription,
+      parseError: null,
+      error: htmlData.error,
+    };
+  } catch (err) {
+    return {
+      ...htmlData,
+      subscriberCount: null,
+      videoCount: null,
+      description: htmlData.metaDescription,
+      parseError: err instanceof Error ? err.message : "ytInitialData parse failed",
+      error: "YouTube channel metrics could not be parsed from public HTML",
+    };
+  }
 }
 
 async function scrapeTikTokProfile(profile: PublicProfileData) {
@@ -222,30 +312,77 @@ async function scrapeInstagramProfile(profile: PublicProfileData) {
   if (!profile.username) return { ...profile, error: "no username" };
 
   try {
-    const { response, json } = await fetchJson(
-      `https://www.instagram.com/${profile.username}/?__a=1&__d=dis`,
-      "application/json",
-      { "x-ig-app-id": "936619743392459" },
+    const { response, text } = await fetchText(
+      `https://www.instagram.com/${profile.username}/embed`,
+      "text/html",
     );
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
-    const root = getRecord(json);
-    const user = getRecord(getRecord(root.graphql).user ?? getRecord(root.data).user);
-    const followedBy = getRecord(user.edge_followed_by);
-    const follows = getRecord(user.edge_follow);
-    const timeline = getRecord(user.edge_owner_to_timeline_media);
+    const additionalDataMatch = text.match(/window\.__additionalDataLoaded\('[^']+',\s*/);
+    const jsonText = additionalDataMatch
+      ? parseJsonObject(text, additionalDataMatch.index ?? 0)
+      : extractScriptJson(text, ["window._sharedData ="]);
+
+    if (jsonText) {
+      const root = getRecord(JSON.parse(jsonText) as unknown);
+      const profilePage = Array.isArray(getRecord(root.entry_data).ProfilePage) ? getRecord(root.entry_data).ProfilePage as unknown[] : [];
+      const user = getRecord(getRecord(root.graphql).user ?? getRecord(getRecord(profilePage[0]).graphql).user);
+
+      if (Object.keys(user).length > 0) {
+        const followedBy = getRecord(user.edge_followed_by);
+        const follows = getRecord(user.edge_follow);
+        const timeline = getRecord(user.edge_owner_to_timeline_media);
+
+        return {
+          ...profile,
+          rawHtml: text.slice(0, 3000),
+          metaDescription: extractMetaDescription(text),
+          followerCount: typeof followedBy.count === "number" ? followedBy.count : null,
+          followingCount: typeof follows.count === "number" ? follows.count : null,
+          postCount: typeof timeline.count === "number" ? timeline.count : null,
+          bio: typeof user.biography === "string" ? user.biography : null,
+          fullName: typeof user.full_name === "string" ? user.full_name : null,
+          isVerified: typeof user.is_verified === "boolean" ? user.is_verified : null,
+          parseError: null,
+          error: null,
+        };
+      }
+    }
+  } catch {
+    // Fall through to profile-page Open Graph parsing.
+  }
+
+  try {
+    const { response, text } = await fetchText(`https://www.instagram.com/${profile.username}/`, "text/html");
+    const htmlData = mergeHtmlProfile(profile, text, response.ok, response.status);
+    const ogDesc = extractMeta(text, "og:description");
+    const ogTitle = extractMeta(text, "og:title");
+    const followerMatch = ogDesc?.match(/([\d,]+)\s+Followers/i);
+    const followingMatch = ogDesc?.match(/([\d,]+)\s+Following/i);
+    const postMatch = ogDesc?.match(/([\d,]+)\s+Posts/i);
 
     return {
-      ...profile,
-      followerCount: typeof followedBy.count === "number" ? followedBy.count : null,
-      followingCount: typeof follows.count === "number" ? follows.count : null,
-      postCount: typeof timeline.count === "number" ? timeline.count : null,
-      bio: typeof user.biography === "string" ? user.biography : null,
-      fullName: typeof user.full_name === "string" ? user.full_name : null,
-      error: null,
+      ...htmlData,
+      followerCount: followerMatch?.[1]?.replace(/,/g, "") ?? null,
+      followingCount: followingMatch?.[1]?.replace(/,/g, "") ?? null,
+      postCount: postMatch?.[1]?.replace(/,/g, "") ?? null,
+      bio: ogDesc,
+      fullName: ogTitle,
+      ogTitle,
+      parseError: followerMatch || followingMatch || postMatch ? null : "Instagram metrics not found in public Open Graph metadata",
+      error: response.ok ? null : `HTTP ${response.status}`,
     };
-  } catch {
-    return genericScrape(profile);
+  } catch (err) {
+    return {
+      ...profile,
+      followerCount: null,
+      followingCount: null,
+      postCount: null,
+      bio: null,
+      fullName: null,
+      parseError: err instanceof Error ? err.message : "Instagram profile scrape failed",
+      error: err instanceof Error ? err.message : "Instagram profile scrape failed",
+    };
   }
 }
 

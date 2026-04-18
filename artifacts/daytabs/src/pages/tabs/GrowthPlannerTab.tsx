@@ -110,14 +110,25 @@ interface AiPlannerData {
       observable_metrics?: Record<string, unknown>;
       what_is_working?: string[];
       what_is_not_working?: string[];
+      what_to_improve?: string[];
       sources?: string[];
     }>;
+  };
+  trend_read?: {
+    main_opening?: string;
+    what_to_pay_attention_to_this_week?: string[];
+    recommended_shift_this_week?: string;
+    sources?: string[];
   };
   competitors?: Array<{
     platform?: string;
     name?: string;
+    handle?: string;
     profile_url?: string;
     why_relevant?: string;
+    what_to_steal?: string;
+    follower_range?: string;
+    discovery_needed?: boolean;
     evidence?: string[];
     sources?: string[];
   }>;
@@ -133,10 +144,14 @@ interface AiPlannerData {
     creator?: string;
     source_url?: string;
     publish_or_observed_date?: string | null;
+    topic?: string;
+    source?: string;
     visible_hook_or_title?: string;
     format?: string;
     metric_signals?: Record<string, unknown>;
+    why_it_works?: string;
     why_it_is_working?: string;
+    adaptation?: string;
     adaptation_for_user?: string;
     sources?: string[];
   }>;
@@ -508,10 +523,12 @@ function getAiCompetitors(data: AiPlannerData | null, platform: PlatformId): Com
   return (data?.competitors ?? [])
     .filter((competitor) => competitor.platform === platform && competitor.name)
     .map((competitor) => ({
-      name: competitor.name ?? "AI-discovered competitor",
-      focus: competitor.why_relevant || toTextList(competitor.evidence).join(" ") || "Relevant competitor identified by AI.",
+      name: competitor.handle || competitor.name || "AI-discovered competitor",
+      focus: [competitor.why_relevant, competitor.what_to_steal, competitor.follower_range ? `Tier: ${competitor.follower_range}` : ""]
+        .filter(Boolean)
+        .join(" ") || toTextList(competitor.evidence).join(" ") || "Relevant competitor identified by AI.",
       url: competitor.profile_url || "#",
-      avatar: `https://unavatar.io/${competitor.profile_url || competitor.name}`,
+      avatar: `https://unavatar.io/${competitor.profile_url || competitor.handle || competitor.name}`,
     }));
 }
 
@@ -551,7 +568,7 @@ function getAiPlatformSummary(data: AiPlannerData | null, platform: PlatformId) 
       value: String(value),
     })),
     worked: toTextList(profile?.what_is_working).join(" ") || recommendation?.reason || "AI needs more observable profile data to identify what's working.",
-    missed: toTextList(profile?.what_is_not_working).join(" ") || (data?.data_limitations ?? []).join(" ") || "Add profile and post URLs for deeper AI analysis.",
+    missed: toTextList(profile?.what_to_improve).join(" ") || toTextList(profile?.what_is_not_working).join(" ") || (data?.data_limitations ?? []).join(" ") || "Add profile and post URLs for deeper AI analysis.",
   };
 }
 
@@ -559,16 +576,16 @@ function getAiTrendScan(data: AiPlannerData | null, platform: PlatformId) {
   return (data?.trend_scan_last_7_weeks ?? [])
     .filter((trend) => trend.platform === platform)
     .map((trend, index) => ({
-      title: trend.visible_hook_or_title || `AI trend signal ${index + 1}`,
+      title: trend.visible_hook_or_title || trend.topic || `AI trend signal ${index + 1}`,
       format: trend.format || "Platform-native post",
-      creator: trend.creator || "Unknown creator",
+      creator: trend.creator || trend.source || "Unknown creator",
       thumbnail: "https://images.unsplash.com/photo-1497366754035-f200968a6e72?auto=format&fit=crop&w=900&q=80",
       postType: PLATFORM_META[platform].label,
-      searchUrl: trend.source_url || getPlatformSearchUrl(platform, trend.visible_hook_or_title || ""),
+      searchUrl: trend.source_url || getPlatformSearchUrl(platform, trend.visible_hook_or_title || trend.topic || ""),
       signal: Object.keys(trend.metric_signals ?? {}).length
         ? Object.entries(trend.metric_signals ?? {}).map(([key, value]) => `${key}: ${String(value)}`).join(", ")
         : "AI marked metrics as unavailable",
-      why: [trend.why_it_is_working, trend.adaptation_for_user].filter(Boolean).join(" "),
+      why: [trend.why_it_works, trend.why_it_is_working, trend.adaptation, trend.adaptation_for_user].filter(Boolean).join(" "),
     }));
 }
 
@@ -1050,9 +1067,15 @@ export default function GrowthPlannerTab() {
 
   const selectedPlatforms = (Object.keys(platforms) as PlatformId[]).filter((id) => platforms[id].selected);
   const activeCompetitorPlatform = selectedPlatforms.includes(competitorPlatform) ? competitorPlatform : selectedPlatforms[0] ?? "tiktok";
-  const trends = plannerData?.profile_analysis?.summary
-    ? [plannerData.profile_analysis.summary, ...(plannerData.data_limitations ?? [])]
-    : [];
+  const trends = plannerData?.trend_read
+    ? [
+      plannerData.trend_read.main_opening,
+      ...(plannerData.trend_read.what_to_pay_attention_to_this_week ?? []),
+      plannerData.trend_read.recommended_shift_this_week,
+    ].filter((item): item is string => Boolean(item))
+    : plannerData?.profile_analysis?.summary
+      ? [plannerData.profile_analysis.summary, ...(plannerData.data_limitations ?? [])]
+      : [];
   const weekIds = Array.from(new Set(calendar.map((item) => item.weekId ?? 1))).sort((a, b) => a - b);
   const latestWeekId = weekIds[weekIds.length - 1] ?? 1;
   const currentWeekId = weekIds.includes(weekNumber) ? weekNumber : latestWeekId;

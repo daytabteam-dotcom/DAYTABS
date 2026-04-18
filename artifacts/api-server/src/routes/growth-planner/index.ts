@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { requireAuth } from "../../middlewares/auth";
 import { CONTACT_EMAIL, SMTP_USER, assertMailConfigured, createMailTransport, escapeHtml } from "../../lib/email";
-import { fetchTrendingTopics, scrapePublicProfile } from "../../lib/enrichment";
+import { fetchTrendingTopics, scrapePublicProfile, type PublicProfileData, type TrendData } from "../../lib/enrichment";
 import { GROWTH_PLANNER_JSON_SHAPE, GROWTH_PLANNER_SYSTEM_PROMPT } from "../../lib/growthPlannerPrompts";
 import { openai } from "../../lib/openai";
 import { normalizePlan } from "../../lib/planLimits";
@@ -25,7 +25,21 @@ CALENDAR REQUIREMENTS:
 - Each post needs: title, hook, format, platform, scheduled_date, rationale, cta
 - rationale must explain why this topic and timing are strong based on real data
 - Mark any field you cannot verify as discovery_needed: true
-- posts_per_week must exactly match the selected cadence per platform
+
+CALENDAR GENERATION - STRICT RULES:
+- For EACH selected platform, generate exactly postsPerWeek posts (also known as posts_per_week in the output)
+- Total cards = sum of all selected platforms' postsPerWeek values
+- Example: TikTok 7/week + Instagram 7/week + YouTube 3/week = 17 total cards
+- Distribute across the 7 days of the week starting from startDate
+- Multiple platforms can share the same date; each gets its own card
+- Never generate fewer cards than the sum of all selected postsPerWeek values
+- If postsPerWeek is 7, every single day must have a card for that platform
+
+CARD DISTRIBUTION LOGIC:
+- postsPerWeek=7: one card every day
+- postsPerWeek=5: skip 2 days, preferably Sat/Sun unless weekend timing is justified
+- postsPerWeek=3: Mon, Wed, Fri
+- postsPerWeek=1: best single day for that platform, usually Tue or Wed
 
 Return valid JSON matching this schema. No fabricated data:
 ${GROWTH_PLANNER_JSON_SHAPE}
@@ -62,6 +76,58 @@ function getSelectedPlatformEntries(platforms: unknown) {
       postsPerWeek: typeof config.postsPerWeek === "number" ? config.postsPerWeek : null,
     }));
 }
+
+function sanitizeProfileData(profileData: PublicProfileData[]) {
+  return profileData.map((item) => {
+    const metricsUnavailable = Boolean(item.error || item.parseError);
+    return {
+      ...item,
+      possibleFollowerCount: metricsUnavailable ? null : item.possibleFollowerCount ?? null,
+      possiblePostCount: metricsUnavailable ? null : item.possiblePostCount ?? null,
+      followerCount: metricsUnavailable ? null : item.followerCount ?? null,
+      subscriberCount: metricsUnavailable ? null : item.subscriberCount ?? null,
+      followingCount: metricsUnavailable ? null : item.followingCount ?? null,
+      postCount: metricsUnavailable ? null : item.postCount ?? null,
+      videoCount: metricsUnavailable ? null : item.videoCount ?? null,
+      totalLikes: metricsUnavailable ? null : item.totalLikes ?? null,
+      bio: metricsUnavailable ? null : item.bio ?? null,
+      description: metricsUnavailable ? null : item.description ?? null,
+    };
+  });
+}
+
+function buildTrendScanPrompt(trendData: TrendData, selectedPlatforms: ReturnType<typeof getSelectedPlatformEntries>) {
+  const platformTargets = selectedPlatforms.map((entry) => ({
+    platform: entry.platform,
+    postsPerWeek: entry.postsPerWeek,
+  }));
+  const redditTitles = trendData.redditHot.map((item) => `${item.title} (${item.score} score, ${item.comments} comments)`);
+
+  return `TREND SCAN REQUIREMENT:
+Here is the exact trendData you must reference for trend_scan_last_7_weeks:
+- googleTrends items: ${trendData.googleTrendItems.length ? trendData.googleTrendItems.join(" | ") : "unavailable"}
+- redditHot titles: ${redditTitles.length ? redditTitles.join(" | ") : "unavailable"}
+- youtubeTrending: ${trendData.youtubeTrending.length ? trendData.youtubeTrending.join(" | ") : "unavailable"}
+- trend source errors: ${trendData.errors.length ? trendData.errors.join(" | ") : "none"}
+
+For each selected platform's trend_scan_last_7_weeks, take at least 3 of the above items and explain how this creator should use them this week. Be specific and name the trend.
+
+STRICT PLATFORM POST COUNTS:
+${JSON.stringify(platformTargets)}
+Generate exactly these counts per platform, with total calendar cards equal to the sum of postsPerWeek.`;
+}
+
+const COMPETITOR_PROMPT = `COMPETITOR SECTION - REQUIRED:
+Generate 3 competitor accounts per selected platform based on the user's niche.
+Since you cannot browse in this call, use your knowledge of real accounts in the niche.
+For each competitor include:
+- handle: real @username on that platform when you know it
+- why_relevant: what they do that's similar to this account
+- what_to_steal: one specific content strategy or format they use that this account should adopt
+- follower_range: approximate size tier (nano <10k / micro 10-100k / mid 100k-1M / macro 1M+)
+- discovery_needed: true
+
+Focus on accounts that are 1-2 tiers above the user's current size for achievable benchmarks. Do not provide exact follower counts unless they came from provided data.`;
 
 router.post("/notify", async (req, res) => {
   try {
@@ -144,15 +210,17 @@ router.post("/generate", requireAuth, async (req, res) => {
       Promise.all(profileUrls.map((entry) => scrapePublicProfile(entry.url, entry.platform))),
       fetchTrendingTopics(getProfileNiche(profile), selectedPlatforms.map((entry) => entry.platform)),
     ]);
+    const sanitizedProfileData = sanitizeProfileData(profileData);
 
     req.log.info({
-      profileResults: profileData.map((item) => ({
+      profileResults: sanitizedProfileData.map((item) => ({
         platform: item.platform,
         username: item.username,
         normalizedUrl: item.normalizedUrl,
         hasFollowerCount: Boolean(item.followerCount ?? item.subscriberCount ?? item.possibleFollowerCount),
         hasDescription: Boolean(item.description ?? item.bio ?? item.metaDescription),
         error: item.error ?? null,
+        parseError: item.parseError ?? null,
       })),
       trendResults: {
         googleTrendsItems: trendData.googleTrendItems.length,
@@ -167,6 +235,8 @@ router.post("/generate", requireAuth, async (req, res) => {
       messages: [
         { role: "system", content: GROWTH_PLANNER_SYSTEM_PROMPT },
         { role: "user", content: GROWTH_PLANNER_USER_PROMPT },
+        { role: "user", content: buildTrendScanPrompt(trendData, selectedPlatforms) },
+        { role: "user", content: COMPETITOR_PROMPT },
         {
           role: "user",
           content: JSON.stringify({
@@ -178,12 +248,12 @@ router.post("/generate", requireAuth, async (req, res) => {
             customIdea,
             startDate,
             currentDate: new Date().toISOString().slice(0, 10),
-            profileData,
+            profileData: sanitizedProfileData,
             trendData,
             enrichment: {
               selectedPlatforms,
               profileUrlsRequested: profileUrls.length,
-              profileUrlsFetched: profileData.filter((item) => !item.error).length,
+              profileUrlsFetched: sanitizedProfileData.filter((item) => !item.error).length,
               trendErrors: trendData.errors,
             },
           }),
