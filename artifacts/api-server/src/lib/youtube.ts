@@ -376,6 +376,17 @@ async function fetchRecentVideos(userId: number, channelId: string, limit = 20) 
   return asArray(videos.items).map(normalizeVideo);
 }
 
+async function fetchChannelsByIds(userId: number, channelIds: string[]) {
+  const ids = [...new Set(channelIds.filter(Boolean))];
+  if (!ids.length) return [] as unknown[];
+  const channels = await youtubeJson<{ items?: unknown[] }>(userId, dataApiUrl("channels", {
+    part: "snippet,statistics",
+    id: ids.join(","),
+    maxResults: String(ids.length),
+  }), { cacheKey: `channels:${ids.join(",")}`, quotaCost: 1, ttlMs: 24 * 60 * 60 * 1000 });
+  return asArray(channels.items);
+}
+
 async function analyzeNiche(channel: JsonRecord, recentVideos: YoutubeRecentVideo[]): Promise<YoutubeNicheProfile> {
   const completion = await openai.chat.completions.create({
     model: "gpt-4o",
@@ -476,13 +487,53 @@ export async function syncYoutubeChannel(userId: number) {
 
 export async function getYoutubeStatus(userId: number) {
   const [connection] = await db.select().from(youtubeConnectionsTable).where(eq(youtubeConnectionsTable.userId, userId)).limit(1);
-  const [profile] = await db.select().from(youtubeChannelProfilesTable).where(eq(youtubeChannelProfilesTable.userId, userId)).limit(1);
+  let [profile] = await db.select().from(youtubeChannelProfilesTable).where(eq(youtubeChannelProfilesTable.userId, userId)).limit(1);
   const plans = await db.select().from(youtubeWeeklyPlansTable).where(eq(youtubeWeeklyPlansTable.userId, userId)).orderBy(desc(youtubeWeeklyPlansTable.weekNumber));
   const latestPlan = plans[0] ?? null;
   const latestResults = latestPlan
     ? await db.select().from(youtubePlanResultsTable).where(eq(youtubePlanResultsTable.planId, latestPlan.id))
     : [];
-  const competitors = await db.select().from(youtubeCompetitorsTable).where(eq(youtubeCompetitorsTable.userId, userId)).orderBy(desc(youtubeCompetitorsTable.fetchedAt));
+  let competitors = await db.select().from(youtubeCompetitorsTable).where(eq(youtubeCompetitorsTable.userId, userId)).orderBy(desc(youtubeCompetitorsTable.fetchedAt));
+
+  if (connection && profile && !profile.channelThumbnailUrl) {
+    try {
+      profile = await syncYoutubeChannel(userId);
+    } catch {
+      // Keep returning the saved profile even if YouTube refresh fails.
+    }
+  }
+
+  const competitorsMissingImages = competitors.filter((competitor) => competitor.channelId && !competitor.thumbnailUrl);
+  if (connection && competitorsMissingImages.length) {
+    try {
+      const fetchedChannels = await fetchChannelsByIds(userId, competitorsMissingImages.map((competitor) => competitor.channelId || ""));
+      const thumbnailEntries: Array<[string, string]> = fetchedChannels.flatMap((item) => {
+          const channel = asRecord(item);
+          const snippet = asRecord(channel.snippet);
+          const thumbnails = asRecord(snippet.thumbnails);
+          const thumbnailUrl = asString(asRecord(thumbnails.high).url) || asString(asRecord(thumbnails.medium).url) || asString(asRecord(thumbnails.default).url);
+          const channelId = asString(channel.id);
+          return channelId && thumbnailUrl ? [[channelId, thumbnailUrl]] : [];
+        });
+      const thumbnailByChannelId = new Map<string, string>(thumbnailEntries);
+
+      for (const competitor of competitorsMissingImages) {
+        const thumbnailUrl = thumbnailByChannelId.get(competitor.channelId || "");
+        if (!thumbnailUrl) continue;
+        await db.update(youtubeCompetitorsTable)
+          .set({ thumbnailUrl, updatedAt: new Date() })
+          .where(eq(youtubeCompetitorsTable.id, competitor.id));
+      }
+
+      competitors = competitors.map((competitor) => ({
+        ...competitor,
+        thumbnailUrl: competitor.thumbnailUrl || thumbnailByChannelId.get(competitor.channelId || "") || null,
+      }));
+    } catch {
+      // Keep returning the saved competitors even if thumbnail refresh fails.
+    }
+  }
+
   const channelAnalytics = connection && profile ? await channelAnalyticsTimeline(userId) : null;
   return {
     connected: Boolean(connection),
