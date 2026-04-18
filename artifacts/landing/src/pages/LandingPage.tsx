@@ -342,7 +342,7 @@ export default function LandingPage() {
             transition={{ duration: 0.7, delay: 0.1 }}
             className="text-5xl md:text-7xl font-bold leading-tight mb-6"
           >
-            AI Video Analysis for{" "}
+            DayTabs AI Video Analysis for{" "}
             <span className="gradient-text">Content Creators</span>
           </motion.h1>
 
