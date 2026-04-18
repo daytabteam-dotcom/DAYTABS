@@ -57,6 +57,7 @@ interface PlannerState {
   platforms: Record<PlatformId, PlatformConfig>;
   weekNumber: number;
   calendar: CalendarItem[];
+  plannerData?: AiPlannerData | null;
 }
 
 interface CalendarItem {
@@ -70,6 +71,12 @@ interface CalendarItem {
   angle: string;
   thumbnail: string;
   song: string;
+  fullConcept?: string;
+  hook?: string;
+  outline?: string[];
+  captionDirection?: string;
+  cta?: string;
+  sourceInspirations?: string[];
   status?: "posted" | "not-posted";
   result?: string;
   postUrl?: string;
@@ -82,6 +89,64 @@ interface CompetitorProfile {
   focus: string;
   url: string;
   avatar: string;
+}
+
+interface AiPlannerData {
+  insufficient_data?: boolean;
+  data_limitations?: string[];
+  profile_analysis?: {
+    summary?: string;
+    platforms?: Array<{
+      platform?: string;
+      profile_url?: string;
+      observable_metrics?: Record<string, unknown>;
+      what_is_working?: string[];
+      what_is_not_working?: string[];
+      sources?: string[];
+    }>;
+  };
+  competitors?: Array<{
+    platform?: string;
+    name?: string;
+    profile_url?: string;
+    why_relevant?: string;
+    evidence?: string[];
+    sources?: string[];
+  }>;
+  platform_recommendations?: Array<{
+    platform?: string;
+    recommended?: boolean;
+    posts_per_week?: number;
+    reason?: string;
+    evidence_sources?: string[];
+  }>;
+  trend_scan_last_7_weeks?: Array<{
+    platform?: string;
+    creator?: string;
+    source_url?: string;
+    publish_or_observed_date?: string | null;
+    visible_hook_or_title?: string;
+    format?: string;
+    metric_signals?: Record<string, unknown>;
+    why_it_is_working?: string;
+    adaptation_for_user?: string;
+    sources?: string[];
+  }>;
+  calendar?: Array<{
+    platform?: string;
+    scheduled_date?: string;
+    title?: string;
+    full_concept?: string;
+    hook?: string;
+    format?: string;
+    outline?: string[];
+    shot_list?: string[];
+    thumbnail_or_visual_direction?: string;
+    caption_direction?: string;
+    cta?: string;
+    platform_specific_notes?: string;
+    source_inspirations?: Array<string | { source_url?: string; url?: string; title?: string }>;
+  }>;
 }
 
 const STORAGE_KEY = "daytabs:growth-planner";
@@ -224,6 +289,94 @@ function loadState(): PlannerState | null {
   }
 }
 
+function isPlatformId(value: unknown): value is PlatformId {
+  return value === "tiktok" || value === "instagram" || value === "youtube" || value === "linkedin" || value === "x";
+}
+
+function toTextList(value: unknown): string[] {
+  return Array.isArray(value) ? value.map((item) => String(item)).filter(Boolean) : [];
+}
+
+function sourceToString(source: string | { source_url?: string; url?: string; title?: string }) {
+  if (typeof source === "string") return source;
+  return source.source_url || source.url || source.title || "";
+}
+
+function calendarFromAi(data: AiPlannerData, weekId: number, fallbackStartDate: Date): CalendarItem[] {
+  return (data.calendar ?? [])
+    .map((item, index) => {
+      const platform = isPlatformId(item.platform) ? item.platform : "instagram";
+      const scheduledDate = item.scheduled_date && fromIsoDate(item.scheduled_date)
+        ? item.scheduled_date
+        : toIsoDate(addDays(fallbackStartDate, index % 7));
+      const formatted = formatCalendarDay(scheduledDate);
+      const outline = toTextList(item.outline);
+      const shotList = toTextList(item.shot_list);
+      const sourceInspirations = (item.source_inspirations ?? []).map(sourceToString).filter(Boolean);
+      return {
+        id: crypto.randomUUID(),
+        platform,
+        weekId,
+        day: formatted.day,
+        date: scheduledDate,
+        title: item.title || item.hook || `AI-generated ${PLATFORM_META[platform].label} idea`,
+        format: item.platform_specific_notes || item.format || "AI-generated post",
+        angle: item.full_concept || item.hook || outline.join("\n") || "AI-generated content concept",
+        thumbnail: item.thumbnail_or_visual_direction || shotList.join("\n") || "Use the clearest visual proof in the first frame.",
+        song: platform === "tiktok" || platform === "instagram" ? "AI will choose native audio during production." : "No music required.",
+        fullConcept: item.full_concept,
+        hook: item.hook,
+        outline,
+        captionDirection: item.caption_direction,
+        cta: item.cta,
+        sourceInspirations,
+        stage: "idea",
+      } satisfies CalendarItem;
+    });
+}
+
+async function generateGrowthPlannerData({
+  mode,
+  profile,
+  platforms,
+  weekNumber,
+  previousCalendar,
+  customIdea,
+  startDate,
+}: {
+  mode: "initial" | "next-week" | "custom-idea";
+  profile: BrandProfile;
+  platforms: Record<PlatformId, PlatformConfig>;
+  weekNumber: number;
+  previousCalendar?: CalendarItem[];
+  customIdea?: { platform: PlatformId; date: string; title: string; angle: string };
+  startDate?: string;
+}) {
+  const token = localStorage.getItem("daytabs_token");
+  const res = await fetch("/api/growth-planner/generate", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({
+      mode,
+      profile,
+      platforms,
+      weekNumber,
+      previousCalendar,
+      customIdea,
+      startDate,
+    }),
+  });
+
+  const data = await res.json().catch(() => ({})) as { planner?: AiPlannerData; error?: string };
+  if (!res.ok || !data.planner) {
+    throw new Error(data.error || "AI planner generation failed");
+  }
+  return data.planner;
+}
+
 export function getGrowthPlannerNotificationCounts() {
   const state = loadState();
   const calendar = state?.calendar ?? [];
@@ -329,6 +482,17 @@ function competitorProfiles(profile: BrandProfile, platform: PlatformId) {
   return platform === "linkedin" || platform === "x" ? profiles.slice().reverse() : profiles;
 }
 
+function getAiCompetitors(data: AiPlannerData | null, platform: PlatformId): CompetitorProfile[] {
+  return (data?.competitors ?? [])
+    .filter((competitor) => competitor.platform === platform && competitor.name)
+    .map((competitor) => ({
+      name: competitor.name ?? "AI-discovered competitor",
+      focus: competitor.why_relevant || toTextList(competitor.evidence).join(" ") || "Relevant competitor identified by AI.",
+      url: competitor.profile_url || "#",
+      avatar: `https://unavatar.io/${competitor.profile_url || competitor.name}`,
+    }));
+}
+
 function platformSummary(profile: BrandProfile, platform: PlatformId, url: string) {
   const label = PLATFORM_META[platform].label;
   const hasUrl = url.trim().length > 0;
@@ -350,6 +514,40 @@ function platformSummary(profile: BrandProfile, platform: PlatformId, url: strin
       ? "The biggest gap is probably inconsistent series packaging: more recurring formats would make wins easier to repeat."
       : "No live profile URL is connected yet, so the planner is using niche and goal signals only.",
   };
+}
+
+function getAiPlatformSummary(data: AiPlannerData | null, platform: PlatformId) {
+  const profile = data?.profile_analysis?.platforms?.find((entry) => entry.platform === platform);
+  const recommendation = data?.platform_recommendations?.find((entry) => entry.platform === platform);
+  if (!profile && !recommendation) return null;
+  const metrics = profile?.observable_metrics ?? {};
+  const metricEntries = Object.entries(metrics).filter(([, value]) => value !== null && value !== undefined && value !== "");
+  return {
+    title: profile?.profile_url ? `${PLATFORM_META[platform].label} AI profile review` : `${PLATFORM_META[platform].label} AI recommendation`,
+    stats: metricEntries.slice(0, 3).map(([label, value]) => ({
+      label: label.replace(/_/g, " "),
+      value: String(value),
+    })),
+    worked: toTextList(profile?.what_is_working).join(" ") || recommendation?.reason || "AI needs more observable profile data to identify what's working.",
+    missed: toTextList(profile?.what_is_not_working).join(" ") || (data?.data_limitations ?? []).join(" ") || "Add profile and post URLs for deeper AI analysis.",
+  };
+}
+
+function getAiTrendScan(data: AiPlannerData | null, platform: PlatformId) {
+  return (data?.trend_scan_last_7_weeks ?? [])
+    .filter((trend) => trend.platform === platform)
+    .map((trend, index) => ({
+      title: trend.visible_hook_or_title || `AI trend signal ${index + 1}`,
+      format: trend.format || "Platform-native post",
+      creator: trend.creator || "Unknown creator",
+      thumbnail: "https://images.unsplash.com/photo-1497366754035-f200968a6e72?auto=format&fit=crop&w=900&q=80",
+      postType: PLATFORM_META[platform].label,
+      searchUrl: trend.source_url || getPlatformSearchUrl(platform, trend.visible_hook_or_title || ""),
+      signal: Object.keys(trend.metric_signals ?? {}).length
+        ? Object.entries(trend.metric_signals ?? {}).map(([key, value]) => `${key}: ${String(value)}`).join(", ")
+        : "AI marked metrics as unavailable",
+      why: [trend.why_it_is_working, trend.adaptation_for_user].filter(Boolean).join(" "),
+    }));
 }
 
 function getPlatformTrendScan(profile: BrandProfile, platform: PlatformId) {
@@ -809,6 +1007,7 @@ export default function GrowthPlannerTab() {
   const [profile, setProfile] = useState<BrandProfile>(saved?.profile ?? { name: "", niche: "", audience: "", goals: "", attachments: [] });
   const [platforms, setPlatforms] = useState<Record<PlatformId, PlatformConfig>>(saved?.platforms ?? defaultPlatforms);
   const [calendar, setCalendar] = useState<CalendarItem[]>(saved?.calendar ?? []);
+  const [plannerData, setPlannerData] = useState<AiPlannerData | null>(saved?.plannerData ?? null);
   const [weekNumber, setWeekNumber] = useState(saved?.weekNumber ?? 1);
   const [step, setStep] = useState<PlannerStep>(saved ? "links" : "profile");
   const [setupOpen, setSetupOpen] = useState(!saved && plan.isStudio);
@@ -823,11 +1022,15 @@ export default function GrowthPlannerTab() {
   const [viewMode, setViewMode] = useState<PlannerViewMode>("calendar");
   const [highlightedCardId, setHighlightedCardId] = useState<string | null>(null);
   const [competitorPlatform, setCompetitorPlatform] = useState<PlatformId>("tiktok");
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
   const isAllowed = plan.isStudio;
 
   const selectedPlatforms = (Object.keys(platforms) as PlatformId[]).filter((id) => platforms[id].selected);
   const activeCompetitorPlatform = selectedPlatforms.includes(competitorPlatform) ? competitorPlatform : selectedPlatforms[0] ?? "tiktok";
-  const trends = trendLines(profile);
+  const trends = plannerData?.profile_analysis?.summary
+    ? [plannerData.profile_analysis.summary, ...(plannerData.data_limitations ?? [])]
+    : trendLines(profile);
   const weekIds = Array.from(new Set(calendar.map((item) => item.weekId ?? 1))).sort((a, b) => a - b);
   const latestWeekId = weekIds[weekIds.length - 1] ?? 1;
   const currentWeekId = weekIds.includes(weekNumber) ? weekNumber : latestWeekId;
@@ -870,8 +1073,8 @@ export default function GrowthPlannerTab() {
     return () => window.removeEventListener("daytabs:growth-planner-focus-card", handleFocusCard);
   }, [calendar]);
 
-  function persist(nextCalendar = calendar, nextWeek = weekNumber) {
-    saveState({ profile, platforms, calendar: nextCalendar, weekNumber: nextWeek });
+  function persist(nextCalendar = calendar, nextWeek = weekNumber, nextPlannerData = plannerData) {
+    saveState({ profile, platforms, calendar: nextCalendar, weekNumber: nextWeek, plannerData: nextPlannerData });
   }
 
   function applyRecommendations() {
@@ -884,17 +1087,34 @@ export default function GrowthPlannerTab() {
     });
   }
 
-  function completeSetup() {
-    const next = calendar.length ? calendar : generateCalendar(profile, platforms, 1, []);
-    setCalendar(next);
-    setWeekNumber(1);
-    saveState({ profile, platforms, calendar: next, weekNumber: 1 });
-    setVisibleWeek(1);
-    setActivePlatform(selectedPlatforms[0] ?? "tiktok");
-    setSetupOpen(false);
+  async function completeSetup() {
+    setAiLoading(true);
+    setAiError(null);
+    try {
+      const data = await generateGrowthPlannerData({
+        mode: "initial",
+        profile,
+        platforms,
+        weekNumber: 1,
+        startDate: toIsoDate(new Date()),
+      });
+      const aiCalendar = calendarFromAi(data, 1, new Date());
+      const next = aiCalendar.length ? aiCalendar : generateCalendar(profile, platforms, 1, []);
+      setPlannerData(data);
+      setCalendar(next);
+      setWeekNumber(1);
+      saveState({ profile, platforms, calendar: next, weekNumber: 1, plannerData: data });
+      setVisibleWeek(1);
+      setActivePlatform(selectedPlatforms[0] ?? "tiktok");
+      setSetupOpen(false);
+    } catch (err) {
+      setAiError(err instanceof Error ? err.message : "AI planner generation failed. Please try again.");
+    } finally {
+      setAiLoading(false);
+    }
   }
 
-  function nextStep() {
+  async function nextStep() {
     if (step === "profile") {
       applyRecommendations();
       setStep("platforms");
@@ -902,7 +1122,7 @@ export default function GrowthPlannerTab() {
     }
     if (step === "platforms") setStep("cadence");
     if (step === "cadence") setStep("links");
-    if (step === "links") completeSetup();
+    if (step === "links") await completeSetup();
   }
 
   function previousStep() {
@@ -939,14 +1159,47 @@ export default function GrowthPlannerTab() {
     setCustomOpen(false);
   }
 
-  function improveCustomIdea() {
-    const improved = improveCustomIdeaWithContext({
-      profile,
-      platform: customIdea.platform,
-      title: customIdea.title,
-      angle: customIdea.angle,
-    });
-    setCustomIdea((prev) => ({ ...prev, ...improved }));
+  async function improveCustomIdea() {
+    setAiLoading(true);
+    setAiError(null);
+    try {
+      const data = await generateGrowthPlannerData({
+        mode: "custom-idea",
+        profile,
+        platforms,
+        weekNumber,
+        previousCalendar: calendar,
+        customIdea,
+        startDate: customIdea.date,
+      });
+      const improvedItem = data.calendar?.[0];
+      if (improvedItem) {
+        setCustomIdea((prev) => ({
+          ...prev,
+          title: improvedItem.title || improvedItem.hook || prev.title,
+          angle: [
+            improvedItem.full_concept,
+            improvedItem.hook ? `Hook: ${improvedItem.hook}` : "",
+            toTextList(improvedItem.outline).length ? `Outline: ${toTextList(improvedItem.outline).join(" ")}` : "",
+            improvedItem.thumbnail_or_visual_direction ? `Visual: ${improvedItem.thumbnail_or_visual_direction}` : "",
+            improvedItem.caption_direction ? `Caption: ${improvedItem.caption_direction}` : "",
+            improvedItem.cta ? `CTA: ${improvedItem.cta}` : "",
+          ].filter(Boolean).join("\n\n") || prev.angle,
+        }));
+        return;
+      }
+      const improved = improveCustomIdeaWithContext({
+        profile,
+        platform: customIdea.platform,
+        title: customIdea.title,
+        angle: customIdea.angle,
+      });
+      setCustomIdea((prev) => ({ ...prev, ...improved }));
+    } catch (err) {
+      setAiError(err instanceof Error ? err.message : "AI idea improvement failed. Please try again.");
+    } finally {
+      setAiLoading(false);
+    }
   }
 
   function updateCalendarItem(id: string, patch: Partial<CalendarItem>) {
@@ -973,16 +1226,35 @@ export default function GrowthPlannerTab() {
     updateCalendarItem(item.id, { stage });
   }
 
-  function generateNextWeek() {
+  async function generateNextWeek() {
     if (incompleteResults.length > 0) return;
+    setAiLoading(true);
+    setAiError(null);
     const nextWeek = latestWeekId + 1;
-    const nextCalendar = generateCalendar(profile, platforms, nextWeek, calendar);
-    setWeekNumber(nextWeek);
-    const combinedCalendar = [...calendar, ...nextCalendar];
-    setCalendar(combinedCalendar);
-    setVisibleWeek(nextWeek);
-    saveState({ profile, platforms, calendar: combinedCalendar, weekNumber: nextWeek });
-    setFeedbackOpen(false);
+    try {
+      const startDate = toIsoDate(getNextCalendarStartDate(calendar));
+      const data = await generateGrowthPlannerData({
+        mode: "next-week",
+        profile,
+        platforms,
+        weekNumber: nextWeek,
+        previousCalendar: calendar,
+        startDate,
+      });
+      const aiCalendar = calendarFromAi(data, nextWeek, getNextCalendarStartDate(calendar));
+      const nextCalendar = aiCalendar.length ? aiCalendar : generateCalendar(profile, platforms, nextWeek, calendar);
+      setWeekNumber(nextWeek);
+      const combinedCalendar = [...calendar, ...nextCalendar];
+      setPlannerData(data);
+      setCalendar(combinedCalendar);
+      setVisibleWeek(nextWeek);
+      saveState({ profile, platforms, calendar: combinedCalendar, weekNumber: nextWeek, plannerData: data });
+      setFeedbackOpen(false);
+    } catch (err) {
+      setAiError(err instanceof Error ? err.message : "AI next-week generation failed. Please try again.");
+    } finally {
+      setAiLoading(false);
+    }
   }
 
   function openReview(scope: ReviewScope) {
@@ -1028,11 +1300,18 @@ export default function GrowthPlannerTab() {
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant="secondary" className="rounded-lg" onClick={() => setSetupOpen(true)}>Edit setup</Button>
-          <Button className="rounded-lg bg-primary text-primary-foreground" onClick={() => openReview("all")}>
-            Generate next week
+          <Button className="rounded-lg bg-primary text-primary-foreground" onClick={() => openReview("all")} disabled={aiLoading}>
+            {aiLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+            {aiLoading ? "Generating..." : "Generate next week"}
           </Button>
         </div>
       </PanelHeader>
+
+      {aiError && (
+        <PanelCardSoft className="border-red-400/25 bg-red-500/10 p-4 text-sm text-red-100">
+          {aiError}
+        </PanelCardSoft>
+      )}
 
       {calendar.length === 0 ? (
         <PanelCard className="p-8 text-center">
@@ -1191,8 +1470,9 @@ export default function GrowthPlannerTab() {
                 <p className="text-sm font-semibold text-white">Ready for the next week?</p>
                 <p className="text-xs text-white/45 mt-1">Add post results, move rejected ideas to draft, then generate a fresh calendar from what actually happened.</p>
               </div>
-              <Button className="rounded-lg bg-primary text-primary-foreground" onClick={() => openReview("all")}>
-                <RefreshCcw className="w-4 h-4 mr-2" /> Generate next week calendar
+              <Button className="rounded-lg bg-primary text-primary-foreground" onClick={() => openReview("all")} disabled={aiLoading}>
+                {aiLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <RefreshCcw className="w-4 h-4 mr-2" />}
+                {aiLoading ? "Generating with AI..." : "Generate next week calendar"}
               </Button>
             </div>
               </>
@@ -1233,7 +1513,7 @@ export default function GrowthPlannerTab() {
                     })}
                   </div>
                 </div>
-                <PlatformPanel profile={profile} platform={activePlatform} url={platforms[activePlatform]?.url ?? ""} />
+                <PlatformPanel profile={profile} platform={activePlatform} url={platforms[activePlatform]?.url ?? ""} plannerData={plannerData} />
               </div>
             )}
             {viewMode === "competitors" && (
@@ -1255,7 +1535,10 @@ export default function GrowthPlannerTab() {
                 <div className="rounded-xl border border-white/8 bg-white/[0.03] p-3">
                   <PlatformBadge platform={activeCompetitorPlatform} />
                   <div className="grid sm:grid-cols-3 gap-2 mt-3">
-                    {competitorProfiles(profile, activeCompetitorPlatform).map((competitor) => (
+                    {(getAiCompetitors(plannerData, activeCompetitorPlatform).length
+                      ? getAiCompetitors(plannerData, activeCompetitorPlatform)
+                      : competitorProfiles(profile, activeCompetitorPlatform)
+                    ).map((competitor) => (
                       <a
                         key={`${activeCompetitorPlatform}-${competitor.name}`}
                         href={competitor.url}
@@ -1370,6 +1653,11 @@ export default function GrowthPlannerTab() {
             <DialogTitle>Growth Planner setup</DialogTitle>
             <DialogDescription>Share your niche once, then adjust the AI-filled platform and posting plan.</DialogDescription>
           </DialogHeader>
+          {aiError && (
+            <div className="rounded-xl border border-red-400/25 bg-red-500/10 p-3 text-sm text-red-100">
+              {aiError}
+            </div>
+          )}
           <div className="h-1.5 rounded-full bg-white/8 overflow-hidden">
             <div className="h-full bg-primary transition-all" style={{ width: `${onboardingPercent(step)}%` }} />
           </div>
@@ -1431,8 +1719,9 @@ export default function GrowthPlannerTab() {
             <Button variant="secondary" className="rounded-lg" onClick={previousStep} disabled={step === "profile"}>
               <ChevronLeft className="w-4 h-4 mr-1" /> Back
             </Button>
-            <Button className="rounded-lg" onClick={nextStep} disabled={step === "profile" && !profile.niche.trim()}>
-              {step === "links" ? "Build planner" : "Continue"} <ArrowRight className="w-4 h-4 ml-1" />
+            <Button className="rounded-lg" onClick={nextStep} disabled={aiLoading || (step === "profile" && !profile.niche.trim())}>
+              {aiLoading && step === "links" ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+              {step === "links" ? (aiLoading ? "Generating with AI..." : "Build planner") : "Continue"} <ArrowRight className="w-4 h-4 ml-1" />
             </Button>
           </div>
         </DialogContent>
@@ -1448,8 +1737,13 @@ export default function GrowthPlannerTab() {
               </DialogHeader>
               <div className="grid gap-3">
                 <Brief label="Content angle" value={selectedCard.angle} />
+                {selectedCard.hook && <Brief label="Hook" value={selectedCard.hook} />}
+                {selectedCard.outline?.length ? <Brief label="Outline" value={selectedCard.outline.join("\n")} /> : null}
+                {selectedCard.captionDirection && <Brief label="Caption direction" value={selectedCard.captionDirection} />}
+                {selectedCard.cta && <Brief label="CTA" value={selectedCard.cta} />}
                 <Brief label="Thumbnail or footage idea" value={selectedCard.thumbnail} />
                 <Brief label="Song or audio idea" value={selectedCard.song} />
+                {selectedCard.sourceInspirations?.length ? <Brief label="AI source inspirations" value={selectedCard.sourceInspirations.join("\n")} /> : null}
                 <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
                   <p className="text-xs uppercase tracking-wider text-white/35 mb-2">Result after posting</p>
                   <p className="text-sm text-white/50 mb-3">
@@ -1491,8 +1785,9 @@ export default function GrowthPlannerTab() {
             <Input placeholder="Content title" value={customIdea.title} onChange={(e) => setCustomIdea({ ...customIdea, title: e.target.value })} />
             <Textarea placeholder="Angle, visual, or note" value={customIdea.angle} onChange={(e) => setCustomIdea({ ...customIdea, angle: e.target.value })} />
             <div className="flex flex-col sm:flex-row gap-2">
-              <Button variant="secondary" className="rounded-lg flex-1" onClick={improveCustomIdea} disabled={!customIdea.title.trim() && !customIdea.angle.trim()}>
-                <Sparkles className="w-4 h-4 mr-2" /> Improve with AI
+              <Button variant="secondary" className="rounded-lg flex-1" onClick={improveCustomIdea} disabled={aiLoading || (!customIdea.title.trim() && !customIdea.angle.trim())}>
+                {aiLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
+                {aiLoading ? "Improving..." : "Improve with AI"}
               </Button>
               <Button className="rounded-lg flex-1" onClick={addCustomIdea}>Add to calendar</Button>
             </div>
@@ -1571,8 +1866,9 @@ export default function GrowthPlannerTab() {
               Review all posts for next week
             </Button>
           )}
-          <Button className="rounded-lg" onClick={generateNextWeek} disabled={incompleteResults.length > 0}>
-            <RefreshCcw className="w-4 h-4 mr-2" /> Create week {weekNumber + 1}
+          <Button className="rounded-lg" onClick={generateNextWeek} disabled={aiLoading || incompleteResults.length > 0}>
+            {aiLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <RefreshCcw className="w-4 h-4 mr-2" />}
+            {aiLoading ? "Generating with AI..." : `Create week ${weekNumber + 1}`}
           </Button>
         </DialogContent>
       </Dialog>
@@ -1641,9 +1937,17 @@ function PlatformSelectCard({ platform, config, onChange }: { platform: Platform
   );
 }
 
-function PlatformPanel({ profile, platform, url }: { profile: BrandProfile; platform: PlatformId; url: string }) {
-  const summary = platformSummary(profile, platform, url);
-  const trends = getPlatformTrendScan(profile, platform);
+function PlatformPanel({ profile, platform, url, plannerData }: { profile: BrandProfile; platform: PlatformId; url: string; plannerData: AiPlannerData | null }) {
+  const aiSummary = getAiPlatformSummary(plannerData, platform);
+  const fallbackSummary = platformSummary(profile, platform, url);
+  const summary = aiSummary
+    ? {
+      ...aiSummary,
+      stats: aiSummary.stats.length ? aiSummary.stats : fallbackSummary.stats,
+    }
+    : fallbackSummary;
+  const aiTrends = getAiTrendScan(plannerData, platform);
+  const trends = aiTrends.length ? aiTrends : getPlatformTrendScan(profile, platform);
   return (
     <div className="space-y-5">
       <div className="grid lg:grid-cols-[0.9fr_1.1fr] gap-4">
@@ -1669,7 +1973,11 @@ function PlatformPanel({ profile, platform, url }: { profile: BrandProfile; plat
           <div>
             <p className="text-xs uppercase tracking-wider text-white/35">This week trend scan</p>
             <h3 className="text-lg text-white mt-1">{PLATFORM_META[platform].label} viral content patterns</h3>
-            <p className="text-sm text-white/45 mt-1">Evidence-ready trend patterns for {profile.niche || "your niche"}. Live last-7-week examples should come from platform/source data before final generation.</p>
+            <p className="text-sm text-white/45 mt-1">
+              {aiTrends.length
+                ? "AI-generated trend signals based on the available profile, post, source, and limitation data."
+                : `Evidence-ready trend patterns for ${profile.niche || "your niche"}. Add profile and post URLs for deeper AI generation.`}
+            </p>
           </div>
           <Badge className="bg-primary/15 text-primary border-primary/20 hover:brightness-100">5-10 ideas</Badge>
         </div>
@@ -1729,7 +2037,7 @@ function Brief({ label, value, icon: Icon = Sparkles }: { label: string; value: 
         <Icon className="w-4 h-4 text-primary" />
         <p className="text-xs uppercase tracking-wider text-white/35">{label}</p>
       </div>
-      <p className="text-sm text-white/70 leading-relaxed">{value}</p>
+      <p className="text-sm text-white/70 leading-relaxed whitespace-pre-line">{value}</p>
     </div>
   );
 }
