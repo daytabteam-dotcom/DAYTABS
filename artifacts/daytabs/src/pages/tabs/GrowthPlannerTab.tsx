@@ -149,7 +149,8 @@ interface AiPlannerData {
   }>;
 }
 
-const STORAGE_KEY = "daytabs:growth-planner";
+const LEGACY_STORAGE_KEY = "daytabs:growth-planner";
+const STORAGE_KEY = "daytabs:growth-planner:ai-v2";
 
 const CONTENT_STAGES: Array<{ id: ContentStage; label: string; helper: string }> = [
   { id: "idea", label: "Idea", helper: "Concepts ready to shape." },
@@ -281,6 +282,7 @@ const defaultPlatforms: Record<PlatformId, PlatformConfig> = {
 
 function loadState(): PlannerState | null {
   try {
+    localStorage.removeItem(LEGACY_STORAGE_KEY);
     const raw = localStorage.getItem(STORAGE_KEY);
     return raw ? (JSON.parse(raw) as PlannerState) : null;
   } catch {
@@ -1030,7 +1032,7 @@ export default function GrowthPlannerTab() {
   const activeCompetitorPlatform = selectedPlatforms.includes(competitorPlatform) ? competitorPlatform : selectedPlatforms[0] ?? "tiktok";
   const trends = plannerData?.profile_analysis?.summary
     ? [plannerData.profile_analysis.summary, ...(plannerData.data_limitations ?? [])]
-    : trendLines(profile);
+    : [];
   const weekIds = Array.from(new Set(calendar.map((item) => item.weekId ?? 1))).sort((a, b) => a - b);
   const latestWeekId = weekIds[weekIds.length - 1] ?? 1;
   const currentWeekId = weekIds.includes(weekNumber) ? weekNumber : latestWeekId;
@@ -1099,7 +1101,10 @@ export default function GrowthPlannerTab() {
         startDate: toIsoDate(new Date()),
       });
       const aiCalendar = calendarFromAi(data, 1, new Date());
-      const next = aiCalendar.length ? aiCalendar : generateCalendar(profile, platforms, 1, []);
+      if (!aiCalendar.length) {
+        throw new Error("AI did not return calendar items. Please add more profile details or try again.");
+      }
+      const next = aiCalendar;
       setPlannerData(data);
       setCalendar(next);
       setWeekNumber(1);
@@ -1188,13 +1193,7 @@ export default function GrowthPlannerTab() {
         }));
         return;
       }
-      const improved = improveCustomIdeaWithContext({
-        profile,
-        platform: customIdea.platform,
-        title: customIdea.title,
-        angle: customIdea.angle,
-      });
-      setCustomIdea((prev) => ({ ...prev, ...improved }));
+      throw new Error("AI did not return an improved idea. Please add more detail or try again.");
     } catch (err) {
       setAiError(err instanceof Error ? err.message : "AI idea improvement failed. Please try again.");
     } finally {
@@ -1242,7 +1241,10 @@ export default function GrowthPlannerTab() {
         startDate,
       });
       const aiCalendar = calendarFromAi(data, nextWeek, getNextCalendarStartDate(calendar));
-      const nextCalendar = aiCalendar.length ? aiCalendar : generateCalendar(profile, platforms, nextWeek, calendar);
+      if (!aiCalendar.length) {
+        throw new Error("AI did not return calendar items. Please add more post results or try again.");
+      }
+      const nextCalendar = aiCalendar;
       setWeekNumber(nextWeek);
       const combinedCalendar = [...calendar, ...nextCalendar];
       setPlannerData(data);
@@ -1502,6 +1504,11 @@ export default function GrowthPlannerTab() {
                     <Badge className="bg-white/8 text-white/55 border-white/10 hover:brightness-100">Strategy summary</Badge>
                   </div>
                   <div className="divide-y divide-white/8">
+                    {trends.length === 0 && (
+                      <div className="py-3 text-sm text-white/45">
+                        No AI strategy summary yet. Complete setup with your own niche, goals, platforms, and profile URLs to generate this view.
+                      </div>
+                    )}
                     {trends.map((trend, index) => {
                       const labels = ["Main opening", "Content pattern", "Engagement lever", "Risk to avoid"];
                       return (
@@ -1535,10 +1542,7 @@ export default function GrowthPlannerTab() {
                 <div className="rounded-xl border border-white/8 bg-white/[0.03] p-3">
                   <PlatformBadge platform={activeCompetitorPlatform} />
                   <div className="grid sm:grid-cols-3 gap-2 mt-3">
-                    {(getAiCompetitors(plannerData, activeCompetitorPlatform).length
-                      ? getAiCompetitors(plannerData, activeCompetitorPlatform)
-                      : competitorProfiles(profile, activeCompetitorPlatform)
-                    ).map((competitor) => (
+                    {getAiCompetitors(plannerData, activeCompetitorPlatform).map((competitor) => (
                       <a
                         key={`${activeCompetitorPlatform}-${competitor.name}`}
                         href={competitor.url}
@@ -1560,6 +1564,11 @@ export default function GrowthPlannerTab() {
                         </div>
                       </a>
                     ))}
+                    {getAiCompetitors(plannerData, activeCompetitorPlatform).length === 0 && (
+                      <div className="sm:col-span-3 rounded-lg border border-white/8 bg-background/55 p-4 text-sm text-white/45">
+                        No AI competitor data yet. Complete setup with your own profile details and URLs to generate competitors.
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1946,8 +1955,7 @@ function PlatformPanel({ profile, platform, url, plannerData }: { profile: Brand
       stats: aiSummary.stats.length ? aiSummary.stats : fallbackSummary.stats,
     }
     : fallbackSummary;
-  const aiTrends = getAiTrendScan(plannerData, platform);
-  const trends = aiTrends.length ? aiTrends : getPlatformTrendScan(profile, platform);
+  const trends = getAiTrendScan(plannerData, platform);
   return (
     <div className="space-y-5">
       <div className="grid lg:grid-cols-[0.9fr_1.1fr] gap-4">
@@ -1974,9 +1982,9 @@ function PlatformPanel({ profile, platform, url, plannerData }: { profile: Brand
             <p className="text-xs uppercase tracking-wider text-white/35">This week trend scan</p>
             <h3 className="text-lg text-white mt-1">{PLATFORM_META[platform].label} viral content patterns</h3>
             <p className="text-sm text-white/45 mt-1">
-              {aiTrends.length
+              {trends.length
                 ? "AI-generated trend signals based on the available profile, post, source, and limitation data."
-                : `Evidence-ready trend patterns for ${profile.niche || "your niche"}. Add profile and post URLs for deeper AI generation.`}
+                : "No AI trend examples yet. Complete setup with your own data to generate this section."}
             </p>
           </div>
           <Badge className="bg-primary/15 text-primary border-primary/20 hover:brightness-100">5-10 ideas</Badge>
@@ -2024,6 +2032,11 @@ function PlatformPanel({ profile, platform, url, plannerData }: { profile: Brand
               </div>
             </div>
           ))}
+          {trends.length === 0 && (
+            <div className="lg:col-span-2 rounded-lg border border-white/8 bg-background/55 p-4 text-sm text-white/45">
+              No AI trend scan data yet. Add your profile URLs and generate the planner to replace this empty state with real AI output.
+            </div>
+          )}
         </div>
       </div>
     </div>
