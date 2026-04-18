@@ -18,6 +18,94 @@ async function runStartupMigrations() {
     await db.execute(
       sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_past_due BOOLEAN DEFAULT FALSE`
     );
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS youtube_connections (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+        connected_google_email TEXT,
+        channel_id TEXT,
+        channel_title TEXT,
+        access_token TEXT NOT NULL,
+        refresh_token TEXT,
+        token_type TEXT,
+        scopes TEXT,
+        expires_at TIMESTAMP,
+        last_synced_at TIMESTAMP,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      )
+    `);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS youtube_channel_profiles (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+        channel_id TEXT NOT NULL,
+        channel_name TEXT NOT NULL,
+        subscriber_count TEXT,
+        total_view_count TEXT,
+        video_count TEXT,
+        recent_videos JSONB NOT NULL DEFAULT '[]'::jsonb,
+        niche_profile JSONB,
+        fetched_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      )
+    `);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS youtube_competitors (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        channel_id TEXT NOT NULL,
+        channel_name TEXT NOT NULL,
+        subscriber_count TEXT,
+        most_viewed_recent_videos JSONB NOT NULL DEFAULT '[]'::jsonb,
+        posting_frequency TEXT,
+        niche TEXT,
+        fetched_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      )
+    `);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS youtube_weekly_plans (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        week_number INTEGER NOT NULL,
+        start_date TEXT NOT NULL,
+        end_date TEXT NOT NULL,
+        plan JSONB NOT NULL,
+        context_snapshot JSONB NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      )
+    `);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS youtube_plan_results (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        plan_id INTEGER NOT NULL REFERENCES youtube_weekly_plans(id) ON DELETE CASCADE,
+        day_index INTEGER NOT NULL,
+        planned_title TEXT NOT NULL,
+        video_url TEXT NOT NULL,
+        video_id TEXT NOT NULL,
+        metrics JSONB NOT NULL,
+        fetched_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      )
+    `);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS youtube_api_cache (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        cache_key TEXT NOT NULL UNIQUE,
+        payload JSONB NOT NULL,
+        quota_cost INTEGER NOT NULL DEFAULT 0,
+        expires_at TIMESTAMP NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      )
+    `);
     logger.info("Startup migrations applied");
   } catch (err) {
     logger.warn({ err }, "Startup migrations warning (non-fatal)");

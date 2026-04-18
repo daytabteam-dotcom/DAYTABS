@@ -8,6 +8,7 @@ import dubbingRouter from "./dubbing/index";
 import growthPlannerRouter from "./growth-planner/index";
 import userRouter from "./user/index";
 import uploadRouter from "./upload/index";
+import youtubeRouter from "./youtube/index";
 
 const router: IRouter = Router();
 
@@ -19,6 +20,7 @@ router.use("/paddle", paddleRouter);
 router.use("/script-planner", scriptPlannerRouter);
 router.use("/dubbing", dubbingRouter);
 router.use("/growth-planner", growthPlannerRouter);
+router.use("/youtube", youtubeRouter);
 router.use("/user", userRouter);
 
 export default router;

@@ -20,11 +20,11 @@ const RENDER_HOST = "daytabs.onrender.com";
 
 app.use((req, res, next) => {
   const host = (req.get("x-forwarded-host") || req.get("host") || "").split(",")[0].trim();
-  const callbackPath = "/api/auth/google/callback";
+  const callbackPaths = new Set(["/api/auth/google/callback", "/api/youtube/callback"]);
   const shouldRedirect =
     host === RENDER_HOST &&
     (req.method === "GET" || req.method === "HEAD") &&
-    req.path !== callbackPath;
+    !callbackPaths.has(req.path);
 
   if (shouldRedirect) {
     res.redirect(308, `${CANONICAL_APP_ORIGIN}${req.originalUrl}`);
