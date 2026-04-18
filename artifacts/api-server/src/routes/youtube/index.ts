@@ -15,8 +15,8 @@ import {
 
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET!;
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
-const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
+const YOUTUBE_CLIENT_ID = process.env.YOUTUBE_CLIENT_ID || process.env.GOOGLE_CLIENT_ID || "";
+const YOUTUBE_CLIENT_SECRET = process.env.YOUTUBE_CLIENT_SECRET || process.env.GOOGLE_CLIENT_SECRET || "";
 const CANONICAL_APP_ORIGIN = (
   process.env.APP_URL ||
   process.env.BASE_URL ||
@@ -63,7 +63,7 @@ router.get("/callback", async (req, res) => {
       return;
     }
 
-    const client = new OAuth2Client(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, getYoutubeRedirectUri(req));
+    const client = new OAuth2Client(YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET, getYoutubeRedirectUri(req));
     const { tokens } = await client.getToken({ code, redirect_uri: getYoutubeRedirectUri(req) });
     await storeYoutubeTokens(decoded.user_id, tokens);
     await syncYoutubeChannel(decoded.user_id);

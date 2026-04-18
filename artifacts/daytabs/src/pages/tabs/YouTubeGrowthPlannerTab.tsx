@@ -347,46 +347,57 @@ export default function YouTubeGrowthPlannerTab() {
             Connect any YouTube account, analyze the channel, pull live trends and comparable competitors, then generate weekly plans that learn from actual results.
           </PanelSubtitle>
         </div>
-        <div className="flex flex-wrap gap-2">
-          {status?.connected && (
+        {status?.connected && (
+          <div className="flex flex-wrap gap-2">
             <Button variant="secondary" className="rounded-lg" onClick={syncChannel} disabled={Boolean(working)}>
               {working === "sync" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="mr-2 h-4 w-4" />}
               Refresh channel
             </Button>
-          )}
-          <Button className="rounded-lg bg-red-500 text-white hover:bg-red-400" onClick={status?.connected ? generatePlan : connectYoutube} disabled={Boolean(working)}>
-            {working === "connect" || working === "plan" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Youtube className="mr-2 h-4 w-4" />}
-            {status?.connected ? "Generate weekly plan" : "Connect to YouTube"}
-          </Button>
-        </div>
+            <Button className="rounded-lg bg-red-500 text-white hover:bg-red-400" onClick={generatePlan} disabled={Boolean(working)}>
+              {working === "plan" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Youtube className="mr-2 h-4 w-4" />}
+              Generate weekly plan
+            </Button>
+          </div>
+        )}
       </PanelHeader>
 
       {error && <PanelCardSoft className="border-red-400/25 bg-red-500/10 p-4 text-sm text-red-100">{error}</PanelCardSoft>}
 
       {!status?.connected ? (
-        <PanelCard className="p-8">
-          <div className="grid gap-8 lg:grid-cols-[1fr_360px] lg:items-center">
-            <div>
-              <PanelEyebrow>Separate integration</PanelEyebrow>
-              <h2 className="mt-3 text-2xl font-semibold text-white">Use the channel account that actually matters.</h2>
-              <p className="mt-3 max-w-2xl text-sm leading-6 text-white/55">
-                Your DayTabs login stays separate from the YouTube account you connect. OAuth tokens stay on the backend and refresh silently.
-              </p>
-              <div className="mt-6 grid gap-3 sm:grid-cols-3">
-                {["Channel profile", "Real trends", "Weekly results"].map((item) => (
-                  <PanelCardSoft key={item} className="p-4 text-sm text-white/70">
-                    <Check className="mb-3 h-4 w-4 text-emerald-300" />
-                    {item}
-                  </PanelCardSoft>
-                ))}
+        <section className="grid gap-6 lg:grid-cols-[1fr_360px]">
+          <PanelCard className="p-6 md:p-8">
+            <div className="flex items-start gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-red-400/20 bg-red-500/10">
+                <Youtube className="h-6 w-6 text-red-200" />
+              </div>
+              <div>
+                <PanelEyebrow>Secure connection</PanelEyebrow>
+                <h2 className="mt-3 text-2xl font-semibold text-white">Connect the channel you want to grow.</h2>
+                <p className="mt-3 max-w-2xl text-sm leading-6 text-white/55">
+                  Your DayTabs login and YouTube channel can be different Google accounts. DayTabs stores tokens on the backend and refreshes access silently.
+                </p>
+                <div className="mt-6 grid gap-3 sm:grid-cols-3">
+                  {["Channel profile", "Real trends", "Weekly results"].map((item) => (
+                    <PanelCardSoft key={item} className="p-4 text-sm text-white/70">
+                      <Check className="mb-3 h-4 w-4 text-emerald-300" />
+                      {item}
+                    </PanelCardSoft>
+                  ))}
+                </div>
               </div>
             </div>
-            <Button className="rounded-lg bg-red-500 py-6 text-base text-white hover:bg-red-400" onClick={connectYoutube} disabled={Boolean(working)}>
+          </PanelCard>
+          <PanelCard className="flex flex-col justify-between p-6">
+            <div>
+              <p className="text-sm font-medium text-white">Ready when you are.</p>
+              <p className="mt-2 text-sm leading-6 text-white/45">Google will ask for read-only YouTube and Analytics access.</p>
+            </div>
+            <Button className="mt-6 rounded-lg bg-red-500 py-6 text-base text-white hover:bg-red-400" onClick={connectYoutube} disabled={Boolean(working)}>
               {working === "connect" ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Youtube className="mr-2 h-5 w-5" />}
               Connect to YouTube
             </Button>
-          </div>
-        </PanelCard>
+          </PanelCard>
+        </section>
       ) : (
         <>
           <section className="grid gap-4 md:grid-cols-4">

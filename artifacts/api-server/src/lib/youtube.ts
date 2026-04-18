@@ -15,8 +15,8 @@ import {
 import { openai } from "./openai";
 
 const JWT_SECRET = process.env.JWT_SECRET!;
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
-const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
+const YOUTUBE_CLIENT_ID = process.env.YOUTUBE_CLIENT_ID || process.env.GOOGLE_CLIENT_ID || "";
+const YOUTUBE_CLIENT_SECRET = process.env.YOUTUBE_CLIENT_SECRET || process.env.GOOGLE_CLIENT_SECRET || "";
 const CORE_APP_URL = process.env.CORE_APP_URL || "/panel/";
 const CANONICAL_APP_ORIGIN = (
   process.env.APP_URL ||
@@ -92,10 +92,10 @@ export function getYoutubeAppRedirect(value: "connected" | "error", detail?: str
 }
 
 export function createYoutubeAuthUrl(req: import("express").Request, userId: number) {
-  if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
+  if (!YOUTUBE_CLIENT_ID || !YOUTUBE_CLIENT_SECRET) {
     throw new Error("Google OAuth is not configured");
   }
-  const client = new OAuth2Client(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, getYoutubeRedirectUri(req));
+  const client = new OAuth2Client(YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET, getYoutubeRedirectUri(req));
   const state = jwt.sign({ user_id: userId, purpose: "youtube_connect" }, JWT_SECRET, { expiresIn: "15m" });
   return client.generateAuthUrl({
     access_type: "offline",
@@ -244,8 +244,8 @@ async function refreshAccessToken(connection: YoutubeConnection) {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
-      client_id: GOOGLE_CLIENT_ID,
-      client_secret: GOOGLE_CLIENT_SECRET,
+      client_id: YOUTUBE_CLIENT_ID,
+      client_secret: YOUTUBE_CLIENT_SECRET,
       refresh_token: refreshToken,
       grant_type: "refresh_token",
     }),
