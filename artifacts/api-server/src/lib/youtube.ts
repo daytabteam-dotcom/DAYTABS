@@ -658,8 +658,19 @@ export async function generateYoutubeWeeklyPlan(userId: number) {
   "viralTags": [
     { "tag": "", "why": "", "bestUse": "" }
   ],
-  "viralSounds": [
-    { "soundOrSong": "", "sourceVideoOrTrend": "", "whyItIsWorking": "", "howToUse": "" }
+  "performanceInsights": [
+    {
+      "type": "best_time_to_post|hook_performance|thumbnail_pattern|upload_frequency_growth|retention_dropoff|title_length|comment_sentiment|subscriber_velocity|competitor_gap|posting_consistency|tag_effectiveness|first_24h_predictor",
+      "title": "",
+      "finding": "",
+      "evidence": "",
+      "action": "",
+      "confidence": "high|medium|low",
+      "chart": [
+        { "label": "", "value": 0, "comparisonValue": 0 }
+      ],
+      "dataLimitations": ""
+    }
   ],
   "days": [
     {
@@ -687,7 +698,10 @@ Rules:
 - For accountAnalysis, compare multiple videos and name specific titles and metrics. Underperformers must list more than one weak pattern when source data supports it.
 - competitorInsights must only use channels in the competitors context.
 - viralTags should include 5-8 niche-specific tags when source data allows it; avoid generic one-word tags unless paired with a clear reason.
-- viralSounds should be based on trend titles/source videos when available, and should avoid claiming private audio metrics.
+- performanceInsights must include exactly one entry for each of these 12 types: best_time_to_post, hook_performance, thumbnail_pattern, upload_frequency_growth, retention_dropoff, title_length, comment_sentiment, subscriber_velocity, competitor_gap, posting_consistency, tag_effectiveness, first_24h_predictor.
+- For performanceInsights, use the user's own video titles, descriptions, tags, publish dates, view counts, like counts, comment counts, YouTube Analytics summaries, plan results, and competitor data. If a metric is unavailable, mark confidence low and explain the dataLimitations instead of inventing exact numbers.
+- Comment sentiment should be based on available comment/comment-count/title/description signals only; if raw comments were unavailable, say so.
+- Retention and first-24-hour insights should use YouTube Analytics when present; if not present, infer cautiously from available data and label confidence low.
 - Do not invent metrics or competitor names.`,
       },
       { role: "user", content: JSON.stringify(context) },

@@ -11,7 +11,6 @@ import {
   LayoutGrid,
   ListChecks,
   Loader2,
-  Music,
   Plus,
   RefreshCcw,
   Send,
@@ -101,7 +100,16 @@ interface PlanPayload {
     ideasToAdapt?: string[];
   }>;
   viralTags?: Array<{ tag?: string; why?: string; bestUse?: string }>;
-  viralSounds?: Array<{ soundOrSong?: string; sourceVideoOrTrend?: string; whyItIsWorking?: string; howToUse?: string }>;
+  performanceInsights?: Array<{
+    type?: string;
+    title?: string;
+    finding?: string;
+    evidence?: string;
+    action?: string;
+    confidence?: "high" | "medium" | "low" | string;
+    chart?: Array<{ label?: string; value?: number; comparisonValue?: number }>;
+    dataLimitations?: string;
+  }>;
   days?: PlanDay[];
 }
 
@@ -198,6 +206,56 @@ function isVideoInPlanWindow(video: RecentVideo, plan: YoutubeWeeklyPlan | null)
 function videoOptionLabel(video: RecentVideo) {
   const date = video.publishedAt ? new Date(video.publishedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "No date";
   return `${date} - ${video.title}`;
+}
+
+function insightLabel(type?: string) {
+  const labels: Record<string, string> = {
+    best_time_to_post: "Best Time to Post",
+    hook_performance: "Hook Performance Score",
+    thumbnail_pattern: "Thumbnail Pattern Analysis",
+    upload_frequency_growth: "Upload Frequency vs Growth",
+    retention_dropoff: "Audience Retention Drop-off",
+    title_length: "Title Length Sweet Spot",
+    comment_sentiment: "Comment Sentiment Themes",
+    subscriber_velocity: "Subscriber Velocity",
+    competitor_gap: "Competitor Gap Analysis",
+    posting_consistency: "Posting Consistency Score",
+    tag_effectiveness: "Tag Effectiveness Ranking",
+    first_24h_predictor: "First 24 Hour Predictor",
+  };
+  return type ? labels[type] ?? type.replace(/_/g, " ") : "Performance Insight";
+}
+
+function confidenceClass(confidence?: string) {
+  if (confidence === "high") return "border-emerald-400/20 bg-emerald-500/10 text-emerald-200";
+  if (confidence === "medium") return "border-amber-400/20 bg-amber-500/10 text-amber-200";
+  return "border-white/10 bg-white/5 text-white/55";
+}
+
+function MiniInsightChart({ data }: { data?: Array<{ label?: string; value?: number; comparisonValue?: number }> }) {
+  const items = (data ?? []).filter((item) => typeof item.value === "number").slice(0, 4);
+  if (!items.length) return null;
+  const max = Math.max(...items.map((item) => Math.max(Number(item.value) || 0, Number(item.comparisonValue) || 0)), 1);
+  return (
+    <div className="mt-4 space-y-2">
+      {items.map((item) => (
+        <div key={`${item.label}-${item.value}`} className="space-y-1">
+          <div className="flex justify-between gap-3 text-xs text-white/40">
+            <span className="truncate">{item.label}</span>
+            <span>{Math.round(Number(item.value) || 0)}</span>
+          </div>
+          <div className="h-2 overflow-hidden rounded-full bg-white/8">
+            <div className="h-full rounded-full bg-emerald-300" style={{ width: `${Math.max(6, ((Number(item.value) || 0) / max) * 100)}%` }} />
+          </div>
+          {typeof item.comparisonValue === "number" && (
+            <div className="h-1 overflow-hidden rounded-full bg-white/8">
+              <div className="h-full rounded-full bg-red-300/70" style={{ width: `${Math.max(4, ((Number(item.comparisonValue) || 0) / max) * 100)}%` }} />
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function toCardId(day: PlanDay) {
@@ -320,7 +378,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
   const selectedVideoIds = new Set(Object.values(resultSelections).filter(Boolean));
   const hasSelectedResults = Object.values(resultSelections).some(Boolean);
   const usefulTags = (planPayload.viralTags ?? []).filter((tag) => tag.tag && tag.why).slice(0, 10);
-  const usefulSounds = (planPayload.viralSounds ?? []).filter((sound) => sound.soundOrSong && sound.whyItIsWorking).slice(0, 6);
+  const performanceInsights = (planPayload.performanceInsights ?? []).filter((insight) => insight.title && insight.finding);
   const hasResults = Boolean(status?.latestResults?.length);
 
   useEffect(() => {
@@ -614,7 +672,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
             </PanelCard>
           </section>
 
-          <section className="grid gap-6 lg:grid-cols-2">
+          <section className="grid gap-6 lg:grid-cols-[380px_1fr]">
             <PanelCard className="p-6">
               <div className="flex items-center gap-3"><Tags className="h-5 w-5 text-amber-300" /><h2 className="text-xl font-semibold text-white">Viral Tag Opportunities</h2></div>
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -628,16 +686,36 @@ export default function YouTubeGrowthPlannerV2Tab() {
               </div>
             </PanelCard>
             <PanelCard className="p-6">
-              <div className="flex items-center gap-3"><Music className="h-5 w-5 text-pink-300" /><h2 className="text-xl font-semibold text-white">Current Sound Signals</h2></div>
-              <div className="mt-4 space-y-3">
-                {usefulSounds.length >= 2 ? usefulSounds.map((sound) => (
-                  <PanelCardSoft key={`${sound.soundOrSong}-${sound.sourceVideoOrTrend}`} className="p-3">
-                    <p className="font-medium text-white">{sound.soundOrSong}</p>
-                    <p className="mt-2 text-xs text-white/40">{sound.sourceVideoOrTrend}</p>
-                    <p className="mt-2 text-sm leading-5 text-white/55">{sound.whyItIsWorking}</p>
-                    <p className="mt-2 text-xs text-pink-100/70">{sound.howToUse}</p>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-3"><BarChart3 className="h-5 w-5 text-emerald-300" /><h2 className="text-xl font-semibold text-white">Performance Intelligence</h2></div>
+                  <p className="mt-2 text-sm text-white/45">Personalized patterns from your own videos, analytics, tags, comments, and comparable channels.</p>
+                </div>
+                <Badge className="border-emerald-400/20 bg-emerald-500/10 text-emerald-200 hover:brightness-100">{performanceInsights.length || 0}/12 insights</Badge>
+              </div>
+              <div className="mt-5 grid gap-4 xl:grid-cols-2">
+                {performanceInsights.length ? performanceInsights.map((insight) => (
+                  <PanelCardSoft key={`${insight.type}-${insight.title}`} className="p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.16em] text-white/35">{insightLabel(insight.type)}</p>
+                        <h3 className="mt-2 text-base font-semibold text-white">{insight.title}</h3>
+                      </div>
+                      <Badge className={`${confidenceClass(insight.confidence)} hover:brightness-100`}>{insight.confidence ?? "low"}</Badge>
+                    </div>
+                    <p className="mt-3 text-sm leading-6 text-white/65">{insight.finding}</p>
+                    <MiniInsightChart data={insight.chart} />
+                    <div className="mt-4 grid gap-3 text-xs leading-5 text-white/50">
+                      {insight.evidence && <p><span className="text-white/75">Evidence:</span> {insight.evidence}</p>}
+                      {insight.action && <p><span className="text-emerald-200">Next move:</span> {insight.action}</p>}
+                      {insight.dataLimitations && <p className="text-amber-100/70">{insight.dataLimitations}</p>}
+                    </div>
                   </PanelCardSoft>
-                )) : <p className="text-sm text-white/45">No reliable external sound pattern was found. DayTabs will avoid inventing viral audio until trend data supports it.</p>}
+                )) : (
+                  <PanelCardSoft className="p-4 text-sm text-white/55 xl:col-span-2">
+                    Generate a weekly plan to build personalized insight cards for best posting time, hook performance, title length, retention, tags, comments, subscriber velocity, and more.
+                  </PanelCardSoft>
+                )}
               </div>
             </PanelCard>
           </section>
