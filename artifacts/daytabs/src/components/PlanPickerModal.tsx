@@ -30,7 +30,8 @@ const PLAN_META = [
       "Full transcript included",
       "15 Script Planner chats/mo",
     ],
-    ctaClass: "bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 shadow-lg shadow-amber-500/20",
+    ctaClass:
+      "bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 shadow-lg shadow-amber-500/20",
   },
   {
     key: "pro" as const,
@@ -50,7 +51,8 @@ const PLAN_META = [
       "Subtitle file download",
       "40 Script Planner chats/mo",
     ],
-    ctaClass: "bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-500 hover:to-purple-400 shadow-lg shadow-violet-500/20",
+    ctaClass:
+      "bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-500 hover:to-purple-400 shadow-lg shadow-violet-500/20",
   },
   {
     key: "studio" as const,
@@ -67,22 +69,30 @@ const PLAN_META = [
       "100 GB upload limit",
       "All modules unlocked",
       "Priority processing",
-      "Subtitle translation",
+      "Advanced export tools",
       "Unlimited Script Planner",
     ],
-    ctaClass: "bg-gradient-to-r from-pink-600 to-rose-500 hover:from-pink-500 hover:to-rose-400 shadow-lg shadow-pink-500/20",
+    ctaClass:
+      "bg-gradient-to-r from-pink-600 to-rose-500 hover:from-pink-500 hover:to-rose-400 shadow-lg shadow-pink-500/20",
   },
 ];
 
-export function PlanPickerModal({ onClose, highlightPlan }: PlanPickerModalProps) {
+export function PlanPickerModal({
+  onClose,
+  highlightPlan,
+}: PlanPickerModalProps) {
   const { user } = useUser();
   const { openCheckout, checkoutError } = usePaddle();
   const { prices, formatPrice, loading: pricesLoading } = usePaddlePrices();
   const [, navigate] = useLocation();
-  const [selectedPlan, setSelectedPlan] = useState<"creator" | "pro" | "studio" | null>(null);
+  const [selectedPlan, setSelectedPlan] = useState<
+    "creator" | "pro" | "studio" | null
+  >(null);
 
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
   }, [onClose]);
@@ -123,14 +133,22 @@ export function PlanPickerModal({ onClose, highlightPlan }: PlanPickerModalProps
       className="fixed inset-0 z-[200] flex items-center justify-center p-4"
       data-testid="modal-plan-picker"
     >
-      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
+      <div
+        className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+        onClick={onClose}
+      />
 
       <div className="relative z-10 w-full max-w-3xl">
-        <div className="bg-[#110d1a] border border-white/10 rounded-2xl shadow-2xl shadow-black/60 overflow-hidden">
-          <div className="flex items-center justify-between px-6 py-5 border-b border-white/8">
+        <div className="overflow-hidden rounded-[28px] border border-white/10 bg-[linear-gradient(180deg,rgba(168,85,247,0.08),transparent_26%),linear-gradient(180deg,rgba(16,12,25,0.94),rgba(9,10,18,0.9))] shadow-2xl shadow-black/60 backdrop-blur-2xl">
+          <div className="flex items-center justify-between border-b border-white/8 px-6 py-5">
             <div>
-              <h2 className="text-lg font-bold text-white">Upgrade your plan</h2>
-              <p className="text-xs text-white/40 mt-0.5">Unlock more analyses, longer videos, and advanced AI. Cancel anytime.</p>
+              <h2 className="text-lg font-bold text-white">
+                Upgrade your plan
+              </h2>
+              <p className="text-xs text-white/40 mt-0.5">
+                Unlock more analyses, longer videos, and advanced AI. Cancel
+                anytime.
+              </p>
             </div>
             <button
               onClick={onClose}
@@ -149,7 +167,7 @@ export function PlanPickerModal({ onClose, highlightPlan }: PlanPickerModalProps
               return (
                 <div
                   key={plan.key}
-                  className={`relative rounded-xl border ${isHighlighted ? plan.border : "border-white/10"} ${isHighlighted ? plan.ring : ""} p-5 bg-white/[0.03] flex flex-col gap-4`}
+                  className={`relative flex flex-col gap-4 rounded-[22px] border ${isHighlighted ? plan.border : "border-white/10"} ${isHighlighted ? plan.ring : ""} bg-[linear-gradient(180deg,rgba(255,255,255,0.06),transparent_24%),rgba(255,255,255,0.03)] p-5 backdrop-blur-xl`}
                 >
                   {plan.badge && (
                     <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 bg-gradient-to-r from-violet-600 to-purple-500 rounded-full text-[10px] font-bold text-white shadow-md shadow-violet-500/30 whitespace-nowrap">
@@ -158,11 +176,15 @@ export function PlanPickerModal({ onClose, highlightPlan }: PlanPickerModalProps
                   )}
 
                   <div className="flex items-center gap-3">
-                    <div className={`w-9 h-9 rounded-lg bg-gradient-to-br ${plan.color} flex items-center justify-center shrink-0`}>
+                    <div
+                      className={`w-9 h-9 rounded-lg bg-gradient-to-br ${plan.color} flex items-center justify-center shrink-0`}
+                    >
                       <plan.icon className="w-[18px] h-[18px] text-white" />
                     </div>
                     <div>
-                      <p className="text-sm font-bold text-white">{plan.name}</p>
+                      <p className="text-sm font-bold text-white">
+                        {plan.name}
+                      </p>
                       <div className="flex items-baseline gap-0.5">
                         {pricesLoading ? (
                           <Loader2 className="w-3.5 h-3.5 text-white/30 animate-spin" />
@@ -180,7 +202,10 @@ export function PlanPickerModal({ onClose, highlightPlan }: PlanPickerModalProps
 
                   <ul className="space-y-2 flex-1">
                     {plan.features.map((f) => (
-                      <li key={f} className="flex items-center gap-2 text-xs text-white/65">
+                      <li
+                        key={f}
+                        className="flex items-center gap-2 text-xs text-white/65"
+                      >
                         <Check className="w-3.5 h-3.5 text-violet-400 shrink-0" />
                         {f}
                       </li>
@@ -189,7 +214,10 @@ export function PlanPickerModal({ onClose, highlightPlan }: PlanPickerModalProps
 
                   <button
                     onClick={() => handleSelect(plan.key)}
-                    disabled={selectedPlan !== null || (plan.key !== "studio" && !hasCheckout)}
+                    disabled={
+                      selectedPlan !== null ||
+                      (plan.key !== "studio" && !hasCheckout)
+                    }
                     className={`w-full py-2.5 text-sm font-semibold text-white rounded-lg transition-all cursor-pointer ${plan.ctaClass} disabled:opacity-40 disabled:cursor-not-allowed`}
                     data-testid={`button-select-plan-${plan.key}`}
                   >
@@ -198,7 +226,11 @@ export function PlanPickerModal({ onClose, highlightPlan }: PlanPickerModalProps
                         <Loader2 className="w-4 h-4 animate-spin" />
                         Opening...
                       </span>
-                    ) : plan.key === "studio" ? "Contact us" : "Upgrade"}
+                    ) : plan.key === "studio" ? (
+                      "Contact us"
+                    ) : (
+                      "Upgrade"
+                    )}
                   </button>
                 </div>
               );
@@ -217,6 +249,6 @@ export function PlanPickerModal({ onClose, highlightPlan }: PlanPickerModalProps
         </div>
       </div>
     </div>,
-    document.body
+    document.body,
   );
 }

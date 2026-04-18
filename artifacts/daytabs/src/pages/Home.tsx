@@ -1,23 +1,69 @@
 import React, { useEffect, useState, useRef } from "react";
 import { UserProfileMenu } from "@/components/UserProfileMenu";
-import { LayoutDashboard, Wand2, Globe, MonitorPlay, Clapperboard, Zap, Video, FileText, TrendingUp, Lock, CalendarDays, Bell } from "lucide-react";
+import {
+  LayoutDashboard,
+  Wand2,
+  MonitorPlay,
+  Clapperboard,
+  Zap,
+  Video,
+  FileText,
+  TrendingUp,
+  Lock,
+  CalendarDays,
+  Bell,
+} from "lucide-react";
 import VideoAnalyzerTab from "./tabs/VideoAnalyzerTab";
-import DubbingTab from "./tabs/DubbingTab";
 import TeleprompterTab from "./tabs/TeleprompterTab";
 import ScriptPlannerTab from "./tabs/ScriptPlannerTab";
-import GrowthPlannerTab, { getGrowthPlannerNotificationCounts, getGrowthPlannerNotifications } from "./tabs/GrowthPlannerTab";
+import GrowthPlannerTab, {
+  getGrowthPlannerNotificationCounts,
+  getGrowthPlannerNotifications,
+} from "./tabs/GrowthPlannerTab";
 import { PlanPickerModal } from "@/components/PlanPickerModal";
-import { usePlan, getPlanBadgeColor, getPlanLabel, PLAN_DISPLAY_NAMES, getDurationLimitLabel, getFileSizeLimitLabel, getScriptPlannerChatLimit } from "@/hooks/use-plan";
+import {
+  usePlan,
+  getPlanBadgeColor,
+  PLAN_DISPLAY_NAMES,
+  getDurationLimitLabel,
+  getScriptPlannerChatLimit,
+} from "@/hooks/use-plan";
 import { useUser } from "@/hooks/use-user";
-import { PanelPage, PanelHeader, PanelTitle, PanelSubtitle, PanelCard, PanelCardSoft } from "@/components/panel-system";
+import {
+  PanelPage,
+  PanelHeader,
+  PanelTitle,
+  PanelSubtitle,
+  PanelCard,
+  PanelCardSoft,
+} from "@/components/panel-system";
 
 const TABS = [
-  { id: "dashboard",       label: "Home",            icon: LayoutDashboard,  desc: "Overview" },
-  { id: "video-analyzer",  label: "Video Analyzer",  icon: Wand2,            desc: "Full Analysis" },
-  { id: "script-planner",  label: "Script Planner",  icon: Clapperboard,     desc: "AI Scripts" },
-  { id: "growth-planner",  label: "Growth Planner",  icon: CalendarDays,     desc: "Studio" },
-  { id: "teleprompter",    label: "Teleprompter",     icon: MonitorPlay,      desc: "Read Live" },
-  { id: "dubbing",         label: "Dubbing",          icon: Globe,            desc: "Coming Soon" },
+  { id: "dashboard", label: "Home", icon: LayoutDashboard, desc: "Overview" },
+  {
+    id: "video-analyzer",
+    label: "Video Analyzer",
+    icon: Wand2,
+    desc: "Full Analysis",
+  },
+  {
+    id: "script-planner",
+    label: "Script Planner",
+    icon: Clapperboard,
+    desc: "AI Scripts",
+  },
+  {
+    id: "growth-planner",
+    label: "Growth Planner",
+    icon: CalendarDays,
+    desc: "Studio",
+  },
+  {
+    id: "teleprompter",
+    label: "Teleprompter",
+    icon: MonitorPlay,
+    desc: "Read Live",
+  },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -36,15 +82,33 @@ function updateTabUrl(tabId: TabId, mode: "push" | "replace") {
     url.searchParams.set("tab", tabId);
   }
   const nextUrl = `${url.pathname}${url.search}${url.hash}`;
-  if (`${window.location.pathname}${window.location.search}${window.location.hash}` === nextUrl) return;
-  window.history[mode === "push" ? "pushState" : "replaceState"]({ tab: tabId }, "", nextUrl);
+  if (
+    `${window.location.pathname}${window.location.search}${window.location.hash}` ===
+    nextUrl
+  )
+    return;
+  window.history[mode === "push" ? "pushState" : "replaceState"](
+    { tab: tabId },
+    "",
+    nextUrl,
+  );
 }
 
-function NotificationBell({ onOpenGrowthPlanner }: { onOpenGrowthPlanner: () => void }) {
+function NotificationBell({
+  onOpenGrowthPlanner,
+}: {
+  onOpenGrowthPlanner: () => void;
+}) {
   const [open, setOpen] = useState(false);
-  const [counts, setCounts] = useState(() => getGrowthPlannerNotificationCounts());
-  const [notifications, setNotifications] = useState(() => getGrowthPlannerNotifications());
-  const [expandedType, setExpandedType] = useState<"today" | "overdue" | null>(null);
+  const [counts, setCounts] = useState(() =>
+    getGrowthPlannerNotificationCounts(),
+  );
+  const [notifications, setNotifications] = useState(() =>
+    getGrowthPlannerNotifications(),
+  );
+  const [expandedType, setExpandedType] = useState<"today" | "overdue" | null>(
+    null,
+  );
   const total = counts.today + counts.overdue;
 
   useEffect(() => {
@@ -82,10 +146,14 @@ function NotificationBell({ onOpenGrowthPlanner }: { onOpenGrowthPlanner: () => 
         <div className="panel-card absolute right-0 z-50 mt-3 w-80 max-w-[calc(100vw-2rem)] p-4">
           <div className="flex items-center justify-between gap-3 mb-3">
             <p className="text-sm font-semibold text-white">Notifications</p>
-            {total > 0 && <span className="text-xs text-amber-200">{total} active</span>}
+            {total > 0 && (
+              <span className="text-xs text-amber-200">{total} active</span>
+            )}
           </div>
           {total === 0 ? (
-            <p className="text-sm text-white/45">No scheduled posts need attention right now.</p>
+            <p className="text-sm text-white/45">
+              No scheduled posts need attention right now.
+            </p>
           ) : (
             <div className="space-y-2">
               {counts.today > 0 && (
@@ -95,12 +163,18 @@ function NotificationBell({ onOpenGrowthPlanner }: { onOpenGrowthPlanner: () => 
                   helper="Click to see which cards are due."
                   expanded={expandedType === "today"}
                   items={notifications.filter((item) => item.type === "today")}
-                  onToggle={() => setExpandedType(expandedType === "today" ? null : "today")}
+                  onToggle={() =>
+                    setExpandedType(expandedType === "today" ? null : "today")
+                  }
                   onOpenGrowthPlanner={(cardId) => {
                     setOpen(false);
                     onOpenGrowthPlanner();
                     window.setTimeout(() => {
-                      window.dispatchEvent(new CustomEvent("daytabs:growth-planner-focus-card", { detail: { cardId } }));
+                      window.dispatchEvent(
+                        new CustomEvent("daytabs:growth-planner-focus-card", {
+                          detail: { cardId },
+                        }),
+                      );
                     }, 120);
                   }}
                 />
@@ -111,13 +185,23 @@ function NotificationBell({ onOpenGrowthPlanner }: { onOpenGrowthPlanner: () => 
                   title={`${counts.overdue} overdue post${counts.overdue === 1 ? "" : "s"} need an update.`}
                   helper="Click to see which cards need a posted URL or skipped status."
                   expanded={expandedType === "overdue"}
-                  items={notifications.filter((item) => item.type === "overdue")}
-                  onToggle={() => setExpandedType(expandedType === "overdue" ? null : "overdue")}
+                  items={notifications.filter(
+                    (item) => item.type === "overdue",
+                  )}
+                  onToggle={() =>
+                    setExpandedType(
+                      expandedType === "overdue" ? null : "overdue",
+                    )
+                  }
                   onOpenGrowthPlanner={(cardId) => {
                     setOpen(false);
                     onOpenGrowthPlanner();
                     window.setTimeout(() => {
-                      window.dispatchEvent(new CustomEvent("daytabs:growth-planner-focus-card", { detail: { cardId } }));
+                      window.dispatchEvent(
+                        new CustomEvent("daytabs:growth-planner-focus-card", {
+                          detail: { cardId },
+                        }),
+                      );
                     }, 120);
                   }}
                 />
@@ -165,8 +249,12 @@ function NotificationGroup({
               onClick={() => onOpenGrowthPlanner(item.id)}
               className="w-full rounded-md bg-background/50 border border-white/8 p-2 text-left hover:border-primary/35 transition-colors"
             >
-              <p className="text-xs font-semibold text-white/85 leading-snug">{item.title}</p>
-              <p className="text-[11px] text-white/40 mt-1">{item.platform} · {item.date} · {item.stage}</p>
+              <p className="text-xs font-semibold text-white/85 leading-snug">
+                {item.title}
+              </p>
+              <p className="text-[11px] text-white/40 mt-1">
+                {item.platform} · {item.date} · {item.stage}
+              </p>
             </button>
           ))}
         </div>
@@ -196,28 +284,54 @@ function QuickActionCard({
       className="panel-card panel-hover group relative w-full p-5 text-left"
     >
       {badge && (
-        <span className="absolute top-3 right-3 text-xs px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/20">{badge}</span>
+        <span className="absolute top-3 right-3 text-xs px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/20">
+          {badge}
+        </span>
       )}
-      <div className={`w-10 h-10 rounded-xl flex items-center justify-center mb-3 ${color}`}>
+      <div
+        className={`w-10 h-10 rounded-xl flex items-center justify-center mb-3 ${color}`}
+      >
         <Icon className="w-5 h-5" />
       </div>
-      <p className="text-sm font-semibold text-white/90 group-hover:text-white transition-colors">{title}</p>
+      <p className="text-sm font-semibold text-white/90 group-hover:text-white transition-colors">
+        {title}
+      </p>
       <p className="text-xs text-white/40 mt-0.5">{desc}</p>
     </button>
   );
 }
 
-function StatCard({ label, value, sublabel, color }: { label: string; value: string | number; sublabel?: string; color?: string }) {
+function StatCard({
+  label,
+  value,
+  sublabel,
+  color,
+}: {
+  label: string;
+  value: string | number;
+  sublabel?: string;
+  color?: string;
+}) {
   return (
     <PanelCard className="p-5">
-      <p className="text-xs text-white/40 uppercase tracking-wider mb-1">{label}</p>
-      <p className={`text-3xl font-bold font-mono ${color ?? "text-white"}`}>{value}</p>
+      <p className="text-xs text-white/40 uppercase tracking-wider mb-1">
+        {label}
+      </p>
+      <p className={`text-3xl font-bold font-mono ${color ?? "text-white"}`}>
+        {value}
+      </p>
       {sublabel && <p className="text-xs text-white/30 mt-1">{sublabel}</p>}
     </PanelCard>
   );
 }
 
-function Dashboard({ onNavigate, onUpgrade }: { onNavigate: (tab: TabId) => void; onUpgrade: () => void }) {
+function Dashboard({
+  onNavigate,
+  onUpgrade,
+}: {
+  onNavigate: (tab: TabId) => void;
+  onUpgrade: () => void;
+}) {
   const { user } = useUser();
   const { plan, getModeLimits, getScriptPlannerLimits } = usePlan();
   const norm = plan.normalizedPlan;
@@ -231,25 +345,34 @@ function Dashboard({ onNavigate, onUpgrade }: { onNavigate: (tab: TabId) => void
   const isSpUnlimited = spChatLimit === -1;
   const badgeClass = getPlanBadgeColor(norm);
   const displayName = PLAN_DISPLAY_NAMES[norm] ?? "Free";
-  const firstName = user?.name?.split(" ")[0] ?? user?.email?.split("@")[0] ?? "there";
+  const firstName =
+    user?.name?.split(" ")[0] ?? user?.email?.split("@")[0] ?? "there";
 
   return (
-    <PanelPage className="max-w-5xl space-y-8">
+    <PanelPage className="max-w-7xl space-y-8">
       <PanelHeader className="md:block">
         <div>
           <PanelTitle>Welcome back, {firstName}</PanelTitle>
           <PanelSubtitle>Here's what's ready for you today.</PanelSubtitle>
         </div>
       </PanelHeader>
-      <PanelCard className="flex items-center gap-3 p-4">
-        <div className={`px-3 py-1 rounded-full text-xs font-bold border ${badgeClass}`}>{displayName}</div>
+      <PanelCard className="flex items-center gap-3 p-4 sm:p-5">
+        <div
+          className={`px-3 py-1 rounded-full text-xs font-bold border ${badgeClass}`}
+        >
+          {displayName}
+        </div>
         <div className="flex-1">
           {isUnlimited ? (
-            <p className="text-sm text-white/60">Unlimited video analyses, no restrictions.</p>
+            <p className="text-sm text-white/60">
+              Unlimited video analyses, no restrictions.
+            </p>
           ) : (
             <div>
               <div className="flex items-center justify-between mb-1">
-                <p className="text-xs text-white/40">{used} of {total} analyses used this month</p>
+                <p className="text-xs text-white/40">
+                  {used} of {total} analyses used this month
+                </p>
                 <p className="text-xs text-white/40">{remaining} remaining</p>
               </div>
               <div className="h-1.5 bg-white/8 rounded-full overflow-hidden">
@@ -270,15 +393,32 @@ function Dashboard({ onNavigate, onUpgrade }: { onNavigate: (tab: TabId) => void
           </button>
         )}
       </PanelCard>
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard label="Analyses used" value={used} sublabel="this month" />
-        <StatCard label="Analyses left" value={isUnlimited ? "∞" : remaining} sublabel="this month" color={remaining === 0 ? "text-red-400" : "text-primary"} />
-        <StatCard label="Script chats" value={isSpUnlimited ? "∞" : spLimits.chatsUsed} sublabel={isSpUnlimited ? "unlimited" : `of ${spChatLimit} this month`} />
-        <StatCard label="Max duration" value={getDurationLimitLabel(norm)} sublabel="per video" />
+        <StatCard
+          label="Analyses left"
+          value={isUnlimited ? "∞" : remaining}
+          sublabel="this month"
+          color={remaining === 0 ? "text-red-400" : "text-primary"}
+        />
+        <StatCard
+          label="Script chats"
+          value={isSpUnlimited ? "∞" : spLimits.chatsUsed}
+          sublabel={
+            isSpUnlimited ? "unlimited" : `of ${spChatLimit} this month`
+          }
+        />
+        <StatCard
+          label="Max duration"
+          value={getDurationLimitLabel(norm)}
+          sublabel="per video"
+        />
       </div>
       <div>
-        <p className="text-xs text-white/40 uppercase tracking-wider mb-4">Quick Actions</p>
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        <p className="text-xs text-white/40 uppercase tracking-wider mb-4">
+          Quick Actions
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
           <QuickActionCard
             icon={Wand2}
             title="Analyze a Video"
@@ -308,14 +448,6 @@ function Dashboard({ onNavigate, onUpgrade }: { onNavigate: (tab: TabId) => void
             onClick={() => onNavigate("growth-planner")}
             badge={!plan.isStudio ? "Studio" : undefined}
           />
-          <QuickActionCard
-            icon={Globe}
-            title="Dub Your Video"
-            desc="Translate and dub into other languages"
-            color="bg-amber-500/15 border border-amber-500/20 text-amber-400"
-            onClick={() => onNavigate("dubbing")}
-            badge="Soon"
-          />
           {!plan.isPaid && (
             <QuickActionCard
               icon={Zap}
@@ -328,20 +460,51 @@ function Dashboard({ onNavigate, onUpgrade }: { onNavigate: (tab: TabId) => void
         </div>
       </div>
       <PanelCardSoft className="p-5">
-        <p className="text-xs text-white/40 uppercase tracking-wider mb-3">What DayTabs can do</p>
+        <p className="text-xs text-white/40 uppercase tracking-wider mb-3">
+          What DayTabs can do
+        </p>
         <div className="grid sm:grid-cols-2 gap-3">
           {[
-            { icon: Video, label: "Video Quality Analysis", desc: "Lighting, audio, framing, and pacing scores" },
-            { icon: FileText, label: "Editing Suggestions", desc: "Hook moments, cut points, and B-roll cues" },
-            { icon: TrendingUp, label: "Publish Package", desc: "Optimized titles, descriptions, and tags", locked: !plan.isPaid },
-            { icon: Zap, label: "Short Clip Ideas", desc: "Best moments for Shorts, TikTok, and Reels", locked: !plan.isPaid },
+            {
+              icon: Video,
+              label: "Video Quality Analysis",
+              desc: "Lighting, audio, framing, and pacing scores",
+            },
+            {
+              icon: FileText,
+              label: "Editing Suggestions",
+              desc: "Hook moments, cut points, and B-roll cues",
+            },
+            {
+              icon: TrendingUp,
+              label: "Publish Package",
+              desc: "Optimized titles, descriptions, and tags",
+              locked: !plan.isPaid,
+            },
+            {
+              icon: Zap,
+              label: "Short Clip Ideas",
+              desc: "Best moments for Shorts, TikTok, and Reels",
+              locked: !plan.isPaid,
+            },
           ].map((feat, i) => (
-            <div key={i} className={`flex items-start gap-3 p-3 rounded-xl ${feat.locked ? "opacity-50" : ""}`}>
-              <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${feat.locked ? "bg-white/5" : "bg-primary/10"}`}>
-                {feat.locked ? <Lock className="w-4 h-4 text-white/30" /> : <feat.icon className="w-4 h-4 text-primary" />}
+            <div
+              key={i}
+              className={`flex items-start gap-3 p-3 rounded-xl ${feat.locked ? "opacity-50" : ""}`}
+            >
+              <div
+                className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${feat.locked ? "bg-white/5" : "bg-primary/10"}`}
+              >
+                {feat.locked ? (
+                  <Lock className="w-4 h-4 text-white/30" />
+                ) : (
+                  <feat.icon className="w-4 h-4 text-primary" />
+                )}
               </div>
               <div>
-                <p className="text-sm font-medium text-white/80">{feat.label}</p>
+                <p className="text-sm font-medium text-white/80">
+                  {feat.label}
+                </p>
                 <p className="text-xs text-white/40">{feat.desc}</p>
               </div>
             </div>
@@ -384,13 +547,20 @@ export default function Home() {
 
   const tabCallbacks = {
     onDataReady: () => setActiveTabHasData(true),
-    onDataReset: () => { setActiveTabHasData(false); exportFnRef.current = null; },
-    onRegisterExport: (fn: (() => Promise<void>) | null) => { exportFnRef.current = fn; },
+    onDataReset: () => {
+      setActiveTabHasData(false);
+      exportFnRef.current = null;
+    },
+    onRegisterExport: (fn: (() => Promise<void>) | null) => {
+      exportFnRef.current = fn;
+    },
   };
 
   return (
     <div className="min-h-screen relative overflow-x-hidden selection:bg-primary/30">
-      {showPlanModal && <PlanPickerModal onClose={() => setShowPlanModal(false)} />}
+      {showPlanModal && (
+        <PlanPickerModal onClose={() => setShowPlanModal(false)} />
+      )}
       <div className="fixed inset-0 pointer-events-none z-[-1] overflow-hidden">
         <img
           src={`${import.meta.env.BASE_URL}images/panel-bg-purple-minimal.png`}
@@ -399,57 +569,71 @@ export default function Home() {
         />
         <div className="absolute inset-0 bg-background/55" />
       </div>
-      <header className="w-full border-b border-white/5 bg-background/50 backdrop-blur-xl sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
-          <div className="flex items-center gap-3 cursor-pointer" onClick={() => window.location.href = "/"}>
-            <img src={`${import.meta.env.BASE_URL}images/logo.jpg`} alt="DayTabs" className="w-10 h-10 object-contain rounded-lg drop-shadow-[0_0_15px_rgba(124,58,237,0.5)]" />
-            <span className="text-2xl font-display font-bold tracking-tight text-white">Day<span className="text-primary">Tabs</span></span>
+      <header className="w-full border-b border-white/5 bg-background/45 backdrop-blur-xl sticky top-0 z-50">
+        <div className="panel-shell h-20 flex items-center justify-between">
+          <div
+            className="flex items-center gap-3 cursor-pointer"
+            onClick={() => (window.location.href = "/")}
+          >
+            <img
+              src={`${import.meta.env.BASE_URL}images/logo.jpg`}
+              alt="DayTabs"
+              className="w-10 h-10 object-contain rounded-xl drop-shadow-[0_0_15px_rgba(124,58,237,0.5)]"
+            />
+            <span className="text-2xl font-display font-bold tracking-tight text-white">
+              Day<span className="text-primary">Tabs</span>
+            </span>
           </div>
           <div className="flex items-center gap-3">
-            <NotificationBell onOpenGrowthPlanner={() => handleTabClick("growth-planner")} />
+            <NotificationBell
+              onOpenGrowthPlanner={() => handleTabClick("growth-planner")}
+            />
             <UserProfileMenu />
           </div>
         </div>
       </header>
-      <div className="w-full border-b border-white/5 bg-background/30 backdrop-blur-md sticky top-20 z-40">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6">
-          <div className="flex items-center gap-1 overflow-x-auto scrollbar-none py-1">
+      <div className="w-full border-b border-white/5 bg-background/25 backdrop-blur-md sticky top-20 z-40">
+        <div className="panel-shell">
+          <div className="flex items-center gap-2 overflow-x-auto scrollbar-none py-3">
             {TABS.map((tab) => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
-              const isComingSoon = tab.id === "dubbing";
               return (
                 <button
                   key={tab.id}
                   onClick={() => handleTabClick(tab.id)}
-                  className={`flex items-center gap-2.5 px-5 py-3 rounded-xl text-sm font-semibold whitespace-nowrap transition-all duration-200 shrink-0 ${
+                  className={`panel-hover flex items-center gap-2.5 px-4 py-3 rounded-2xl text-sm font-semibold whitespace-nowrap transition-all duration-200 shrink-0 border ${
                     isActive
-                      ? "bg-primary/20 text-primary border border-primary/30 shadow-lg shadow-primary/10"
-                      : "text-white/50 hover:text-white/80 hover:bg-white/5 border border-transparent"
+                      ? "bg-primary/16 text-primary border-primary/30 shadow-lg shadow-primary/10"
+                      : "bg-white/[0.025] text-white/50 border-white/8 hover:text-white/85"
                   }`}
                 >
                   <Icon className="w-4 h-4" />
                   {tab.label}
-                  {isComingSoon ? (
-                    <span className="text-xs px-1.5 py-0.5 bg-amber-500/15 text-amber-400 rounded border border-amber-500/20">Soon</span>
-                  ) : (
-                    <span className={`hidden sm:block text-xs font-normal ${isActive ? "text-primary/70" : "text-white/30"}`}>
-                      {tab.desc}
-                    </span>
-                  )}
+                  <span
+                    className={`hidden sm:block text-xs font-normal ${isActive ? "text-primary/70" : "text-white/30"}`}
+                  >
+                    {tab.desc}
+                  </span>
                 </button>
               );
             })}
           </div>
         </div>
       </div>
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 md:py-16 relative z-10 pl-[32px] pr-[32px]">
-        {activeTab === "dashboard"      && <Dashboard onNavigate={handleTabClick} onUpgrade={() => setShowPlanModal(true)} />}
-        {activeTab === "video-analyzer" && <VideoAnalyzerTab {...tabCallbacks} />}
+      <main className="panel-shell py-10 md:py-12 relative z-10">
+        {activeTab === "dashboard" && (
+          <Dashboard
+            onNavigate={handleTabClick}
+            onUpgrade={() => setShowPlanModal(true)}
+          />
+        )}
+        {activeTab === "video-analyzer" && (
+          <VideoAnalyzerTab {...tabCallbacks} />
+        )}
         {activeTab === "script-planner" && <ScriptPlannerTab />}
         {activeTab === "growth-planner" && <GrowthPlannerTab />}
-        {activeTab === "teleprompter"   && <TeleprompterTab />}
-        {activeTab === "dubbing"        && <DubbingTab {...tabCallbacks} />}
+        {activeTab === "teleprompter" && <TeleprompterTab />}
       </main>
     </div>
   );
