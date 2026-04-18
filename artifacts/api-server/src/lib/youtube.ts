@@ -45,6 +45,7 @@ export interface YoutubeRecentVideo {
   viewCount: string | null;
   likeCount: string | null;
   commentCount: string | null;
+  thumbnailUrl?: string | null;
   channelId?: string | null;
   channelTitle?: string | null;
   url: string;
@@ -57,6 +58,16 @@ export interface YoutubeNicheProfile {
   targetAudience: string;
   keywords: string[];
   summary: string;
+}
+
+interface YoutubeAnalyticsPoint {
+  date: string;
+  views: number;
+  subscribersGained: number;
+  subscribersLost: number;
+  subscribersNet: number;
+  estimatedMinutesWatched: number;
+  averageViewDuration: number;
 }
 
 function getCoreAppPath(): string {
@@ -326,6 +337,7 @@ function normalizeVideo(item: unknown): YoutubeRecentVideo {
   const snippet = asRecord(record.snippet);
   const stats = asRecord(record.statistics);
   const details = asRecord(record.contentDetails);
+  const thumbnails = asRecord(snippet.thumbnails);
   const id = asString(record.id) || asString(asRecord(record.id).videoId) || "";
   return {
     id,
@@ -337,6 +349,7 @@ function normalizeVideo(item: unknown): YoutubeRecentVideo {
     viewCount: asString(stats.viewCount),
     likeCount: asString(stats.likeCount),
     commentCount: asString(stats.commentCount),
+    thumbnailUrl: asString(asRecord(thumbnails.medium).url) || asString(asRecord(thumbnails.default).url) || asString(asRecord(thumbnails.high).url),
     channelId: asString(snippet.channelId),
     channelTitle: asString(snippet.channelTitle),
     url: id ? `https://www.youtube.com/watch?v=${id}` : "https://www.youtube.com",
@@ -405,6 +418,8 @@ export async function syncYoutubeChannel(userId: number) {
 
   const snippet = asRecord(channel.snippet);
   const statistics = asRecord(channel.statistics);
+  const thumbnails = asRecord(snippet.thumbnails);
+  const channelThumbnailUrl = asString(asRecord(thumbnails.high).url) || asString(asRecord(thumbnails.medium).url) || asString(asRecord(thumbnails.default).url);
   const recentVideos = await fetchRecentVideos(userId, channelId, 20);
   const nicheProfile = await analyzeNiche({
     id: channelId,
@@ -430,6 +445,7 @@ export async function syncYoutubeChannel(userId: number) {
       userId,
       channelId,
       channelName: asString(snippet.title) || "YouTube channel",
+      channelThumbnailUrl,
       subscriberCount: asString(statistics.subscriberCount),
       totalViewCount: asString(statistics.viewCount),
       videoCount: asString(statistics.videoCount),
@@ -443,6 +459,7 @@ export async function syncYoutubeChannel(userId: number) {
       set: {
         channelId,
         channelName: asString(snippet.title) || "YouTube channel",
+        channelThumbnailUrl,
         subscriberCount: asString(statistics.subscriberCount),
         totalViewCount: asString(statistics.viewCount),
         videoCount: asString(statistics.videoCount),
@@ -466,9 +483,11 @@ export async function getYoutubeStatus(userId: number) {
     ? await db.select().from(youtubePlanResultsTable).where(eq(youtubePlanResultsTable.planId, latestPlan.id))
     : [];
   const competitors = await db.select().from(youtubeCompetitorsTable).where(eq(youtubeCompetitorsTable.userId, userId)).orderBy(desc(youtubeCompetitorsTable.fetchedAt));
+  const channelAnalytics = connection && profile ? await channelAnalyticsTimeline(userId) : null;
   return {
     connected: Boolean(connection),
     channel: profile,
+    channelAnalytics,
     competitors,
     latestPlan,
     plans,
@@ -550,6 +569,8 @@ export async function discoverCompetitors(userId: number, profile: typeof youtub
     if (!channelId) continue;
     const snippet = asRecord(channel.snippet);
     const stats = asRecord(channel.statistics);
+    const thumbnails = asRecord(snippet.thumbnails);
+    const thumbnailUrl = asString(asRecord(thumbnails.high).url) || asString(asRecord(thumbnails.medium).url) || asString(asRecord(thumbnails.default).url);
     const recent = await fetchRecentVideos(userId, channelId, 10);
     const topVideos = [...recent]
       .sort((a, b) => parseNumber(b.viewCount) - parseNumber(a.viewCount))
@@ -559,6 +580,7 @@ export async function discoverCompetitors(userId: number, profile: typeof youtub
       userId,
       channelId,
       channelName: asString(snippet.title) || "YouTube competitor",
+      thumbnailUrl,
       subscriberCount: asString(stats.subscriberCount),
       mostViewedRecentVideos: topVideos,
       postingFrequency: postingFrequency(recent),
@@ -585,6 +607,44 @@ async function analyticsSummary(userId: number) {
     return data;
   } catch (err) {
     return { error: err instanceof Error ? err.message : "YouTube Analytics summary unavailable" };
+  }
+}
+
+async function channelAnalyticsTimeline(userId: number) {
+  const endDate = isoDate(new Date());
+  const startDate = isoDate(addDays(new Date(), -84));
+  try {
+    const data = await youtubeJson<{ rows?: unknown[] }>(userId, analyticsUrl({
+      ids: "channel==MINE",
+      startDate,
+      endDate,
+      metrics: "views,subscribersGained,subscribersLost,estimatedMinutesWatched,averageViewDuration",
+      dimensions: "day",
+      sort: "day",
+    }), { cacheKey: `analytics-timeline:${userId}:${startDate}:${endDate}`, quotaCost: 1, ttlMs: 6 * 60 * 60 * 1000 });
+
+    const daily = asArray(data.rows).map((row) => {
+      const values = Array.isArray(row) ? row : [];
+      const date = asString(values[0]) || "";
+      const views = parseNumber(values[1]);
+      const subscribersGained = parseNumber(values[2]);
+      const subscribersLost = parseNumber(values[3]);
+      const estimatedMinutesWatched = parseNumber(values[4]);
+      const averageViewDuration = parseNumber(values[5]);
+      return {
+        date,
+        views,
+        subscribersGained,
+        subscribersLost,
+        subscribersNet: subscribersGained - subscribersLost,
+        estimatedMinutesWatched,
+        averageViewDuration,
+      } satisfies YoutubeAnalyticsPoint;
+    }).filter((point) => point.date);
+
+    return { daily };
+  } catch (err) {
+    return { daily: [], error: err instanceof Error ? err.message : "YouTube Analytics timeline unavailable" };
   }
 }
 
@@ -632,7 +692,7 @@ export async function generateYoutubeWeeklyPlan(userId: number) {
     messages: [
       {
         role: "system",
-        content: "Generate a YouTube-only growth plan from real channel, video, trend, competitor, analytics, and past-result data. Return JSON only. Never invent metrics; say unavailable when source data is missing.",
+        content: "Generate a YouTube-only growth plan from real channel, video, trend, competitor, analytics, and past-result data. Return JSON only. ABSOLUTE RULE: do not hallucinate, infer exact metrics, invent competitors, invent comments, invent retention curves, invent CTR, invent subscriber gains, or invent first-24-hour performance. If exact source data is missing, mark confidence low and explain the limitation.",
       },
       {
         role: "user",
@@ -700,6 +760,7 @@ Rules:
 - viralTags should include 5-8 niche-specific tags when source data allows it; avoid generic one-word tags unless paired with a clear reason.
 - performanceInsights must include exactly one entry for each of these 12 types: best_time_to_post, hook_performance, thumbnail_pattern, upload_frequency_growth, retention_dropoff, title_length, comment_sentiment, subscriber_velocity, competitor_gap, posting_consistency, tag_effectiveness, first_24h_predictor.
 - For performanceInsights, use the user's own video titles, descriptions, tags, publish dates, view counts, like counts, comment counts, YouTube Analytics summaries, plan results, and competitor data. If a metric is unavailable, mark confidence low and explain the dataLimitations instead of inventing exact numbers.
+- Every number in finding, evidence, action, and chart values must come from supplied context or be explicitly labeled as an estimate in dataLimitations. Prefer "not enough data yet" over a made-up insight.
 - Comment sentiment should be based on available comment/comment-count/title/description signals only; if raw comments were unavailable, say so.
 - Retention and first-24-hour insights should use YouTube Analytics when present; if not present, infer cautiously from available data and label confidence low.
 - Do not invent metrics or competitor names.`,

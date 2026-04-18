@@ -106,6 +106,8 @@ async function runStartupMigrations() {
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       )
     `);
+    await db.execute(sql`ALTER TABLE youtube_channel_profiles ADD COLUMN IF NOT EXISTS channel_thumbnail_url TEXT`);
+    await db.execute(sql`ALTER TABLE youtube_competitors ADD COLUMN IF NOT EXISTS thumbnail_url TEXT`);
     logger.info("Startup migrations applied");
   } catch (err) {
     logger.warn({ err }, "Startup migrations warning (non-fatal)");
