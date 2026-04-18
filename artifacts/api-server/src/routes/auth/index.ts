@@ -27,6 +27,7 @@ const CANONICAL_APP_ORIGIN = (
   "https://daytabs.com"
 ).replace(/\/$/, "");
 const RENDER_HOST = "daytabs.onrender.com";
+const GOOGLE_CALLBACK_PATH = "/api/auth/google/callback";
 
 function getPublicBaseUrl(req: import("express").Request): string {
   const forwarded = req.get("x-forwarded-host");
@@ -35,9 +36,16 @@ function getPublicBaseUrl(req: import("express").Request): string {
 }
 
 function getGoogleRedirectUri(req: import("express").Request): string {
-  const configuredRedirectUri = process.env.GOOGLE_REDIRECT_URI;
+  const configuredRedirectUri = process.env.GOOGLE_REDIRECT_URI?.trim();
+  if (process.env.NODE_ENV === "production") {
+    const callbackPath = configuredRedirectUri
+      ? new URL(configuredRedirectUri, CANONICAL_APP_ORIGIN).pathname
+      : GOOGLE_CALLBACK_PATH;
+    return `${CANONICAL_APP_ORIGIN}${callbackPath}`;
+  }
+
   if (configuredRedirectUri) return configuredRedirectUri;
-  return `${getPublicBaseUrl(req)}/api/auth/google/callback`;
+  return `${getPublicBaseUrl(req)}${GOOGLE_CALLBACK_PATH}`;
 }
 
 function getCoreAppPath(): string {
