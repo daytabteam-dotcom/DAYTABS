@@ -30,6 +30,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { usePlan } from "@/hooks/use-plan";
+import { PanelPage, PanelHeader, PanelTitle, PanelSubtitle, PanelCard, PanelCardSoft, PanelEyebrow } from "@/components/panel-system";
 
 type PlatformId = "tiktok" | "instagram" | "youtube" | "linkedin" | "x";
 type PlannerStep = "profile" | "platforms" | "cadence" | "links";
@@ -742,31 +743,31 @@ function GrowthPlannerComingSoon() {
   };
 
   return (
-    <div className="max-w-4xl mx-auto py-8">
-      <div className="rounded-lg border border-white/8 bg-white/[0.025] p-6 md:p-8">
+    <PanelPage className="max-w-4xl py-8">
+      <PanelCard className="p-6 md:p-8">
         <div className="flex flex-col md:flex-row md:items-start justify-between gap-6">
           <div className="space-y-4 max-w-xl">
             <div className="flex items-center gap-3">
-              <div className="relative w-11 h-11 rounded-lg border border-white/10 bg-white/[0.04] flex items-center justify-center">
+              <div className="panel-card-soft relative flex h-11 w-11 items-center justify-center">
                 <CalendarDays className="w-5 h-5 text-pink-300" />
                 <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-amber-300 text-amber-950 flex items-center justify-center">
                   <Clock className="w-3 h-3" />
                 </span>
               </div>
               <div>
-                <p className="text-xs uppercase tracking-wider text-white/35">Coming soon</p>
-                <h2 className="text-3xl font-bold text-white">Growth Planner</h2>
+                <PanelEyebrow>Coming soon</PanelEyebrow>
+                <PanelTitle>Growth Planner</PanelTitle>
               </div>
             </div>
-            <p className="text-white/50 text-sm leading-relaxed">
+            <PanelSubtitle className="mt-0">
               Build a niche-aware content system with weekly calendars, platform mix, competitor ideas, and next-step planning from your results.
-            </p>
+            </PanelSubtitle>
             <div className="grid sm:grid-cols-2 gap-3">
               {features.map((feature) => (
-                <div key={feature.label} className="flex items-center gap-3 rounded-lg border border-white/8 bg-background/40 p-3 text-sm text-white/60">
+                <PanelCardSoft key={feature.label} className="flex items-center gap-3 p-3 text-sm text-white/60">
                   <Check className="w-4 h-4 text-pink-300 shrink-0" />
                   {feature.label}
-                </div>
+                </PanelCardSoft>
               ))}
             </div>
           </div>
@@ -786,10 +787,10 @@ function GrowthPlannerComingSoon() {
                   placeholder="your@email.com"
                   required
                   disabled={loading}
-                  className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-sm text-white placeholder-white/25 focus:outline-none focus:border-pink-400/45 transition-colors disabled:opacity-50"
+                  className="panel-input w-full px-4 py-3 disabled:opacity-50"
                 />
                 {error && <p className="text-xs text-red-400">{error}</p>}
-                <Button type="submit" disabled={loading} className="w-full rounded-lg bg-pink-500 text-white hover:bg-pink-400">
+                <Button type="submit" disabled={loading} className="w-full border-pink-400/35 bg-pink-500 text-white hover:bg-pink-400">
                   {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Bell className="w-4 h-4 mr-2" />}
                   {loading ? "Submitting..." : "Notify me"}
                 </Button>
@@ -797,8 +798,8 @@ function GrowthPlannerComingSoon() {
             )}
           </div>
         </div>
-      </div>
-    </div>
+      </PanelCard>
+    </PanelPage>
   );
 }
 
@@ -1016,14 +1017,14 @@ export default function GrowthPlannerTab() {
   }
 
   return (
-    <div className="max-w-7xl space-y-8">
-      <div className="flex flex-col lg:flex-row lg:items-end gap-5 justify-between">
+    <PanelPage className="max-w-7xl space-y-8">
+      <PanelHeader className="gap-5 justify-between lg:items-end">
         <div>
           <Badge className="bg-pink-500/15 text-pink-200 border-pink-500/20 hover:brightness-100">Studio Growth Planner</Badge>
-          <h1 className="text-4xl font-display font-bold text-white mt-4">Plan the next week from what is working now.</h1>
-          <p className="text-white/45 mt-2 max-w-3xl">
+          <PanelTitle className="mt-4 text-4xl">Plan the next week from what is working now.</PanelTitle>
+          <PanelSubtitle className="max-w-3xl">
             Profile setup, platform recommendations, competitor angles, social audits, and a weekly calendar that improves after each round of results.
-          </p>
+          </PanelSubtitle>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant="secondary" className="rounded-lg" onClick={() => setSetupOpen(true)}>Edit setup</Button>
@@ -1031,18 +1032,18 @@ export default function GrowthPlannerTab() {
             Generate next week
           </Button>
         </div>
-      </div>
+      </PanelHeader>
 
       {calendar.length === 0 ? (
-        <div className="glass-card rounded-2xl p-8 text-center">
+        <PanelCard className="p-8 text-center">
           <Sparkles className="w-10 h-10 text-primary mx-auto mb-4" />
           <h2 className="text-2xl text-white">Start with your niche and goals.</h2>
           <p className="text-white/45 mt-2">DayTabs will suggest channels, cadence, competitor angles, and the first week of posts.</p>
           <Button className="mt-5 rounded-lg" onClick={() => setSetupOpen(true)}>Open setup</Button>
-        </div>
+        </PanelCard>
       ) : (
         <>
-          <section className="glass-card rounded-2xl p-6">
+          <PanelCard className="p-6">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-5">
               <div>
                 <div className="flex items-center gap-2">
@@ -1052,7 +1053,7 @@ export default function GrowthPlannerTab() {
                 <p className="text-sm text-white/40 mt-1">{getWorkspaceDescription(viewMode)}</p>
               </div>
               <div className="flex items-center justify-end md:ml-auto shrink-0">
-                <div className="flex rounded-lg border border-white/10 bg-white/[0.03] p-1">
+                <div className="panel-card-soft flex p-1">
                   {[
                     { id: "calendar" as PlannerViewMode, label: "Calendar", icon: CalendarDays },
                     { id: "planner" as PlannerViewMode, label: "Planner", icon: Columns3 },
@@ -1280,10 +1281,10 @@ export default function GrowthPlannerTab() {
                 </div>
               </div>
             )}
-          </section>
+          </PanelCard>
 
           {viewMode === "planner" && (
-          <section className="glass-card rounded-2xl p-6">
+          <PanelCard className="p-6">
             <div className="flex items-center justify-between gap-3 mb-5">
               <div>
                 <h2 className="text-xl text-white">Planner board</h2>
@@ -1358,7 +1359,7 @@ export default function GrowthPlannerTab() {
                 );
               })}
             </div>
-          </section>
+          </PanelCard>
           )}
         </>
       )}
@@ -1575,7 +1576,7 @@ export default function GrowthPlannerTab() {
           </Button>
         </DialogContent>
       </Dialog>
-    </div>
+    </PanelPage>
   );
 }
 

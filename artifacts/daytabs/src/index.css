@@ -47,7 +47,7 @@
 :root {
   --background: 224 71% 4%;
   --foreground: 210 40% 98%;
-  --card: 222 47% 8%;
+  --card: 226 34% 11%;
   --card-foreground: 210 40% 98%;
   --popover: 222 47% 8%;
   --popover-foreground: 210 40% 98%;
@@ -55,10 +55,10 @@
   --primary: 262 85% 72%;
   --primary-foreground: 262 40% 10%;
   
-  --secondary: 217 32% 17%;
+  --secondary: 225 26% 16%;
   --secondary-foreground: 210 40% 98%;
   
-  --muted: 217 32% 17%;
+  --muted: 225 24% 14%;
   --muted-foreground: 215 20.2% 65.1%;
   
   --accent: 262 85% 72%;
@@ -67,17 +67,24 @@
   --destructive: 0 62.8% 30.6%;
   --destructive-foreground: 210 40% 98%;
   
-  --border: 217 32% 17%;
-  --input: 217 32% 17%;
+  --border: 226 24% 18%;
+  --input: 226 24% 18%;
   --ring: 262 85% 72%;
-  
-  --radius: 1rem;
+
+  --panel-surface: 226 34% 11%;
+  --panel-surface-soft: 226 30% 9%;
+  --panel-surface-strong: 226 30% 13%;
+  --panel-surface-hover: 226 28% 15%;
+  --panel-border: 226 24% 18%;
+  --panel-shadow: 228 54% 3%;
+
+  --radius: 0.5rem;
 }
 
 .dark {
   --background: 224 71% 4%;
   --foreground: 210 40% 98%;
-  --card: 222 47% 8%;
+  --card: 226 34% 11%;
   --card-foreground: 210 40% 98%;
   --popover: 222 47% 8%;
   --popover-foreground: 210 40% 98%;
@@ -85,10 +92,10 @@
   --primary: 262 85% 72%;
   --primary-foreground: 262 40% 10%;
   
-  --secondary: 217 32% 17%;
+  --secondary: 225 26% 16%;
   --secondary-foreground: 210 40% 98%;
   
-  --muted: 217 32% 17%;
+  --muted: 225 24% 14%;
   --muted-foreground: 215 20.2% 65.1%;
   
   --accent: 262 85% 72%;
@@ -97,9 +104,16 @@
   --destructive: 0 62.8% 30.6%;
   --destructive-foreground: 210 40% 98%;
   
-  --border: 217 32% 17%;
-  --input: 217 32% 17%;
+  --border: 226 24% 18%;
+  --input: 226 24% 18%;
   --ring: 262 85% 72%;
+
+  --panel-surface: 226 34% 11%;
+  --panel-surface-soft: 226 30% 9%;
+  --panel-surface-strong: 226 30% 13%;
+  --panel-surface-hover: 226 28% 15%;
+  --panel-border: 226 24% 18%;
+  --panel-shadow: 228 54% 3%;
 }
 
 @layer base {
@@ -119,6 +133,81 @@
 }
 
 @layer utilities {
+  .panel-page {
+    @apply mx-auto w-full max-w-6xl space-y-6;
+  }
+
+  .panel-header {
+    @apply flex flex-col gap-2 md:flex-row md:items-end md:justify-between;
+  }
+
+  .panel-kicker {
+    @apply text-[11px] font-semibold uppercase tracking-[0.18em] text-white/40;
+  }
+
+  .panel-title {
+    @apply text-3xl font-display font-bold text-white;
+  }
+
+  .panel-subtitle {
+    @apply mt-1 text-sm leading-relaxed text-white/50;
+  }
+
+  .panel-card {
+    background-color: hsl(var(--panel-surface));
+    border: 1px solid hsl(var(--panel-border));
+    box-shadow: 0 18px 44px -28px hsl(var(--panel-shadow) / 0.9);
+    @apply rounded-lg;
+  }
+
+  .panel-card-soft {
+    background-color: hsl(var(--panel-surface-soft));
+    border: 1px solid hsl(var(--panel-border));
+    box-shadow: 0 18px 44px -28px hsl(var(--panel-shadow) / 0.75);
+    @apply rounded-lg;
+  }
+
+  .panel-card-strong {
+    background-color: hsl(var(--panel-surface-strong));
+    border: 1px solid hsl(var(--panel-border));
+    box-shadow: 0 20px 46px -28px hsl(var(--panel-shadow) / 0.95);
+    @apply rounded-lg;
+  }
+
+  .panel-hover {
+    @apply transition-all duration-200;
+  }
+
+  .panel-hover:hover {
+    background-color: hsl(var(--panel-surface-hover));
+    border-color: hsl(var(--ring) / 0.35);
+  }
+
+  .panel-input {
+    background-color: hsl(var(--panel-surface-soft));
+    border: 1px solid hsl(var(--panel-border));
+    @apply rounded-lg text-sm text-white placeholder:text-white/25 transition-colors;
+  }
+
+  .panel-input:focus {
+    outline: none;
+    border-color: hsl(var(--ring) / 0.55);
+    box-shadow: 0 0 0 1px hsl(var(--ring) / 0.25);
+  }
+
+  .panel-chip {
+    @apply rounded-lg border px-3 py-1.5 text-xs font-semibold;
+    background-color: hsl(var(--panel-surface-soft));
+    border-color: hsl(var(--panel-border));
+    color: rgb(255 255 255 / 0.65);
+  }
+
+  .panel-chip-active {
+    background-color: hsl(var(--primary) / 0.16);
+    border-color: hsl(var(--ring) / 0.4);
+    color: hsl(var(--primary));
+  }
+
   .hover-elevate {
     @apply transition-all duration-300;
   }
@@ -130,7 +219,10 @@
   }
   
   .glass-card {
-    @apply bg-card/60 backdrop-blur-xl border border-white/10 shadow-xl;
+    background-color: hsl(var(--panel-surface));
+    border: 1px solid hsl(var(--panel-border));
+    box-shadow: 0 18px 44px -28px hsl(var(--panel-shadow) / 0.9);
+    @apply rounded-lg backdrop-blur-xl;
   }
   
   .text-gradient {

@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import { MonitorPlay, Trash2, Type } from "lucide-react";
 import { Teleprompter } from "@/components/Teleprompter";
 import { Button } from "@/components/ui/button";
+import { PanelPage, PanelHeader, PanelTitle, PanelSubtitle, PanelCard, PanelCardSoft } from "@/components/panel-system";
 
 const PLACEHOLDER = `Welcome to DayTabs Teleprompter.
 
@@ -25,26 +26,23 @@ export default function TeleprompterTab() {
       <motion.div
         initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
-        className="max-w-5xl mx-auto space-y-5"
+        className="panel-page max-w-5xl space-y-6"
       >
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+        <PanelHeader className="gap-4">
           <div>
             <div className="flex items-center gap-2">
               <MonitorPlay className="w-5 h-5 text-primary" />
-              <h2 className="text-3xl font-bold text-white">Teleprompter</h2>
+              <PanelTitle>Teleprompter</PanelTitle>
             </div>
-            <p className="text-white/45 text-sm mt-2">Paste your script, set your pace, and read cleanly on camera.</p>
+            <PanelSubtitle>Paste your script, set your pace, and read cleanly on camera.</PanelSubtitle>
           </div>
-          <Button
-            onClick={() => setOpen(true)}
-            className="rounded-lg bg-primary text-primary-foreground hover:bg-primary/90"
-          >
+          <Button onClick={() => setOpen(true)}>
             <MonitorPlay className="w-4 h-4 mr-2" />
             Start
           </Button>
-        </div>
+        </PanelHeader>
 
-        <div className="rounded-lg border border-white/8 bg-white/[0.025] overflow-hidden">
+        <PanelCard className="overflow-hidden">
           <div className="flex items-center justify-between px-5 py-3 border-b border-white/8">
             <span className="flex items-center gap-2 text-sm text-white/55 font-medium">
               <Type className="w-4 h-4 text-white/35" />
@@ -64,19 +62,19 @@ export default function TeleprompterTab() {
             value={script}
             onChange={e => setScript(e.target.value)}
             placeholder={PLACEHOLDER}
-            className="w-full bg-transparent px-5 py-4 text-sm text-white/80 placeholder:text-white/20 resize-none focus:outline-none leading-relaxed min-h-[420px]"
+            className="w-full bg-transparent px-5 py-4 text-sm leading-relaxed min-h-[420px] resize-none text-white/80 placeholder:text-white/20 focus:outline-none"
             spellCheck
           />
-        </div>
+        </PanelCard>
 
-        <div className="rounded-lg border border-white/8 bg-white/[0.025] p-4 text-xs text-white/35 space-y-1.5">
+        <PanelCardSoft className="p-4 text-xs text-white/35 space-y-1.5">
           <p className="font-semibold text-white/55 mb-2">Keyboard shortcuts</p>
           <div className="grid grid-cols-2 gap-x-6 gap-y-1">
             <span><kbd className="bg-white/10 px-1.5 py-0.5 rounded font-mono">Space</kbd> Play / Pause</span>
             <span><kbd className="bg-white/10 px-1.5 py-0.5 rounded font-mono">↑</kbd> <kbd className="bg-white/10 px-1.5 py-0.5 rounded font-mono">↓</kbd> Adjust speed</span>
             <span><kbd className="bg-white/10 px-1.5 py-0.5 rounded font-mono">Esc</kbd> Close</span>
           </div>
-        </div>
+        </PanelCardSoft>
       </motion.div>
     </>
   );

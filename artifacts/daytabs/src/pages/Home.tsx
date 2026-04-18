@@ -9,6 +9,7 @@ import GrowthPlannerTab, { getGrowthPlannerNotificationCounts, getGrowthPlannerN
 import { PlanPickerModal } from "@/components/PlanPickerModal";
 import { usePlan, getPlanBadgeColor, getPlanLabel, PLAN_DISPLAY_NAMES, getDurationLimitLabel, getFileSizeLimitLabel, getScriptPlannerChatLimit } from "@/hooks/use-plan";
 import { useUser } from "@/hooks/use-user";
+import { PanelPage, PanelHeader, PanelTitle, PanelSubtitle, PanelCard, PanelCardSoft } from "@/components/panel-system";
 
 const TABS = [
   { id: "dashboard",       label: "Home",            icon: LayoutDashboard,  desc: "Overview" },
@@ -67,7 +68,7 @@ function NotificationBell({ onOpenGrowthPlanner }: { onOpenGrowthPlanner: () => 
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
-        className="relative w-10 h-10 rounded-lg border border-white/10 bg-white/[0.03] flex items-center justify-center text-white/55 hover:text-white hover:bg-white/[0.06] transition-colors"
+        className="panel-card-soft panel-hover relative flex h-10 w-10 items-center justify-center text-white/55 hover:text-white"
         aria-label="Notifications"
       >
         <Bell className="w-5 h-5" />
@@ -78,7 +79,7 @@ function NotificationBell({ onOpenGrowthPlanner }: { onOpenGrowthPlanner: () => 
         )}
       </button>
       {open && (
-        <div className="absolute right-0 mt-3 w-80 max-w-[calc(100vw-2rem)] rounded-xl border border-white/10 bg-card shadow-2xl p-4 z-50">
+        <div className="panel-card absolute right-0 z-50 mt-3 w-80 max-w-[calc(100vw-2rem)] p-4">
           <div className="flex items-center justify-between gap-3 mb-3">
             <p className="text-sm font-semibold text-white">Notifications</p>
             {total > 0 && <span className="text-xs text-amber-200">{total} active</span>}
@@ -146,7 +147,7 @@ function NotificationGroup({
   onOpenGrowthPlanner: (cardId: string) => void;
 }) {
   return (
-    <div className="rounded-lg border border-amber-400/20 bg-amber-400/10 overflow-hidden">
+    <div className="overflow-hidden rounded-lg border border-amber-400/20 bg-amber-400/10">
       <button
         type="button"
         onClick={onToggle}
@@ -192,7 +193,7 @@ function QuickActionCard({
   return (
     <button
       onClick={onClick}
-      className="group relative text-left w-full p-5 rounded-2xl border border-white/8 bg-background/40 hover:border-primary/30 hover:bg-primary/5 transition-all duration-200"
+      className="panel-card panel-hover group relative w-full p-5 text-left"
     >
       {badge && (
         <span className="absolute top-3 right-3 text-xs px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/20">{badge}</span>
@@ -208,11 +209,11 @@ function QuickActionCard({
 
 function StatCard({ label, value, sublabel, color }: { label: string; value: string | number; sublabel?: string; color?: string }) {
   return (
-    <div className="p-5 rounded-2xl border border-white/8 bg-background/40">
+    <PanelCard className="p-5">
       <p className="text-xs text-white/40 uppercase tracking-wider mb-1">{label}</p>
       <p className={`text-3xl font-bold font-mono ${color ?? "text-white"}`}>{value}</p>
       {sublabel && <p className="text-xs text-white/30 mt-1">{sublabel}</p>}
-    </div>
+    </PanelCard>
   );
 }
 
@@ -233,12 +234,14 @@ function Dashboard({ onNavigate, onUpgrade }: { onNavigate: (tab: TabId) => void
   const firstName = user?.name?.split(" ")[0] ?? user?.email?.split("@")[0] ?? "there";
 
   return (
-    <div className="space-y-10 max-w-5xl">
-      <div>
-        <h1 className="text-3xl font-display font-bold text-white">Welcome back, {firstName}</h1>
-        <p className="text-white/40 mt-1">Here's what's ready for you today.</p>
-      </div>
-      <div className="flex items-center gap-3 p-4 rounded-2xl border border-white/8 bg-background/40">
+    <PanelPage className="max-w-5xl space-y-8">
+      <PanelHeader className="md:block">
+        <div>
+          <PanelTitle>Welcome back, {firstName}</PanelTitle>
+          <PanelSubtitle>Here's what's ready for you today.</PanelSubtitle>
+        </div>
+      </PanelHeader>
+      <PanelCard className="flex items-center gap-3 p-4">
         <div className={`px-3 py-1 rounded-full text-xs font-bold border ${badgeClass}`}>{displayName}</div>
         <div className="flex-1">
           {isUnlimited ? (
@@ -261,12 +264,12 @@ function Dashboard({ onNavigate, onUpgrade }: { onNavigate: (tab: TabId) => void
         {!plan.isPaid && (
           <button
             onClick={onUpgrade}
-            className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-primary/20 text-primary border border-primary/30 hover:bg-primary/30 transition-all whitespace-nowrap"
+            className="rounded-lg border border-primary/30 bg-primary/14 px-3 py-1.5 text-xs font-semibold whitespace-nowrap text-primary transition-all hover:bg-primary/20"
           >
             Upgrade
           </button>
         )}
-      </div>
+      </PanelCard>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <StatCard label="Analyses used" value={used} sublabel="this month" />
         <StatCard label="Analyses left" value={isUnlimited ? "∞" : remaining} sublabel="this month" color={remaining === 0 ? "text-red-400" : "text-primary"} />
@@ -324,7 +327,7 @@ function Dashboard({ onNavigate, onUpgrade }: { onNavigate: (tab: TabId) => void
           )}
         </div>
       </div>
-      <div className="p-5 rounded-2xl border border-white/8 bg-gradient-to-r from-primary/5 to-purple-500/5">
+      <PanelCardSoft className="p-5">
         <p className="text-xs text-white/40 uppercase tracking-wider mb-3">What DayTabs can do</p>
         <div className="grid sm:grid-cols-2 gap-3">
           {[
@@ -344,8 +347,8 @@ function Dashboard({ onNavigate, onUpgrade }: { onNavigate: (tab: TabId) => void
             </div>
           ))}
         </div>
-      </div>
-    </div>
+      </PanelCardSoft>
+    </PanelPage>
   );
 }
 

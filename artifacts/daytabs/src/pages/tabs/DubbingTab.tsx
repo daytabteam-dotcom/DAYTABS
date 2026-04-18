@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Globe, Clock, Bell, Check, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { PanelPage, PanelHeader, PanelTitle, PanelSubtitle, PanelCard, PanelCardSoft, PanelEyebrow } from "@/components/panel-system";
 
 interface TabProps {
   onDataReady: () => void;
@@ -54,31 +55,31 @@ export default function DubbingTab({ onDataReset, onRegisterExport }: TabProps) 
   ];
 
   return (
-    <div className="max-w-4xl mx-auto py-8">
-      <div className="rounded-lg border border-white/8 bg-white/[0.025] p-6 md:p-8">
+    <PanelPage className="max-w-4xl py-8">
+      <PanelCard className="p-6 md:p-8">
         <div className="flex flex-col md:flex-row md:items-start justify-between gap-6">
           <div className="space-y-4 max-w-xl">
             <div className="flex items-center gap-3">
-              <div className="relative w-11 h-11 rounded-lg border border-white/10 bg-white/[0.04] flex items-center justify-center">
+              <div className="panel-card-soft relative flex h-11 w-11 items-center justify-center">
                 <Globe className="w-5 h-5 text-primary" />
                 <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-amber-300 text-amber-950 flex items-center justify-center">
                   <Clock className="w-3 h-3" />
                 </span>
               </div>
               <div>
-                <p className="text-xs uppercase tracking-wider text-white/35">Coming soon</p>
-                <h2 className="text-3xl font-bold text-white">AI Dubbing</h2>
+                <PanelEyebrow>Coming soon</PanelEyebrow>
+                <PanelTitle>AI Dubbing</PanelTitle>
               </div>
             </div>
-            <p className="text-white/50 text-sm leading-relaxed">
+            <PanelSubtitle className="mt-0">
               Translate and re-voice videos with natural AI voices while keeping timing and export quality predictable.
-            </p>
+            </PanelSubtitle>
             <div className="grid sm:grid-cols-2 gap-3">
               {features.map(f => (
-                <div key={f.label} className="flex items-center gap-3 rounded-lg border border-white/8 bg-background/40 p-3 text-sm text-white/60">
+                <PanelCardSoft key={f.label} className="flex items-center gap-3 p-3 text-sm text-white/60">
                   <Check className="w-4 h-4 text-primary shrink-0" />
                   {f.label}
-                </div>
+                </PanelCardSoft>
               ))}
             </div>
           </div>
@@ -98,10 +99,10 @@ export default function DubbingTab({ onDataReset, onRegisterExport }: TabProps) 
                   placeholder="your@email.com"
                   required
                   disabled={loading}
-                  className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-sm text-white placeholder-white/25 focus:outline-none focus:border-primary/45 transition-colors disabled:opacity-50"
+                  className="panel-input w-full px-4 py-3 disabled:opacity-50"
                 />
                 {error && <p className="text-xs text-red-400">{error}</p>}
-                <Button type="submit" disabled={loading} className="w-full rounded-lg bg-primary text-primary-foreground hover:bg-primary/90">
+                <Button type="submit" disabled={loading} className="w-full">
                   {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Bell className="w-4 h-4 mr-2" />}
                   {loading ? "Submitting..." : "Notify me"}
                 </Button>
@@ -109,7 +110,7 @@ export default function DubbingTab({ onDataReset, onRegisterExport }: TabProps) 
             )}
           </div>
         </div>
-      </div>
-    </div>
+      </PanelCard>
+    </PanelPage>
   );
 }

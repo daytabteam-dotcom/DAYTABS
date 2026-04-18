@@ -16,6 +16,7 @@ import { usePlan, getFileSizeLimitLabel, getDurationLimitLabel, FILE_SIZE_LIMITS
 import { PlanPickerModal } from "@/components/PlanPickerModal";
 import { generateAnalysisPDF } from "@/lib/generateAnalysisPDF";
 import { UpgradeErrorModal, type LimitError } from "@/components/UpgradeErrorModal";
+import { PanelPage, PanelHeader, PanelTitle, PanelSubtitle, PanelCard, PanelCardSoft } from "@/components/panel-system";
 
 interface TabProps {
   onDataReady: () => void;
@@ -1717,7 +1718,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
   const showHistoryLanding = !hasResults && !showAnalyzing && !isError && hasHistory && !showUploadForm;
 
   return (
-    <div className="space-y-8">
+    <PanelPage className="space-y-8">
       {showPlanModal && <PlanPickerModal onClose={() => setShowPlanModal(false)} />}
       <UpgradeErrorModal error={limitError} onClose={() => setLimitError(null)} />
       {showLimitModal && (
@@ -1729,10 +1730,10 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
       )}
       {showHistoryLanding ? (
         <section className="space-y-6">
-          <div className="flex items-center justify-between gap-4 flex-wrap">
+          <PanelHeader className="flex-wrap gap-4">
             <div>
-              <h1 className="text-3xl font-display font-bold text-white">Video Analyzer</h1>
-              <p className="text-white/50 mt-2">Open a recent report or reconnect to work still in progress.</p>
+              <PanelTitle>Video Analyzer</PanelTitle>
+              <PanelSubtitle>Open a recent report or reconnect to work still in progress.</PanelSubtitle>
             </div>
             <button
               type="button"
@@ -1745,7 +1746,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
               <Upload className="w-4 h-4" />
               New Analysis
             </button>
-          </div>
+          </PanelHeader>
           <div className="flex justify-end">
             <button
               type="button"
@@ -1767,10 +1768,10 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
         </section>
       ) : !hasResults && !showAnalyzing && !isError ? (
         <>
-          <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+          <PanelHeader className="gap-4">
             <div>
-              <h1 className="text-3xl font-display font-bold text-white">Video Analyzer</h1>
-              <p className="text-white/50 mt-2 max-w-2xl">Upload a raw talking video for quality scores, editing tips, script insights, and a publish package.</p>
+              <PanelTitle>Video Analyzer</PanelTitle>
+              <PanelSubtitle className="max-w-2xl">Upload a raw talking video for quality scores, editing tips, script insights, and a publish package.</PanelSubtitle>
             </div>
             {hasHistory && (
               <button
@@ -1782,7 +1783,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
                 Refresh history
               </button>
             )}
-          </div>
+          </PanelHeader>
 
           <div className="grid lg:grid-cols-3 gap-5">
             <div className="lg:col-span-2 space-y-5">
@@ -1801,7 +1802,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
                 </p>
               </div>
 
-              <div className="rounded-lg border border-white/8 bg-white/[0.025] p-4">
+              <PanelCard className="p-4">
                 <p className="text-xs text-white/40 uppercase tracking-wider mb-3 flex items-center gap-2">
                   <TrendingUp className="w-3.5 h-3.5" />Target platform
                 </p>
@@ -1819,10 +1820,10 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
                     );
                   })}
                 </div>
-              </div>
+              </PanelCard>
             </div>
 
-            <div className="space-y-4 rounded-lg border border-white/8 bg-white/[0.025] p-4 self-start">
+            <PanelCard className="space-y-4 self-start p-4">
               <p className="text-xs text-white/40 uppercase tracking-wider flex items-center gap-2">
                 <Wand2 className="w-3.5 h-3.5" />Analysis modules
               </p>
@@ -1835,7 +1836,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
                     <button
                       key={mod.id}
                       onClick={() => toggleModule(mod.id, locked)}
-                      className={`w-full flex items-center gap-3 p-3 rounded-lg text-left transition-all border ${active && !locked ? `${MODULE_COLORS[mod.color]} border-opacity-40` : locked ? "bg-white/3 border-white/8 opacity-60" : "bg-white/3 border-white/8 hover:border-white/15"}`}
+                      className={`w-full flex items-center gap-3 p-3 rounded-lg text-left transition-all border ${active && !locked ? `${MODULE_COLORS[mod.color]} border-opacity-40` : locked ? "panel-card-soft opacity-60" : "panel-card-soft panel-hover"}`}
                     >
                       <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${active && !locked ? MODULE_COLORS[mod.color] : "bg-white/5"}`}>
                         {locked ? <Lock className="w-4 h-4 text-white/30" /> : <Icon className="w-4 h-4" />}
@@ -1875,7 +1876,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
                   </button>
                 )}
               </div>
-            </div>
+            </PanelCard>
           </div>
 
           {!hasHistory && (
@@ -1980,6 +1981,6 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
           )}
         </div>
       ) : null}
-    </div>
+    </PanelPage>
   );
 }
