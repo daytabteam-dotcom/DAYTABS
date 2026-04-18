@@ -20,6 +20,13 @@ if (!JWT_SECRET) {
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
 const CORE_APP_URL = process.env.CORE_APP_URL || "/panel/";
+const CANONICAL_APP_ORIGIN = (
+  process.env.APP_URL ||
+  process.env.BASE_URL ||
+  process.env.NEXT_PUBLIC_URL ||
+  "https://daytabs.com"
+).replace(/\/$/, "");
+const RENDER_HOST = "daytabs.onrender.com";
 
 function getPublicBaseUrl(req: import("express").Request): string {
   const forwarded = req.get("x-forwarded-host");
@@ -46,6 +53,12 @@ function appendRedirectParam(path: string, key: string, value: string): string {
   const url = new URL(path, "https://daytabs.local");
   url.searchParams.set(key, value);
   return `${url.pathname}${url.search}${url.hash}`;
+}
+
+function getAppRedirect(req: import("express").Request, path: string): string {
+  const host = (req.get("x-forwarded-host") || req.get("host") || "").split(",")[0].trim();
+  if (host === RENDER_HOST) return `${CANONICAL_APP_ORIGIN}${path}`;
+  return path;
 }
 
 function signToken(userId: number, email: string, name?: string | null, plan = "free") {
@@ -132,16 +145,16 @@ router.get("/google", (req, res) => {
 router.get("/google/callback", async (req, res) => {
   try {
     const coreAppPath = getCoreAppPath();
-    if (!GOOGLE_CLIENT_ID) { res.redirect(appendRedirectParam(coreAppPath, "error", "google_not_configured")); return; }
+    if (!GOOGLE_CLIENT_ID) { res.redirect(getAppRedirect(req, appendRedirectParam(coreAppPath, "error", "google_not_configured"))); return; }
     const { code } = req.query as { code?: string };
-    if (!code) { res.redirect(appendRedirectParam(coreAppPath, "error", "no_code")); return; }
+    if (!code) { res.redirect(getAppRedirect(req, appendRedirectParam(coreAppPath, "error", "no_code"))); return; }
     const client = new OAuth2Client(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET);
     const redirectUri = getGoogleRedirectUri(req);
     const { tokens } = await client.getToken({ code, redirect_uri: redirectUri });
     client.setCredentials(tokens);
     const ticket = await client.verifyIdToken({ idToken: tokens.id_token!, audience: GOOGLE_CLIENT_ID });
     const payload = ticket.getPayload();
-    if (!payload?.email) { res.redirect(appendRedirectParam(coreAppPath, "error", "no_email")); return; }
+    if (!payload?.email) { res.redirect(getAppRedirect(req, appendRedirectParam(coreAppPath, "error", "no_email"))); return; }
     let [user] = await db.select().from(usersTable).where(eq(usersTable.email, payload.email)).limit(1);
     if (!user) {
       [user] = await db.insert(usersTable).values({ email: payload.email, name: payload.name || null, googleId: payload.sub }).returning();
@@ -149,10 +162,10 @@ router.get("/google/callback", async (req, res) => {
       await db.update(usersTable).set({ googleId: payload.sub }).where(eq(usersTable.id, user.id));
     }
     const token = signToken(user.id, user.email, user.name, user.plan);
-    res.redirect(appendRedirectParam(coreAppPath, "token", token));
+    res.redirect(getAppRedirect(req, appendRedirectParam(coreAppPath, "token", token)));
   } catch (err) {
     req.log.error({ err }, "Google OAuth callback error");
-    res.redirect(appendRedirectParam(getCoreAppPath(), "error", "oauth_failed"));
+    res.redirect(getAppRedirect(req, appendRedirectParam(getCoreAppPath(), "error", "oauth_failed")));
   }
 });
 

@@ -10,6 +10,30 @@ const app: Express = express();
 
 app.set("trust proxy", true);
 
+const CANONICAL_APP_ORIGIN = (
+  process.env.APP_URL ||
+  process.env.BASE_URL ||
+  process.env.NEXT_PUBLIC_URL ||
+  "https://daytabs.com"
+).replace(/\/$/, "");
+const RENDER_HOST = "daytabs.onrender.com";
+
+app.use((req, res, next) => {
+  const host = (req.get("x-forwarded-host") || req.get("host") || "").split(",")[0].trim();
+  const callbackPath = "/api/auth/google/callback";
+  const shouldRedirect =
+    host === RENDER_HOST &&
+    (req.method === "GET" || req.method === "HEAD") &&
+    req.path !== callbackPath;
+
+  if (shouldRedirect) {
+    res.redirect(308, `${CANONICAL_APP_ORIGIN}${req.originalUrl}`);
+    return;
+  }
+
+  next();
+});
+
 app.use(
   pinoHttp({
     logger,
@@ -35,6 +59,7 @@ const configuredCorsOrigins = (process.env.CORS_ALLOWED_ORIGINS || "")
   .map((origin) => origin.trim())
   .filter(Boolean);
 const allowedCorsOrigins = new Set([
+  CANONICAL_APP_ORIGIN,
   "https://www.daytabs.com",
   "https://daytabs.com",
   ...configuredCorsOrigins,
