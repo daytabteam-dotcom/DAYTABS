@@ -8,6 +8,8 @@ import { logger } from "./lib/logger";
 
 const app: Express = express();
 
+app.set("trust proxy", true);
+
 app.use(
   pinoHttp({
     logger,
@@ -27,7 +29,30 @@ app.use(
     },
   }),
 );
-app.use(cors());
+
+const configuredCorsOrigins = (process.env.CORS_ALLOWED_ORIGINS || "")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+const allowedCorsOrigins = new Set([
+  "https://www.daytabs.com",
+  "https://daytabs.com",
+  ...configuredCorsOrigins,
+]);
+
+app.use(
+  cors({
+    origin(origin, callback) {
+      if (!origin || configuredCorsOrigins.length === 0 || allowedCorsOrigins.has(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error("Not allowed by CORS"));
+    },
+    credentials: true,
+  }),
+);
 
 // Body parsing middleware - applied to all routes except multipart uploads
 app.use((req, res, next) => {

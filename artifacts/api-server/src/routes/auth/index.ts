@@ -24,17 +24,30 @@ const CORE_APP_URL = process.env.CORE_APP_URL || "/panel/";
 function getPublicBaseUrl(req: import("express").Request): string {
   const forwarded = req.get("x-forwarded-host");
   if (forwarded) return `${req.get("x-forwarded-proto") || "https"}://${forwarded}`;
-  const replitDomains = (process.env.REPLIT_DOMAINS || "").split(",").map(d => d.trim()).filter(Boolean);
-  const replitDomain = process.env.NODE_ENV === "production"
-    ? replitDomains[0]
-    : (process.env.REPLIT_DEV_DOMAIN || replitDomains[0]);
-  if (replitDomain) return `https://${replitDomain}`;
   return `${req.protocol}://${req.get("host")}`;
 }
 
 function getGoogleRedirectUri(req: import("express").Request): string {
-  if (process.env.GOOGLE_REDIRECT_URI) return process.env.GOOGLE_REDIRECT_URI;
-  return `${getPublicBaseUrl(req)}/api/auth/google/callback`;
+  const configuredRedirectUri = process.env.GOOGLE_REDIRECT_URI;
+  const callbackPath = configuredRedirectUri
+    ? new URL(configuredRedirectUri, "https://daytabs.local").pathname
+    : "/api/auth/google/callback";
+  return `${getPublicBaseUrl(req)}${callbackPath}`;
+}
+
+function getCoreAppPath(): string {
+  try {
+    const url = new URL(CORE_APP_URL);
+    return `${url.pathname}${url.search}${url.hash}` || "/panel/";
+  } catch {
+    return CORE_APP_URL || "/panel/";
+  }
+}
+
+function appendRedirectParam(path: string, key: string, value: string): string {
+  const url = new URL(path, "https://daytabs.local");
+  url.searchParams.set(key, value);
+  return `${url.pathname}${url.search}${url.hash}`;
 }
 
 function signToken(userId: number, email: string, name?: string | null, plan = "free") {
@@ -120,16 +133,17 @@ router.get("/google", (req, res) => {
 
 router.get("/google/callback", async (req, res) => {
   try {
-    if (!GOOGLE_CLIENT_ID) { res.redirect(`${CORE_APP_URL}?error=google_not_configured`); return; }
+    const coreAppPath = getCoreAppPath();
+    if (!GOOGLE_CLIENT_ID) { res.redirect(appendRedirectParam(coreAppPath, "error", "google_not_configured")); return; }
     const { code } = req.query as { code?: string };
-    if (!code) { res.redirect(`${CORE_APP_URL}?error=no_code`); return; }
+    if (!code) { res.redirect(appendRedirectParam(coreAppPath, "error", "no_code")); return; }
     const client = new OAuth2Client(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET);
     const redirectUri = getGoogleRedirectUri(req);
     const { tokens } = await client.getToken({ code, redirect_uri: redirectUri });
     client.setCredentials(tokens);
     const ticket = await client.verifyIdToken({ idToken: tokens.id_token!, audience: GOOGLE_CLIENT_ID });
     const payload = ticket.getPayload();
-    if (!payload?.email) { res.redirect(`${CORE_APP_URL}?error=no_email`); return; }
+    if (!payload?.email) { res.redirect(appendRedirectParam(coreAppPath, "error", "no_email")); return; }
     let [user] = await db.select().from(usersTable).where(eq(usersTable.email, payload.email)).limit(1);
     if (!user) {
       [user] = await db.insert(usersTable).values({ email: payload.email, name: payload.name || null, googleId: payload.sub }).returning();
@@ -137,11 +151,10 @@ router.get("/google/callback", async (req, res) => {
       await db.update(usersTable).set({ googleId: payload.sub }).where(eq(usersTable.id, user.id));
     }
     const token = signToken(user.id, user.email, user.name, user.plan);
-    const destination = CORE_APP_URL.endsWith("/") ? CORE_APP_URL : `${CORE_APP_URL}/`;
-    res.redirect(`${destination}?token=${token}`);
+    res.redirect(appendRedirectParam(coreAppPath, "token", token));
   } catch (err) {
     req.log.error({ err }, "Google OAuth callback error");
-    res.redirect(`${CORE_APP_URL}?error=oauth_failed`);
+    res.redirect(appendRedirectParam(getCoreAppPath(), "error", "oauth_failed"));
   }
 });
 
