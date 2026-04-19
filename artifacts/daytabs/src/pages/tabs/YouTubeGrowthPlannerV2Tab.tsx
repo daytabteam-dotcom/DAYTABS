@@ -1148,6 +1148,16 @@ function deriveFriendlyLeaderboardMessage(weeklyComparison: NonNullable<ReturnTy
   return `${competitor.name} is ahead by ${formatNumber(Math.abs(viewGap))} views and ${Math.abs(uploadGap)} upload${Math.abs(uploadGap) === 1 ? "" : "s"} this week. One well-timed upload can still close a meaningful part of that gap.`;
 }
 
+function uploadReviewPrompt(video: RecentVideo, matchingIdeas: PlanDay[]) {
+  if (matchingIdeas.length === 0) {
+    return "No planned ideas exist on this publish date yet. Save this upload as a new idea so your week stays complete.";
+  }
+  if (matchingIdeas.length === 1) {
+    return "We found one planned idea on this publish date. Link it if this upload matches, or save it as a new idea instead.";
+  }
+  return `We found ${matchingIdeas.length} planned ideas on this publish date. Choose the one this upload belongs to, or save it as a new idea.`;
+}
+
 function deriveCompetitorGapSummary(ownAverageViews: number, competitorRows: Array<ReturnType<typeof deriveCompetitorRows>[number]>) {
   const actionable = [...competitorRows]
     .filter((row) => row.averageViews > ownAverageViews)
@@ -2787,9 +2797,9 @@ export default function YouTubeGrowthPlannerV2Tab() {
     <PanelCard className="border-emerald-300/15 bg-[radial-gradient(circle_at_top_left,rgba(52,211,153,0.18),transparent_38%),linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0.01))] p-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-emerald-100/70">To do</p>
-          <h3 className="mt-2 text-xl font-semibold text-white">You have uploads to sort into this week&apos;s plan</h3>
-          <p className="mt-1 text-sm text-white/55">These videos are live in the current scheduled week, but they are not linked to an idea yet. Match them to a planned card or save them as new ideas so your week stays accurate.</p>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-emerald-100/70">Action queue</p>
+          <h3 className="mt-2 text-xl font-semibold text-white">Sort this week&apos;s unlinked uploads</h3>
+          <p className="mt-1 max-w-3xl text-sm text-white/55">These videos are already live in the current schedule week, but they are not attached to an idea yet. Clearing this list keeps your plan accurate and makes the rest of the week easier to trust.</p>
           <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-emerald-300/20 bg-emerald-400/10 px-3 py-1 text-xs text-emerald-100">
             <CheckCircle2 className="h-3.5 w-3.5" />
             {unlinkedWeekVideos.length} upload{unlinkedWeekVideos.length === 1 ? "" : "s"} waiting for review
@@ -2800,19 +2810,38 @@ export default function YouTubeGrowthPlannerV2Tab() {
           Refresh uploads
         </Button>
       </div>
+      <div className="mt-5 grid gap-3 md:grid-cols-3">
+        {[
+          { label: "Review uploads", value: unlinkedWeekVideos.length, caption: "Videos need a decision", tone: "border-white/10 bg-white/[0.04] text-white" },
+          { label: "Link to plan", value: unlinkedWeekVideos.filter((video) => (daysByDate.get(video.publishedAt?.slice(0, 10) ?? "") ?? []).some((day) => !resultsByDay.has(day.day))).length, caption: "Can match an existing idea", tone: "border-emerald-300/20 bg-emerald-400/10 text-emerald-100" },
+          { label: "Create new idea", value: unlinkedWeekVideos.filter((video) => !(daysByDate.get(video.publishedAt?.slice(0, 10) ?? "") ?? []).some((day) => !resultsByDay.has(day.day))).length, caption: "No plan card found yet", tone: "border-amber-300/20 bg-amber-400/10 text-amber-100" },
+        ].map((item) => (
+          <PanelCardSoft key={item.label} className={cn("border p-4", item.tone)}>
+            <p className="text-[11px] uppercase tracking-[0.16em] opacity-70">{item.label}</p>
+            <p className="mt-2 text-2xl font-semibold">{item.value}</p>
+            <p className="mt-1 text-xs opacity-75">{item.caption}</p>
+          </PanelCardSoft>
+        ))}
+      </div>
       <div className="mt-5 space-y-4">
-        {unlinkedWeekVideos.map((video) => {
+        {unlinkedWeekVideos.map((video, index) => {
           const videoDate = video.publishedAt?.slice(0, 10) ?? "";
           const matchingIdeas = (daysByDate.get(videoDate) ?? []).filter((day) => !resultsByDay.has(day.day));
           return (
             <PanelCardSoft key={video.id} className="border border-white/10 p-4 transition-all hover:-translate-y-0.5 hover:bg-white/[0.05]">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs text-white/65">
+                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-400/15 text-emerald-100">{index + 1}</span>
+                  Review upload
+                </div>
+                <span className="text-xs text-white/45">{formatIsoDate(video.publishedAt)} · {formatNumber(video.viewCount)} views</span>
+              </div>
               <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                 <div className="flex min-w-0 items-start gap-3">
                   {video.thumbnailUrl ? <img src={video.thumbnailUrl} alt="" className="h-20 w-32 rounded-xl object-cover" /> : <div className="flex h-20 w-32 items-center justify-center rounded-xl bg-white/[0.05]"><Play className="h-5 w-5 text-white/50" /></div>}
                   <div className="min-w-0">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/35">{formatIsoDate(video.publishedAt)} · {formatNumber(video.viewCount)} views</p>
                     <p className="mt-2 line-clamp-2 text-base font-semibold text-white">{video.title}</p>
-                    <p className="mt-1 text-sm text-white/50">Was this one of your planned ideas for that day?</p>
+                    <p className="mt-1 text-sm text-white/50">{uploadReviewPrompt(video, matchingIdeas)}</p>
                   </div>
                 </div>
                 <Button className="rounded-lg bg-white text-black hover:bg-white/90" onClick={() => void addUploadedVideoAsIdea(video)}>
@@ -2833,7 +2862,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
                     {day.hook && day.hook !== day.contentIdea ? <p className="mt-1 text-white/55">{day.hook}</p> : null}
                   </button>
                 ))}
-                {!matchingIdeas.length ? <div className="rounded-xl border border-dashed border-white/10 px-4 py-3 text-sm text-white/45">No planned cards exist on this publish date yet. Save it as a new idea to keep the week complete.</div> : null}
+                {!matchingIdeas.length ? <div className="rounded-xl border border-dashed border-white/10 px-4 py-3 text-sm text-white/45">No matching plan card was found for this date. The easiest next step is saving it as a new idea.</div> : null}
               </div>
             </PanelCardSoft>
           );
