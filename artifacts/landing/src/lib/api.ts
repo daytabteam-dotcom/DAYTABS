@@ -1,4 +1,6 @@
-const API_BASE = "/api/auth";
+import { getCoreAppUrl, withApiBase } from "./runtime";
+
+const API_BASE = withApiBase("/api/auth");
 
 export interface AuthResponse {
   token: string;
@@ -41,7 +43,4 @@ export const authApi = {
   googleLoginUrl: () => `${API_BASE}/google`,
 };
 
-export function getCoreAppUrl(token?: string): string {
-  const base = "/panel/";
-  return token ? `${base}?token=${token}` : base;
-}
+export { getCoreAppUrl };

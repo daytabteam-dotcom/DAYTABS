@@ -69,6 +69,7 @@ interface YoutubeSettings {
 
 type IdeaOrigin = "ai" | "manual";
 type IdeaFeedback = "liked" | "disliked" | null;
+type SignalSource = "performance" | "feedback" | "competitor" | "trend" | "channel_gap" | "low_signal";
 type PlanDayPatch = Partial<{
   date: string;
   stage: string;
@@ -87,6 +88,48 @@ type PlanDayPatch = Partial<{
   isDeleted: boolean;
   deletedAt: string | null;
 }>;
+
+interface StoredLikedIdeaFeedback {
+  topic: string;
+  format: string;
+  signalSource: string;
+}
+
+interface StoredDislikedIdeaFeedback {
+  titleConcept: string;
+  format: string;
+}
+
+interface StoredDeletedIdeaFeedback {
+  concept: string;
+  reason: string;
+}
+
+interface StoredIdeaFeedbackSummary {
+  liked: StoredLikedIdeaFeedback[];
+  disliked: StoredDislikedIdeaFeedback[];
+  deleted: StoredDeletedIdeaFeedback[];
+}
+
+interface PreviousPerformanceResultPayload {
+  plannedTitle: string;
+  videoUrl: string;
+  videoId: string;
+  fetchedAt: string | null;
+  publishedAt: string | null;
+  publishedDay: string | null;
+  metrics: JsonRecord;
+  channelAverages: {
+    ctr: number | null;
+    views: number | null;
+    watchTime: number | null;
+  };
+  linkedIdeaFeedback: {
+    aiFeedback: IdeaFeedback;
+    wasDeleted: boolean;
+  };
+  ideaFeedbackSummary: StoredIdeaFeedbackSummary;
+}
 
 interface YoutubeAnalyticsPoint {
   date: string;
@@ -245,6 +288,13 @@ function asString(value: unknown): string | null {
   return typeof value === "string" ? value : value == null ? null : String(value);
 }
 
+function extractJSON(raw: string): string {
+  const start = raw.indexOf("{");
+  const end = raw.lastIndexOf("}");
+  if (start === -1 || end === -1) throw new Error("No JSON found in response");
+  return raw.slice(start, end + 1);
+}
+
 function parseNumber(value: unknown) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -399,6 +449,178 @@ function normalizePlanDayRecord(day: JsonRecord, fallbackIndex: number) {
     isDeleted: Boolean(day.isDeleted),
     deletedAt: asString(day.deletedAt),
   };
+}
+
+function normalizeStoredIdeaFeedbackSummary(value: unknown): StoredIdeaFeedbackSummary {
+  const record = asRecord(value);
+  const liked = asArray(record.liked)
+    .map((item) => {
+      const entry = asRecord(item);
+      return {
+        topic: asString(entry.topic)?.trim() || "",
+        format: asString(entry.format)?.trim() || "",
+        signalSource: asString(entry.signalSource)?.trim() || "",
+      } satisfies StoredLikedIdeaFeedback;
+    })
+    .filter((item) => item.topic);
+  const disliked = asArray(record.disliked)
+    .map((item) => {
+      const entry = asRecord(item);
+      return {
+        titleConcept: asString(entry.titleConcept)?.trim() || "",
+        format: asString(entry.format)?.trim() || "",
+      } satisfies StoredDislikedIdeaFeedback;
+    })
+    .filter((item) => item.titleConcept);
+  const deleted = asArray(record.deleted)
+    .map((item) => {
+      const entry = asRecord(item);
+      return {
+        concept: asString(entry.concept)?.trim() || "",
+        reason: asString(entry.reason)?.trim() || "deleted_by_user",
+      } satisfies StoredDeletedIdeaFeedback;
+    })
+    .filter((item) => item.concept);
+  return { liked, disliked, deleted };
+}
+
+function dedupeByKey<T>(items: T[], keyOf: (item: T) => string) {
+  const seen = new Set<string>();
+  const deduped: T[] = [];
+  for (const item of items) {
+    const key = keyOf(item);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(item);
+  }
+  return deduped;
+}
+
+function inferIdeaFormat(day: JsonRecord) {
+  const explicit = asString(day.format)?.trim();
+  if (explicit) return explicit;
+  const text = [asString(day.contentIdea), asString(day.hook), asString(day.rationale)].filter(Boolean).join(" ");
+  return contentTypeFromText(text || "");
+}
+
+function inferIdeaSignalSource(day: JsonRecord): SignalSource {
+  const value = asString(day.signalSource);
+  if (
+    value === "performance"
+    || value === "feedback"
+    || value === "competitor"
+    || value === "trend"
+    || value === "channel_gap"
+    || value === "low_signal"
+  ) return value;
+  return "feedback";
+}
+
+function summarizeIdeaConcept(day: JsonRecord) {
+  const title = asString(day.contentIdea)?.trim() || asString(day.title)?.trim() || "Untitled idea";
+  const keyword = asString(day.targetKeyword)?.trim();
+  const format = inferIdeaFormat(day);
+  if (keyword && format) return `${keyword} ${format}`.trim();
+  const parts = title.split(/[-:|]/).map((part) => part.trim()).filter(Boolean);
+  return (parts[0] || title).slice(0, 120);
+}
+
+function feedbackSummaryFromPlans(plans: Array<typeof youtubeWeeklyPlansTable.$inferSelect>) {
+  const liked = plans.flatMap((plan) => {
+    const days = asPlanDays(asArray(asRecord(plan.plan).days));
+    return days.flatMap((day) => {
+      if (normalizeIdeaOrigin(day.ideaOrigin) !== "ai" || normalizeIdeaFeedback(day.aiFeedback) !== "liked") return [];
+      return [{
+        topic: summarizeIdeaConcept(day),
+        format: inferIdeaFormat(day),
+        signalSource: inferIdeaSignalSource(day),
+      } satisfies StoredLikedIdeaFeedback];
+    });
+  });
+
+  const disliked = plans.flatMap((plan) => {
+    const days = asPlanDays(asArray(asRecord(plan.plan).days));
+    return days.flatMap((day) => {
+      if (normalizeIdeaOrigin(day.ideaOrigin) !== "ai" || normalizeIdeaFeedback(day.aiFeedback) !== "disliked") return [];
+      return [{
+        titleConcept: asString(day.contentIdea)?.trim() || summarizeIdeaConcept(day),
+        format: inferIdeaFormat(day),
+      } satisfies StoredDislikedIdeaFeedback];
+    });
+  });
+
+  const deleted = plans.flatMap((plan) => {
+    const days = asPlanDays(asArray(asRecord(plan.plan).days));
+    return days.flatMap((day) => {
+      if (normalizeIdeaOrigin(day.ideaOrigin) !== "ai" || !Boolean(day.isDeleted)) return [];
+      return [{
+        concept: summarizeIdeaConcept(day),
+        reason: "deleted_by_user",
+      } satisfies StoredDeletedIdeaFeedback];
+    });
+  });
+
+  return {
+    liked: dedupeByKey(liked.reverse(), (item) => `${item.topic}|${item.format}|${item.signalSource}`).slice(0, 30),
+    disliked: dedupeByKey(disliked.reverse(), (item) => `${item.titleConcept}|${item.format}`).slice(0, 30),
+    deleted: dedupeByKey(deleted.reverse(), (item) => `${item.concept}|${item.reason}`).slice(0, 40),
+  } satisfies StoredIdeaFeedbackSummary;
+}
+
+function mergeIdeaFeedbackSummary(
+  stored: StoredIdeaFeedbackSummary,
+  inferred: StoredIdeaFeedbackSummary,
+): StoredIdeaFeedbackSummary {
+  return {
+    liked: dedupeByKey([...stored.liked, ...inferred.liked].reverse(), (item) => `${item.topic}|${item.format}|${item.signalSource}`).slice(0, 30),
+    disliked: dedupeByKey([...stored.disliked, ...inferred.disliked].reverse(), (item) => `${item.titleConcept}|${item.format}`).slice(0, 30),
+    deleted: dedupeByKey([...stored.deleted, ...inferred.deleted].reverse(), (item) => `${item.concept}|${item.reason}`).slice(0, 40),
+  };
+}
+
+async function getPersistedIdeaFeedbackSummary(
+  userId: number,
+  profile?: typeof youtubeChannelProfilesTable.$inferSelect | null,
+  plans?: Array<typeof youtubeWeeklyPlansTable.$inferSelect>,
+) {
+  const loadedProfile = profile ?? (await db.select().from(youtubeChannelProfilesTable).where(eq(youtubeChannelProfilesTable.userId, userId)).limit(1))[0] ?? null;
+  const loadedPlans = plans ?? await db.select().from(youtubeWeeklyPlansTable).where(eq(youtubeWeeklyPlansTable.userId, userId)).orderBy(desc(youtubeWeeklyPlansTable.weekNumber));
+  const stored = normalizeStoredIdeaFeedbackSummary(asRecord(loadedProfile).ideaFeedbackSummary);
+  const inferred = feedbackSummaryFromPlans(loadedPlans);
+  return mergeIdeaFeedbackSummary(stored, inferred);
+}
+
+async function persistIdeaFeedbackSummary(
+  userId: number,
+  mutate: (summary: StoredIdeaFeedbackSummary) => StoredIdeaFeedbackSummary,
+) {
+  const [profile] = await db.select().from(youtubeChannelProfilesTable).where(eq(youtubeChannelProfilesTable.userId, userId)).limit(1);
+  if (!profile) return null;
+  const nextSummary = mutate(normalizeStoredIdeaFeedbackSummary(asRecord(profile).ideaFeedbackSummary));
+  const [updated] = await db.update(youtubeChannelProfilesTable)
+    .set({
+      ideaFeedbackSummary: nextSummary,
+      updatedAt: new Date(),
+    } as any)
+    .where(eq(youtubeChannelProfilesTable.userId, userId))
+    .returning();
+  return updated ?? { ...profile, ideaFeedbackSummary: nextSummary };
+}
+
+function metricsHasLinkedSignal(metrics: JsonRecord) {
+  return ["impressionClickThroughRate", "views", "estimatedMinutesWatched", "watchTime", "watch_time_minutes"]
+    .some((key) => {
+      const value = metrics[key];
+      return value !== null && value !== undefined && Number.isFinite(Number(value));
+    });
+}
+
+function averageMetric(results: Array<{ metrics: JsonRecord }>, key: string) {
+  const values = results
+    .map((result) => Number(result.metrics[key]))
+    .filter((value) => Number.isFinite(value));
+  if (!values.length) return null;
+  return Math.round((values.reduce((sum, value) => sum + value, 0) / values.length) * 100) / 100;
 }
 
 function derivePerformanceSignals(
@@ -656,7 +878,7 @@ function derivePerformanceSignals(
 }
 
 function parseAiJson(raw: string) {
-  return JSON.parse(raw.trim().replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/i, ""));
+  return JSON.parse(extractJSON(raw));
 }
 
 async function readCache<T>(cacheKey: string): Promise<T | null> {
@@ -894,11 +1116,35 @@ async function searchChannelIds(userId: number, query: string, maxResults = 25) 
 
 async function analyzeNiche(channel: JsonRecord, recentVideos: YoutubeRecentVideo[]): Promise<YoutubeNicheProfile> {
   const completion = await openai.chat.completions.create({
-    model: "gpt-4o",
+    model: "gpt-4o-mini",
     messages: [
       {
         role: "system",
-        content: "Analyze a YouTube channel from real channel/video data. Return JSON only with niche, contentStyle, tone, targetAudience, keywords, and summary. Do not invent metrics.",
+        content: `You are a YouTube channel analyst. Your job is to extract an accurate, evidence-based profile of a channel from real data — not to flatter or describe it generically.
+Analyze the channel data and recent videos provided. Return a JSON object only — no preamble, no explanation, no markdown.
+Rules:
+
+Base every field strictly on what the data shows. If a field cannot be determined from the data, use null.
+Do not use generic phrases like "engaging content" or "quality videos."
+keywords must be actual words/phrases from real video titles and descriptions — not invented.
+contentStyle must describe what the creator actually does (e.g. "talking-head tutorials under 10 minutes", "vlog-style product reviews", "faceless screencast walkthroughs") — not what they claim to do.
+tone must be inferred from titles and descriptions — look for patterns like humor markers, urgency words, personal pronouns, or instructional language.
+uploadCadence: calculate average days between the last 10 uploads. Express as a number.
+topFormats: look at the 5 highest-view videos. What do they have in common structurally? (e.g. listicles, tutorials, challenges, reaction, story-time)
+If the channel has fewer than 5 videos, set dataConfidence to "low".
+
+Return shape:
+{
+"niche": string,
+"contentStyle": string,
+"tone": string,
+"targetAudience": string,
+"keywords": string[],
+"topFormats": string[],
+"uploadCadence": number | null,
+"summary": string,
+"dataConfidence": "low" | "medium" | "high"
+}`,
       },
       {
         role: "user",
@@ -917,7 +1163,10 @@ async function analyzeNiche(channel: JsonRecord, recentVideos: YoutubeRecentVide
     targetAudience: asString(parsed.targetAudience) || "YouTube viewers interested in this topic",
     keywords: asArray(parsed.keywords).map((item) => String(item)).filter(Boolean).slice(0, 8),
     summary: asString(parsed.summary) || "Niche analysis generated from connected YouTube data.",
-  };
+    topFormats: asArray(parsed.topFormats).map((item) => String(item)).filter(Boolean).slice(0, 5),
+    uploadCadence: parsed.uploadCadence == null ? null : parseNumber(parsed.uploadCadence),
+    dataConfidence: asString(parsed.dataConfidence) || "medium",
+  } as YoutubeNicheProfile;
 }
 
 export async function syncYoutubeChannel(userId: number) {
@@ -1289,16 +1538,99 @@ async function channelAnalyticsTimeline(userId: number) {
 async function previousPerformanceSummary(userId: number) {
   const results = await db.select().from(youtubePlanResultsTable).where(eq(youtubePlanResultsTable.userId, userId)).orderBy(desc(youtubePlanResultsTable.fetchedAt));
   if (!results.length) return null;
-  const compact = results.map((result) => ({
-    plannedTitle: result.plannedTitle,
-    videoUrl: result.videoUrl,
-    metrics: result.metrics,
-  }));
+  const [profile] = await db.select().from(youtubeChannelProfilesTable).where(eq(youtubeChannelProfilesTable.userId, userId)).limit(1);
+  const plans = await db.select().from(youtubeWeeklyPlansTable).where(eq(youtubeWeeklyPlansTable.userId, userId)).orderBy(desc(youtubeWeeklyPlansTable.weekNumber));
+  const recentVideos = Array.isArray(profile?.recentVideos) ? profile.recentVideos.map((video) => asRecord(video)) : [];
+  const publishedByVideoId = new Map<string, { publishedAt: string | null; publishedDay: string | null }>(
+    recentVideos.flatMap((video) => {
+      const id = asString(video.id);
+      const publishedAt = asString(video.publishedAt);
+      if (!id) return [];
+      return [[id, {
+        publishedAt,
+        publishedDay: publishedAt ? getDayNameForIso(publishedAt.slice(0, 10)) : null,
+      }] as const];
+    }),
+  );
+  const ideaFeedbackSummary = await getPersistedIdeaFeedbackSummary(userId, profile, plans);
+  const filteredResults: PreviousPerformanceResultPayload[] = results
+    .map((result) => {
+      const metrics = asRecord(result.metrics);
+      const linkedPublish = publishedByVideoId.get(result.videoId);
+      const plan = plans.find((item) => item.id === result.planId);
+      const matchingDay = plan
+        ? asPlanDays(asArray(asRecord(plan.plan).days)).find((day) => parsePlanDayIndex(day.day, -1) === result.dayIndex)
+        : null;
+      return {
+        plannedTitle: result.plannedTitle,
+        videoUrl: result.videoUrl,
+        videoId: result.videoId,
+        fetchedAt: result.fetchedAt?.toISOString?.() ?? null,
+        publishedAt: linkedPublish?.publishedAt ?? null,
+        publishedDay: linkedPublish?.publishedDay ?? null,
+        metrics,
+        channelAverages: {
+          ctr: null,
+          views: null,
+          watchTime: null,
+        },
+        linkedIdeaFeedback: {
+          aiFeedback: normalizeIdeaFeedback(matchingDay?.aiFeedback),
+          wasDeleted: Boolean(matchingDay?.isDeleted),
+        },
+        ideaFeedbackSummary,
+      } satisfies PreviousPerformanceResultPayload;
+    })
+    .filter((result) => metricsHasLinkedSignal(result.metrics))
+    .sort((a, b) => (b.publishedAt || b.fetchedAt || "").localeCompare(a.publishedAt || a.fetchedAt || ""))
+    .slice(0, 30);
+  if (!filteredResults.length) return null;
+  const ctrAverage = averageMetric(filteredResults, "impressionClickThroughRate");
+  const viewsAverage = averageMetric(filteredResults, "views");
+  const watchTimeAverage = averageMetric(filteredResults, "estimatedMinutesWatched");
+  for (const result of filteredResults) {
+    result.channelAverages = {
+      ctr: ctrAverage,
+      views: viewsAverage,
+      watchTime: watchTimeAverage,
+    };
+  }
   const completion = await openai.chat.completions.create({
-    model: "gpt-4o",
+    model: "gpt-4o-mini",
     messages: [
-      { role: "system", content: "Summarize YouTube plan results. Return JSON with highestCtrTypes, watchTimeTopics, bestPostingDays, flops, and shortSummary." },
-      { role: "user", content: JSON.stringify(compact.slice(0, 50)) },
+      {
+        role: "system",
+        content: `You are a YouTube performance analyst reviewing a creator's past weekly content plans and their real results.
+Your job is to extract honest patterns — what worked, what flopped, and what the data suggests for next week. Return JSON only.
+Rules:
+
+Only draw conclusions that are supported by the data. If sample size is too small (fewer than 5 results with metrics), say so in lowConfidenceNote.
+Do not invent correlations. If CTR data is missing, omit CTR conclusions.
+"Worked" means: CTR above channel average, OR views above channel average, OR watch time above channel average — at least one signal.
+"Flopped" means: performed below all three of the above benchmarks where data exists.
+bestPostingDays: based on actual publish dates of top performers, not assumptions.
+Identify topic clusters in the top performers — not just individual video titles.
+ideaFeedbackPatterns: summarize what the user liked, disliked, and deleted from AI suggestions (separate from actual video performance).
+
+Return shape:
+{
+"topPerformingTopics": string[],
+"topPerformingFormats": string[],
+"highestCtrTypes": string[],
+"watchTimeTopics": string[],
+"bestPostingDays": string[],
+"flops": string[],
+"flopReasons": string,
+"ideaFeedbackPatterns": {
+"liked": string[],
+"disliked": string[],
+"deleted": string[]
+},
+"lowConfidenceNote": string | null,
+"shortSummary": string
+}`,
+      },
+      { role: "user", content: JSON.stringify(filteredResults) },
     ],
     response_format: { type: "json_object" },
     max_completion_tokens: 1200,
@@ -1352,21 +1684,31 @@ function normalizeGeneratedYoutubePlan(
   const rawDays = asArray(rawPlan.days);
   const normalizedDays = selectedDates.map((selected, index) => {
     const source = asRecord(rawDays[index]);
-    const contentIdea = normalizeTitleToRange(asString(source.contentIdea) || `Week ${index + 1} YouTube idea`, rangeMin, rangeMax);
+    const contentIdea = normalizeTitleToRange(asString(source.title) || asString(source.contentIdea) || `Week ${index + 1} YouTube idea`, rangeMin, rangeMax);
+    const whyThisIdea = asString(source.whyThisIdea)?.trim();
+    const lowSignalNote = asString(source.lowSignalNote)?.trim();
     return {
       day: parsePlanDayIndex(source.day, index + 1),
-      date: selected.date,
+      date: asString(source.date) || selected.date,
+      bestDay: asString(source.bestDay) || (selected.slot.averageViews > 0 ? selected.weekday : null),
       stage: asString(source.stage) || "idea",
       contentIdea,
       hook: asString(source.hook) || contentIdea,
-      outline: asArray(source.outline).map((item) => String(item)).filter(Boolean).slice(0, 6),
+      outline: [],
       bestPostingTime: selected.slot.suggestedTime || (asString(source.bestPostingTime) || "20:00"),
-      rationale: asString(source.rationale) || `${selected.weekday} ${selected.slot.slotLabel} is one of your strongest available windows from the heatmap, so this idea is scheduled to ride that signal.`,
+      rationale: whyThisIdea || asString(source.rationale) || `${selected.weekday} ${selected.slot.slotLabel} is one of your strongest available windows from the heatmap, so this idea is scheduled to ride that signal.`,
       tags: asArray(source.tags).map((item) => String(item)).filter(Boolean).slice(0, 8),
-      soundSuggestion: asString(source.soundSuggestion) || "",
-      competitorReference: asString(source.competitorReference) || "",
-      descriptionSuggestion: asString(source.descriptionSuggestion) || "",
+      soundSuggestion: asString(source.estimatedLength) || asString(source.soundSuggestion) || "",
+      competitorReference: asString(source.signalSource) || asString(source.competitorReference) || "",
+      descriptionSuggestion: asString(source.targetKeyword) || asString(source.descriptionSuggestion) || "",
       thumbnailConcept: asString(source.thumbnailConcept) || "",
+      format: asString(source.format) || "",
+      targetKeyword: asString(source.targetKeyword) || "",
+      estimatedLength: asString(source.estimatedLength) || "",
+      whyThisIdea: whyThisIdea || "",
+      signalSource: asString(source.signalSource) || "low_signal",
+      confidence: asString(source.confidence) || "medium",
+      lowSignalNote: lowSignalNote || null,
       ideaOrigin: "ai" as const,
       aiFeedback: null,
       feedbackUpdatedAt: null,
@@ -1378,44 +1720,10 @@ function normalizeGeneratedYoutubePlan(
 
   return {
     ...rawPlan,
+    summary: asString(rawPlan.weekSummary) || asString(rawPlan.summary) || "",
+    performanceInsight: asString(rawPlan.performanceInsight) || "",
+    competitorInsight: asString(rawPlan.competitorInsight) || "",
     days: normalizedDays,
-  };
-}
-
-function summarizeIdeaFeedbackFromPlans(plans: Array<typeof youtubeWeeklyPlansTable.$inferSelect>) {
-  const liked: string[] = [];
-  const disliked: string[] = [];
-  const deleted: string[] = [];
-  const manual: string[] = [];
-
-  for (const plan of plans) {
-    const planRecord = asRecord(plan.plan);
-    const days = asPlanDays(asArray(planRecord.days));
-    for (const day of days) {
-      const title = asString(day.contentIdea)?.trim();
-      const feedback = normalizeIdeaFeedback(day.aiFeedback);
-      if (!title || !feedback) continue;
-      if (feedback === "liked") liked.push(title);
-      if (feedback === "disliked") disliked.push(title);
-    }
-    for (const day of days) {
-      const title = asString(day.contentIdea)?.trim();
-      if (!title) continue;
-      if (Boolean(day.isDeleted)) deleted.push(title);
-      if (normalizeIdeaOrigin(day.ideaOrigin) === "manual") manual.push(title);
-    }
-  }
-
-  return {
-    likedIdeas: liked.slice(-12),
-    dislikedIdeas: disliked.slice(-12),
-    deletedIdeas: deleted.slice(-20),
-    manualIdeas: manual.slice(-20),
-    summary: [
-      liked.length ? `Creator liked ${liked.length} AI suggestions recently.` : null,
-      disliked.length ? `Creator disliked ${disliked.length} AI suggestions recently.` : null,
-      deleted.length ? `Creator deleted ${deleted.length} saved ideas recently.` : null,
-    ].filter(Boolean).join(" "),
   };
 }
 
@@ -1490,98 +1798,118 @@ export async function generateYoutubeWeeklyPlan(userId: number) {
       metrics: asRecord(result.metrics),
     })),
   );
-  const ideaFeedbackSummary = summarizeIdeaFeedbackFromPlans(plans);
-  const context = { profile, nicheProfile, recentVideos, trends, competitors, analytics, analyticsTimeline, performanceSignals, ideaFeedbackSummary, pastPerformance, weekNumber, startDate, endDate, preferredPostsPerWeek };
+  const ideaFeedbackSummary = await getPersistedIdeaFeedbackSummary(userId, profile, plans);
+  const topVideos = [...recentVideos]
+    .sort((a, b) => parseNumber(asRecord(b).viewCount) - parseNumber(asRecord(a).viewCount))
+    .slice(0, 10)
+    .map((video) => {
+      const item = asRecord(video);
+      return {
+        id: asString(item.id),
+        title: asString(item.title),
+        publishedAt: asString(item.publishedAt),
+        viewCount: parseNumber(item.viewCount),
+        tags: asArray(item.tags).map((tag) => String(tag)).filter(Boolean),
+        duration: asString(item.duration),
+      };
+    });
+  const analyticsRows = asArray(asRecord(analytics).rows)
+    .map((row) => Array.isArray(row) ? row : [])
+    .filter((row) => row.length >= 4);
+  const avgViewDuration = analyticsRows.length
+    ? Math.round(analyticsRows.reduce((sum, row) => sum + parseNumber(row[3]), 0) / analyticsRows.length)
+    : null;
+  const avgCTR = averageMetric(hydratedResults.map((result) => ({ metrics: asRecord(result.metrics) })), "impressionClickThroughRate");
+  const bestPostingDays = performanceSignals.bestPostingTimeByDay
+    .filter((item) => item.averageViews > 0)
+    .sort((a, b) => b.averageViews - a.averageViews)
+    .slice(0, Math.max(1, preferredPostsPerWeek))
+    .map((item) => item.day);
+  const context = {
+    profile,
+    channelProfile: profile,
+    nicheProfile,
+    recentVideos,
+    trends,
+    competitors,
+    analytics: {
+      ...asRecord(analytics),
+      topVideos,
+      avgCTR,
+      avgViewDuration,
+      bestPostingDays,
+    },
+    analyticsTimeline,
+    performanceSignals,
+    performanceSummary: pastPerformance,
+    ideaFeedbackSummary,
+    pastPerformance,
+    lastWeekPlan: lastPlan?.plan ?? null,
+    weekNumber,
+    startDate,
+    endDate,
+    preferredPostsPerWeek,
+  };
 
   const completion = await openai.chat.completions.create({
     model: "gpt-4o",
     messages: [
       {
         role: "system",
-        content: "Generate a YouTube-only growth plan from real channel, video, trend, competitor, analytics, and past-result data. Return JSON only. ABSOLUTE RULE: do not hallucinate, infer exact metrics, invent competitors, invent comments, invent retention curves, invent CTR, invent subscriber gains, or invent first-24-hour performance. If exact source data is missing, mark confidence low and explain the limitation.",
-      },
-      {
-        role: "user",
-        content: `Return this exact shape:
-{
-  "weekNumber": ${weekNumber},
-  "summary": "",
-  "accountAnalysis": {
-    "whatWorked": [],
-    "whyItWorked": [],
-    "underperformers": [],
-    "recommendations": []
-  },
-  "competitorInsights": [
-    {
-      "channelName": "",
-      "channelUrl": "",
-      "whatIsWorking": [],
-      "whyVideosGoViral": [],
-      "ideasToAdapt": []
-    }
-  ],
-  "viralTags": [
-    { "tag": "", "why": "", "bestUse": "" }
-  ],
-  "performanceInsights": [
-    {
-      "type": "best_time_to_post|hook_performance|thumbnail_pattern|upload_frequency_growth|retention_dropoff|title_length|comment_sentiment|subscriber_velocity|competitor_gap|posting_consistency|tag_effectiveness|first_24h_predictor",
-      "title": "",
-      "finding": "",
-      "evidence": "",
-      "action": "",
-      "confidence": "high|medium|low",
-      "chart": [
-        { "label": "", "value": 0, "comparisonValue": 0 }
-      ],
-      "dataLimitations": ""
-    }
-  ],
-  "days": [
-    {
-      "day": 1,
-      "date": "${startDate}",
-      "stage": "idea",
-      "contentIdea": "",
-      "hook": "",
-      "outline": [],
-      "bestPostingTime": "",
-      "rationale": "",
-      "tags": [],
-      "soundSuggestion": "",
-      "competitorReference": ""
-    }
-  ]
-}
+        content: `You are a YouTube growth strategist who thinks like a top creator, not a content agency.
+Your job is to generate a weekly content plan for one specific creator based on their real channel data, past performance, competitor landscape, current trends, and their feedback on previous AI suggestions.
+HOW TO REASON (follow this order before writing anything):
 
-Rules:
-- Generate exactly ${preferredPostsPerWeek} day objects and every day must include a concrete bestPostingTime in HH:MM format.
-- Use context.performanceSignals.bestPostingTimeByDay so each weekday gets the strongest available time window for that specific day of week. Do not use arbitrary times.
-- Use the best-performing hook style from context.performanceSignals.hookInsight as the default structure for titles, hooks, and outlines unless a specific day has stronger evidence for a different style.
-- Keep suggested titles inside the optimal title-length range from context.performanceSignals.titleLengthInsight whenever source data supports it.
-- Use top-performing tags and trending tags from context.performanceSignals.tagInsight in the weekly ideas where relevant.
-- Use the subscriber spike signal and competitor gap signal from context.performanceSignals to shape at least one weekly idea each.
-- Use context.performanceSignals.tier1CompetitorPatterns to shape at least one idea that directly answers a same-level competitor opportunity.
-- Use context.performanceSignals.linkedVideoPerformance when available so the next week learns from the creator's actual linked results.
-- If context.ideaFeedbackSummary.deletedIdeas includes repeated themes or titles, avoid suggesting similar ideas unless fresh performance evidence strongly supports them.
-- If context.ideaFeedbackSummary.manualIdeas shows clear preference patterns, lean toward those creator-led directions.
-- Rationale must reference actual trend, competitor, analytics, or past performance data from the context.
-- If this is week 2 or later, explicitly reference past performance in each rationale.
-- Analyze the user's own recent videos using their titles, descriptions, tags, durations, and metrics. If script/transcript data is absent, say title/description/tags were used instead.
-- Identify repeatable channel DNA from the user's real titles, hooks, topics, emotional tone, and formats. The ${preferredPostsPerWeek} ideas must sound like this creator, not generic niche tutorials.
-- For accountAnalysis, compare multiple videos and name specific titles and metrics.
-- For accountAnalysis.whatWorked and accountAnalysis.underperformers, diagnose the referenced videos across these five dimensions: hook analysis, tag analysis, title length, concept type, and timing. Be specific and comparative.
-- For accountAnalysis.recommendations, every recommendation must reference a specific video, a specific data point, and explain the psychological or algorithmic mechanism behind the recommendation.
-- competitorInsights must only use channels in the competitors context.
-- At least one day must directly address the competitor gap insight from context.performanceSignals.competitorGap when available.
-- viralTags should include 5-8 niche-specific tags when source data allows it; avoid generic one-word tags unless paired with a clear reason.
-- performanceInsights must include exactly one entry for each of these 12 types: best_time_to_post, hook_performance, thumbnail_pattern, upload_frequency_growth, retention_dropoff, title_length, comment_sentiment, subscriber_velocity, competitor_gap, posting_consistency, tag_effectiveness, first_24h_predictor.
-- For performanceInsights, use the user's own video titles, descriptions, tags, publish dates, view counts, like counts, comment counts, YouTube Analytics summaries, plan results, and competitor data. If a metric is unavailable, mark confidence low and explain the dataLimitations instead of inventing exact numbers.
-- Every number in finding, evidence, action, and chart values must come from supplied context or be explicitly labeled as an estimate in dataLimitations. Prefer "not enough data yet" over a made-up insight.
-- Comment sentiment should be based on available comment/comment-count/title/description signals only; if raw comments were unavailable, say so.
-- Retention and first-24-hour insights should use YouTube Analytics when present; if not present, infer cautiously from available data and label confidence low.
-- Do not invent metrics or competitor names.`,
+Read the performanceSummary. What actually worked last week? Start from there.
+Check ideaFeedbackSummary. What did the user explicitly like, dislike, or delete? Never repeat a deleted idea concept. Avoid patterns from disliked ideas. Build on patterns from liked ideas.
+Look at the analytics. What topics have the highest CTR? What watch time signals exist? What is the best posting day pattern?
+Check competitors. What are they covering that this channel hasn't? What formats are performing for them?
+Check trends. Which of the trending topics are actually relevant to this channel's niche? Ignore trends that are a stretch.
+Now generate. Every idea must trace to at least one of the above signals. If you can't justify an idea with data, don't include it.
+
+IDEA QUALITY RULES:
+
+Titles must sound like a real creator wrote them — specific, direct, with a clear payoff implied. Never use hollow phrases like "the ultimate guide", "you need to know this", or "game changer."
+Hook must name a specific tension or question the video answers in the first 10 seconds. Not a vague teaser.
+Thumbnail concept must be visually distinct from competitors. Describe the specific visual — not "bold text + face."
+Tags must be actual search terms a real viewer would type — not keyword-stuffed variations of the title.
+If the channel's data is thin on a given day, set confidence to "low" and explain why in lowSignalNote.
+Never suggest a topic concept the user deleted in the past. Flag it if you're unsure whether a concept is too similar.
+
+POSTING STRATEGY:
+
+Use the channel's actual best posting days from analytics. Do not default to "Tuesday and Thursday."
+If posting day data is unavailable, leave bestDay as null and note it.
+
+OUTPUT RULES:
+
+Return JSON only. No explanation, no preamble, no markdown fences.
+Every day object must match the exact shape below.
+Generate exactly as many day objects as the channel's upload cadence calls for this week — do not pad with filler days.
+
+Return this exact shape:
+{
+"weekSummary": string,
+"performanceInsight": string,
+"competitorInsight": string,
+"days": [
+{
+"date": string,
+"bestDay": string | null,
+"title": string,
+"hook": string,
+"thumbnailConcept": string,
+"format": string,
+"targetKeyword": string,
+"tags": string[],
+"estimatedLength": string,
+"whyThisIdea": string,
+"signalSource": "performance" | "feedback" | "competitor" | "trend" | "channel_gap" | "low_signal",
+"confidence": "high" | "medium" | "low",
+"lowSignalNote": string | null
+}
+]
+}`,
       },
       { role: "user", content: JSON.stringify(context) },
     ],
@@ -1620,41 +1948,103 @@ export async function improveYoutubeIdea(userId: number, idea: { title?: string;
   const [profile] = await db.select().from(youtubeChannelProfilesTable).where(eq(youtubeChannelProfilesTable.userId, userId)).limit(1);
   if (!profile) throw new Error("Connect YouTube before improving ideas");
   const plans = await db.select().from(youtubeWeeklyPlansTable).where(eq(youtubeWeeklyPlansTable.userId, userId)).orderBy(desc(youtubeWeeklyPlansTable.weekNumber));
-  const [lastPlan] = await db.select().from(youtubeWeeklyPlansTable).where(eq(youtubeWeeklyPlansTable.userId, userId)).orderBy(desc(youtubeWeeklyPlansTable.weekNumber)).limit(1);
-  const latestSignals = asRecord(asRecord(lastPlan?.contextSnapshot).performanceSignals);
-  const ideaFeedbackSummary = summarizeIdeaFeedbackFromPlans(plans);
+  const ideaFeedbackSummary = await getPersistedIdeaFeedbackSummary(userId, profile, plans);
   const completion = await openai.chat.completions.create({
-    model: "gpt-4o",
+    model: "gpt-4o-mini",
     messages: [
       {
         role: "system",
-        content: "Improve a YouTube content idea using the creator's channel profile, current plan context, and past like/dislike/deleted-idea feedback on AI suggestions. Return JSON only with contentIdea, hook, outline, bestPostingTime, rationale, tags, soundSuggestion, competitorReference, descriptionSuggestion, and thumbnailConcept. Keep the title inside the supplied optimal title range when one is available, and align bestPostingTime to the supplied strongest posting window. Avoid themes that appear in deletedIdeas unless the current evidence strongly justifies them.",
+        content: `You are a YouTube content strategist helping a creator sharpen one specific idea they came up with.
+Your job is NOT to replace their idea with something generic. Your job is to make their specific idea stronger — better title, clearer hook, more search-targeted, more thumbnail-friendly — while staying true to what they were going for.
+Rules:
+
+Read their feedback history. If this idea direction was previously disliked or deleted, flag it honestly rather than silently improving it.
+Improve the title: make it more specific, cut filler words, front-load the payoff.
+Sharpen the hook: name the exact tension or question the viewer will care about in the first 10 seconds.
+Suggest a thumbnail concept that is visually distinct — describe the actual image, not just "bold text."
+Suggest 1 alternative angle on the same topic if the original framing has weak search volume potential.
+Do not pad the response with explanations. Return JSON only.
+
+Return shape:
+{
+"improvedTitle": string,
+"improvedHook": string,
+"thumbnailConcept": string,
+"targetKeyword": string,
+"alternativeAngle": string | null,
+"feedbackWarning": string | null
+}`,
       },
       {
         role: "user",
         content: JSON.stringify({
           idea,
           channelProfile: profile,
-          latestPlan: lastPlan?.plan ?? null,
-          performanceSignals: latestSignals,
-          ideaFeedbackSummary,
+          ideaFeedbackSummary: {
+            liked: ideaFeedbackSummary.liked,
+            disliked: ideaFeedbackSummary.disliked,
+            deleted: ideaFeedbackSummary.deleted,
+          },
         }),
       },
     ],
     response_format: { type: "json_object" },
     max_completion_tokens: 1400,
   });
-  return parseAiJson(completion.choices[0]?.message?.content ?? "{}");
+  const improved = asRecord(parseAiJson(completion.choices[0]?.message?.content ?? "{}"));
+  const improvedTitle = asString(improved.improvedTitle)?.trim() || idea.title?.trim() || "YouTube idea";
+  const improvedHook = asString(improved.improvedHook)?.trim() || idea.angle?.trim() || improvedTitle;
+  const alternativeAngle = asString(improved.alternativeAngle)?.trim();
+  const feedbackWarning = asString(improved.feedbackWarning)?.trim();
+  const rationaleParts = [feedbackWarning, alternativeAngle ? `Alternative angle: ${alternativeAngle}` : null].filter(Boolean);
+  return {
+    ...improved,
+    contentIdea: improvedTitle,
+    hook: improvedHook,
+    outline: alternativeAngle ? [alternativeAngle] : [],
+    rationale: rationaleParts.join(" "),
+    thumbnailConcept: asString(improved.thumbnailConcept)?.trim() || "",
+    descriptionSuggestion: asString(improved.targetKeyword)?.trim() || "",
+  };
 }
 
 export async function updateYoutubeIdeaFeedback(userId: number, planId: number, dayIndex: number, feedback: IdeaFeedback) {
   const normalizedFeedback = normalizeIdeaFeedback(feedback);
-  return updatePlanDay(userId, planId, dayIndex, (day) => ({
+  const result = await updatePlanDay(userId, planId, dayIndex, (day) => ({
     ...day,
     ideaOrigin: normalizeIdeaOrigin(day.ideaOrigin),
     aiFeedback: normalizedFeedback,
     feedbackUpdatedAt: new Date().toISOString(),
   }));
+  const day = asRecord(result.day);
+  if (normalizeIdeaOrigin(day.ideaOrigin) === "ai") {
+    if (normalizedFeedback === "liked") {
+      await persistIdeaFeedbackSummary(userId, (summary) => ({
+        ...summary,
+        liked: dedupeByKey([
+          ...summary.liked,
+          {
+            topic: summarizeIdeaConcept(day),
+            format: inferIdeaFormat(day),
+            signalSource: inferIdeaSignalSource(day),
+          },
+        ].reverse(), (item) => `${item.topic}|${item.format}|${item.signalSource}`).slice(0, 30),
+      }));
+    }
+    if (normalizedFeedback === "disliked") {
+      await persistIdeaFeedbackSummary(userId, (summary) => ({
+        ...summary,
+        disliked: dedupeByKey([
+          ...summary.disliked,
+          {
+            titleConcept: asString(day.contentIdea)?.trim() || summarizeIdeaConcept(day),
+            format: inferIdeaFormat(day),
+          },
+        ].reverse(), (item) => `${item.titleConcept}|${item.format}`).slice(0, 30),
+      }));
+    }
+  }
+  return result;
 }
 
 export async function createYoutubePlanDay(userId: number, planId: number, dayInput: JsonRecord) {
@@ -1687,12 +2077,26 @@ export async function patchYoutubePlanDay(userId: number, planId: number, dayInd
 }
 
 export async function deleteYoutubePlanDay(userId: number, planId: number, dayIndex: number) {
-  return updatePlanDay(userId, planId, dayIndex, (day) => ({
+  const result = await updatePlanDay(userId, planId, dayIndex, (day) => ({
     ...day,
     isDeleted: true,
     deletedAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   }));
+  const day = asRecord(result.day);
+  if (normalizeIdeaOrigin(day.ideaOrigin) === "ai") {
+    await persistIdeaFeedbackSummary(userId, (summary) => ({
+      ...summary,
+      deleted: dedupeByKey([
+        ...summary.deleted,
+        {
+          concept: summarizeIdeaConcept(day),
+          reason: "deleted_by_user",
+        },
+      ].reverse(), (item) => `${item.concept}|${item.reason}`).slice(0, 40),
+    }));
+  }
+  return result;
 }
 
 export async function regenerateYoutubePlanIdea(userId: number, planId: number, dayIndex: number) {
@@ -1702,30 +2106,60 @@ export async function regenerateYoutubePlanIdea(userId: number, planId: number, 
   const plans = await db.select().from(youtubeWeeklyPlansTable).where(eq(youtubeWeeklyPlansTable.userId, userId)).orderBy(desc(youtubeWeeklyPlansTable.weekNumber));
   const { plan, day } = await updatePlanDay(userId, planId, dayIndex, (existingDay) => existingDay);
   const latestSignals = asRecord(asRecord(plan.contextSnapshot).performanceSignals);
-  const ideaFeedbackSummary = summarizeIdeaFeedbackFromPlans(plans);
+  const ideaFeedbackSummary = await getPersistedIdeaFeedbackSummary(userId, profile, plans);
   const siblingIdeas = asPlanDays(asArray(asRecord(plan.plan).days))
     .filter((item) => parsePlanDayIndex(item.day, -1) !== dayIndex)
-    .map((item) => asString(item.contentIdea))
-    .filter((item): item is string => Boolean(item));
+    .map((item) => ({
+      title: asString(item.contentIdea),
+      format: inferIdeaFormat(item),
+      targetKeyword: asString(item.targetKeyword),
+    }))
+    .filter((item) => item.title || item.targetKeyword);
 
   const completion = await openai.chat.completions.create({
-    model: "gpt-4o",
+    model: "gpt-4o-mini",
     messages: [
       {
         role: "system",
-        content: "Regenerate one YouTube plan idea using the creator's saved channel profile, current weekly plan context, and past like/dislike/deleted-idea feedback on AI suggestions. Return JSON only with contentIdea, hook, outline, bestPostingTime, rationale, tags, soundSuggestion, competitorReference, descriptionSuggestion, and thumbnailConcept. Avoid duplicating sibling ideas from the same plan and avoid themes that resemble deleted ideas unless current evidence is strong.",
+        content: `You are a YouTube content strategist replacing one planned video idea with something better.
+The creator rejected the previous idea for this slot. Your job is to generate a genuinely different concept — not a rephrased version of the same idea.
+Rules:
+
+Check the ideaFeedbackSummary. If the rejected idea matches a pattern of previously disliked or deleted ideas, explicitly steer away from that direction.
+Look at siblingIdeas (other videos planned this week). The new idea must not overlap in topic or format with any sibling.
+The new idea must trace to a real signal: past performance, a competitor gap, a trend, or an underexplored keyword in the channel's niche.
+Title must be specific and creator-voiced. No hollow clickbait phrases.
+Explain in whyDifferent how this idea is distinct from the one it replaces.
+Return JSON only.
+
+Return shape:
+{
+"title": string,
+"hook": string,
+"thumbnailConcept": string,
+"format": string,
+"targetKeyword": string,
+"tags": string[],
+"whyThisIdea": string,
+"whyDifferent": string,
+"signalSource": "performance" | "feedback" | "competitor" | "trend" | "channel_gap",
+"confidence": "high" | "medium" | "low"
+}`,
       },
       {
         role: "user",
         content: JSON.stringify({
-          currentIdea: day,
+          rejectedIdea: day,
           date: asString(day.date),
           dayIndex,
           channelProfile: profile,
-          plan: plan.plan,
-          performanceSignals: latestSignals,
-          ideaFeedbackSummary,
           siblingIdeas,
+          ideaFeedbackSummary: {
+            liked: ideaFeedbackSummary.liked,
+            disliked: ideaFeedbackSummary.disliked,
+            deleted: ideaFeedbackSummary.deleted,
+          },
+          performanceSignals: latestSignals,
         }),
       },
     ],
@@ -1737,16 +2171,22 @@ export async function regenerateYoutubePlanIdea(userId: number, planId: number, 
   const currentTitle = asString(day.contentIdea) || `Week ${dayIndex} YouTube idea`;
   const nextDay = {
     ...day,
-    contentIdea: asString(raw.contentIdea)?.trim() || currentTitle,
+    contentIdea: asString(raw.title)?.trim() || currentTitle,
     hook: asString(raw.hook)?.trim() || asString(day.hook) || currentTitle,
-    outline: asArray(raw.outline).map((item) => String(item)).filter(Boolean).slice(0, 6),
-    bestPostingTime: asString(raw.bestPostingTime)?.trim() || asString(day.bestPostingTime) || "",
-    rationale: asString(raw.rationale)?.trim() || asString(day.rationale) || "",
+    outline: [],
+    bestPostingTime: asString(day.bestPostingTime) || "",
+    rationale: [asString(raw.whyThisIdea)?.trim(), asString(raw.whyDifferent)?.trim()].filter(Boolean).join(" ").trim() || asString(day.rationale) || "",
     tags: asArray(raw.tags).map((item) => String(item)).filter(Boolean).slice(0, 8),
-    soundSuggestion: asString(raw.soundSuggestion) || "",
-    competitorReference: asString(raw.competitorReference) || "",
-    descriptionSuggestion: asString(raw.descriptionSuggestion) || "",
+    soundSuggestion: asString(raw.format) || "",
+    competitorReference: asString(raw.signalSource) || "",
+    descriptionSuggestion: asString(raw.targetKeyword) || "",
     thumbnailConcept: asString(raw.thumbnailConcept) || "",
+    format: asString(raw.format) || "",
+    targetKeyword: asString(raw.targetKeyword) || "",
+    whyThisIdea: asString(raw.whyThisIdea) || "",
+    whyDifferent: asString(raw.whyDifferent) || "",
+    signalSource: asString(raw.signalSource) || "",
+    confidence: asString(raw.confidence) || "medium",
     ideaOrigin: "ai",
     aiFeedback: null,
     feedbackUpdatedAt: new Date().toISOString(),

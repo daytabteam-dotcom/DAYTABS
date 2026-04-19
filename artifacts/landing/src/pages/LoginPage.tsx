@@ -2,7 +2,8 @@ import { useState } from "react";
 import { Link, useLocation } from "wouter";
 import { motion } from "framer-motion";
 import { Mail, Lock, LogIn, AlertCircle } from "lucide-react";
-import { authApi, getCoreAppUrl } from "../lib/api";
+import { authApi } from "../lib/api";
+import { getWakePageUrl } from "@/lib/runtime";
 
 export default function LoginPage() {
   const [, navigate] = useLocation();
@@ -17,7 +18,7 @@ export default function LoginPage() {
     setLoading(true);
     try {
       const { token } = await authApi.login(email, password);
-      navigate(`/redirecting?token=${token}`);
+      navigate(getWakePageUrl(token));
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Login failed");
     } finally {

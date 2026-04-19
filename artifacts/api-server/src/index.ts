@@ -109,6 +109,10 @@ async function runStartupMigrations() {
       )
     `);
     await db.execute(sql`ALTER TABLE youtube_channel_profiles ADD COLUMN IF NOT EXISTS channel_thumbnail_url TEXT`);
+    await db.execute(sql`
+      ALTER TABLE youtube_channel_profiles
+      ADD COLUMN IF NOT EXISTS idea_feedback_summary JSONB NOT NULL DEFAULT '{"liked":[],"disliked":[],"deleted":[]}'::jsonb
+    `);
     await db.execute(sql`ALTER TABLE youtube_competitors ADD COLUMN IF NOT EXISTS thumbnail_url TEXT`);
     logger.info("Startup migrations applied");
   } catch (err) {

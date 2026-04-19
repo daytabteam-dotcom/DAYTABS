@@ -1,14 +1,14 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { Zap, CheckCircle } from "lucide-react";
+import { getWakePageUrl } from "@/lib/runtime";
 
 export default function RedirectingPage() {
   const [progress, setProgress] = useState(0);
 
   useEffect(() => {
     const token = new URLSearchParams(window.location.search).get("token");
-    const coreAppUrl = "/panel/";
-    const destination = token ? `${coreAppUrl}?token=${token}` : coreAppUrl;
+    const destination = getWakePageUrl(token || undefined);
 
     const timer = setInterval(() => {
       setProgress((p) => {

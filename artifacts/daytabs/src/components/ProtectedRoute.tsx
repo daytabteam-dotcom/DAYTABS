@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { getPublicSiteUrl } from "@/lib/runtime";
 
 function createDevToken() {
   const payload = {
@@ -76,7 +77,7 @@ export default function ProtectedRoute({ children }: Props) {
 
   if (status === "unauthenticated") {
     const loginPath = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/login`;
-    const rootLoginPath = "/login";
+    const rootLoginPath = getPublicSiteUrl("/login");
 
     return (
       <div className="min-h-screen bg-[#0d0a1a] text-white flex items-center justify-center px-6">

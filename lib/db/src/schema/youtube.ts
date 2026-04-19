@@ -29,6 +29,11 @@ export const youtubeChannelProfilesTable = pgTable("youtube_channel_profiles", {
   videoCount: text("video_count"),
   recentVideos: jsonb("recent_videos").notNull().default([]),
   nicheProfile: jsonb("niche_profile"),
+  ideaFeedbackSummary: jsonb("idea_feedback_summary").notNull().default({
+    liked: [],
+    disliked: [],
+    deleted: [],
+  }),
   fetchedAt: timestamp("fetched_at").defaultNow().notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),

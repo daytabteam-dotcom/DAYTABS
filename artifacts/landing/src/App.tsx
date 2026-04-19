@@ -10,6 +10,7 @@ import SignupPage from "@/pages/SignupPage";
 import PricingPage from "@/pages/PricingPage";
 import ContactPage from "@/pages/ContactPage";
 import RedirectingPage from "@/pages/RedirectingPage";
+import WakePage from "@/pages/WakePage";
 import TermsPage from "@/pages/TermsPage";
 import PrivacyPage from "@/pages/PrivacyPage";
 import BlogIndexPage from "@/pages/BlogIndexPage";
@@ -25,6 +26,7 @@ function Router() {
       <Route path="/signup" component={SignupPage} />
       <Route path="/pricing" component={PricingPage} />
       <Route path="/contact" component={ContactPage} />
+      <Route path="/wake" component={WakePage} />
       <Route path="/redirecting" component={RedirectingPage} />
       <Route path="/terms" component={TermsPage} />
       <Route path="/privacy" component={PrivacyPage} />
