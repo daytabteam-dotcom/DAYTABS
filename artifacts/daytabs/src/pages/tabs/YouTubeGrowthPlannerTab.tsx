@@ -165,7 +165,7 @@ function GrowthPlannerComingSoon() {
               </div>
               <div>
                 <PanelEyebrow>Coming soon</PanelEyebrow>
-                <PanelTitle>Growth Planner</PanelTitle>
+                <PanelTitle>YouTube Growth</PanelTitle>
               </div>
             </div>
             <PanelSubtitle className="mt-0">
@@ -185,7 +185,7 @@ function GrowthPlannerComingSoon() {
             {submitted ? (
               <div className="flex items-center gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm font-medium text-emerald-300">
                 <Check className="h-4 w-4" />
-                We'll notify you when Growth Planner launches.
+                We'll notify you when YouTube Growth launches.
               </div>
             ) : (
               <form onSubmit={handleNotify} className="space-y-3">
@@ -340,7 +340,7 @@ export default function YouTubeGrowthPlannerTab() {
         <div>
           <Badge className="border-red-400/20 bg-red-500/15 text-red-100 hover:brightness-100">
             <Youtube className="mr-2 h-3.5 w-3.5" />
-            YouTube Growth Planner
+            YouTube Growth
           </Badge>
           <PanelTitle className="mt-4 text-4xl">Plan from your real channel data.</PanelTitle>
           <PanelSubtitle className="max-w-3xl">

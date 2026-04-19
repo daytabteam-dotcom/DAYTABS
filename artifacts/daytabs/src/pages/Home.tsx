@@ -54,7 +54,7 @@ const TABS = [
   },
   {
     id: "growth-planner",
-    label: "Growth Planner",
+    label: "YouTube Growth",
     icon: CalendarDays,
     desc: "Studio",
   },
