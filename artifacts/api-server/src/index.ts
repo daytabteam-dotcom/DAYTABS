@@ -25,6 +25,7 @@ async function runStartupMigrations() {
         connected_google_email TEXT,
         channel_id TEXT,
         channel_title TEXT,
+        preferred_posts_per_week INTEGER DEFAULT 3,
         access_token TEXT NOT NULL,
         refresh_token TEXT,
         token_type TEXT,
@@ -35,6 +36,7 @@ async function runStartupMigrations() {
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       )
     `);
+    await db.execute(sql`ALTER TABLE youtube_connections ADD COLUMN IF NOT EXISTS preferred_posts_per_week INTEGER DEFAULT 3`);
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS youtube_channel_profiles (
         id SERIAL PRIMARY KEY,

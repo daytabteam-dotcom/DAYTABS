@@ -15,6 +15,7 @@ import {
   savePlanResults,
   storeYoutubeTokens,
   syncYoutubeChannel,
+  updateYoutubeSettings,
 } from "../../lib/youtube";
 
 const router = Router();
@@ -94,6 +95,21 @@ router.post("/sync", requireAuth, async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "YouTube sync error");
     res.status(500).json({ error: err instanceof Error ? err.message : "Failed to sync YouTube channel" });
+  }
+});
+
+router.post("/settings", requireAuth, async (req, res) => {
+  try {
+    const preferredPostsPerWeek = Number(req.body?.preferredPostsPerWeek);
+    if (!Number.isFinite(preferredPostsPerWeek) || preferredPostsPerWeek < 1) {
+      res.status(400).json({ error: "preferredPostsPerWeek must be a positive number" });
+      return;
+    }
+    const settings = await updateYoutubeSettings(req.auth!.user_id, { preferredPostsPerWeek });
+    res.json({ settings });
+  } catch (err) {
+    req.log.error({ err }, "YouTube settings update error");
+    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to update YouTube settings" });
   }
 });
 

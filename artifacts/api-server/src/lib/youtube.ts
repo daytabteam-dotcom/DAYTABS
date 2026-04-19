@@ -60,6 +60,12 @@ export interface YoutubeNicheProfile {
   summary: string;
 }
 
+interface YoutubeSettings {
+  preferredPostsPerWeek: number;
+  connectedAt: string | null;
+  needsPostingPreference: boolean;
+}
+
 interface YoutubeAnalyticsPoint {
   date: string;
   views: number;
@@ -645,6 +651,7 @@ export async function storeYoutubeTokens(userId: number, tokens: {
     .values({
       userId,
       accessToken: encryptToken(tokens.access_token)!,
+      preferredPostsPerWeek: existing?.preferredPostsPerWeek ?? 3,
       refreshToken,
       tokenType: tokens.token_type ?? "Bearer",
       scopes: tokens.scope ?? YOUTUBE_SCOPES.join(" "),
@@ -655,6 +662,7 @@ export async function storeYoutubeTokens(userId: number, tokens: {
       target: youtubeConnectionsTable.userId,
       set: {
         accessToken: encryptToken(tokens.access_token)!,
+        preferredPostsPerWeek: existing?.preferredPostsPerWeek ?? 3,
         refreshToken,
         tokenType: tokens.token_type ?? "Bearer",
         scopes: tokens.scope ?? YOUTUBE_SCOPES.join(" "),
@@ -977,6 +985,11 @@ export async function getYoutubeStatus(userId: number) {
   }
 
   const channelAnalytics = connection && profile ? await channelAnalyticsTimeline(userId) : null;
+  const settings: YoutubeSettings = {
+    preferredPostsPerWeek: Math.max(1, parseNumber(connection?.preferredPostsPerWeek) || 3),
+    connectedAt: connection?.createdAt?.toISOString?.() ?? null,
+    needsPostingPreference: !connection?.preferredPostsPerWeek,
+  };
   return {
     connected: Boolean(connection),
     channel: profile,
@@ -985,7 +998,26 @@ export async function getYoutubeStatus(userId: number) {
     latestPlan,
     plans,
     latestResults,
+    settings,
   };
+}
+
+export async function updateYoutubeSettings(userId: number, settings: { preferredPostsPerWeek: number }) {
+  const preferredPostsPerWeek = Math.max(1, Math.min(30, Math.round(settings.preferredPostsPerWeek || 0)));
+  const [connection] = await db.select().from(youtubeConnectionsTable).where(eq(youtubeConnectionsTable.userId, userId)).limit(1);
+  if (!connection) throw new Error("Connect YouTube before saving posting settings");
+  const [updated] = await db.update(youtubeConnectionsTable)
+    .set({
+      preferredPostsPerWeek,
+      updatedAt: new Date(),
+    })
+    .where(eq(youtubeConnectionsTable.userId, userId))
+    .returning();
+  return {
+    preferredPostsPerWeek: updated?.preferredPostsPerWeek ?? preferredPostsPerWeek,
+    connectedAt: updated?.createdAt?.toISOString?.() ?? connection.createdAt?.toISOString?.() ?? null,
+    needsPostingPreference: false,
+  } satisfies YoutubeSettings;
 }
 
 export async function fetchTrendingVideos(userId: number, nicheProfile: YoutubeNicheProfile) {
@@ -1219,28 +1251,39 @@ function normalizeGeneratedYoutubePlan(
   rawPlan: JsonRecord,
   startDate: string,
   performanceSignals: PerformanceSignalSummary,
+  preferredPostsPerWeek: number,
 ) {
   const rangeMin = performanceSignals.titleLengthInsight?.min ?? 35;
   const rangeMax = performanceSignals.titleLengthInsight?.max && performanceSignals.titleLengthInsight.max < 999
     ? performanceSignals.titleLengthInsight.max
     : 55;
-  const perDaySlot = new Map(performanceSignals.bestPostingTimeByDay.map((item) => [item.day, item]));
-  const rawDays = asArray(rawPlan.days);
-  const normalizedDays = Array.from({ length: 7 }).map((_, index) => {
-    const source = asRecord(rawDays[index]);
+  const selectedDates = Array.from({ length: 7 }).map((_, index) => {
     const date = isoDate(addDays(new Date(`${startDate}T00:00:00Z`), index));
     const weekday = getDayNameForIso(date);
-    const slot = perDaySlot.get(weekday);
+    const slot = performanceSignals.bestPostingTimeByDay.find((item) => item.day === weekday) ?? {
+      day: weekday,
+      slotLabel: "18:00-24:00",
+      suggestedTime: "20:00",
+      averageViews: 0,
+    };
+    return { date, weekday, slot };
+  })
+    .sort((a, b) => b.slot.averageViews - a.slot.averageViews || a.date.localeCompare(b.date))
+    .slice(0, preferredPostsPerWeek)
+    .sort((a, b) => a.date.localeCompare(b.date));
+  const rawDays = asArray(rawPlan.days);
+  const normalizedDays = selectedDates.map((selected, index) => {
+    const source = asRecord(rawDays[index]);
     const contentIdea = normalizeTitleToRange(asString(source.contentIdea) || `Week ${index + 1} YouTube idea`, rangeMin, rangeMax);
     return {
       day: parsePlanDayIndex(source.day, index + 1),
-      date,
+      date: selected.date,
       stage: asString(source.stage) || "idea",
       contentIdea,
       hook: asString(source.hook) || contentIdea,
       outline: asArray(source.outline).map((item) => String(item)).filter(Boolean).slice(0, 6),
-      bestPostingTime: slot?.suggestedTime || (asString(source.bestPostingTime) || "20:00"),
-      rationale: asString(source.rationale) || "Built from your recent channel performance signals.",
+      bestPostingTime: selected.slot.suggestedTime || (asString(source.bestPostingTime) || "20:00"),
+      rationale: asString(source.rationale) || `${selected.weekday} ${selected.slot.slotLabel} is one of your strongest available windows from the heatmap, so this idea is scheduled to ride that signal.`,
       tags: asArray(source.tags).map((item) => String(item)).filter(Boolean).slice(0, 8),
       soundSuggestion: asString(source.soundSuggestion) || "",
       competitorReference: asString(source.competitorReference) || "",
@@ -1258,7 +1301,9 @@ function normalizeGeneratedYoutubePlan(
 export async function generateYoutubeWeeklyPlan(userId: number) {
   const [profile] = await db.select().from(youtubeChannelProfilesTable).where(eq(youtubeChannelProfilesTable.userId, userId)).limit(1);
   if (!profile) throw new Error("Connect YouTube before generating a plan");
+  const connection = await getYoutubeConnection(userId);
   const nicheProfile = asRecord(profile.nicheProfile) as unknown as YoutubeNicheProfile;
+  const preferredPostsPerWeek = Math.max(1, parseNumber(connection?.preferredPostsPerWeek) || 3);
   const trends = await fetchTrendingVideos(userId, nicheProfile);
   const competitors = await discoverCompetitors(userId, profile);
   const analytics = await analyticsSummary(userId);
@@ -1286,7 +1331,7 @@ export async function generateYoutubeWeeklyPlan(userId: number) {
       metrics: asRecord(result.metrics),
     })),
   );
-  const context = { profile, nicheProfile, recentVideos, trends, competitors, analytics, analyticsTimeline, performanceSignals, pastPerformance, weekNumber, startDate, endDate };
+  const context = { profile, nicheProfile, recentVideos, trends, competitors, analytics, analyticsTimeline, performanceSignals, pastPerformance, weekNumber, startDate, endDate, preferredPostsPerWeek };
 
   const completion = await openai.chat.completions.create({
     model: "gpt-4o",
@@ -1351,7 +1396,7 @@ export async function generateYoutubeWeeklyPlan(userId: number) {
 }
 
 Rules:
-- Generate exactly 7 day objects and every day must include a concrete bestPostingTime in HH:MM format.
+- Generate exactly ${preferredPostsPerWeek} day objects and every day must include a concrete bestPostingTime in HH:MM format.
 - Use context.performanceSignals.bestPostingTimeByDay so each weekday gets the strongest available time window for that specific day of week. Do not use arbitrary times.
 - Use the best-performing hook style from context.performanceSignals.hookInsight as the default structure for titles, hooks, and outlines unless a specific day has stronger evidence for a different style.
 - Keep suggested titles inside the optimal title-length range from context.performanceSignals.titleLengthInsight whenever source data supports it.
@@ -1362,8 +1407,10 @@ Rules:
 - Rationale must reference actual trend, competitor, analytics, or past performance data from the context.
 - If this is week 2 or later, explicitly reference past performance in each rationale.
 - Analyze the user's own recent videos using their titles, descriptions, tags, durations, and metrics. If script/transcript data is absent, say title/description/tags were used instead.
-- Identify repeatable channel DNA from the user's real titles, hooks, topics, emotional tone, and formats. The 7 ideas must sound like this creator, not generic niche tutorials.
-- For accountAnalysis, compare multiple videos and name specific titles and metrics. Underperformers must list more than one weak pattern when source data supports it.
+- Identify repeatable channel DNA from the user's real titles, hooks, topics, emotional tone, and formats. The ${preferredPostsPerWeek} ideas must sound like this creator, not generic niche tutorials.
+- For accountAnalysis, compare multiple videos and name specific titles and metrics.
+- For accountAnalysis.whatWorked and accountAnalysis.underperformers, diagnose the referenced videos across these five dimensions: hook analysis, tag analysis, title length, concept type, and timing. Be specific and comparative.
+- For accountAnalysis.recommendations, every recommendation must reference a specific video, a specific data point, and explain the psychological or algorithmic mechanism behind the recommendation.
 - competitorInsights must only use channels in the competitors context.
 - At least one day must directly address the competitor gap insight from context.performanceSignals.competitorGap when available.
 - viralTags should include 5-8 niche-specific tags when source data allows it; avoid generic one-word tags unless paired with a clear reason.
@@ -1380,7 +1427,7 @@ Rules:
     max_completion_tokens: 5000,
   });
 
-  const plan = normalizeGeneratedYoutubePlan(asRecord(parseAiJson(completion.choices[0]?.message?.content ?? "{}")), startDate, performanceSignals);
+  const plan = normalizeGeneratedYoutubePlan(asRecord(parseAiJson(completion.choices[0]?.message?.content ?? "{}")), startDate, performanceSignals, preferredPostsPerWeek);
   if (shouldReplaceDraftPlan && lastPlan) {
     const [saved] = await db.update(youtubeWeeklyPlansTable)
       .set({

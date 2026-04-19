@@ -7,6 +7,7 @@ export const youtubeConnectionsTable = pgTable("youtube_connections", {
   connectedGoogleEmail: text("connected_google_email"),
   channelId: text("channel_id"),
   channelTitle: text("channel_title"),
+  preferredPostsPerWeek: integer("preferred_posts_per_week").default(3),
   accessToken: text("access_token").notNull(),
   refreshToken: text("refresh_token"),
   tokenType: text("token_type"),
