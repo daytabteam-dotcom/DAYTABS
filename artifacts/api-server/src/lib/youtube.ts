@@ -70,6 +70,51 @@ interface YoutubeAnalyticsPoint {
   averageViewDuration: number;
 }
 
+interface PerformanceSignalSummary {
+  bestPostingTime: {
+    label: string;
+    averageViews: number;
+    percentAboveChannelAverage: number;
+    sampleVideos: Array<{ title: string; viewCount: number; publishedAt: string | null }>;
+  } | null;
+  hookInsight: {
+    bestType: string;
+    averageViews: number;
+    evidenceVideos: Array<{ title: string; viewCount: number }>;
+    analysis: string;
+    nextHookSuggestions: string[];
+  } | null;
+  titleLengthInsight: {
+    winningBucket: string;
+    min: number;
+    max: number;
+    averageViews: number;
+    percentAboveChannelAverage: number;
+    topPerformers: Array<{ title: string; views: number; titleLength: number }>;
+    bottomPerformers: Array<{ title: string; views: number; titleLength: number }>;
+  } | null;
+  tagInsight: {
+    topPerformingTags: Array<{ tag: string; averageViews: number; relativeToMedian: "above" | "neutral" | "below" }>;
+    trendingTags: Array<{ tag: string; signal: number; why: string }>;
+  };
+  subscriberSpike: {
+    date: string;
+    subscribersNet: number;
+    videoTitle: string;
+    contentType: string;
+    hookStyle: string;
+    implication: string;
+  } | null;
+  competitorGap: {
+    channelName: string;
+    averageViews: number;
+    videosPerWeek: string;
+    contentDriver: string;
+    hookStyle: string;
+    recommendation: string;
+  } | null;
+}
+
 function getCoreAppPath(): string {
   try {
     const url = new URL(CORE_APP_URL);
@@ -166,6 +211,267 @@ function addDays(date: Date, days: number) {
   const next = new Date(date);
   next.setUTCDate(next.getUTCDate() + days);
   return next;
+}
+
+const DAYS_OF_WEEK = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const HOUR_BUCKETS = [
+  { label: "00:00-06:00", start: 0, end: 6 },
+  { label: "06:00-12:00", start: 6, end: 12 },
+  { label: "12:00-18:00", start: 12, end: 18 },
+  { label: "18:00-24:00", start: 18, end: 24 },
+] as const;
+
+function hookType(title: string) {
+  const trimmed = title.trim();
+  const lower = trimmed.toLowerCase();
+  if (trimmed.endsWith("?")) return "Question";
+  if (/^(will|can|what|why|how)\b/i.test(trimmed)) return "Curiosity";
+  if (/\b(lowest|anxiety|feel|story|struggle|fear|confession|healing|burnout|overwhelmed)\b/i.test(lower)) return "Emotional";
+  return "Descriptive";
+}
+
+function contentTypeFromText(text: string) {
+  const lower = text.toLowerCase();
+  if (lower.includes("tutorial") || lower.includes("step") || lower.includes("how to")) return "tutorial";
+  if (lower.includes("process") || lower.includes("paint") || lower.includes("draw with me")) return "process";
+  if (lower.includes("?") || lower.includes("what if") || lower.includes("will ") || lower.includes("can ")) return "curiosity-led";
+  return "emotional storytelling";
+}
+
+function parseVideosPerWeekLabel(label?: string | null) {
+  const value = Number(label?.match(/([\d.]+)\s+videos\/week/i)?.[1] ?? 0);
+  if (!value) return "n/a";
+  const rounded = Math.round(value * 2) / 2;
+  if (Number.isInteger(rounded)) return `${rounded} videos/week`;
+  return `${rounded} videos/week`;
+}
+
+function safePercent(numerator: number, denominator: number) {
+  if (!denominator) return 0;
+  return Math.round((numerator / denominator) * 100);
+}
+
+function derivePerformanceSignals(
+  recentVideos: YoutubeRecentVideo[],
+  trendVideos: YoutubeRecentVideo[],
+  analyticsPoints: YoutubeAnalyticsPoint[],
+  competitors: Array<typeof youtubeCompetitorsTable.$inferSelect>,
+  ownSubscribers: number,
+): PerformanceSignalSummary {
+  const videos = recentVideos.filter((video) => parseNumber(video.viewCount) > 0);
+  const channelAverageViews = videos.length
+    ? Math.round(videos.reduce((sum, video) => sum + parseNumber(video.viewCount), 0) / videos.length)
+    : 0;
+
+  const bestTimeCells = new Map<string, { label: string; totalViews: number; count: number; videos: YoutubeRecentVideo[] }>();
+  for (const day of DAYS_OF_WEEK) {
+    for (const bucket of HOUR_BUCKETS) {
+      bestTimeCells.set(`${day}-${bucket.label}`, { label: `${day} ${bucket.label}`, totalViews: 0, count: 0, videos: [] });
+    }
+  }
+  for (const video of videos) {
+    if (!video.publishedAt) continue;
+    const published = new Date(video.publishedAt);
+    if (Number.isNaN(published.getTime())) continue;
+    const weekday = DAYS_OF_WEEK[published.getUTCDay()];
+    const bucket = HOUR_BUCKETS.find((item) => published.getUTCHours() >= item.start && published.getUTCHours() < item.end);
+    if (!bucket) continue;
+    const key = `${weekday}-${bucket.label}`;
+    const cell = bestTimeCells.get(key);
+    if (!cell) continue;
+    cell.totalViews += parseNumber(video.viewCount);
+    cell.count += 1;
+    cell.videos.push(video);
+  }
+  const bestPostingTime = [...bestTimeCells.values()]
+    .filter((cell) => cell.count > 0)
+    .map((cell) => ({
+      label: cell.label,
+      averageViews: Math.round(cell.totalViews / cell.count),
+      percentAboveChannelAverage: safePercent(Math.round(cell.totalViews / cell.count) - channelAverageViews, channelAverageViews),
+      sampleVideos: cell.videos
+        .sort((a, b) => parseNumber(b.viewCount) - parseNumber(a.viewCount))
+        .slice(0, 2)
+        .map((video) => ({ title: video.title, viewCount: parseNumber(video.viewCount), publishedAt: video.publishedAt })),
+    }))
+    .sort((a, b) => b.averageViews - a.averageViews)[0] ?? null;
+
+  const hookGroups = new Map<string, YoutubeRecentVideo[]>();
+  for (const video of videos) {
+    const key = hookType(video.title);
+    if (!hookGroups.has(key)) hookGroups.set(key, []);
+    hookGroups.get(key)!.push(video);
+  }
+  const hookInsight = [...hookGroups.entries()]
+    .map(([type, items]) => ({
+      bestType: type,
+      averageViews: Math.round(items.reduce((sum, item) => sum + parseNumber(item.viewCount), 0) / Math.max(1, items.length)),
+      evidenceVideos: [...items]
+        .sort((a, b) => parseNumber(b.viewCount) - parseNumber(a.viewCount))
+        .slice(0, 3)
+        .map((video) => ({ title: video.title, viewCount: parseNumber(video.viewCount) })),
+    }))
+    .sort((a, b) => b.averageViews - a.averageViews)[0];
+  const hookSignal = hookInsight ? {
+    ...hookInsight,
+    analysis: hookInsight.bestType === "Emotional"
+      ? `Emotional hooks are winning because they create personal stakes before the click and make the outcome feel intimate and unresolved.`
+      : hookInsight.bestType === "Question"
+        ? `Question hooks are winning because they open a knowledge gap immediately and push viewers to click for the answer.`
+        : hookInsight.bestType === "Curiosity"
+          ? `Curiosity hooks are winning because they promise a reveal or transformation without giving away the payoff too early.`
+          : `Descriptive hooks are winning because viewers respond best when the value is explicit and easy to parse.`,
+    nextHookSuggestions: hookInsight.bestType === "Emotional"
+      ? [
+        "Lead with a vulnerable personal moment in the title.",
+        "Open the hook with a confession, setback, or emotional turning point.",
+        "Frame the title around what changed after a difficult moment.",
+      ]
+      : hookInsight.bestType === "Question"
+        ? [
+          "Turn the title into one sharp question the video resolves.",
+          "Use a specific challenge or surprising comparison in the opening line.",
+          "Keep the question concrete enough that the answer feels urgent.",
+        ]
+        : hookInsight.bestType === "Curiosity"
+          ? [
+            "Tease the payoff without revealing the ending in the title.",
+            "Use contrast words like 'before', 'after', 'instead', or 'finally'.",
+            "Make the first line promise a reveal, test, or unexpected result.",
+          ]
+          : [
+            "Keep the title direct about the result or technique.",
+            "Use clear nouns and outcomes before stylistic phrasing.",
+            "Pair straightforward wording with one concrete emotional or visual payoff.",
+          ],
+  } : null;
+
+  const titleBuckets = [
+    { label: "Under 20 chars", min: 0, max: 19 },
+    { label: "20-35 chars", min: 20, max: 35 },
+    { label: "35-50 chars", min: 36, max: 50 },
+    { label: "50-70 chars", min: 51, max: 70 },
+    { label: "Over 70 chars", min: 71, max: Infinity },
+  ];
+  const titleBucketStats = titleBuckets.map((bucket) => {
+    const items = videos.filter((video) => video.title.length >= bucket.min && video.title.length <= bucket.max);
+    const averageViews = items.length ? Math.round(items.reduce((sum, video) => sum + parseNumber(video.viewCount), 0) / items.length) : 0;
+    return { ...bucket, averageViews };
+  });
+  const winningTitleBucket = titleBucketStats.sort((a, b) => b.averageViews - a.averageViews)[0];
+  const sortedByViews = [...videos].sort((a, b) => parseNumber(b.viewCount) - parseNumber(a.viewCount));
+  const titleLengthInsight = winningTitleBucket ? {
+    winningBucket: winningTitleBucket.label,
+    min: winningTitleBucket.min,
+    max: Number.isFinite(winningTitleBucket.max) ? winningTitleBucket.max : 999,
+    averageViews: winningTitleBucket.averageViews,
+    percentAboveChannelAverage: safePercent(winningTitleBucket.averageViews - channelAverageViews, channelAverageViews),
+    topPerformers: sortedByViews.slice(0, 5).map((video) => ({ title: video.title, views: parseNumber(video.viewCount), titleLength: video.title.length })),
+    bottomPerformers: [...sortedByViews].reverse().slice(0, 5).map((video) => ({ title: video.title, views: parseNumber(video.viewCount), titleLength: video.title.length })),
+  } : null;
+
+  const medianViews = videos.length
+    ? [...videos].map((video) => parseNumber(video.viewCount)).sort((a, b) => a - b)[Math.floor(videos.length / 2)]
+    : 0;
+  const tagMap = new Map<string, number[]>();
+  for (const video of videos) {
+    for (const tag of video.tags ?? []) {
+      const key = tag.trim().toLowerCase();
+      if (!key) continue;
+      if (!tagMap.has(key)) tagMap.set(key, []);
+      tagMap.get(key)!.push(parseNumber(video.viewCount));
+    }
+  }
+  const topPerformingTags = [...tagMap.entries()]
+    .map(([tag, values]) => {
+      const averageViews = Math.round(values.reduce((sum, value) => sum + value, 0) / Math.max(1, values.length));
+      const relativeDelta = medianViews ? ((averageViews - medianViews) / medianViews) * 100 : 0;
+      return {
+        tag,
+        averageViews,
+        relativeToMedian: relativeDelta > 20 ? "above" as const : relativeDelta < -20 ? "below" as const : "neutral" as const,
+      };
+    })
+    .sort((a, b) => b.averageViews - a.averageViews)
+    .slice(0, 15);
+
+  const existingTags = new Set(topPerformingTags.map((item) => item.tag));
+  const trendingTagCounts = new Map<string, { count: number; topViews: number }>();
+  for (const video of trendVideos) {
+    for (const tag of video.tags ?? []) {
+      const key = tag.trim().toLowerCase();
+      if (!key || existingTags.has(key)) continue;
+      const current = trendingTagCounts.get(key) ?? { count: 0, topViews: 0 };
+      current.count += 1;
+      current.topViews = Math.max(current.topViews, parseNumber(video.viewCount));
+      trendingTagCounts.set(key, current);
+    }
+  }
+  const trendingTags = [...trendingTagCounts.entries()]
+    .sort((a, b) => (b[1].count * 1000 + b[1].topViews) - (a[1].count * 1000 + a[1].topViews))
+    .slice(0, 8)
+    .map(([tag, data]) => ({
+      tag,
+      signal: data.count,
+      why: data.count > 1
+        ? `#${tag} appears in ${data.count} trending niche videos from the past 7 days, with top examples reaching ${data.topViews.toLocaleString()} views, and it is not in your current tag mix.`
+        : `Emerging tag with signal 1: one recent niche video using #${tag} already reached ${data.topViews.toLocaleString()} views, suggesting early-mover upside.`,
+    }));
+
+  const subscriberSpike = analyticsPoints.length
+    ? [...analyticsPoints]
+      .sort((a, b) => b.subscribersNet - a.subscribersNet)
+      .map((point) => {
+        const spikeVideo = videos.find((video) => video.publishedAt?.slice(0, 10) === point.date);
+        if (!spikeVideo) return null;
+        return {
+          date: point.date,
+          subscribersNet: point.subscribersNet,
+          videoTitle: spikeVideo.title,
+          contentType: contentTypeFromText(spikeVideo.title),
+          hookStyle: hookType(spikeVideo.title),
+          implication: `Your biggest spike came from ${contentTypeFromText(spikeVideo.title)} content using a ${hookType(spikeVideo.title).toLowerCase()} hook, so future plans should replicate that pairing.`,
+        };
+      })
+      .find(Boolean) ?? null
+    : null;
+
+  const ownAverageViews = channelAverageViews;
+  const competitorGap = competitors
+    .map((competitor) => {
+      const topVideos = Array.isArray(competitor.mostViewedRecentVideos) ? competitor.mostViewedRecentVideos : [];
+      const averageViews = topVideos.length
+        ? Math.round(topVideos.reduce((sum, video) => sum + parseNumber(asRecord(video).viewCount), 0) / topVideos.length)
+        : 0;
+      const contentDriver = topVideos[0] ? contentTypeFromText(asString(asRecord(topVideos[0]).title) || "") : "educational";
+      const hookStyle = topVideos[0] ? hookType(asString(asRecord(topVideos[0]).title) || "") : "Descriptive";
+      const subscriberGap = Math.abs(parseNumber(competitor.subscriberCount) - ownSubscribers);
+      return {
+        channelName: competitor.channelName,
+        averageViews,
+        videosPerWeek: parseVideosPerWeekLabel(competitor.postingFrequency),
+        contentDriver,
+        hookStyle,
+        closeness: subscriberGap,
+      };
+    })
+    .filter((item) => item.averageViews > ownAverageViews)
+    .sort((a, b) => a.closeness - b.closeness || b.averageViews - a.averageViews)[0];
+
+  return {
+    bestPostingTime,
+    hookInsight: hookSignal,
+    titleLengthInsight,
+    tagInsight: {
+      topPerformingTags,
+      trendingTags,
+    },
+    subscriberSpike,
+    competitorGap: competitorGap ? {
+      ...competitorGap,
+      recommendation: `${competitorGap.channelName} is closest in size but outperforms your channel with ${competitorGap.contentDriver} videos and ${competitorGap.hookStyle.toLowerCase()} hooks. Add at least one weekly idea in that lane.`,
+    } : null,
+  };
 }
 
 function parseAiJson(raw: string) {
@@ -723,6 +1029,25 @@ async function previousPerformanceSummary(userId: number) {
   return parseAiJson(completion.choices[0]?.message?.content ?? "{}");
 }
 
+async function hydrateStoredResultMetrics(userId: number) {
+  const results = await db.select().from(youtubePlanResultsTable).where(eq(youtubePlanResultsTable.userId, userId)).orderBy(desc(youtubePlanResultsTable.fetchedAt));
+  const hydrated = [];
+  for (const result of results) {
+    const hasMetrics = result.metrics && typeof result.metrics === "object" && Object.keys(result.metrics as Record<string, unknown>).length > 0;
+    if (hasMetrics) {
+      hydrated.push(result);
+      continue;
+    }
+    const metrics = await fetchVideoAnalytics(userId, result.videoId);
+    const [updated] = await db.update(youtubePlanResultsTable)
+      .set({ metrics, fetchedAt: new Date(), updatedAt: new Date() })
+      .where(eq(youtubePlanResultsTable.id, result.id))
+      .returning();
+    hydrated.push(updated ?? { ...result, metrics });
+  }
+  return hydrated;
+}
+
 export async function generateYoutubeWeeklyPlan(userId: number) {
   const [profile] = await db.select().from(youtubeChannelProfilesTable).where(eq(youtubeChannelProfilesTable.userId, userId)).limit(1);
   if (!profile) throw new Error("Connect YouTube before generating a plan");
@@ -730,6 +1055,8 @@ export async function generateYoutubeWeeklyPlan(userId: number) {
   const trends = await fetchTrendingVideos(userId, nicheProfile);
   const competitors = await discoverCompetitors(userId, profile);
   const analytics = await analyticsSummary(userId);
+  const analyticsTimeline = await channelAnalyticsTimeline(userId);
+  await hydrateStoredResultMetrics(userId);
   const pastPerformance = await previousPerformanceSummary(userId);
   const [lastPlan] = await db.select().from(youtubeWeeklyPlansTable).where(eq(youtubeWeeklyPlansTable.userId, userId)).orderBy(desc(youtubeWeeklyPlansTable.weekNumber)).limit(1);
   const lastPlanResults = lastPlan
@@ -740,7 +1067,14 @@ export async function generateYoutubeWeeklyPlan(userId: number) {
   const startDate = isoDate(new Date());
   const endDate = isoDate(addDays(new Date(), 6));
   const recentVideos = Array.isArray(profile.recentVideos) ? profile.recentVideos : [];
-  const context = { profile, nicheProfile, recentVideos, trends, competitors, analytics, pastPerformance, weekNumber, startDate, endDate };
+  const performanceSignals = derivePerformanceSignals(
+    recentVideos,
+    trends,
+    analyticsTimeline.daily ?? [],
+    competitors,
+    parseNumber(profile.subscriberCount),
+  );
+  const context = { profile, nicheProfile, recentVideos, trends, competitors, analytics, analyticsTimeline, performanceSignals, pastPerformance, weekNumber, startDate, endDate };
 
   const completion = await openai.chat.completions.create({
     model: "gpt-4o",
@@ -806,12 +1140,18 @@ export async function generateYoutubeWeeklyPlan(userId: number) {
 
 Rules:
 - Generate exactly 7 day objects and every day must include a concrete bestPostingTime in HH:MM format.
+- Use the bestPostingTime signal from context.performanceSignals as the default scheduling source for all 7 days. Do not use arbitrary times.
+- Use the best-performing hook style from context.performanceSignals.hookInsight as the default structure for titles, hooks, and outlines unless a specific day has stronger evidence for a different style.
+- Keep suggested titles inside the optimal title-length range from context.performanceSignals.titleLengthInsight whenever source data supports it.
+- Use top-performing tags and trending tags from context.performanceSignals.tagInsight in the weekly ideas where relevant.
+- Use the subscriber spike signal and competitor gap signal from context.performanceSignals to shape at least one weekly idea each.
 - Rationale must reference actual trend, competitor, analytics, or past performance data from the context.
 - If this is week 2 or later, explicitly reference past performance in each rationale.
 - Analyze the user's own recent videos using their titles, descriptions, tags, durations, and metrics. If script/transcript data is absent, say title/description/tags were used instead.
 - Identify repeatable channel DNA from the user's real titles, hooks, topics, emotional tone, and formats. The 7 ideas must sound like this creator, not generic niche tutorials.
 - For accountAnalysis, compare multiple videos and name specific titles and metrics. Underperformers must list more than one weak pattern when source data supports it.
 - competitorInsights must only use channels in the competitors context.
+- At least one day must directly address the competitor gap insight from context.performanceSignals.competitorGap when available.
 - viralTags should include 5-8 niche-specific tags when source data allows it; avoid generic one-word tags unless paired with a clear reason.
 - performanceInsights must include exactly one entry for each of these 12 types: best_time_to_post, hook_performance, thumbnail_pattern, upload_frequency_growth, retention_dropoff, title_length, comment_sentiment, subscriber_velocity, competitor_gap, posting_consistency, tag_effectiveness, first_24h_predictor.
 - For performanceInsights, use the user's own video titles, descriptions, tags, publish dates, view counts, like counts, comment counts, YouTube Analytics summaries, plan results, and competitor data. If a metric is unavailable, mark confidence low and explain the dataLimitations instead of inventing exact numbers.
@@ -917,24 +1257,42 @@ export async function savePlanResults(userId: number, planId: number, results: A
   const [plan] = await db.select().from(youtubeWeeklyPlansTable).where(and(eq(youtubeWeeklyPlansTable.id, planId), eq(youtubeWeeklyPlansTable.userId, userId))).limit(1);
   if (!plan) throw new Error("Plan not found");
   const saved = [];
+  const existing = await db.select().from(youtubePlanResultsTable).where(eq(youtubePlanResultsTable.planId, planId));
   const seenVideoIds = new Set<string>();
   for (const result of results) {
     const videoId = result.videoId || (result.videoUrl ? extractYoutubeVideoId(result.videoUrl) : null);
     if (!videoId) throw new Error(`Invalid YouTube URL for day ${result.dayIndex}`);
     if (seenVideoIds.has(videoId)) throw new Error("One YouTube video cannot be linked to more than one content idea");
     seenVideoIds.add(videoId);
-    const metrics = await fetchVideoAnalytics(userId, videoId);
     const videoUrl = result.videoUrl || `https://www.youtube.com/watch?v=${videoId}`;
-    const [row] = await db.insert(youtubePlanResultsTable).values({
-      userId,
-      planId,
-      dayIndex: result.dayIndex,
-      plannedTitle: result.plannedTitle,
-      videoUrl,
-      videoId,
-      metrics,
-      updatedAt: new Date(),
-    }).returning();
+    const conflicting = existing.find((row) => row.videoId === videoId && row.dayIndex !== result.dayIndex);
+    if (conflicting) throw new Error("One YouTube video cannot be linked to more than one content idea");
+    const match = existing.find((row) => row.dayIndex === result.dayIndex);
+    const now = new Date();
+    let row;
+    if (match) {
+      [row] = await db.update(youtubePlanResultsTable)
+        .set({
+          plannedTitle: result.plannedTitle,
+          videoUrl,
+          videoId,
+          metrics: {},
+          updatedAt: now,
+        })
+        .where(eq(youtubePlanResultsTable.id, match.id))
+        .returning();
+    } else {
+      [row] = await db.insert(youtubePlanResultsTable).values({
+        userId,
+        planId,
+        dayIndex: result.dayIndex,
+        plannedTitle: result.plannedTitle,
+        videoUrl,
+        videoId,
+        metrics: {},
+        updatedAt: now,
+      }).returning();
+    }
     saved.push(row);
   }
   return saved;
