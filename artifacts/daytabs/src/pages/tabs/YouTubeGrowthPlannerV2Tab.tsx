@@ -292,6 +292,36 @@ interface TagOpportunity {
   guidance: string;
 }
 
+interface WeeklyComparisonCompetitorRow {
+  key: string;
+  name: string;
+  shortName: string;
+  views: number;
+  uploads: number;
+  fill: string;
+  isYou: false;
+  videos: NonNullable<YoutubeCompetitor["mostViewedRecentVideos"]>;
+}
+
+interface WeeklyComparisonYouRow {
+  key: "you";
+  name: string;
+  shortName: string;
+  views: number;
+  uploads: number;
+  fill: string;
+  isYou: true;
+  videos: RecentVideo[];
+}
+
+type WeeklyComparisonRow = WeeklyComparisonYouRow | WeeklyComparisonCompetitorRow;
+type WeeklyComparisonWeekdayRow = {
+  iso: string;
+  day: string;
+  youViews: number;
+  youUploads: number;
+} & Record<string, string | number>;
+
 const stages: Array<{ id: Stage; label: string }> = [
   { id: "idea", label: "Ideas" },
   { id: "recording", label: "Recording" },
@@ -307,6 +337,7 @@ const hourBuckets = [
   { label: "12:00", start: 12, end: 18 },
   { label: "18:00", start: 18, end: 24 },
 ];
+const leaderboardCompetitorColors = ["#fca5a5", "#93c5fd", "#fcd34d", "#c4b5fd", "#fdba74", "#5eead4", "#f9a8d4", "#bef264"];
 
 function authHeaders(): HeadersInit {
   const token = localStorage.getItem("daytabs_token");
@@ -1092,19 +1123,21 @@ function deriveWeeklyComparisonData(
   };
   const yourVideos = recentVideos.filter((video) => inWindow(video.publishedAt));
 
-  const competitorRows = tier1.slice(0, 4).map((competitor) => {
+  const competitorRows = tier1.map((competitor, index) => {
     const weeklyVideos = (competitor.mostViewedRecentVideos ?? []).filter((video) => inWindow(video.publishedAt));
     return {
+      key: `competitor${index}`,
       name: competitor.channelName,
       shortName: competitor.channelName,
       views: weeklyVideos.reduce((sum, video) => sum + parseNumber(video.viewCount), 0),
       uploads: weeklyVideos.length,
-      fill: "#fca5a5",
+      fill: leaderboardCompetitorColors[index % leaderboardCompetitorColors.length],
       isYou: false,
       videos: weeklyVideos,
-    };
+    } satisfies WeeklyComparisonCompetitorRow;
   });
   const youRow = {
+    key: "you",
     name: channelName || "You",
     shortName: "You",
     views: yourVideos.reduce((sum, video) => sum + parseNumber(video.viewCount), 0),
@@ -1112,26 +1145,29 @@ function deriveWeeklyComparisonData(
     fill: "#34d399",
     isYou: true,
     videos: yourVideos,
-  };
-  const motivatingCompetitor = competitorRows.sort((a, b) => Math.abs(a.uploads - youRow.uploads) - Math.abs(b.uploads - youRow.uploads) || Math.abs(a.views - youRow.views) - Math.abs(b.views - youRow.views))[0];
+  } satisfies WeeklyComparisonYouRow;
+  const motivatingCompetitor = [...competitorRows].sort((a, b) => Math.abs(a.uploads - youRow.uploads) - Math.abs(b.uploads - youRow.uploads) || Math.abs(a.views - youRow.views) - Math.abs(b.views - youRow.views))[0];
   const weekdayRows = latestPlan.startDate && latestPlan.endDate
     ? Array.from({ length: 7 }).map((_, index) => {
       const iso = toIsoDate(addUtcDays(new Date(`${latestPlan.startDate}T00:00:00Z`), index));
       const day = daysOfWeek[new Date(`${iso}T00:00:00Z`).getUTCDay()];
       const yourDayVideos = yourVideos.filter((video) => video.publishedAt?.slice(0, 10) === iso);
-      const competitorDayVideos = (motivatingCompetitor?.videos ?? []).filter((video) => video.publishedAt?.slice(0, 10) === iso);
-      return {
+      const row: WeeklyComparisonWeekdayRow = {
         iso,
         day,
         youViews: yourDayVideos.reduce((sum, video) => sum + parseNumber(video.viewCount), 0),
-        competitorViews: competitorDayVideos.reduce((sum, video) => sum + parseNumber(video.viewCount), 0),
         youUploads: yourDayVideos.length,
-        competitorUploads: competitorDayVideos.length,
       };
+      for (const competitor of competitorRows) {
+        const competitorDayVideos = competitor.videos.filter((video) => video.publishedAt?.slice(0, 10) === iso);
+        row[`${competitor.key}Views`] = competitorDayVideos.reduce((sum, video) => sum + parseNumber(video.viewCount), 0);
+        row[`${competitor.key}Uploads`] = competitorDayVideos.length;
+      }
+      return row;
     })
     : [];
 
-  return { rows: [youRow, ...competitorRows], motivatingCompetitor, weekdayRows };
+  return { rows: [youRow, ...competitorRows], competitors: competitorRows, motivatingCompetitor, weekdayRows };
 }
 
 function deriveCurrentWeekConsistencyData(weekDates: string[], plannedDates: Set<string>, videos: RecentVideo[]) {
@@ -1606,19 +1642,27 @@ function CalendarPreviewCard({
 function WeeklyComparisonChart({
   rows,
   weekdayRows,
-  competitorName,
 }: {
-  rows: Array<{ name: string; shortName: string; views: number; uploads: number; fill: string; isYou: boolean }>;
-  weekdayRows: Array<{ iso: string; day: string; youViews: number; competitorViews: number; youUploads: number; competitorUploads: number }>;
-  competitorName?: string;
+  rows: WeeklyComparisonRow[];
+  weekdayRows: WeeklyComparisonWeekdayRow[];
 }) {
+  const competitors = rows.filter((row): row is WeeklyComparisonCompetitorRow => !row.isYou);
+  const uploadsConfig = {
+    youUploads: { label: "You", color: "#34d399" },
+    ...Object.fromEntries(competitors.map((competitor) => [`${competitor.key}Uploads`, { label: competitor.name, color: competitor.fill }])),
+  };
+  const viewsConfig = {
+    youViews: { label: "You", color: "#34d399" },
+    ...Object.fromEntries(competitors.map((competitor) => [`${competitor.key}Views`, { label: competitor.name, color: competitor.fill }])),
+  };
+
   return (
     <div className="mt-4 grid gap-4 xl:grid-cols-2">
       <PanelCardSoft className="p-4">
         <h5 className="text-sm font-semibold text-white">Upload count by weekday</h5>
-        <p className="mt-1 text-xs text-white/45">Current scheduled week, comparing your uploads with {competitorName ?? "the closest competitor"}.</p>
+        <p className="mt-1 text-xs text-white/45">Current scheduled week, comparing your uploads with every Tier 1 competitor.</p>
         <div className="mt-4 h-56">
-          <ChartContainer config={{ youUploads: { label: "You", color: "#34d399" }, competitorUploads: { label: competitorName ?? "Competitor", color: "#fca5a5" } }} className="h-full w-full">
+          <ChartContainer config={uploadsConfig} className="h-full w-full">
             <BarChart data={weekdayRows} margin={{ left: 6, right: 6, top: 12, bottom: 32 }}>
               <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.08)" />
               <XAxis dataKey="day" tickLine={false} axisLine={false} interval={0} height={42} />
@@ -1626,18 +1670,27 @@ function WeeklyComparisonChart({
               <ChartTooltip
                 content={({ active, payload }: TooltipProps<number, string>) => {
                   if (!active || !payload?.length) return null;
-                  const point = payload[0]?.payload as { iso: string; youUploads: number; competitorUploads: number };
+                  const point = payload[0]?.payload as WeeklyComparisonWeekdayRow;
                   return (
                     <div className="rounded-lg border border-white/10 bg-[#120d1f] px-3 py-2 text-xs text-white shadow-xl">
                       <p className="font-medium">{formatIsoDate(point.iso)}</p>
                       <p className="mt-1 text-white/65">You: {point.youUploads} upload{point.youUploads === 1 ? "" : "s"}</p>
-                      <p className="mt-1 text-white/65">{competitorName ?? "Competitor"}: {point.competitorUploads} upload{point.competitorUploads === 1 ? "" : "s"}</p>
+                      {competitors.map((competitor) => {
+                        const uploads = Number(point[`${competitor.key}Uploads`] ?? 0);
+                        return (
+                          <p key={`${competitor.key}-uploads-tooltip`} className="mt-1 text-white/65">
+                            {competitor.name}: {uploads} upload{uploads === 1 ? "" : "s"}
+                          </p>
+                        );
+                      })}
                     </div>
                   );
                 }}
               />
               <Bar dataKey="youUploads" radius={[8, 8, 0, 0]} fill="#34d399" />
-              <Bar dataKey="competitorUploads" radius={[8, 8, 0, 0]} fill="#fca5a5" />
+              {competitors.map((competitor) => (
+                <Bar key={`${competitor.key}-uploads`} dataKey={`${competitor.key}Uploads`} radius={[8, 8, 0, 0]} fill={competitor.fill} />
+              ))}
             </BarChart>
           </ChartContainer>
         </div>
@@ -1646,7 +1699,7 @@ function WeeklyComparisonChart({
         <h5 className="text-sm font-semibold text-white">Views by weekday</h5>
         <p className="mt-1 text-xs text-white/45">Current scheduled week view totals, sourced from published videos in this window.</p>
         <div className="mt-4 h-56">
-          <ChartContainer config={{ youViews: { label: "You", color: "#34d399" }, competitorViews: { label: competitorName ?? "Competitor", color: "#fca5a5" } }} className="h-full w-full">
+          <ChartContainer config={viewsConfig} className="h-full w-full">
             <BarChart data={weekdayRows} margin={{ left: 6, right: 6, top: 12, bottom: 32 }}>
               <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.08)" />
               <XAxis dataKey="day" tickLine={false} axisLine={false} interval={0} height={42} />
@@ -1654,18 +1707,24 @@ function WeeklyComparisonChart({
               <ChartTooltip
                 content={({ active, payload }: TooltipProps<number, string>) => {
                   if (!active || !payload?.length) return null;
-                  const point = payload[0]?.payload as { iso: string; youViews: number; competitorViews: number };
+                  const point = payload[0]?.payload as WeeklyComparisonWeekdayRow;
                   return (
                     <div className="rounded-lg border border-white/10 bg-[#120d1f] px-3 py-2 text-xs text-white shadow-xl">
                       <p className="font-medium">{formatIsoDate(point.iso)}</p>
                       <p className="mt-1 text-white/65">You: {formatNumber(point.youViews)} views</p>
-                      <p className="mt-1 text-white/65">{competitorName ?? "Competitor"}: {formatNumber(point.competitorViews)} views</p>
+                      {competitors.map((competitor) => (
+                        <p key={`${competitor.key}-views-tooltip`} className="mt-1 text-white/65">
+                          {competitor.name}: {formatNumber(point[`${competitor.key}Views`])} views
+                        </p>
+                      ))}
                     </div>
                   );
                 }}
               />
               <Bar dataKey="youViews" radius={[8, 8, 0, 0]} fill="#34d399" />
-              <Bar dataKey="competitorViews" radius={[8, 8, 0, 0]} fill="#fca5a5" />
+              {competitors.map((competitor) => (
+                <Bar key={`${competitor.key}-views`} dataKey={`${competitor.key}Views`} radius={[8, 8, 0, 0]} fill={competitor.fill} />
+              ))}
             </BarChart>
           </ChartContainer>
         </div>
@@ -3171,15 +3230,16 @@ export default function YouTubeGrowthPlannerV2Tab() {
                       <BarChart3 className="h-5 w-5 text-emerald-300" />
                       <h2 className="text-2xl font-semibold text-white">Repeat or Fix</h2>
                     </div>
-                    <p className="mt-2 max-w-3xl text-sm leading-6 text-white/55">One repeatable pattern and one fixable gap at a time, with the source video and next move attached.</p>
+                    <p className="mt-2 max-w-3xl text-sm leading-6 text-white/55">Pick one proven move to repeat and one underperforming video to repair. Each card shows the source upload, the signal behind it, and the next action to try.</p>
                   </div>
                   <Badge className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-white/65 hover:brightness-100">
                     {topDiagnostics.length + underperformerDiagnostics.length} cards
                   </Badge>
                 </div>
                 {channelDescription(status.channel) ? (
-                  <PanelCardSoft className="mt-5 border border-white/10 p-4 text-sm leading-6 text-white/65">
-                    {channelDescription(status.channel)}
+                  <PanelCardSoft className="mt-5 border border-white/10 p-4">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/35">Channel context for these recommendations</p>
+                    <p className="mt-2 text-sm leading-6 text-white/65">{channelDescription(status.channel)}</p>
                   </PanelCardSoft>
                 ) : null}
               </div>
@@ -3476,8 +3536,8 @@ export default function YouTubeGrowthPlannerV2Tab() {
                     {tier.key === "tier1" && weeklyComparison ? (
                       <PanelCardSoft className="border border-emerald-400/20 p-4">
                         <h4 className="text-base font-semibold text-white">This Week&apos;s Friendly Leaderboard</h4>
-                        <p className="mt-1 text-sm text-white/50">Weekday-by-weekday uploads and views for the current scheduled week.</p>
-                        <WeeklyComparisonChart rows={weeklyComparison.rows} weekdayRows={weeklyComparison.weekdayRows} competitorName={weeklyComparison.motivatingCompetitor?.name} />
+                        <p className="mt-1 text-sm text-white/50">Weekday-by-weekday uploads and views for you and every Tier 1 competitor in the current scheduled week.</p>
+                        <WeeklyComparisonChart rows={weeklyComparison.rows} weekdayRows={weeklyComparison.weekdayRows} />
                         {weeklyLeaderboardMessage ? <p className="mt-3 text-sm text-white/65">{weeklyLeaderboardMessage}</p> : null}
                       </PanelCardSoft>
                     ) : null}
