@@ -5,12 +5,15 @@ import { eq } from "drizzle-orm";
 import { db, youtubeChannelProfilesTable } from "@workspace/db";
 import { requireAuth } from "../../middlewares/auth";
 import {
+  createYoutubePlanDay,
   createYoutubeAuthUrl,
+  deleteYoutubePlanDay,
   discoverCompetitors,
   generateYoutubeWeeklyPlan,
   getYoutubeAppRedirect,
   getYoutubeRedirectUri,
   getYoutubeStatus,
+  patchYoutubePlanDay,
   improveYoutubeIdea,
   regenerateYoutubePlanIdea,
   savePlanResults,
@@ -162,6 +165,55 @@ router.post("/plans/:planId/results", requireAuth, async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "YouTube plan result collection error");
     res.status(500).json({ error: err instanceof Error ? err.message : "Failed to collect YouTube results" });
+  }
+});
+
+router.post("/plans/:planId/days", requireAuth, async (req, res) => {
+  try {
+    const planId = Number(req.params.planId);
+    const day = req.body?.day && typeof req.body.day === "object" ? req.body.day : null;
+    if (!Number.isInteger(planId) || planId <= 0 || !day) {
+      res.status(400).json({ error: "Valid plan ID and day payload are required" });
+      return;
+    }
+    const created = await createYoutubePlanDay(req.auth!.user_id, planId, day);
+    res.json(created);
+  } catch (err) {
+    req.log.error({ err }, "YouTube day create error");
+    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to create plan day" });
+  }
+});
+
+router.patch("/plans/:planId/days/:dayIndex", requireAuth, async (req, res) => {
+  try {
+    const planId = Number(req.params.planId);
+    const dayIndex = Number(req.params.dayIndex);
+    const patch = req.body?.patch && typeof req.body.patch === "object" ? req.body.patch : {};
+    if (!Number.isInteger(planId) || planId <= 0 || !Number.isInteger(dayIndex) || dayIndex <= 0) {
+      res.status(400).json({ error: "Valid plan ID and day index are required" });
+      return;
+    }
+    const updated = await patchYoutubePlanDay(req.auth!.user_id, planId, dayIndex, patch);
+    res.json(updated);
+  } catch (err) {
+    req.log.error({ err }, "YouTube day patch error");
+    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to update plan day" });
+  }
+});
+
+router.delete("/plans/:planId/days/:dayIndex", requireAuth, async (req, res) => {
+  try {
+    const planId = Number(req.params.planId);
+    const dayIndex = Number(req.params.dayIndex);
+    if (!Number.isInteger(planId) || planId <= 0 || !Number.isInteger(dayIndex) || dayIndex <= 0) {
+      res.status(400).json({ error: "Valid plan ID and day index are required" });
+      return;
+    }
+    const updated = await deleteYoutubePlanDay(req.auth!.user_id, planId, dayIndex);
+    res.json(updated);
+  } catch (err) {
+    req.log.error({ err }, "YouTube day delete error");
+    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to delete plan day" });
   }
 });
 

@@ -149,6 +149,10 @@ interface PlanDay {
   aiFeedback?: IdeaFeedback;
   feedbackUpdatedAt?: string | null;
   regeneratedAt?: string | null;
+  isDeleted?: boolean;
+  deletedAt?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
 }
 
 interface PerformanceInsight {
@@ -710,6 +714,18 @@ function ideaOriginMeta(day: PlanDay) {
     cardClassName: "border-red-300/20 bg-red-500/[0.05] hover:border-red-300/35",
     accentClassName: "from-red-300 to-amber-300",
   };
+}
+
+function hydrateVisiblePlanDays(rawDays: PlanDay[] = []) {
+  return rawDays
+    .filter((day) => !day.isDeleted)
+    .map((day) => ({
+      ...day,
+      id: toCardId(day),
+      stage: day.stage ?? "idea",
+      ideaOrigin: day.ideaOrigin ?? "ai",
+      aiFeedback: day.aiFeedback ?? null,
+    }));
 }
 
 function conceptTypeFromVideo(video: RecentVideo) {
@@ -2291,13 +2307,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
   const needsPostingPreference = Boolean(status?.connected && status?.settings?.needsPostingPreference);
 
   useEffect(() => {
-    setDays((latestPlan?.plan?.days ?? []).map((day) => ({
-      ...day,
-      id: toCardId(day),
-      stage: day.stage ?? "idea",
-      ideaOrigin: day.ideaOrigin ?? "ai",
-      aiFeedback: day.aiFeedback ?? null,
-    })));
+    setDays(hydrateVisiblePlanDays(latestPlan?.plan?.days ?? []));
   }, [latestPlan?.id]);
 
   useEffect(() => {
@@ -2420,29 +2430,37 @@ export default function YouTubeGrowthPlannerV2Tab() {
 
   function applyServerPlanUpdate(nextPlan: YoutubeWeeklyPlan, nextDay?: Partial<PlanDay> | null) {
     setStatus((current) => current ? { ...current, latestPlan: nextPlan } : current);
-    setDays((nextPlan.plan.days ?? []).map((day) => ({
-      ...day,
-      id: toCardId(day),
-      stage: day.stage ?? "idea",
-      ideaOrigin: day.ideaOrigin ?? "ai",
-      aiFeedback: day.aiFeedback ?? null,
-    })));
+    setDays(hydrateVisiblePlanDays(nextPlan.plan.days ?? []));
     if (nextDay) {
       setDetailDay((current) => current && current.day === nextDay.day ? { ...current, ...nextDay } : current);
     }
   }
 
-  function deleteDay(day: PlanDay) {
+  async function deleteDay(day: PlanDay) {
     const confirmed = window.confirm(`Delete "${day.contentIdea}" from this plan?`);
     if (!confirmed) return;
-    const cardId = toCardId(day);
-    setDays((current) => current.filter((item) => toCardId(item) !== cardId));
-    setDetailDay((current) => current && toCardId(current) === cardId ? null : current);
-    setResultSelections((current) => {
-      const next = { ...current };
-      delete next[day.day];
-      return next;
-    });
+    if (!latestPlan) {
+      const cardId = toCardId(day);
+      setDays((current) => current.filter((item) => toCardId(item) !== cardId));
+      setDetailDay((current) => current && toCardId(current) === cardId ? null : current);
+      return;
+    }
+    setError(null);
+    try {
+      const data = await jsonFetch<{ plan: YoutubeWeeklyPlan; day: PlanDay }>(`/api/youtube/plans/${latestPlan.id}/days/${day.day}`, {
+        method: "DELETE",
+      });
+      applyServerPlanUpdate(data.plan);
+      setDetailDay((current) => current?.day === day.day ? null : current);
+      setMovingDay((current) => current?.day === day.day ? null : current);
+      setResultSelections((current) => {
+        const next = { ...current };
+        delete next[day.day];
+        return next;
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not delete idea");
+    }
   }
 
   function handleDragStart(day: PlanDay) {
@@ -2451,7 +2469,8 @@ export default function YouTubeGrowthPlannerV2Tab() {
 
   function handleDropOnDate(date: string) {
     const cardId = window.sessionStorage.getItem("daytabs-dragged-youtube-day");
-    if (cardId) updateDay(cardId, { date });
+    const day = days.find((item) => toCardId(item) === cardId);
+    if (cardId && day) void moveIdeaToDate(day, date);
   }
 
   function handleDropOnStage(stage: Stage) {
@@ -2462,7 +2481,11 @@ export default function YouTubeGrowthPlannerV2Tab() {
       setDetailDay(day);
       return;
     }
-    updateDay(cardId, { stage });
+    if (latestPlan) {
+      void patchPlanDay(day.day, { stage });
+    } else {
+      updateDay(cardId, { stage });
+    }
   }
 
   async function connectYoutube() {
@@ -2583,7 +2606,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
     const nextDay = Math.max(0, ...days.map((day) => day.day)) + 1;
     const date = customIdea.date || days[days.length - 1]?.date || new Date().toISOString().slice(0, 10);
     const ideaLines = customIdea.angle.split("\n").map((line) => line.trim()).filter(Boolean);
-    setDays((current) => [...current, {
+    const newDay: PlanDay = {
       id: `custom-${crypto.randomUUID()}`,
       day: nextDay,
       date,
@@ -2600,13 +2623,47 @@ export default function YouTubeGrowthPlannerV2Tab() {
       competitorReference: "",
       descriptionSuggestion: "",
       thumbnailConcept: "",
-    }]);
+      isDeleted: false,
+      deletedAt: null,
+    };
+    if (latestPlan) {
+      try {
+        const data = await jsonFetch<{ plan: YoutubeWeeklyPlan; day: PlanDay }>(`/api/youtube/plans/${latestPlan.id}/days`, {
+          method: "POST",
+          body: JSON.stringify({ day: newDay }),
+        });
+        applyServerPlanUpdate(data.plan, data.day);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Could not save custom idea");
+        return;
+      }
+    } else {
+      setDays((current) => [...current, newDay]);
+    }
     setCustomIdea({ title: "", angle: "", date: "" });
     setCustomOpen(false);
   }
 
-  function moveIdeaToDate(day: PlanDay, date: string) {
-    updateDay(toCardId(day), { date });
+  async function patchPlanDay(dayIndex: number, patch: Partial<PlanDay>) {
+    if (!latestPlan) return;
+    const data = await jsonFetch<{ plan: YoutubeWeeklyPlan; day: PlanDay }>(`/api/youtube/plans/${latestPlan.id}/days/${dayIndex}`, {
+      method: "PATCH",
+      body: JSON.stringify({ patch }),
+    });
+    applyServerPlanUpdate(data.plan, data.day);
+  }
+
+  async function moveIdeaToDate(day: PlanDay, date: string) {
+    if (latestPlan) {
+      try {
+        await patchPlanDay(day.day, { date });
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Could not move idea");
+        return;
+      }
+    } else {
+      updateDay(toCardId(day), { date });
+    }
     setMovingDay(null);
     setDetailDay((current) => current && current.day === day.day ? { ...current, date } : current);
   }
@@ -2614,7 +2671,15 @@ export default function YouTubeGrowthPlannerV2Tab() {
   async function linkVideoToPlannedDay(video: RecentVideo, day: PlanDay) {
     setResultSelections((current) => ({ ...current, [day.day]: video.id }));
     await submitResults([{ dayIndex: day.day, plannedTitle: day.contentIdea, videoId: video.id }]);
-    updateDay(toCardId(day), { stage: "published" });
+    if (latestPlan) {
+      try {
+        await patchPlanDay(day.day, { stage: "published" });
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Could not update idea stage");
+      }
+    } else {
+      updateDay(toCardId(day), { stage: "published" });
+    }
   }
 
   async function addUploadedVideoAsIdea(video: RecentVideo) {
@@ -2637,10 +2702,22 @@ export default function YouTubeGrowthPlannerV2Tab() {
       competitorReference: "",
       descriptionSuggestion: video.description ?? "",
       thumbnailConcept: "",
+      isDeleted: false,
+      deletedAt: null,
     };
-    setDays((current) => [...current, newDay]);
-    setResultSelections((current) => ({ ...current, [nextDay]: video.id }));
-    await submitResults([{ dayIndex: nextDay, plannedTitle: video.title, videoId: video.id }]);
+    let persistedDay = newDay;
+    if (latestPlan) {
+      const data = await jsonFetch<{ plan: YoutubeWeeklyPlan; day: PlanDay }>(`/api/youtube/plans/${latestPlan.id}/days`, {
+        method: "POST",
+        body: JSON.stringify({ day: newDay }),
+      });
+      applyServerPlanUpdate(data.plan, data.day);
+      persistedDay = data.day;
+    } else {
+      setDays((current) => [...current, newDay]);
+    }
+    setResultSelections((current) => ({ ...current, [persistedDay.day]: video.id }));
+    await submitResults([{ dayIndex: persistedDay.day, plannedTitle: video.title, videoId: video.id }]);
   }
 
   async function saveIdeaFeedback(day: PlanDay, feedback: IdeaFeedback) {
@@ -3540,7 +3617,11 @@ export default function YouTubeGrowthPlannerV2Tab() {
                                   if (!selectedVideoId) return;
                                   void submitResults([{ dayIndex: detailDay.day, plannedTitle: detailDay.contentIdea, videoId: selectedVideoId }]).then(() => {
                                     setLinkingDay(null);
-                                    updateDay(toCardId(detailDay), { stage: "published" });
+                                    if (latestPlan) {
+                                      void patchPlanDay(detailDay.day, { stage: "published" });
+                                    } else {
+                                      updateDay(toCardId(detailDay), { stage: "published" });
+                                    }
                                   });
                                 }}
                                 disabled={!selectedVideoId || savingResultDay === detailDay.day}
