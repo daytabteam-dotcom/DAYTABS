@@ -41,6 +41,7 @@ export interface YoutubeRecentVideo {
   description: string;
   tags: string[];
   publishedAt: string | null;
+  visibility?: string | null;
   duration: string | null;
   viewCount: string | null;
   likeCount: string | null;
@@ -825,6 +826,7 @@ function normalizeVideo(item: unknown): YoutubeRecentVideo {
   const snippet = asRecord(record.snippet);
   const stats = asRecord(record.statistics);
   const details = asRecord(record.contentDetails);
+  const status = asRecord(record.status);
   const thumbnails = asRecord(snippet.thumbnails);
   const id = asString(record.id) || asString(asRecord(record.id).videoId) || "";
   return {
@@ -833,6 +835,7 @@ function normalizeVideo(item: unknown): YoutubeRecentVideo {
     description: asString(snippet.description) || "",
     tags: asArray(snippet.tags).map((tag) => String(tag)),
     publishedAt: asString(snippet.publishedAt),
+    visibility: asString(status.privacyStatus),
     duration: asString(details.duration),
     viewCount: asString(stats.viewCount),
     likeCount: asString(stats.likeCount),
@@ -857,7 +860,7 @@ async function fetchRecentVideos(userId: number, channelId: string, limit = 20) 
     .filter((id): id is string => Boolean(id));
   if (!ids.length) return [];
   const videos = await youtubeJson<{ items?: unknown[] }>(userId, dataApiUrl("videos", {
-    part: "snippet,statistics,contentDetails",
+    part: "snippet,statistics,contentDetails,status",
     id: ids.join(","),
     maxResults: String(limit),
   }), { cacheKey: `videos:${ids.join(",")}`, quotaCost: 1, ttlMs: 60 * 60 * 1000 });

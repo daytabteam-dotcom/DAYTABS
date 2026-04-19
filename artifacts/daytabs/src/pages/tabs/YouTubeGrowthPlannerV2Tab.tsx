@@ -81,6 +81,7 @@ interface RecentVideo {
   description?: string;
   tags?: string[];
   publishedAt?: string | null;
+  visibility?: string | null;
   duration?: string | null;
   viewCount?: string | null;
   likeCount?: string | null;
@@ -382,6 +383,10 @@ function isVideoInPlanWindow(video: RecentVideo, plan: YoutubeWeeklyPlan | null)
 function videoOptionLabel(video: RecentVideo) {
   const date = video.publishedAt ? new Date(video.publishedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "No date";
   return `${date} - ${video.title}`;
+}
+
+function isPublicVideo(video?: RecentVideo | null) {
+  return (video?.visibility || "").toLowerCase() === "public";
 }
 
 function insightLabel(type?: string) {
@@ -2421,6 +2426,17 @@ export default function YouTubeGrowthPlannerV2Tab() {
     [weeklyComparison],
   );
 
+  useEffect(() => {
+    setDays((current) => current.map((day) => {
+      const linked = resultsByDay.get(day.day);
+      const linkedVideo = linked ? recentVideoById.get(linked.videoId) : null;
+      if (linked && isPublicVideo(linkedVideo) && day.stage !== "published") {
+        return { ...day, stage: "published" };
+      }
+      return day;
+    }));
+  }, [resultsByDay, recentVideoById]);
+
   if (!plan.isStudio) return <GrowthPlannerComingSoon />;
   if (loading || planLoading) return <LoadingState />;
 
@@ -2478,7 +2494,18 @@ export default function YouTubeGrowthPlannerV2Tab() {
     const day = days.find((item) => toCardId(item) === cardId);
     if (!cardId || !day) return;
     if (stage === "published") {
+      const linked = resultsByDay.get(day.day);
+      const linkedVideo = linked ? recentVideoById.get(linked.videoId) : null;
+      if (linked && isPublicVideo(linkedVideo)) {
+        if (latestPlan) {
+          void patchPlanDay(day.day, { stage: "published" });
+        } else {
+          updateDay(cardId, { stage: "published" });
+        }
+        return;
+      }
       setDetailDay(day);
+      setLinkingDay(day.day);
       return;
     }
     if (latestPlan) {
