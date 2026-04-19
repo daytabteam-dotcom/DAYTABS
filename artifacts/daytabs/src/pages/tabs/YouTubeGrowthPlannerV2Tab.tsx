@@ -31,7 +31,6 @@ import {
   Send,
   Sparkles,
   TrendingDown,
-  TrendingUp,
   Type,
   Youtube,
 } from "lucide-react";
@@ -466,17 +465,6 @@ function chunkByWeek(points: YoutubeAnalyticsPoint[]) {
     weekly.get(key)!.push(point);
   }
   return [...weekly.entries()].slice(-8);
-}
-
-function deriveStatTrend(points: YoutubeAnalyticsPoint[], metric: "views" | "subscribersNet") {
-  const recent = points.slice(-60);
-  if (recent.length < 14) return { series: [] as number[], change: null as number | null };
-  const current = recent.slice(-30);
-  const previous = recent.slice(-60, -30);
-  const currentTotal = current.reduce((sum, point) => sum + point[metric], 0);
-  const previousTotal = previous.reduce((sum, point) => sum + point[metric], 0);
-  const change = previousTotal > 0 ? ((currentTotal - previousTotal) / previousTotal) * 100 : null;
-  return { series: current.map((point) => point[metric]), change };
 }
 
 function deriveBestTimeHeatmap(videos: RecentVideo[]) {
@@ -1148,46 +1136,6 @@ function StatsSkeleton() {
         </PanelCardSoft>
       ))}
     </section>
-  );
-}
-
-function ChannelSparkline({ values }: { values: number[] }) {
-  const points = values.filter((value) => Number.isFinite(value));
-  if (points.length < 2) return <p className="mt-3 text-xs text-white/30">Waiting for enough analytics history.</p>;
-  const max = Math.max(...points);
-  const min = Math.min(...points);
-  const polyline = points.map((value, index) => {
-    const x = (index / Math.max(1, points.length - 1)) * 100;
-    const y = 30 - (((value - min) / Math.max(1, max - min)) * 24);
-    return `${x},${y}`;
-  }).join(" ");
-  return (
-    <svg viewBox="0 0 100 34" className="mt-3 h-10 w-full">
-      <polyline points={polyline} fill="none" stroke="rgb(248 113 113)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function StatCard({
-  label,
-  value,
-  trend,
-  caption,
-}: {
-  label: string;
-  value?: string | number | null;
-  trend?: { series: number[]; change: number | null };
-  caption?: string;
-}) {
-  return (
-    <PanelCardSoft className="p-4">
-      <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-white/35">{label}</p>
-      <p className="mt-2 text-2xl font-semibold text-white">{formatNumber(value)}</p>
-      {trend?.series?.length ? <ChannelSparkline values={trend.series} /> : <div className="mt-3 h-10" />}
-      <p className={cn("text-xs", trend?.change != null ? (trend.change >= 0 ? "text-emerald-300" : "text-red-300") : "text-white/40")}>
-        {trend?.change != null ? `${trend.change >= 0 ? "↑" : "↓"}${Math.abs(Math.round(trend.change))}% over the last 30 days` : caption || "Trend appears after more analytics data arrives."}
-      </p>
-    </PanelCardSoft>
   );
 }
 
@@ -2151,8 +2099,6 @@ export default function YouTubeGrowthPlannerV2Tab() {
   }, [latestPlan?.startDate, latestPlan?.endDate]);
   const dayByDate = useMemo(() => new Map(calendarDays.map((day) => [day.date, day])), [calendarDays]);
   const plannedDateSet = useMemo(() => new Set(calendarDays.map((day) => day.date)), [calendarDays]);
-  const subscriberTrend = deriveStatTrend(analyticsPoints, "subscribersNet");
-  const viewTrend = deriveStatTrend(analyticsPoints, "views");
   const progressState = weekProgress(days, status?.latestResults ?? []);
   const overview = useMemo(() => buildOverviewSections(recentVideos), [recentVideos]);
   const postingPattern = useMemo(() => buildPostingPattern(recentVideos, status?.settings?.connectedAt), [recentVideos, status?.settings?.connectedAt]);
@@ -2330,6 +2276,90 @@ export default function YouTubeGrowthPlannerV2Tab() {
     setCustomOpen(false);
   }
 
+  const planCalendarSection = (
+    <PanelCard className="p-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-3">
+            <CalendarDays className="h-5 w-5 text-red-300" />
+            <h2 className="text-2xl font-semibold text-white">
+              {latestPlan ? "This Week Plan" : "Weekly Plan"}
+            </h2>
+          </div>
+          <p className="mt-2 text-sm text-white/45">{dateRangeLabel(latestPlan?.startDate, latestPlan?.endDate)}</p>
+        </div>
+        <div className="flex gap-2">
+          <Button variant={viewMode === "calendar" ? "default" : "secondary"} className="rounded-lg" onClick={() => setViewMode("calendar")}><LayoutGrid className="mr-2 h-4 w-4" />Calendar</Button>
+          <Button variant={viewMode === "planner" ? "default" : "secondary"} className="rounded-lg" onClick={() => setViewMode("planner")}><ListChecks className="mr-2 h-4 w-4" />Planner</Button>
+        </div>
+      </div>
+      <div className="mt-5 rounded-lg border border-white/10 bg-white/[0.03] p-4">
+        <div className="flex items-center justify-between gap-3 text-sm text-white/70">
+          <span>{progressState.planned} planned this week · {progressState.posted} published</span>
+          <span>{progressState.progress}%</span>
+        </div>
+        <Progress value={progressState.progress} className="mt-3 bg-white/10 [&>div]:bg-red-400" />
+      </div>
+      {latestPlan?.plan?.summary && <p className="mt-4 text-sm text-white/55">{latestPlan.plan.summary}</p>}
+      {viewMode === "calendar" ? (
+        <div className="mt-5 grid gap-3 lg:grid-cols-7">
+          {weekCalendarDates.map((date) => {
+            const day = dayByDate.get(date);
+            const linked = day ? resultsByDay.get(day.day) : null;
+            const isToday = date === new Date().toISOString().slice(0, 10);
+            return (
+              <div key={date} onDragOver={(event) => event.preventDefault()} onDrop={() => handleDropOnDate(date)} className={cn("min-h-[260px] rounded-2xl border bg-white/[0.025] p-3 transition-all hover:bg-white/[0.04]", isToday ? "border-red-300/35" : "border-white/10")}>
+                <div className="mb-3 flex items-start justify-between gap-2 rounded-xl border border-white/10 bg-black/10 px-3 py-2">
+                  <div>
+                    <p className="text-sm font-semibold text-white">{dayName(date)}</p>
+                    <p className="mt-1 text-xs text-white/35">{formatIsoDate(date, { month: "short", day: "numeric" })}</p>
+                  </div>
+                  {linked ? <span className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-2 py-1 text-[10px] font-medium text-emerald-200">Published</span> : day ? <span className="rounded-full border border-sky-400/25 bg-sky-500/10 px-2 py-1 text-[10px] font-medium text-sky-100">Planned</span> : <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-[10px] font-medium text-white/35">Open</span>}
+                </div>
+                {day ? (
+                  <CalendarPreviewCard day={day} linked={Boolean(linked)} onDragStart={handleDragStart} onOpen={setDetailDay} />
+                ) : (
+                  <div className="flex h-[180px] flex-col items-center justify-center rounded-2xl border border-dashed border-white/10 bg-black/10 text-center text-sm text-white/25">
+                    <Plus className="mb-2 h-5 w-5" />
+                    No post planned
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {!days.length && <div className="rounded-lg border border-white/10 p-8 text-center text-sm text-white/45 lg:col-span-7">Generate a plan to create exactly {preferredPostsPerWeek} YouTube ideas grounded in your channel data and strongest posting windows.</div>}
+        </div>
+      ) : (
+        <div className="mt-5 grid gap-3 lg:grid-cols-5">
+          {stages.map((stage) => (
+            <div key={stage.id} onDragOver={(event) => event.preventDefault()} onDrop={() => handleDropOnStage(stage.id)} className="min-h-[260px] rounded-lg border border-white/10 bg-white/[0.025] p-3">
+              <p className="mb-3 text-sm font-semibold text-white">{stage.label}</p>
+              <div className="space-y-3">
+                {days.filter((day) => (day.stage ?? "idea") === stage.id).map((day) => <PlannerIdeaCard key={toCardId(day)} day={day} onDragStart={handleDragStart} />)}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </PanelCard>
+  );
+
+  const consistencySection = (
+    <PanelCard id="posting-consistency" className="p-6 transition-all hover:-translate-y-1 hover:bg-white/[0.04]">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-3">
+            <CheckCircle2 className="h-5 w-5 text-emerald-300" />
+            <h2 className="text-2xl font-semibold text-white">Consistency Tracker</h2>
+          </div>
+          <p className="mt-2 text-sm text-white/45">Four weeks of publishing behavior so you can see if growth is a consistency issue, a performance issue, or both.</p>
+        </div>
+        <Badge className={`${confidenceClass(recentVideos.length >= 4 ? "high" : "medium")} hover:brightness-100`}>{recentVideos.length >= 4 ? "high" : "medium"}</Badge>
+      </div>
+      <PostingPatternStrip days={postingPattern} plannedDates={plannedDateSet} />
+    </PanelCard>
+  );
+
   return (
     <PanelPage className="max-w-7xl space-y-8 py-8">
       <PanelHeader className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
@@ -2397,37 +2427,8 @@ export default function YouTubeGrowthPlannerV2Tab() {
         </section>
       ) : (
         <>
-          <PanelCard className="p-4">
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <CommandStat
-                label="Weekly target"
-                value={`${preferredPostsPerWeek} upload${preferredPostsPerWeek === 1 ? "" : "s"}`}
-                caption="Used when generating plans"
-                Icon={CalendarDays}
-              />
-              <CommandStat
-                label="Plan window"
-                value={latestPlan ? dateRangeLabel(latestPlan.startDate, latestPlan.endDate) : "Not generated"}
-                caption="Dates this calendar covers"
-                Icon={ListChecks}
-              />
-              <CommandStat
-                label="Progress"
-                value={`${progressState.posted}/${Math.max(days.length, preferredPostsPerWeek)} published`}
-                caption="Linked uploads this week"
-                Icon={CheckCircle2}
-              />
-              <CommandStat
-                label="Best slot"
-                value={bestTime.highest ? `${bestTime.highest.day} ${bestTime.highest.hour}` : "Needs more data"}
-                caption={bestTime.highest ? `${formatNumber(bestTime.highest.value)} avg views` : "More uploads improve this"}
-                Icon={Clock}
-              />
-            </div>
-          </PanelCard>
-
-          <section className="grid gap-4 md:grid-cols-5">
-            <PanelCardStrong className="border border-white/10 p-5 transition-all hover:-translate-y-1 hover:bg-white/[0.05] md:col-span-2">
+          <PanelCardStrong className="p-5">
+            <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_1.3fr] xl:items-center">
               <div className="flex items-start gap-4">
                 <div className="relative">
                   <Avatar className="h-20 w-20 rounded-[20px] border border-white/10">
@@ -2439,28 +2440,44 @@ export default function YouTubeGrowthPlannerV2Tab() {
                   </span>
                 </div>
                 <div className="min-w-0">
-                  <p className="text-[11px] uppercase tracking-[0.18em] text-white/35">Connected Channel</p>
-                  <h2 className="mt-2 truncate text-2xl font-semibold text-white">{status.channel?.channelName ?? "Connected"}</h2>
+                  <p className="text-[11px] uppercase tracking-[0.18em] text-white/35">Command Center</p>
+                  <h2 className="mt-2 truncate text-2xl font-semibold text-white">{status.channel?.channelName ?? "Connected channel"}</h2>
                   <p className="mt-1 text-sm text-white/45">{status.channel?.nicheProfile?.niche ?? "Niche profile ready"}</p>
-                  {channelDescription(status.channel) ? (
-                    <div className="mt-3">
-                      <p className="line-clamp-2 text-sm leading-6 text-white/60">{channelDescription(status.channel)}</p>
-                      {channelDescription(status.channel).length > 140 ? (
-                        <button type="button" onClick={() => setChannelDetailsOpen(true)} className="mt-1 text-xs text-white/45 transition-colors hover:text-white">
-                          Read more
-                        </button>
-                      ) : null}
-                    </div>
-                  ) : null}
+                  <div className="mt-3 flex flex-wrap gap-2 text-xs text-white/45">
+                    <span>{formatNumber(status.channel?.subscriberCount)} subscribers</span>
+                    <span>·</span>
+                    <span>{formatNumber(status.channel?.totalViewCount)} total views</span>
+                    <span>·</span>
+                    <span>{formatNumber(status.channel?.videoCount)} videos</span>
+                  </div>
                 </div>
               </div>
-            </PanelCardStrong>
-            <StatCard label="Subscribers" value={status.channel?.subscriberCount} trend={subscriberTrend} />
-            <StatCard label="Total Views" value={status.channel?.totalViewCount} trend={viewTrend} />
-            <StatCard label="Videos" value={status.channel?.videoCount} caption="Current published video count from YouTube." />
-          </section>
+              <div className="grid gap-3 md:grid-cols-3">
+                <CommandStat
+                  label="Weekly target"
+                  value={`${preferredPostsPerWeek} upload${preferredPostsPerWeek === 1 ? "" : "s"}`}
+                  caption="Used when generating plans"
+                  Icon={CalendarDays}
+                />
+                <CommandStat
+                  label="Progress"
+                  value={`${progressState.posted}/${Math.max(days.length, preferredPostsPerWeek)} published`}
+                  caption="Linked uploads this week"
+                  Icon={CheckCircle2}
+                />
+                <CommandStat
+                  label="Best slot"
+                  value={bestTime.highest ? `${bestTime.highest.day} ${bestTime.highest.hour}` : "Needs more data"}
+                  caption={bestTime.highest ? `${formatNumber(bestTime.highest.value)} avg views` : "More uploads improve this"}
+                  Icon={Clock}
+                />
+              </div>
+            </div>
+          </PanelCardStrong>
 
-          <section className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
+          {planCalendarSection}
+
+          <section>
             <PanelCard className="overflow-hidden border border-white/10 p-0 transition-all hover:-translate-y-1 hover:bg-white/[0.04]">
               <div className="border-b border-white/10 bg-white/[0.03] p-6">
                 <div className="flex flex-wrap items-start justify-between gap-4">
@@ -2498,26 +2515,9 @@ export default function YouTubeGrowthPlannerV2Tab() {
                 />
               </div>
             </PanelCard>
-
-            <PanelCard className="p-6 transition-all hover:-translate-y-1 hover:bg-white/[0.04]">
-              <div className="flex items-center gap-3">
-                <TrendingUp className="h-5 w-5 text-sky-300" />
-                <h2 className="text-2xl font-semibold text-white">Recent Videos</h2>
-              </div>
-              <p className="mt-2 text-sm text-white/45">All source material here comes from the connected channel’s actual recent uploads.</p>
-              <div className="mt-4 space-y-3">
-                {recentVideos.slice(0, 5).map((video) => (
-                  <a key={video.id} href={video.url} target="_blank" rel="noreferrer" className="flex items-center gap-3 rounded-lg border border-white/10 p-3 text-sm text-white/70 transition-all hover:-translate-y-0.5 hover:bg-white/5">
-                    {video.thumbnailUrl ? <img src={video.thumbnailUrl} alt="" className="h-[45px] w-20 rounded-md object-cover" /> : <div className="flex h-[45px] w-20 items-center justify-center rounded-md bg-[#151515]"><Play className="h-4 w-4 text-white/60" /></div>}
-                    <div className="min-w-0">
-                      <span className="line-clamp-2 text-white">{video.title}</span>
-                      <span className="mt-2 flex items-center gap-3 text-xs text-white/35">{formatNumber(video.viewCount)} views <ExternalLink className="h-3 w-3" /></span>
-                    </div>
-                  </a>
-                ))}
-              </div>
-            </PanelCard>
           </section>
+
+          {consistencySection}
 
           <PanelCard className="p-6 transition-all hover:-translate-y-1 hover:bg-white/[0.04]">
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -2531,7 +2531,6 @@ export default function YouTubeGrowthPlannerV2Tab() {
             </div>
             <div className="sticky top-4 z-10 mt-5 flex flex-wrap gap-2 rounded-xl border border-white/10 bg-[#120d1f]/90 p-3 backdrop-blur">
               {[
-                ["posting-consistency", "Posting Consistency"],
                 ["optimal-posting-schedule", "Optimal Posting Schedule"],
                 ["hook-efficacy-analysis", "Hook Efficacy"],
                 ["optimal-title-length", "Optimal Title Length"],
@@ -2544,17 +2543,6 @@ export default function YouTubeGrowthPlannerV2Tab() {
             </div>
 
             <div className="mt-6 space-y-6">
-              <PanelCardSoft id="posting-consistency" className="border border-white/10 p-5 transition-all hover:-translate-y-1 hover:bg-white/[0.05]">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <h3 className="text-xl font-semibold text-white">Posting Consistency Score</h3>
-                    <p className="mt-2 text-sm text-white/45">A visual read of how consistently you have published since connecting this channel.</p>
-                  </div>
-                  <Badge className={`${confidenceClass(recentVideos.length >= 4 ? "high" : "medium")} hover:brightness-100`}>{recentVideos.length >= 4 ? "high" : "medium"}</Badge>
-                </div>
-                <PostingPatternStrip days={postingPattern} plannedDates={plannedDateSet} />
-              </PanelCardSoft>
-
               <PanelCardSoft id="optimal-posting-schedule" className="border border-white/10 p-5 transition-all hover:-translate-y-1 hover:bg-white/[0.05]">
                 <div className="flex items-center justify-between gap-3">
                   <div>
@@ -2725,71 +2713,6 @@ export default function YouTubeGrowthPlannerV2Tab() {
               ) : null}
 
             </div>
-          </PanelCard>
-
-          <PanelCard className="p-6">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <div className="flex items-center gap-3">
-                  <CalendarDays className="h-5 w-5 text-red-300" />
-                  <h2 className="text-2xl font-semibold text-white">
-                    {latestPlan ? "Plan Calendar" : "Weekly Calendar"}
-                  </h2>
-                </div>
-                <p className="mt-2 text-sm text-white/45">{dateRangeLabel(latestPlan?.startDate, latestPlan?.endDate)}</p>
-              </div>
-              <div className="flex gap-2">
-                <Button variant={viewMode === "calendar" ? "default" : "secondary"} className="rounded-lg" onClick={() => setViewMode("calendar")}><LayoutGrid className="mr-2 h-4 w-4" />Calendar</Button>
-                <Button variant={viewMode === "planner" ? "default" : "secondary"} className="rounded-lg" onClick={() => setViewMode("planner")}><ListChecks className="mr-2 h-4 w-4" />Planner</Button>
-              </div>
-            </div>
-            <div className="mt-5 rounded-lg border border-white/10 bg-white/[0.03] p-4">
-              <div className="flex items-center justify-between gap-3 text-sm text-white/70">
-                <span>{progressState.planned} planned this week · {progressState.posted} published</span>
-                <span>{progressState.progress}%</span>
-              </div>
-              <Progress value={progressState.progress} className="mt-3 bg-white/10 [&>div]:bg-red-400" />
-            </div>
-            {latestPlan?.plan?.summary && <p className="mt-4 text-sm text-white/55">{latestPlan.plan.summary}</p>}
-            {viewMode === "calendar" ? (
-              <div className="mt-5 grid gap-3 lg:grid-cols-7">
-                {weekCalendarDates.map((date) => {
-                  const day = dayByDate.get(date);
-                  const linked = day ? resultsByDay.get(day.day) : null;
-                  const isToday = date === new Date().toISOString().slice(0, 10);
-                  return (
-                  <div key={date} onDragOver={(event) => event.preventDefault()} onDrop={() => handleDropOnDate(date)} className={cn("min-h-[260px] rounded-2xl border bg-white/[0.025] p-3 transition-all hover:bg-white/[0.04]", isToday ? "border-red-300/35" : "border-white/10")}>
-                    <div className="mb-3 flex items-start justify-between gap-2 rounded-xl border border-white/10 bg-black/10 px-3 py-2">
-                      <div>
-                        <p className="text-sm font-semibold text-white">{dayName(date)}</p>
-                        <p className="mt-1 text-xs text-white/35">{formatIsoDate(date, { month: "short", day: "numeric" })}</p>
-                      </div>
-                      {linked ? <span className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-2 py-1 text-[10px] font-medium text-emerald-200">Published</span> : day ? <span className="rounded-full border border-sky-400/25 bg-sky-500/10 px-2 py-1 text-[10px] font-medium text-sky-100">Planned</span> : <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-[10px] font-medium text-white/35">Open</span>}
-                    </div>
-                    {day ? (
-                      <CalendarPreviewCard day={day} linked={Boolean(linked)} onDragStart={handleDragStart} onOpen={setDetailDay} />
-                    ) : (
-                      <div className="flex h-[180px] flex-col items-center justify-center rounded-2xl border border-dashed border-white/10 bg-black/10 text-center text-sm text-white/25">
-                        <Plus className="mb-2 h-5 w-5" />
-                        No post planned
-                      </div>
-                    )}
-                  </div>
-                )})}
-                {!days.length && <div className="rounded-lg border border-white/10 p-8 text-center text-sm text-white/45 lg:col-span-7">Generate a plan to create exactly {preferredPostsPerWeek} YouTube ideas grounded in your channel data and strongest posting windows.</div>}
-              </div>
-            ) : (
-              <div className="mt-5 grid gap-3 lg:grid-cols-5">
-                {stages.map((stage) => (
-                  <div key={stage.id} onDragOver={(event) => event.preventDefault()} onDrop={() => handleDropOnStage(stage.id)} className="min-h-[260px] rounded-lg border border-white/10 bg-white/[0.025] p-3">
-                    <p className="mb-3 text-sm font-semibold text-white">{stage.label}</p>
-                    <div className="space-y-3">
-                      {days.filter((day) => (day.stage ?? "idea") === stage.id).map((day) => <PlannerIdeaCard key={toCardId(day)} day={day} onDragStart={handleDragStart} />)}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
           </PanelCard>
 
           <section>
