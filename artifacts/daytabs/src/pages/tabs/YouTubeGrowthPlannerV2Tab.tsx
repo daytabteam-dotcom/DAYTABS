@@ -118,7 +118,7 @@ interface YoutubeCompetitor {
   thumbnailUrl?: string | null;
   subscriberCount?: string | null;
   postingFrequency?: string | null;
-  mostViewedRecentVideos?: Array<{ title?: string; viewCount?: string | null; url?: string }>;
+  mostViewedRecentVideos?: Array<{ title?: string; viewCount?: string | null; url?: string; publishedAt?: string | null; thumbnailUrl?: string | null }>;
 }
 
 interface PlanDay {
@@ -206,6 +206,8 @@ interface PostingPatternDay {
   dayNumber: string;
   weekIndex: number;
   videoTitle?: string;
+  isFuture?: boolean;
+  isUpcoming?: boolean;
 }
 
 interface TitleLengthBucket {
@@ -636,6 +638,13 @@ function contentTypeMeta(day: PlanDay) {
   return { label: "Emotional", Icon: Heart };
 }
 
+function renderQuotedTitles(text: string) {
+  const parts = text.split(/(\"[^\"]+\")/g).filter(Boolean);
+  return parts.map((part, index) => part.startsWith("\"") && part.endsWith("\"")
+    ? <strong key={`${part}-${index}`} className="font-semibold text-white">{part.slice(1, -1)}</strong>
+    : <span key={`${part}-${index}`}>{part}</span>);
+}
+
 function buildOverviewSections(videos: RecentVideo[]) {
   const sorted = [...videos].sort((a, b) => parseNumber(b.viewCount) - parseNumber(a.viewCount));
   const top = sorted.slice(0, 3);
@@ -652,14 +661,14 @@ function buildOverviewSections(videos: RecentVideo[]) {
   const strongestTag = Object.entries(topTag).sort((a, b) => b[1] - a[1])[0]?.[0];
 
   return {
-    whatWorked: top.map((video) => `"${video.title}" led with ${formatNumber(video.viewCount)} views.`),
+    whatWorkedVideos: top,
     whyItWorked: [
       top[0] ? `"${top[0].title}" used a ${hookType(top[0].title).toLowerCase()} hook and reached ${formatNumber(top[0].viewCount)} views.` : null,
       top[1] ? `"${top[1].title}" kept the title around ${top[1].title.length} characters, close to your strongest cluster.` : null,
       strongestTag && top[2] ? `"${top[2].title}" reinforced the repeat tag theme #${strongestTag}, which appears across your better-performing uploads.` : null,
       questionCount ? `${questionCount} of your top ${top.length} videos use a question or curiosity-led title pattern.` : null,
     ].filter(Boolean) as string[],
-    underperformers: bottom.map((video) => `"${video.title}" stalled at ${formatNumber(video.viewCount)} views, making it one of the weakest recent uploads.`),
+    underperformerVideos: bottom,
     recommendations: [
       top[0] ? `Build the next week around the pattern in "${top[0].title}" instead of resetting to a new format.` : null,
       avgTopLength && avgBottomLength ? `Your stronger titles average ${avgTopLength} characters vs ${avgBottomLength} for the weakest set, so stay near that higher-performing range.` : null,
@@ -670,12 +679,19 @@ function buildOverviewSections(videos: RecentVideo[]) {
 }
 
 function buildPostingPattern(videos: RecentVideo[]) {
-  const days = Array.from({ length: 30 }).map((_, index) => {
+  const today = new Date();
+  const todayIso = today.toISOString().slice(0, 10);
+  const endOfNextWeek = new Date(today);
+  const daysUntilWeekEnd = (7 - (today.getUTCDay() || 7)) % 7;
+  endOfNextWeek.setUTCDate(today.getUTCDate() + daysUntilWeekEnd + 7);
+  const futureCount = Math.max(0, Math.round((endOfNextWeek.getTime() - today.getTime()) / 86400000));
+  const days = Array.from({ length: 30 + futureCount }).map((_, index) => {
     const date = new Date();
-    date.setUTCDate(date.getUTCDate() - (29 - index));
+    date.setUTCDate(date.getUTCDate() - 29 + index);
     const iso = date.toISOString().slice(0, 10);
     const matchedVideo = videos.find((video) => video.publishedAt?.slice(0, 10) === iso);
     const posted = Boolean(matchedVideo);
+    const isFuture = iso > todayIso;
     return {
       iso,
       posted,
@@ -683,6 +699,8 @@ function buildPostingPattern(videos: RecentVideo[]) {
       dayNumber: date.toLocaleDateString(undefined, { day: "numeric" }),
       weekIndex: Math.floor(index / 7),
       videoTitle: matchedVideo?.title,
+      isFuture,
+      isUpcoming: isFuture,
     };
   });
   return days;
@@ -897,6 +915,58 @@ function deriveCompetitorRows(ownSubscribers: number, recentVideos: RecentVideo[
   });
 }
 
+function partitionCompetitors(ownSubscribers: number, competitors: Array<ReturnType<typeof deriveCompetitorRows>[number]>) {
+  const tier1 = competitors.filter((item) => ownSubscribers > 0 && item.subscribers > 0 && item.subscribers <= ownSubscribers * 5);
+  const tier2 = competitors.filter((item) => ownSubscribers > 0 && item.subscribers > ownSubscribers * 5 && item.subscribers <= ownSubscribers * 30);
+  const tier3 = competitors.filter((item) => ownSubscribers > 0 && item.subscribers > ownSubscribers * 30);
+  return { tier1, tier2, tier3 };
+}
+
+function deriveWeeklyComparisonData(
+  tier1: Array<ReturnType<typeof deriveCompetitorRows>[number]>,
+  latestPlan: YoutubeWeeklyPlan | null,
+  linkedResults: YoutubePlanResult[],
+  recentVideoById: Map<string, RecentVideo>,
+  channelName?: string,
+) {
+  if (!latestPlan) return null;
+  const start = `${latestPlan.startDate}T00:00:00Z`;
+  const end = `${latestPlan.endDate}T23:59:59Z`;
+  const inWindow = (value?: string | null) => {
+    if (!value) return false;
+    const time = new Date(value).getTime();
+    return Number.isFinite(time) && time >= new Date(start).getTime() && time <= new Date(end).getTime();
+  };
+  const yourVideos = linkedResults
+    .map((result) => recentVideoById.get(result.videoId))
+    .filter((video): video is RecentVideo => Boolean(video))
+    .filter((video) => inWindow(video.publishedAt));
+
+  const rows = [
+    {
+      name: channelName || "You",
+      shortName: "You",
+      views: yourVideos.reduce((sum, video) => sum + parseNumber(video.viewCount), 0),
+      uploads: yourVideos.length,
+      fill: "#34d399",
+      isYou: true,
+    },
+    ...tier1.slice(0, 4).map((competitor) => {
+      const weeklyVideos = (competitor.mostViewedRecentVideos ?? []).filter((video) => inWindow(video.publishedAt));
+      return {
+        name: competitor.channelName,
+        shortName: competitor.channelName,
+        views: weeklyVideos.reduce((sum, video) => sum + parseNumber(video.viewCount), 0),
+        uploads: weeklyVideos.length,
+        fill: "#fca5a5",
+        isYou: false,
+      };
+    }),
+  ];
+  const motivatingCompetitor = rows.slice(1).sort((a, b) => Math.abs(a.uploads - rows[0].uploads) - Math.abs(b.uploads - rows[0].uploads))[0];
+  return { rows, motivatingCompetitor };
+}
+
 function deriveCompetitorGapSummary(ownAverageViews: number, competitorRows: Array<ReturnType<typeof deriveCompetitorRows>[number]>) {
   const actionable = [...competitorRows]
     .filter((row) => row.averageViews > ownAverageViews)
@@ -933,6 +1003,21 @@ function deriveCompetitorCardInsight(competitor: YoutubeCompetitor) {
   } as PlanDay).label.toLowerCase() : "educational";
   const hook = topTitle ? hookType(topTitle).toLowerCase() : "descriptive";
   return `${competitor.channelName} posts ${competitor.postingFrequency ?? "consistently"} and gets traction with ${style} videos using ${hook} hooks. Test one idea that borrows that structure while keeping your own voice.`;
+}
+
+function deriveBestPostingSlotByDay(cells: Array<{ day: string; hour: string; value: number; label: string }>) {
+  return daysOfWeek.reduce<Record<string, { slot: string; value: number }>>((acc, day) => {
+    const best = cells
+      .filter((cell) => cell.day === day)
+      .sort((a, b) => b.value - a.value)[0];
+    if (best) {
+      acc[day] = {
+        slot: best.hour === "00:00" ? "00:00-06:00" : best.hour === "06:00" ? "06:00-12:00" : best.hour === "12:00" ? "12:00-18:00" : "18:00-24:00",
+        value: best.value,
+      };
+    }
+    return acc;
+  }, {});
 }
 
 function StatsSkeleton() {
@@ -1000,34 +1085,14 @@ function VideoPicker({
   disabledIds: Set<string>;
   onSelect: (videoId: string) => void;
 }) {
-  const [query, setQuery] = useState("");
-  const filteredVideos = useMemo(() => {
-    const lowered = query.trim().toLowerCase();
-    return [...videos]
-      .sort((a, b) => new Date(b.publishedAt || 0).getTime() - new Date(a.publishedAt || 0).getTime())
-      .filter((video) => !lowered || video.title.toLowerCase().includes(lowered));
-  }, [videos, query]);
+  const filteredVideos = useMemo(
+    () => [...videos].sort((a, b) => new Date(b.publishedAt || 0).getTime() - new Date(a.publishedAt || 0).getTime()),
+    [videos],
+  );
   if (!videos.length) return <p className="mt-3 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-white/35">No videos uploaded during this week. Skip this day.</p>;
   return (
-    <div className="mt-3 space-y-3">
-      <Input
-        value={query}
-        onChange={(event) => setQuery(event.target.value)}
-        placeholder="Search videos by title"
-        className="h-9 border-white/10 bg-white/[0.03] text-sm text-white placeholder:text-white/30"
-      />
-      <div className="max-h-56 space-y-2 overflow-y-auto pr-1">
-      <button
-        type="button"
-        onClick={() => onSelect("")}
-        className={cn(
-          "flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left transition-colors",
-          !selected ? "border-white/20 bg-white/[0.05] text-white/70" : "border-white/10 bg-white/[0.03] text-white/45 hover:bg-white/[0.05]",
-        )}
-      >
-        <span className="text-xs">Skip this day</span>
-        {!selected ? <Check className="h-4 w-4 text-white" /> : null}
-      </button>
+    <div className="mt-3">
+      <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
       {filteredVideos.map((video) => {
         const disabled = disabledIds.has(video.id) && selected !== video.id;
         const active = selected === video.id;
@@ -1058,9 +1123,26 @@ function VideoPicker({
           </button>
         );
       })}
-      {!filteredVideos.length ? <p className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-white/35">No videos match that search.</p> : null}
       </div>
     </div>
+  );
+}
+
+function CompactVideoCard({ video, accent = "border-white/10" }: { video: RecentVideo; accent?: string }) {
+  return (
+    <a
+      href={video.url}
+      target="_blank"
+      rel="noreferrer"
+      className={cn("flex items-center gap-3 rounded-2xl border bg-[#111111] p-3 text-white transition-all hover:-translate-y-0.5 hover:bg-[#171717]", accent)}
+    >
+      {video.thumbnailUrl ? <img src={video.thumbnailUrl} alt="" className="h-[54px] w-24 rounded-lg object-cover" /> : <div className="flex h-[54px] w-24 items-center justify-center rounded-lg bg-black/30"><Play className="h-4 w-4 text-white/60" /></div>}
+      <div className="min-w-0 flex-1">
+        <p className="line-clamp-2 text-sm font-medium text-white">{video.title}</p>
+        <p className="mt-1 text-xs text-white/45">{formatNumber(video.viewCount)} views</p>
+      </div>
+      <ExternalLink className="h-4 w-4 shrink-0 text-white/50" />
+    </a>
   );
 }
 
@@ -1076,18 +1158,20 @@ function CalendarPreviewCard({ day, onDragStart, onOpen }: { day: PlanDay; onDra
           onClick={() => onOpen(day)}
           className="w-full rounded-lg border border-white/10 bg-white/[0.03] text-left transition-all hover:-translate-y-0.5 hover:bg-white/[0.06]"
         >
-          <div className={cn("relative flex aspect-video items-end overflow-hidden rounded-t-lg bg-gradient-to-br p-3", placeholderStyle(day.contentIdea))}>
+          <div className={cn("relative overflow-hidden rounded-t-lg bg-gradient-to-br p-4", placeholderStyle(day.contentIdea))}>
             <div className="absolute right-3 top-3 rounded-md border border-white/20 bg-black/20 p-1.5">
               <Icon className="h-4 w-4 text-white" />
             </div>
-            <p className="line-clamp-2 max-w-[80%] text-sm font-semibold text-white">{day.contentIdea}</p>
+            <p className="pr-10 text-base font-semibold leading-6 text-white">{day.hook}</p>
           </div>
           <div className="p-3">
             <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.16em] text-white/35">
-              <GripVertical className="h-3 w-3" />
+              <Clock className="h-3 w-3" />
               {postingTime(day)}
             </div>
-            <p className="mt-2 line-clamp-2 text-sm text-white/80">{day.contentIdea}</p>
+            <div className="mt-3 rounded-lg border border-white/10 bg-white/[0.04] p-2 text-white/75">
+              <Icon className="h-4 w-4" />
+            </div>
           </div>
         </button>
       </HoverCardTrigger>
@@ -1096,6 +1180,34 @@ function CalendarPreviewCard({ day, onDragStart, onOpen }: { day: PlanDay; onDra
         <p className="mt-2 text-sm leading-6 text-white/80">{day.hook}</p>
       </HoverCardContent>
     </HoverCard>
+  );
+}
+
+function WeeklyComparisonChart({ rows }: { rows: Array<{ name: string; shortName: string; views: number; uploads: number; fill: string; isYou: boolean }> }) {
+  return (
+    <div className="mt-4 h-64">
+      <ChartContainer config={{ views: { label: "Weekly views", color: "#fca5a5" } }} className="h-full w-full">
+        <BarChart data={rows} margin={{ left: 6, right: 6, top: 12, bottom: 32 }}>
+          <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.08)" />
+          <XAxis dataKey="shortName" tickLine={false} axisLine={false} interval={0} angle={-10} textAnchor="end" height={54} />
+          <YAxis tickLine={false} axisLine={false} />
+          <ChartTooltip
+            content={({ active, payload }: TooltipProps<number, string>) => {
+              if (!active || !payload?.length) return null;
+              const point = payload[0]?.payload as { name: string; views: number; uploads: number; isYou: boolean };
+              return (
+                <div className="rounded-lg border border-white/10 bg-[#120d1f] px-3 py-2 text-xs text-white shadow-xl">
+                  <p className="font-medium">{point.name}{point.isYou ? " · You" : ""}</p>
+                  <p className="mt-1 text-white/65">{formatNumber(point.views)} weekly views</p>
+                  <p className="mt-1 text-white/65">{point.uploads} upload{point.uploads === 1 ? "" : "s"}</p>
+                </div>
+              );
+            }}
+          />
+          <Bar dataKey="views" radius={[8, 8, 0, 0]} fill="#fca5a5" />
+        </BarChart>
+      </ChartContainer>
+    </div>
   );
 }
 
@@ -1174,17 +1286,20 @@ function BestTimeHeatmap({ cells }: { cells?: Array<{ day: string; hour: string;
   );
 }
 
-function PostingPatternStrip({ days }: { days: Array<{ iso: string; posted: boolean; label: string }> }) {
+function PostingPatternStrip({ days }: { days: PostingPatternDay[] }) {
   const weeks = days.reduce<Array<PostingPatternDay[]>>((acc, day, index) => {
     const weekIndex = Math.floor(index / 7);
     if (!acc[weekIndex]) acc[weekIndex] = [];
     acc[weekIndex].push(day as PostingPatternDay);
     return acc;
   }, []);
+  const postedCount = days.filter((day) => !day.isFuture && day.posted).length;
+  const consistency = Math.round((postedCount / 30) * 100);
   return (
     <TooltipProvider>
       <div className="mt-4">
-      <p className="text-sm text-white/60">Your posting pattern - last 30 days.</p>
+      <p className="text-sm text-white/60">Your posting pattern - last 30 days, plus the rest of this week and next week so you can see the runway ahead.</p>
+      <p className="mt-2 text-[11px] uppercase tracking-[0.16em] text-white/35">Upcoming</p>
       <div className="mt-3 flex gap-3 overflow-x-auto pb-1">
         {weeks.map((week, weekIndex) => (
           <div key={`week-${weekIndex}`} className={cn("min-w-[88px] space-y-2 pl-3", weekIndex > 0 && "border-l border-white/10")}>
@@ -1194,7 +1309,12 @@ function PostingPatternStrip({ days }: { days: Array<{ iso: string; posted: bool
                 <Tooltip key={day.iso}>
                   <TooltipTrigger asChild>
                     <div className="space-y-1">
-                      <div className={cn("flex h-10 w-10 items-center justify-center rounded-md border text-sm font-medium", day.posted ? "border-emerald-300/40 bg-emerald-400/80 text-emerald-950" : "border-white/10 bg-white/[0.08] text-white/70")}>
+                      <div className={cn(
+                        "flex h-10 w-10 items-center justify-center rounded-md border text-sm font-medium",
+                        day.posted && "border-emerald-300/40 bg-emerald-400/80 text-emerald-950",
+                        !day.posted && !day.isFuture && "border-white/10 bg-white/[0.08] text-white/70",
+                        day.isFuture && "border border-dashed border-white/25 bg-slate-200/10 text-slate-200/70",
+                      )}>
                         {day.dayNumber}
                       </div>
                       <p className="text-[10px] text-white/40">{day.label}</p>
@@ -1202,7 +1322,7 @@ function PostingPatternStrip({ days }: { days: Array<{ iso: string; posted: bool
                   </TooltipTrigger>
                   <TooltipContent className="max-w-56 border border-white/10 bg-[#120d1f] text-white">
                     <p>{formatIsoDate(day.iso)}</p>
-                    <p className="mt-1 text-white/70">{day.posted ? "Video posted" : "No video posted"}</p>
+                    <p className="mt-1 text-white/70">{day.isFuture ? "Upcoming day" : day.posted ? "Video posted" : "No video posted"}</p>
                     {day.videoTitle ? <p className="mt-1 text-white/70">{day.videoTitle}</p> : null}
                   </TooltipContent>
                 </Tooltip>
@@ -1211,6 +1331,7 @@ function PostingPatternStrip({ days }: { days: Array<{ iso: string; posted: bool
           </div>
         ))}
       </div>
+      <p className="mt-4 text-sm text-white/65">You posted {postedCount} of 30 days. That&apos;s {consistency}% consistency. Channels that post 15+ days per month grow 3x faster on average. Your next move today: lock in one upload for the next open green opportunity on this grid.</p>
       </div>
     </TooltipProvider>
   );
@@ -1559,6 +1680,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
   const [tagExpanded, setTagExpanded] = useState(false);
   const [savingResultDay, setSavingResultDay] = useState<number | null>(null);
   const [saveConfirmationDay, setSaveConfirmationDay] = useState<number | null>(null);
+  const [linkingDay, setLinkingDay] = useState<number | null>(null);
 
   const latestPlan = status?.latestPlan ?? null;
   const planPayload = latestPlan?.plan ?? {};
@@ -1612,6 +1734,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
   const overview = useMemo(() => buildOverviewSections(recentVideos), [recentVideos]);
   const postingPattern = useMemo(() => buildPostingPattern(recentVideos), [recentVideos]);
   const bestTime = useMemo(() => deriveBestTimeSummary(contextSnapshot?.recentVideos ?? recentVideos), [contextSnapshot?.recentVideos, recentVideos]);
+  const bestPostingSlotByDay = useMemo(() => deriveBestPostingSlotByDay(bestTime.cells), [bestTime.cells]);
   const hookRows = useMemo(() => deriveHookRows(recentVideos), [recentVideos]);
   const hookInsight = useMemo(() => deriveHookInsight(recentVideos), [recentVideos]);
   const titleLengthSummary = useMemo(() => deriveTitleLengthSummary(recentVideos), [recentVideos]);
@@ -1626,6 +1749,8 @@ export default function YouTubeGrowthPlannerV2Tab() {
   const competitorGapSummary = useMemo(() => deriveCompetitorGapSummary(recentVideos.length ? Math.round(recentVideos.reduce((sum, video) => sum + parseNumber(video.viewCount), 0) / recentVideos.length) : 0, competitorRows), [recentVideos, competitorRows]);
   const recentVideoById = useMemo(() => new Map(recentVideos.map((video) => [video.id, video])), [recentVideos]);
   const resultsByDay = useMemo(() => new Map(latestResults.map((result) => [result.dayIndex, result])), [latestResults]);
+  const competitorTiers = useMemo(() => partitionCompetitors(ownSubscribers, competitorRows), [ownSubscribers, competitorRows]);
+  const weeklyComparison = useMemo(() => deriveWeeklyComparisonData(competitorTiers.tier1, latestPlan, latestResults, recentVideoById, status?.channel?.channelName), [competitorTiers.tier1, latestPlan, latestResults, recentVideoById, status?.channel?.channelName]);
 
   if (!plan.isStudio) return <GrowthPlannerComingSoon />;
   if (loading || planLoading) return <LoadingState />;
@@ -1879,11 +2004,12 @@ export default function YouTubeGrowthPlannerV2Tab() {
           </section>
 
           <section className="grid gap-6 lg:grid-cols-[1fr_360px]">
-            <PanelCard className="p-6 transition-all hover:-translate-y-1 hover:bg-white/[0.04]">
+          <PanelCard className="p-6 transition-all hover:-translate-y-1 hover:bg-white/[0.04]">
               <div className="flex items-center gap-3">
                 <BarChart3 className="h-5 w-5 text-emerald-300" />
                 <h2 className="text-2xl font-semibold text-white">Channel Overview</h2>
               </div>
+              <p className="mt-2 text-sm text-white/55">Start with what your channel is already doing right, then turn the gaps into one clear move you can make today.</p>
               {channelDescription(status.channel) ? (
                 <PanelCardSoft className="mt-5 border border-white/10 p-4 text-sm leading-6 text-white/65">
                   {channelDescription(status.channel)}
@@ -1891,20 +2017,27 @@ export default function YouTubeGrowthPlannerV2Tab() {
               ) : null}
               <div className="mt-5 grid gap-3 md:grid-cols-2">
                 {[
-                  { key: "whatWorked", title: "What Worked", Icon: CheckCircle2, items: overview.whatWorked },
+                  { key: "whatWorked", title: "What Worked", Icon: CheckCircle2, items: overview.whyItWorked, videos: overview.whatWorkedVideos },
                   { key: "whyItWorked", title: "Why It Worked", Icon: Lightbulb, items: overview.whyItWorked },
-                  { key: "underperformers", title: "Underperformers", Icon: TrendingDown, items: overview.underperformers },
+                  { key: "underperformers", title: "Underperformers", Icon: TrendingDown, items: [`These videos are the clearest opportunities to tighten the hook, title framing, or posting slot next.`], videos: overview.underperformerVideos },
                   { key: "recommendations", title: "Recommendations", Icon: Target, items: overview.recommendations },
-                ].map(({ key, title, Icon, items }) => (
+                ].map(({ key, title, Icon, items, videos }) => (
                   <PanelCardSoft key={key} className="p-4 transition-all hover:-translate-y-1 hover:bg-white/[0.05]">
                     <div className="flex items-center gap-2">
                       <Icon className="h-4 w-4 text-white/40" />
                       <p className="text-lg font-semibold text-white">{title}</p>
                     </div>
-                    <ul className="mt-3 space-y-2 text-sm leading-6 text-white/60">
-                      {items.slice(0, 4).map((item) => <li key={item}>{item}</li>)}
-                      {!items.length && <li>Sync more uploads to generate channel-specific evidence here.</li>}
-                    </ul>
+                    {videos?.length ? (
+                      <div className="mt-3 space-y-3">
+                        {videos.map((video) => <CompactVideoCard key={video.id} video={video} accent={key === "whatWorked" ? "border-emerald-400/20" : "border-red-400/20"} />)}
+                        <p className="text-sm leading-6 text-white/60">{items[0]}</p>
+                      </div>
+                    ) : (
+                      <ul className="mt-3 space-y-2 text-sm leading-6 text-white/60">
+                        {items.slice(0, 4).map((item) => <li key={item}>{renderQuotedTitles(item)}</li>)}
+                        {!items.length && <li>Sync more uploads to generate channel-specific evidence here.</li>}
+                      </ul>
+                    )}
                   </PanelCardSoft>
                 ))}
               </div>
@@ -2229,55 +2362,86 @@ export default function YouTubeGrowthPlannerV2Tab() {
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <h2 className="text-2xl font-semibold text-white">Competitor Intelligence</h2>
-                  <p className="mt-1 text-sm text-white/45">Comparable and aspirational channels are labeled against this channel’s actual subscriber count.</p>
+                  <p className="mt-1 text-sm text-white/45">Use this like a coach&apos;s scouting report: who you can catch now, who is just ahead, and who defines the playbook for your niche.</p>
                 </div>
                 <Button variant="secondary" className="rounded-lg" onClick={discoverCompetitorsOnly} disabled={Boolean(working)}>
                   {working === "competitors" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="mr-2 h-4 w-4" />}
                   Discover competitors
                 </Button>
               </div>
-              <div className="mt-4 grid gap-4 md:grid-cols-2">
-                {(status.competitors ?? []).slice(0, 6).map((competitor) => {
-                  const insight = planPayload.competitorInsights?.find((item) => item.channelName === competitor.channelName);
-                  const url = insight?.channelUrl || `https://www.youtube.com/channel/${competitor.channelId ?? ""}`;
-                  const relative = relativeCompetitorLabel(competitor, ownSubscribers);
-                  const topVideo = competitor.mostViewedRecentVideos?.[0];
-                  return (
-                    <PanelCardSoft key={competitor.id} className="border border-white/10 p-4 transition-all hover:-translate-y-0.5 hover:bg-white/[0.05]">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex items-center gap-3">
-                          <Avatar className="h-12 w-12">
-                            <AvatarImage src={competitor.thumbnailUrl ?? undefined} alt={competitor.channelName} />
-                            <AvatarFallback className="bg-white/[0.08] text-sm text-white">{initials(competitor.channelName)}</AvatarFallback>
-                          </Avatar>
-                          <div>
-                            <p className="font-medium text-white">{competitor.channelName}</p>
-                            <p className="mt-1 text-xs text-white/40">{formatNumber(competitor.subscriberCount)} subscribers</p>
-                          </div>
-                        </div>
-                        <a href={url} target="_blank" rel="noreferrer" className="rounded-lg border border-white/10 p-2 text-white/55 hover:bg-white/5"><ExternalLink className="h-4 w-4" /></a>
-                      </div>
-                      <div className="mt-4 rounded-lg border border-white/10 bg-black/10 p-3">
-                        <div className="flex items-center justify-between gap-2 text-[11px] uppercase tracking-[0.16em] text-white/40">
-                          <span>{relative.label.toUpperCase()}</span>
-                          <span>{relative.ratio ? `${Math.round(relative.ratio)}x your subscribers` : "No ratio yet"}</span>
-                        </div>
-                      <div className="mt-3 space-y-2 text-sm text-white/65">
-                          <p>Your channel: {formatNumber(ownSubscribers)} subscribers</p>
-                          <p>{competitor.channelName}: {formatNumber(competitor.subscriberCount)} subscribers</p>
-                          <p>{competitor.postingFrequency ?? "Posting frequency unavailable"}</p>
-                        </div>
-                      </div>
-                      <p className="mt-3 text-sm leading-6 text-white/65">{deriveCompetitorCardInsight(competitor)}</p>
-                      {topVideo ? (
-                        <a href={topVideo.url} target="_blank" rel="noreferrer" className="mt-3 block text-sm text-red-200 transition-colors hover:text-red-100">
-                          Top video: {topVideo.title}
-                        </a>
-                      ) : null}
-                    </PanelCardSoft>
-                  );
-                })}
-                {!status.competitors?.length && <PanelCardSoft className="p-4 text-sm text-white/55 md:col-span-2">No competitors are saved yet. Run competitor discovery and DayTabs will search YouTube for comparable channels in this niche.</PanelCardSoft>}
+              <div className="mt-5 space-y-6">
+                {[
+                  {
+                    key: "tier1",
+                    title: "Tier 1 — Your Level: Channels You Can Beat",
+                    subtitle: "These are the channels close enough to race right now. Treat them like proof that your next push can move the leaderboard.",
+                    rows: competitorTiers.tier1,
+                    accent: "border-emerald-400/25",
+                  },
+                  {
+                    key: "tier2",
+                    title: "Tier 2 — Growing Fast: Just Ahead of You",
+                    subtitle: "These channels are realistic near-term targets. Study the patterns that helped them break away.",
+                    rows: competitorTiers.tier2,
+                    accent: "border-white/10",
+                  },
+                  {
+                    key: "tier3",
+                    title: "Tier 3 — Top of Your Niche: Study Their Playbook",
+                    subtitle: "Learn from the best in your niche. Use them as ideation fuel, not intimidation.",
+                    rows: competitorTiers.tier3,
+                    accent: "border-amber-300/25",
+                  },
+                ].map((tier) => (
+                  <div key={tier.key} className="space-y-3">
+                    <div>
+                      <h3 className="text-lg font-semibold text-white">{tier.title}</h3>
+                      <p className="mt-1 text-sm text-white/50">{tier.subtitle}</p>
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-2">
+                      {tier.rows.map((competitor) => {
+                        const insight = planPayload.competitorInsights?.find((item) => item.channelName === competitor.channelName);
+                        const url = insight?.channelUrl || `https://www.youtube.com/channel/${competitor.channelId ?? ""}`;
+                        const topVideo = [...(competitor.mostViewedRecentVideos ?? [])].sort((a, b) => parseNumber(b.viewCount) - parseNumber(a.viewCount))[0];
+                        return (
+                          <PanelCardSoft key={`${tier.key}-${competitor.id}`} className={cn("border p-4 transition-all hover:-translate-y-0.5 hover:bg-white/[0.05]", tier.accent)}>
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex items-center gap-3">
+                                <Avatar className="h-12 w-12">
+                                  <AvatarImage src={competitor.thumbnailUrl ?? undefined} alt={competitor.channelName} />
+                                  <AvatarFallback className="bg-white/[0.08] text-sm text-white">{initials(competitor.channelName)}</AvatarFallback>
+                                </Avatar>
+                                <div>
+                                  <p className="font-medium text-white">{competitor.channelName}</p>
+                                  <p className="mt-1 text-xs text-white/40">{formatNumber(competitor.subscriberCount)} subscribers · {competitor.videosPerWeekLabel}</p>
+                                </div>
+                              </div>
+                              <a href={url} target="_blank" rel="noreferrer" className="rounded-lg border border-white/10 p-2 text-white/55 hover:bg-white/5"><ExternalLink className="h-4 w-4" /></a>
+                            </div>
+                            <p className="mt-4 text-sm leading-6 text-white/70">{deriveCompetitorCardInsight(competitor)}</p>
+                            {tier.key === "tier3" ? <p className="mt-2 text-sm text-amber-100/75">Watch their top video to see what your niche&apos;s audience loves most.</p> : null}
+                            {topVideo ? (
+                              <a href={topVideo.url} target="_blank" rel="noreferrer" className="mt-3 block text-sm text-red-200 transition-colors hover:text-red-100">
+                                Top video: {topVideo.title}
+                              </a>
+                            ) : null}
+                          </PanelCardSoft>
+                        );
+                      })}
+                      {!tier.rows.length ? <PanelCardSoft className="p-4 text-sm text-white/55 md:col-span-2">No channels are in this tier yet. Refresh competitors and DayTabs will keep scouting your niche.</PanelCardSoft> : null}
+                    </div>
+                    {tier.key === "tier1" && weeklyComparison ? (
+                      <PanelCardSoft className="border border-emerald-400/20 p-4">
+                        <h4 className="text-base font-semibold text-white">This Week&apos;s Friendly Leaderboard</h4>
+                        <p className="mt-1 text-sm text-white/50">Views this week for you and the channels closest to your current level.</p>
+                        <WeeklyComparisonChart rows={weeklyComparison.rows} />
+                        {weeklyComparison.motivatingCompetitor ? (
+                          <p className="mt-3 text-sm text-white/65">You posted {weeklyComparison.rows[0]?.uploads ?? 0} videos this week. {weeklyComparison.motivatingCompetitor.name} posted {weeklyComparison.motivatingCompetitor.uploads}. Closing the gap starts with one more video.</p>
+                        ) : null}
+                      </PanelCardSoft>
+                    ) : null}
+                  </div>
+                ))}
               </div>
             </PanelCard>
 
@@ -2285,7 +2449,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
               <PanelCard className="p-6 transition-all hover:-translate-y-1 hover:bg-white/[0.04]">
                 <div>
                   <h2 className="text-2xl font-semibold text-white">End of Week Results</h2>
-                  <p className="mt-1 text-sm text-white/45">Link each planned idea to the real upload. DayTabs saves the mapping instantly here, then fetches performance context only when you generate the next week.</p>
+                  <p className="mt-1 text-sm text-white/45">Mark off the week by linking each idea to the real upload. This saves instantly with no AI call, then next week&apos;s plan learns from what actually shipped.</p>
                 </div>
                 <div className="mt-5 space-y-3">
                   {days.map((day) => {
@@ -2293,54 +2457,85 @@ export default function YouTubeGrowthPlannerV2Tab() {
                     const linkedVideo = linked ? recentVideoById.get(linked.videoId) : null;
                     return (
                     <div key={`result-${toCardId(day)}`} className="min-h-[320px] rounded-lg border border-white/10 p-3">
-                      <div className="flex items-start justify-between gap-3">
-                        <p className="text-sm font-medium text-white">Day {day.day}: {day.contentIdea}</p>
-                        {saveConfirmationDay === day.day ? <span className="text-xs text-emerald-300">Saved</span> : null}
-                      </div>
-                      <div className="mt-3 min-h-[72px] rounded-lg border border-white/10 bg-white/[0.03] p-3">
-                        {linked ? (
-                          <div className="flex items-center gap-3">
-                            {linkedVideo?.thumbnailUrl ? <img src={linkedVideo.thumbnailUrl} alt="" className="h-[45px] w-20 rounded-md object-cover" /> : <div className="flex h-[45px] w-20 items-center justify-center rounded-md bg-[#151515]"><Play className="h-4 w-4 text-white/60" /></div>}
-                            <div className="min-w-0">
-                              <p className="line-clamp-2 text-sm text-white">{linkedVideo?.title ?? linked.plannedTitle}</p>
-                              <p className="mt-1 text-xs text-white/45">{linkedVideo ? `${formatIsoDate(linkedVideo.publishedAt)} · ${formatNumber(linkedVideo.viewCount)} views` : linked.videoUrl}</p>
+                      {!linked ? (
+                        <>
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="text-sm font-medium text-white">{day.contentIdea}</p>
+                              <p className="mt-1 text-xs text-white/50">{day.hook}</p>
                             </div>
+                            {saveConfirmationDay === day.day ? <span className="text-xs text-emerald-300">Saved</span> : null}
                           </div>
-                        ) : (
-                          <p className="text-sm text-white/45">No linked video yet.</p>
-                        )}
-                      </div>
-                      <VideoPicker
-                        videos={weekVideos}
-                        selected={resultSelections[day.day] ?? linked?.videoId ?? ""}
-                        disabledIds={new Set([...linkedVideoIds, ...selectedVideoIds].filter((videoId) => resultSelections[day.day] !== videoId))}
-                        onSelect={(videoId) => setResultSelections((current) => ({ ...current, [day.day]: videoId }))}
-                      />
-                      <Button
-                        className="mt-3 w-full rounded-lg bg-emerald-500 text-emerald-950 hover:bg-emerald-400 disabled:bg-white/10 disabled:text-white/30"
-                        onClick={() => {
-                          const selectedVideoId = resultSelections[day.day] ?? linked?.videoId;
-                          if (!selectedVideoId) return;
-                          void submitResults([{ dayIndex: day.day, plannedTitle: day.contentIdea, videoId: selectedVideoId }]);
-                        }}
-                        disabled={savingResultDay === day.day || !(resultSelections[day.day] ?? linked?.videoId)}
-                      >
-                        {savingResultDay === day.day ? "Saving..." : "Save linked video"}
-                      </Button>
+                          {linkingDay === day.day ? (
+                            <>
+                              <VideoPicker
+                                videos={weekVideos}
+                                selected={resultSelections[day.day] ?? ""}
+                                disabledIds={new Set([...linkedVideoIds, ...selectedVideoIds].filter((videoId) => resultSelections[day.day] !== videoId))}
+                                onSelect={(videoId) => setResultSelections((current) => ({ ...current, [day.day]: videoId }))}
+                              />
+                              <div className="mt-3 flex gap-2">
+                                <Button
+                                  className="flex-1 rounded-lg bg-emerald-500 text-emerald-950 hover:bg-emerald-400 disabled:bg-white/10 disabled:text-white/30"
+                                  onClick={() => {
+                                    const selectedVideoId = resultSelections[day.day];
+                                    if (!selectedVideoId) return;
+                                    void submitResults([{ dayIndex: day.day, plannedTitle: day.contentIdea, videoId: selectedVideoId }]).then(() => setLinkingDay(null));
+                                  }}
+                                  disabled={savingResultDay === day.day || !resultSelections[day.day]}
+                                >
+                                  {savingResultDay === day.day ? "Saving..." : "Confirm link"}
+                                </Button>
+                                <Button variant="secondary" className="rounded-lg" onClick={() => setLinkingDay(null)}>Cancel</Button>
+                              </div>
+                            </>
+                          ) : (
+                            <Button className="mt-3 rounded-lg bg-emerald-500 text-emerald-950 hover:bg-emerald-400" onClick={() => setLinkingDay(day.day)}>
+                              Link video
+                            </Button>
+                          )}
+                        </>
+                      ) : (
+                        <div className="rounded-2xl border border-emerald-400/20 bg-emerald-500/5 p-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex items-center gap-3">
+                              {linkedVideo?.thumbnailUrl ? <img src={linkedVideo.thumbnailUrl} alt="" className="h-[45px] w-20 rounded-md object-cover" /> : <div className="flex h-[45px] w-20 items-center justify-center rounded-md bg-[#151515]"><Play className="h-4 w-4 text-white/60" /></div>}
+                              <div className="min-w-0">
+                                <p className="line-clamp-2 text-sm text-white">{linkedVideo?.title ?? linked.plannedTitle}</p>
+                                <p className="mt-1 text-xs text-white/45">{linkedVideo ? `${formatIsoDate(linkedVideo.publishedAt)} · ${formatNumber(linkedVideo.viewCount)} views` : linked.videoUrl}</p>
+                              </div>
+                            </div>
+                            <button type="button" onClick={() => setLinkingDay(day.day)} className="text-xs text-white/55 hover:text-white">Change</button>
+                          </div>
+                          {linkingDay === day.day ? (
+                            <>
+                              <VideoPicker
+                                videos={weekVideos}
+                                selected={resultSelections[day.day] ?? linked.videoId}
+                                disabledIds={new Set([...linkedVideoIds, ...selectedVideoIds].filter((videoId) => resultSelections[day.day] !== videoId && linked.videoId !== videoId))}
+                                onSelect={(videoId) => setResultSelections((current) => ({ ...current, [day.day]: videoId }))}
+                              />
+                              <div className="mt-3 flex gap-2">
+                                <Button
+                                  className="flex-1 rounded-lg bg-emerald-500 text-emerald-950 hover:bg-emerald-400 disabled:bg-white/10 disabled:text-white/30"
+                                  onClick={() => {
+                                    const selectedVideoId = resultSelections[day.day] ?? linked.videoId;
+                                    if (!selectedVideoId) return;
+                                    void submitResults([{ dayIndex: day.day, plannedTitle: day.contentIdea, videoId: selectedVideoId }]).then(() => setLinkingDay(null));
+                                  }}
+                                  disabled={savingResultDay === day.day}
+                                >
+                                  {savingResultDay === day.day ? "Saving..." : "Confirm link"}
+                                </Button>
+                                <Button variant="secondary" className="rounded-lg" onClick={() => setLinkingDay(null)}>Cancel</Button>
+                              </div>
+                            </>
+                          ) : null}
+                        </div>
+                      )}
                     </div>
                   )})}
                 </div>
-                {hasResults && (
-                  <div className="mt-5 space-y-3">
-                    {latestResults.map((result) => (
-                      <PanelCardSoft key={result.id} className="p-3">
-                        <p className="text-sm font-medium text-white">{result.plannedTitle}</p>
-                        <a className="mt-1 block text-xs text-red-200 hover:text-red-100" href={result.videoUrl} target="_blank" rel="noreferrer">{result.videoUrl}</a>
-                        <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-white/50">{Object.entries(result.metrics ?? {}).slice(0, 6).map(([key, value]) => <span key={key}>{key}: {metricLabel(value)}</span>)}</div>
-                      </PanelCardSoft>
-                    ))}
-                  </div>
-                )}
               </PanelCard>
             )}
           </section>
@@ -2371,13 +2566,26 @@ export default function YouTubeGrowthPlannerV2Tab() {
       </Dialog>
 
       <Dialog open={Boolean(detailDay)} onOpenChange={(open) => !open && setDetailDay(null)}>
-        <DialogContent className="max-h-[80vh] max-w-2xl overflow-y-auto">
+        <DialogContent className="max-h-[80vh] max-w-2xl overflow-y-auto pt-10">
           <DialogHeader>
             <DialogTitle>{detailDay?.contentIdea}</DialogTitle>
             <DialogDescription>Full content brief for this planned upload.</DialogDescription>
           </DialogHeader>
           {detailDay ? (
             <div className="space-y-4 text-sm text-white/70">
+              {(() => {
+                const slot = bestPostingSlotByDay[daysOfWeek[new Date(`${detailDay.date}T00:00:00Z`).getUTCDay()]];
+                return slot ? (
+                  <PanelCardSoft className="border border-emerald-400/20 bg-emerald-500/10 p-4">
+                    <p className="text-xs uppercase tracking-[0.16em] text-emerald-100/75">Heatmap Signal</p>
+                    <p className="mt-2 text-white">{daysOfWeek[new Date(`${detailDay.date}T00:00:00Z`).getUTCDay()]} {slot.slot} is your strongest window — {formatNumber(slot.value)} avg views.</p>
+                  </PanelCardSoft>
+                ) : null;
+              })()}
+              <PanelCardSoft className="border border-red-400/20 bg-red-500/10 p-4">
+                <p className="text-xs uppercase tracking-[0.16em] text-red-100/70">Primary Hook</p>
+                <p className="mt-3 text-lg font-semibold leading-7 text-white">{detailDay.hook}</p>
+              </PanelCardSoft>
               <div className="grid gap-3 sm:grid-cols-2">
                 <PanelCardSoft className="p-3">
                   <p className="text-xs uppercase tracking-[0.16em] text-white/40">Posting Time</p>
@@ -2385,13 +2593,14 @@ export default function YouTubeGrowthPlannerV2Tab() {
                   <p className="mt-2 text-white/60">{detailDay.rationale}</p>
                 </PanelCardSoft>
                 <PanelCardSoft className="p-3">
-                  <p className="text-xs uppercase tracking-[0.16em] text-white/40">Full Hook</p>
-                  <p className="mt-2 text-white">{detailDay.hook}</p>
+                  <p className="text-xs uppercase tracking-[0.16em] text-white/40">Content Type</p>
+                  <p className="mt-2 text-white">{contentTypeMeta(detailDay).label}</p>
                 </PanelCardSoft>
               </div>
               <PanelCardSoft className="p-3">
                 <p className="text-xs uppercase tracking-[0.16em] text-white/40">Complete Title Suggestion</p>
                 <p className="mt-2 text-white">{detailDay.contentIdea}</p>
+                <p className="mt-2 text-white/60">{detailDay.contentIdea.length} chars · Your sweet spot: {titleLengthSummary.winningBucket ? `${titleLengthSummary.winningBucket.min}-${Number.isFinite(titleLengthSummary.winningBucket.max) ? titleLengthSummary.winningBucket.max : "70+"}` : "35-55"} chars.</p>
               </PanelCardSoft>
               <PanelCardSoft className="p-3">
                 <p className="text-xs uppercase tracking-[0.16em] text-white/40">Description Suggestion</p>
