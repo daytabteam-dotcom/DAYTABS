@@ -733,6 +733,17 @@ function hydrateVisiblePlanDays(rawDays: PlanDay[] = []) {
     }));
 }
 
+function effectivePlannerStage(
+  day: PlanDay,
+  resultsByDay: Map<number, YoutubePlanResult>,
+  recentVideoById: Map<string, RecentVideo>,
+): Stage {
+  const linked = resultsByDay.get(day.day);
+  const linkedVideo = linked ? recentVideoById.get(linked.videoId) : null;
+  if (linked && isPublicVideo(linkedVideo)) return "published";
+  return (day.stage ?? "idea") as Stage;
+}
+
 function conceptTypeFromVideo(video: RecentVideo) {
   const text = `${video.title} ${video.description || ""}`.toLowerCase();
   if (text.includes("tutorial") || text.includes("how to") || text.includes("step")) return "Tutorial";
@@ -2414,8 +2425,8 @@ export default function YouTubeGrowthPlannerV2Tab() {
   );
   const todayIso = new Date().toISOString().slice(0, 10);
   const todayPlannedDays = useMemo(
-    () => (daysByDate.get(todayIso) ?? []).filter((day) => !resultsByDay.has(day.day)),
-    [daysByDate, resultsByDay, todayIso],
+    () => (daysByDate.get(todayIso) ?? []).filter((day) => effectivePlannerStage(day, resultsByDay, recentVideoById) !== "published"),
+    [daysByDate, resultsByDay, recentVideoById, todayIso],
   );
   const currentWeekConsistency = useMemo(
     () => deriveCurrentWeekConsistencyData(weekCalendarDates, plannedDateSet, recentVideos),
@@ -2497,10 +2508,9 @@ export default function YouTubeGrowthPlannerV2Tab() {
       const linked = resultsByDay.get(day.day);
       const linkedVideo = linked ? recentVideoById.get(linked.videoId) : null;
       if (linked && isPublicVideo(linkedVideo)) {
+        updateDay(cardId, { stage: "published" });
         if (latestPlan) {
           void patchPlanDay(day.day, { stage: "published" });
-        } else {
-          updateDay(cardId, { stage: "published" });
         }
         return;
       }
@@ -2872,7 +2882,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
             <div key={stage.id} onDragOver={(event) => event.preventDefault()} onDrop={() => handleDropOnStage(stage.id)} className="min-h-[260px] rounded-lg border border-white/10 bg-white/[0.025] p-3">
               <p className="mb-3 text-sm font-semibold text-white">{stage.label}</p>
               <div className="space-y-3">
-                {days.filter((day) => (day.stage ?? "idea") === stage.id).map((day) => <PlannerIdeaCard key={toCardId(day)} day={day} onDragStart={handleDragStart} onDelete={deleteDay} onOpen={setDetailDay} />)}
+                {days.filter((day) => effectivePlannerStage(day, resultsByDay, recentVideoById) === stage.id).map((day) => <PlannerIdeaCard key={toCardId(day)} day={day} onDragStart={handleDragStart} onDelete={deleteDay} onOpen={setDetailDay} />)}
               </div>
             </div>
           ))}
