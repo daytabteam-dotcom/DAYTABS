@@ -1126,6 +1126,28 @@ function deriveCurrentWeekConsistencyData(weekDates: string[], plannedDates: Set
   });
 }
 
+function deriveFriendlyLeaderboardMessage(weeklyComparison: NonNullable<ReturnType<typeof deriveWeeklyComparisonData>>) {
+  const you = weeklyComparison.rows[0];
+  const competitor = weeklyComparison.motivatingCompetitor;
+  if (!you || !competitor) {
+    return "Keep publishing this week and the leaderboard will sharpen as more live results come in.";
+  }
+
+  const viewGap = you.views - competitor.views;
+  const uploadGap = you.uploads - competitor.uploads;
+
+  if (viewGap >= 0 && uploadGap >= 0) {
+    return `You are ahead of ${competitor.name} by ${formatNumber(viewGap)} views with ${Math.abs(uploadGap)} more upload${Math.abs(uploadGap) === 1 ? "" : "s"} in this week. Keep the pace and protect the lead.`;
+  }
+  if (viewGap >= 0 && uploadGap < 0) {
+    return `You are ahead by ${formatNumber(viewGap)} views even with fewer uploads than ${competitor.name}. Quality is winning this week, so one more strong post could widen the gap fast.`;
+  }
+  if (viewGap < 0 && uploadGap >= 0) {
+    return `${competitor.name} is ahead by ${formatNumber(Math.abs(viewGap))} views even though you matched or beat their upload pace. Keep posting, but focus the next upload on your strongest window.`;
+  }
+  return `${competitor.name} is ahead by ${formatNumber(Math.abs(viewGap))} views and ${Math.abs(uploadGap)} upload${Math.abs(uploadGap) === 1 ? "" : "s"} this week. One well-timed upload can still close a meaningful part of that gap.`;
+}
+
 function deriveCompetitorGapSummary(ownAverageViews: number, competitorRows: Array<ReturnType<typeof deriveCompetitorRows>[number]>) {
   const actionable = [...competitorRows]
     .filter((row) => row.averageViews > ownAverageViews)
@@ -1611,44 +1633,72 @@ function WeeklyComparisonChart({
 }
 
 function CurrentWeekConsistencyChart({ rows }: { rows: Array<{ iso: string; day: string; postedCount: number; plannedCount: number; missed: boolean; status: "posted" | "missed" | "planned" | "empty" }> }) {
+  const summary = {
+    published: rows.filter((row) => row.status === "posted").length,
+    planned: rows.filter((row) => row.status === "planned").length,
+    missed: rows.filter((row) => row.status === "missed").length,
+    uploads: rows.reduce((sum, row) => sum + row.postedCount, 0),
+    open: rows.filter((row) => row.status === "empty").length,
+  };
   return (
-    <div className="mt-4 grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-      <PanelCardSoft className="p-4">
-        <h5 className="text-sm font-semibold text-white">Current week consistency</h5>
-        <p className="mt-1 text-xs text-white/45">Every day turns green if at least one real uploaded video exists on that date.</p>
-        <div className="mt-4 grid grid-cols-7 gap-2">
+    <div className="mt-5 space-y-4">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {[
+          { label: "Published Days", value: summary.published, caption: `${summary.uploads} upload${summary.uploads === 1 ? "" : "s"} landed this week`, tone: "border-emerald-300/20 bg-emerald-400/10 text-emerald-100" },
+          { label: "Still Planned", value: summary.planned, caption: "Scheduled days still on track", tone: "border-sky-300/20 bg-sky-400/10 text-sky-100" },
+          { label: "Missed", value: summary.missed, caption: "Scheduled days with no live upload", tone: "border-red-300/20 bg-red-400/10 text-red-100" },
+          { label: "Open Days", value: summary.open, caption: "No schedule and no upload yet", tone: "border-white/10 bg-white/[0.04] text-white/75" },
+        ].map((item) => (
+          <PanelCardSoft key={item.label} className={cn("border p-4", item.tone)}>
+            <p className="text-[11px] uppercase tracking-[0.16em] opacity-70">{item.label}</p>
+            <p className="mt-2 text-2xl font-semibold">{item.value}</p>
+            <p className="mt-1 text-xs opacity-75">{item.caption}</p>
+          </PanelCardSoft>
+        ))}
+      </div>
+      <PanelCardSoft className="overflow-hidden p-0">
+        <div className="border-b border-white/10 px-4 py-3">
+          <h5 className="text-sm font-semibold text-white">Current week consistency</h5>
+          <p className="mt-1 text-xs text-white/45">Any day with a real uploaded video turns green automatically, whether it was scheduled or not.</p>
+        </div>
+        <div className="grid gap-px bg-white/10 md:grid-cols-7">
           {rows.map((day) => (
-            <div key={day.iso} className="space-y-2">
-              <div className="text-center text-[11px] font-medium text-white/45">{day.day}</div>
-              <div className={cn(
-                "rounded-2xl border p-3 text-center transition-all",
-                day.status === "posted" && "border-emerald-300/35 bg-emerald-400/15 text-emerald-100",
-                day.status === "missed" && "border-red-300/35 bg-red-400/15 text-red-100",
-                day.status === "planned" && "border-sky-300/25 bg-sky-400/15 text-sky-100",
-                day.status === "empty" && "border-white/10 bg-white/[0.04] text-white/45",
-              )}>
-                <p className="text-xs font-semibold">{formatIsoDate(day.iso, { month: "short", day: "numeric" })}</p>
-                <p className="mt-2 text-lg font-semibold">{day.postedCount > 0 ? day.postedCount : day.plannedCount > 0 ? day.plannedCount : 0}</p>
-                <p className="mt-1 text-[11px] uppercase tracking-[0.14em]">
-                  {day.status === "posted" ? "Published" : day.status === "missed" ? "Missed" : day.status === "planned" ? "Planned" : "Open"}
+            <div
+              key={day.iso}
+              className={cn(
+                "min-h-[132px] bg-[#120d1f] p-4 transition-all",
+                day.status === "posted" && "bg-emerald-500/10",
+                day.status === "missed" && "bg-red-500/10",
+                day.status === "planned" && "bg-sky-500/10",
+              )}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <p className="text-xs font-semibold text-white">{day.day}</p>
+                  <p className="mt-1 text-[11px] text-white/45">{formatIsoDate(day.iso, { month: "short", day: "numeric" })}</p>
+                </div>
+                <span className={cn(
+                  "rounded-full border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]",
+                  day.status === "posted" && "border-emerald-300/25 bg-emerald-400/15 text-emerald-100",
+                  day.status === "missed" && "border-red-300/25 bg-red-400/15 text-red-100",
+                  day.status === "planned" && "border-sky-300/25 bg-sky-400/15 text-sky-100",
+                  day.status === "empty" && "border-white/10 bg-white/[0.04] text-white/50",
+                )}>
+                  {day.status === "posted" ? "Live" : day.status === "missed" ? "Missed" : day.status === "planned" ? "Planned" : "Open"}
+                </span>
+              </div>
+              <div className="mt-5">
+                <p className="text-3xl font-semibold text-white">{day.postedCount > 0 ? day.postedCount : day.plannedCount > 0 ? day.plannedCount : 0}</p>
+                <p className="mt-1 text-xs text-white/55">
+                  {day.postedCount > 0
+                    ? `${day.postedCount} uploaded video${day.postedCount === 1 ? "" : "s"}`
+                    : day.status === "planned"
+                      ? "Scheduled and waiting"
+                      : day.status === "missed"
+                        ? "Scheduled but not published"
+                        : "Nothing booked yet"}
                 </p>
               </div>
-            </div>
-          ))}
-        </div>
-      </PanelCardSoft>
-      <PanelCardSoft className="p-4">
-        <h5 className="text-sm font-semibold text-white">Week totals</h5>
-        <p className="mt-1 text-xs text-white/45">Planned vs published, based on actual videos in the current scheduled week.</p>
-        <div className="mt-4 space-y-3">
-          {[
-            { label: "Published days", value: rows.filter((row) => row.status === "posted").length, tone: "border-emerald-300/20 bg-emerald-400/10 text-emerald-100" },
-            { label: "Planned only", value: rows.filter((row) => row.status === "planned").length, tone: "border-sky-300/20 bg-sky-400/10 text-sky-100" },
-            { label: "Missed days", value: rows.filter((row) => row.status === "missed").length, tone: "border-red-300/20 bg-red-400/10 text-red-100" },
-          ].map((item) => (
-            <div key={item.label} className={cn("rounded-2xl border p-4", item.tone)}>
-              <p className="text-[11px] uppercase tracking-[0.16em] opacity-70">{item.label}</p>
-              <p className="mt-2 text-2xl font-semibold">{item.value}</p>
             </div>
           ))}
         </div>
@@ -2346,6 +2396,10 @@ export default function YouTubeGrowthPlannerV2Tab() {
     () => deriveCurrentWeekConsistencyData(weekCalendarDates, plannedDateSet, recentVideos),
     [weekCalendarDates, plannedDateSet, recentVideos],
   );
+  const weeklyLeaderboardMessage = useMemo(
+    () => weeklyComparison ? deriveFriendlyLeaderboardMessage(weeklyComparison) : null,
+    [weeklyComparison],
+  );
 
   if (!plan.isStudio) return <GrowthPlannerComingSoon />;
   if (loading || planLoading) return <LoadingState />;
@@ -2730,12 +2784,16 @@ export default function YouTubeGrowthPlannerV2Tab() {
   );
 
   const uploadReviewSection = unlinkedWeekVideos.length ? (
-    <PanelCardSoft className="border-emerald-300/15 p-5">
+    <PanelCard className="border-emerald-300/15 bg-[radial-gradient(circle_at_top_left,rgba(52,211,153,0.18),transparent_38%),linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0.01))] p-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-emerald-100/70">Published this week</p>
-          <h3 className="mt-2 text-xl font-semibold text-white">Match new uploads to this week&apos;s plan</h3>
-          <p className="mt-1 text-sm text-white/50">These videos were published in the scheduled week but are not linked yet. Choose the matching plan card or create a new idea from the upload.</p>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-emerald-100/70">To do</p>
+          <h3 className="mt-2 text-xl font-semibold text-white">You have uploads to sort into this week&apos;s plan</h3>
+          <p className="mt-1 text-sm text-white/55">These videos are live in the current scheduled week, but they are not linked to an idea yet. Match them to a planned card or save them as new ideas so your week stays accurate.</p>
+          <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-emerald-300/20 bg-emerald-400/10 px-3 py-1 text-xs text-emerald-100">
+            <CheckCircle2 className="h-3.5 w-3.5" />
+            {unlinkedWeekVideos.length} upload{unlinkedWeekVideos.length === 1 ? "" : "s"} waiting for review
+          </div>
         </div>
         <Button variant="secondary" className="rounded-lg" onClick={() => void syncChannel()} disabled={working === "sync"}>
           {working === "sync" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="mr-2 h-4 w-4" />}
@@ -2754,12 +2812,12 @@ export default function YouTubeGrowthPlannerV2Tab() {
                   <div className="min-w-0">
                     <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/35">{formatIsoDate(video.publishedAt)} · {formatNumber(video.viewCount)} views</p>
                     <p className="mt-2 line-clamp-2 text-base font-semibold text-white">{video.title}</p>
-                    <p className="mt-1 text-sm text-white/50">Was this one of your planned cards for that day?</p>
+                    <p className="mt-1 text-sm text-white/50">Was this one of your planned ideas for that day?</p>
                   </div>
                 </div>
                 <Button className="rounded-lg bg-white text-black hover:bg-white/90" onClick={() => void addUploadedVideoAsIdea(video)}>
                   <Plus className="mr-2 h-4 w-4" />
-                  Add as new idea
+                  This is a new idea
                 </Button>
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
@@ -2770,17 +2828,18 @@ export default function YouTubeGrowthPlannerV2Tab() {
                     onClick={() => void linkVideoToPlannedDay(video, day)}
                     className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-left text-sm text-white transition-all hover:-translate-y-0.5 hover:border-emerald-300/35 hover:bg-emerald-500/10"
                   >
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-100/65">Yes, link it here</p>
                     <p className="font-semibold">{day.contentIdea}</p>
                     {day.hook && day.hook !== day.contentIdea ? <p className="mt-1 text-white/55">{day.hook}</p> : null}
                   </button>
                 ))}
-                {!matchingIdeas.length ? <div className="rounded-xl border border-dashed border-white/10 px-4 py-3 text-sm text-white/45">No planned cards on this publish date. Add it as a new idea.</div> : null}
+                {!matchingIdeas.length ? <div className="rounded-xl border border-dashed border-white/10 px-4 py-3 text-sm text-white/45">No planned cards exist on this publish date yet. Save it as a new idea to keep the week complete.</div> : null}
               </div>
             </PanelCardSoft>
           );
         })}
       </div>
-    </PanelCardSoft>
+    </PanelCard>
   ) : null;
 
   const sectionNav = (
@@ -2955,8 +3014,8 @@ export default function YouTubeGrowthPlannerV2Tab() {
             </div>
           </PanelCardStrong>
 
-          {sectionNav}
           {uploadReviewSection}
+          {sectionNav}
           {todayActionCard}
           {planCalendarSection}
 
@@ -3276,9 +3335,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
                         <h4 className="text-base font-semibold text-white">This Week&apos;s Friendly Leaderboard</h4>
                         <p className="mt-1 text-sm text-white/50">Weekday-by-weekday uploads and views for the current scheduled week.</p>
                         <WeeklyComparisonChart rows={weeklyComparison.rows} weekdayRows={weeklyComparison.weekdayRows} competitorName={weeklyComparison.motivatingCompetitor?.name} />
-                        {weeklyComparison.motivatingCompetitor ? (
-                          <p className="mt-3 text-sm text-white/65">You posted {weeklyComparison.rows[0]?.uploads ?? 0} video{(weeklyComparison.rows[0]?.uploads ?? 0) === 1 ? "" : "s"} this week and gained {formatNumber(weeklyComparison.rows[0]?.views ?? 0)} views. {weeklyComparison.motivatingCompetitor.name} posted {weeklyComparison.motivatingCompetitor.uploads} and gained {formatNumber(weeklyComparison.motivatingCompetitor.views)} views. {(weeklyComparison.rows[0]?.views ?? 0) >= weeklyComparison.motivatingCompetitor.views ? "You are ahead this week, so keep the momentum." : "Closing the gap starts with one more strong upload in your best slot."}</p>
-                        ) : null}
+                        {weeklyLeaderboardMessage ? <p className="mt-3 text-sm text-white/65">{weeklyLeaderboardMessage}</p> : null}
                       </PanelCardSoft>
                     ) : null}
                   </div>
