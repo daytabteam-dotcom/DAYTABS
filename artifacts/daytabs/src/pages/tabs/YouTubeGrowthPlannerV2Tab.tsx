@@ -2256,6 +2256,11 @@ export default function YouTubeGrowthPlannerV2Tab() {
     }
   }
 
+  function openCustomIdeaForDate(date: string) {
+    setCustomIdea((current) => ({ ...current, date }));
+    setCustomOpen(true);
+  }
+
   async function addCustomIdea() {
     const title = customIdea.title.trim();
     if (!title) return;
@@ -2317,12 +2322,29 @@ export default function YouTubeGrowthPlannerV2Tab() {
                   {linked ? <span className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-2 py-1 text-[10px] font-medium text-emerald-200">Published</span> : day ? <span className="rounded-full border border-sky-400/25 bg-sky-500/10 px-2 py-1 text-[10px] font-medium text-sky-100">Planned</span> : <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-[10px] font-medium text-white/35">Open</span>}
                 </div>
                 {day ? (
-                  <CalendarPreviewCard day={day} linked={Boolean(linked)} onDragStart={handleDragStart} onOpen={setDetailDay} />
-                ) : (
-                  <div className="flex h-[180px] flex-col items-center justify-center rounded-2xl border border-dashed border-white/10 bg-black/10 text-center text-sm text-white/25">
-                    <Plus className="mb-2 h-5 w-5" />
-                    No post planned
+                  <div className="space-y-3">
+                    <CalendarPreviewCard day={day} linked={Boolean(linked)} onDragStart={handleDragStart} onOpen={setDetailDay} />
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="w-full rounded-xl border-dashed text-white/55 hover:text-white"
+                      onClick={() => openCustomIdeaForDate(date)}
+                    >
+                      <Plus className="mr-2 h-4 w-4" />
+                      Add another idea
+                    </Button>
                   </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => openCustomIdeaForDate(date)}
+                    className="flex h-[180px] w-full flex-col items-center justify-center rounded-2xl border border-dashed border-white/10 bg-black/10 text-center text-sm text-white/30 transition-all hover:-translate-y-0.5 hover:border-red-300/30 hover:bg-red-500/10 hover:text-white"
+                  >
+                    <span className="mb-3 flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-white/[0.05]">
+                      <Plus className="h-5 w-5" />
+                    </span>
+                    Add idea for this day
+                  </button>
                 )}
               </div>
             );
@@ -2381,10 +2403,6 @@ export default function YouTubeGrowthPlannerV2Tab() {
             <Button variant="secondary" className="rounded-lg px-3 text-white/65" onClick={syncChannel} disabled={Boolean(working)}>
               {working === "sync" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="mr-2 h-4 w-4" />}
               Refresh channel
-            </Button>
-            <Button variant="secondary" className="rounded-lg px-3 text-white/65" onClick={() => setCustomOpen(true)}>
-              <Plus className="mr-2 h-4 w-4" />
-              Add idea
             </Button>
           </div>
         )}
