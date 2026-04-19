@@ -1,4 +1,5 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react";
+import type { LucideIcon } from "lucide-react";
 import {
   Archive,
   BarChart3,
@@ -13,8 +14,8 @@ import {
   ExternalLink,
   Flame,
   GripVertical,
+  Hash,
   Heart,
-  Lightbulb,
   LayoutGrid,
   ListChecks,
   Loader2,
@@ -26,9 +27,9 @@ import {
   Settings,
   Send,
   Sparkles,
-  Target,
   TrendingDown,
   TrendingUp,
+  Type,
   Youtube,
 } from "lucide-react";
 import {
@@ -727,84 +728,32 @@ function buildVideoDiagnostics(
     return {
       video,
       hook: kind === "top"
-        ? `Hook: ${type} hook — ${type.toLowerCase()} titles averaged ${formatNumber(hookAverage)} views on your channel${questionAverage ? ` vs ${formatNumber(questionAverage)} for question hooks` : ""}.`
-        : `Hook: ${type} title with less tension — rewrite it toward a question or emotional angle because those patterns outperform descriptive titles on your channel.`,
+        ? `${type} hook. ${type.toLowerCase()} titles averaged ${formatNumber(hookAverage)} views on your channel${questionAverage ? ` vs ${formatNumber(questionAverage)} for question hooks` : ""}.`
+        : `${type} title with less tension. Rewrite it toward a question or emotional angle because those patterns outperform descriptive titles on your channel.`,
       tags: kind === "top"
-        ? `Tags: ${overlapTags.length ? overlapTags.map((tag) => `#${tag}`).join(" + ") : "No repeated niche tag cluster"}${overlapTags.length ? ` appeared across your stronger uploads and helped this video match winning metadata patterns.` : " — test a tighter niche-specific tag combo next time."}`
-        : `Tags: ${overlapTags.length ? overlapTags.map((tag) => `#${tag}`).join(" + ") : "Mostly generic tags"} — add more niche-specific tags that appear on your better videos.`,
+        ? `${overlapTags.length ? overlapTags.map((tag) => `#${tag}`).join(" + ") : "No repeated niche tag cluster"}${overlapTags.length ? ` appeared across your stronger uploads and helped this video match winning metadata patterns.` : ". Test a tighter niche-specific tag combo next time."}`
+        : `${overlapTags.length ? overlapTags.map((tag) => `#${tag}`).join(" + ") : "Mostly generic tags"}. Add more niche-specific tags that appear on your better videos.`,
       titleLength: kind === "top"
-        ? `Title length: ${video.title.length} characters — ${inRange ? "inside" : "outside"} your optimal ${titleLengthSummary.winningBucket ? `${titleLengthSummary.winningBucket.min}-${Number.isFinite(titleLengthSummary.winningBucket.max) ? titleLengthSummary.winningBucket.max : "70+"}` : "35-55"} range.`
-        : `Title length: ${video.title.length} characters — ${inRange ? "the length is fine, so the hook and concept need work" : "move it closer to your winning range for a better first impression."}`,
+        ? `${video.title.length} characters. ${inRange ? "Inside" : "Outside"} your optimal ${titleLengthSummary.winningBucket ? `${titleLengthSummary.winningBucket.min}-${Number.isFinite(titleLengthSummary.winningBucket.max) ? titleLengthSummary.winningBucket.max : "70+"}` : "35-55"} range.`
+        : `${video.title.length} characters. ${inRange ? "The length is fine, so the hook and concept need work." : "Move it closer to your winning range for a better first impression."}`,
       conceptType: kind === "top"
-        ? `Concept: ${concept} video — this format shows up repeatedly in your stronger performers.`
-        : `Concept: ${concept} video — test this idea as a reveal, tutorial, or story angle with clearer stakes.`,
+        ? `${concept} video. This format shows up repeatedly in your stronger performers.`
+        : `${concept} video. Test this idea as a reveal, tutorial, or story angle with clearer stakes.`,
       timing: kind === "top"
-        ? `Timing: Posted ${postedDay}${bucket ? ` ${bucket.label === "00:00" ? "00:00-06:00" : bucket.label === "06:00" ? "06:00-12:00" : bucket.label === "12:00" ? "12:00-18:00" : "18:00-24:00"}` : ""}${bestTime.highest ? ` — compare that with ${strongestWindow}, your strongest signal at ${formatNumber(bestTime.highest.value)} avg views.` : "."}`
-        : `Timing: It missed your strongest heatmap signal — try the next version in ${strongestWindow} so the topic gets a better first push.`,
+        ? `Posted ${postedDay}${bucket ? ` ${bucket.label === "00:00" ? "00:00-06:00" : bucket.label === "06:00" ? "06:00-12:00" : bucket.label === "12:00" ? "12:00-18:00" : "18:00-24:00"}` : ""}${bestTime.highest ? `. Compare that with ${strongestWindow}, your strongest signal at ${formatNumber(bestTime.highest.value)} avg views.` : "."}`
+        : `It missed your strongest heatmap signal. Try the next version in ${strongestWindow} so the topic gets a better first push.`,
     } satisfies VideoDiagnostic;
   });
-}
-
-function buildTeachingRecommendations(
-  recentVideos: RecentVideo[],
-  hookInsight: ReturnType<typeof deriveHookInsight>,
-  titleLengthSummary: ReturnType<typeof deriveTitleLengthSummary>,
-  bestTime: ReturnType<typeof deriveBestTimeSummary>,
-) {
-  const top = [...recentVideos].sort((a, b) => parseNumber(b.viewCount) - parseNumber(a.viewCount));
-  const bestVideo = top[0];
-  const secondVideo = top[1];
-  const items = [
-    hookInsight && bestVideo
-      ? `"${bestVideo.title}" reached ${formatNumber(bestVideo.viewCount)} views, and your ${hookInsight.winner.type.toLowerCase()} hooks average ${formatNumber(hookInsight.winner.averageViews)} views overall. That works because the title creates a gap the viewer wants to resolve before scrolling past. Write your next 2 titles in that structure and compare click-through rate.`
-      : null,
-    titleLengthSummary.winningBucket && secondVideo
-      ? `"${secondVideo.title}" landed at ${secondVideo.title.length} characters, right near your ${titleLengthSummary.winningBucket.min}-${Number.isFinite(titleLengthSummary.winningBucket.max) ? titleLengthSummary.winningBucket.max : "70+"} character sweet spot where videos average ${formatNumber(titleLengthSummary.winningBucket.averageViews)} views. That range works because viewers can understand the payoff fast without the title feeling cluttered. Keep the next title in that range.`
-      : null,
-    bestTime.highest && bestVideo
-      ? `"${bestVideo.title}" benefited from stronger timing. Your best heatmap slot is ${bestTime.highest.day} ${bestTime.highest.hour === "00:00" ? "00:00-06:00" : bestTime.highest.hour === "06:00" ? "06:00-12:00" : bestTime.highest.hour === "12:00" ? "12:00-18:00" : "18:00-24:00"} at ${formatNumber(bestTime.highest.value)} average views, which matters because early velocity tells YouTube whether to keep testing the upload. Schedule your next video into that window.`
-      : null,
-  ].filter(Boolean) as string[];
-  return items;
-}
-
-function renderQuotedTitles(text: string) {
-  const parts = text.split(/(\"[^\"]+\")/g).filter(Boolean);
-  return parts.map((part, index) => part.startsWith("\"") && part.endsWith("\"")
-    ? <strong key={`${part}-${index}`} className="font-semibold text-white">{part.slice(1, -1)}</strong>
-    : <span key={`${part}-${index}`}>{part}</span>);
 }
 
 function buildOverviewSections(videos: RecentVideo[]) {
   const sorted = [...videos].sort((a, b) => parseNumber(b.viewCount) - parseNumber(a.viewCount));
   const top = sorted.slice(0, 3);
   const bottom = [...sorted].reverse().slice(0, 3).reverse();
-  const avgTopLength = top.length ? Math.round(top.reduce((sum, video) => sum + video.title.length, 0) / top.length) : 0;
-  const avgBottomLength = bottom.length ? Math.round(bottom.reduce((sum, video) => sum + video.title.length, 0) / bottom.length) : 0;
-  const questionCount = top.filter((video) => hookType(video.title) === "Question").length;
-  const withTags = videos.filter((video) => (video.tags ?? []).length);
-  const topTag = withTags.flatMap((video) => video.tags ?? []).reduce<Record<string, number>>((acc, tag) => {
-    const key = tag.trim().toLowerCase();
-    if (key) acc[key] = (acc[key] ?? 0) + 1;
-    return acc;
-  }, {});
-  const strongestTag = Object.entries(topTag).sort((a, b) => b[1] - a[1])[0]?.[0];
 
   return {
     whatWorkedVideos: top,
-    whyItWorked: [
-      top[0] ? `"${top[0].title}" used a ${hookType(top[0].title).toLowerCase()} hook and reached ${formatNumber(top[0].viewCount)} views.` : null,
-      top[1] ? `"${top[1].title}" kept the title around ${top[1].title.length} characters, close to your strongest cluster.` : null,
-      strongestTag && top[2] ? `"${top[2].title}" reinforced the repeat tag theme #${strongestTag}, which appears across your better-performing uploads.` : null,
-      questionCount ? `${questionCount} of your top ${top.length} videos use a question or curiosity-led title pattern.` : null,
-    ].filter(Boolean) as string[],
     underperformerVideos: bottom,
-    recommendations: [
-      top[0] ? `Build the next week around the pattern in "${top[0].title}" instead of resetting to a new format.` : null,
-      avgTopLength && avgBottomLength ? `Your stronger titles average ${avgTopLength} characters vs ${avgBottomLength} for the weakest set, so stay near that higher-performing range.` : null,
-      bottom[0] ? `Rewrite low-performing titles like "${bottom[0].title}" with a clearer tension, outcome, or question-based hook.` : null,
-      strongestTag ? `Keep testing #${strongestTag} where it fits, then pair it with one fresh niche trend tag instead of generic filler tags.` : null,
-    ].filter(Boolean) as string[],
   };
 }
 
@@ -1020,7 +969,7 @@ function deriveTrendingTagSuggestions(planTags: PlanPayload["viralTags"], trendV
       topViews: data.topViews,
       why: data.signal > 1
         ? `#${tag} appears in ${data.signal} trending niche videos from the past 7 days that reached up to ${formatNumber(data.topViews)} views, and none of your current videos use it.`
-        : `Emerging tag with signal 1 — one recent niche video using #${tag} already reached ${formatNumber(data.topViews)} views, suggesting early mover advantage.`,
+        : `Emerging tag with signal 1. One recent niche video using #${tag} already reached ${formatNumber(data.topViews)} views, suggesting early mover advantage.`,
     }));
   const merged = [...fromPlan, ...fromTrends].filter((item, index, items) => items.findIndex((candidate) => candidate.tag.toLowerCase() === item.tag.toLowerCase()) === index);
   return merged.slice(0, 8);
@@ -1279,21 +1228,147 @@ function VideoPicker({
   );
 }
 
-function CompactVideoCard({ video, accent = "border-white/10" }: { video: RecentVideo; accent?: string }) {
+function VideoDiagnosticCard({
+  diagnostic,
+  tone,
+}: {
+  diagnostic: VideoDiagnostic;
+  tone: "positive" | "negative";
+}) {
+  const positive = tone === "positive";
+  const metricItems: Array<{ label: string; value: string; Icon: LucideIcon; className: string }> = [
+    { label: "Hook", value: diagnostic.hook, Icon: Sparkles, className: positive ? "text-emerald-200" : "text-red-200" },
+    { label: "Tags", value: diagnostic.tags, Icon: Hash, className: "text-amber-200" },
+    { label: "Title length", value: diagnostic.titleLength, Icon: Type, className: "text-sky-200" },
+    { label: "Concept", value: diagnostic.conceptType, Icon: Paintbrush, className: "text-pink-200" },
+    { label: "Timing", value: diagnostic.timing, Icon: Clock, className: "text-violet-200" },
+  ];
+
   return (
-    <a
-      href={video.url}
-      target="_blank"
-      rel="noreferrer"
-      className={cn("flex items-center gap-3 rounded-2xl border bg-[#111111] p-3 text-white transition-all hover:-translate-y-0.5 hover:bg-[#171717]", accent)}
-    >
-      {video.thumbnailUrl ? <img src={video.thumbnailUrl} alt="" className="h-[54px] w-24 rounded-lg object-cover" /> : <div className="flex h-[54px] w-24 items-center justify-center rounded-lg bg-black/30"><Play className="h-4 w-4 text-white/60" /></div>}
-      <div className="min-w-0 flex-1">
-        <p className="line-clamp-2 text-sm font-medium text-white">{video.title}</p>
-        <p className="mt-1 text-xs text-white/45">{formatNumber(video.viewCount)} views</p>
+    <PanelCardSoft className={cn(
+      "p-4 transition-all duration-200 hover:-translate-y-0.5",
+      positive ? "border-emerald-300/20" : "border-red-300/20",
+    )}>
+      <div className="flex gap-4">
+        <a href={diagnostic.video.url} target="_blank" rel="noreferrer" className="group relative h-24 w-40 shrink-0 overflow-hidden rounded-xl border border-white/10 bg-black/30 max-sm:h-20 max-sm:w-28">
+          {diagnostic.video.thumbnailUrl ? (
+            <img src={diagnostic.video.thumbnailUrl} alt="" className="h-full w-full object-cover opacity-90 transition-transform duration-500 group-hover:scale-105" />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center bg-white/[0.04]">
+              <Play className="h-8 w-8 text-white/45" />
+            </div>
+          )}
+          <span className="absolute right-2 top-2 rounded-full bg-black/55 p-1 text-white/70 opacity-0 transition-opacity group-hover:opacity-100">
+            <ExternalLink className="h-3.5 w-3.5" />
+          </span>
+        </a>
+        <div className="min-w-0 flex-1">
+          <div className="mb-2 flex flex-wrap gap-2">
+            <span className={cn(
+              "inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]",
+              positive ? "border-emerald-300/25 bg-emerald-400/10 text-emerald-100" : "border-red-300/25 bg-red-400/10 text-red-100",
+            )}>
+              {positive ? "Repeat" : "Fix"}
+            </span>
+            <span className="inline-flex items-center rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/55">
+              {formatNumber(diagnostic.video.viewCount)} views
+            </span>
+          </div>
+          <a href={diagnostic.video.url} target="_blank" rel="noreferrer" className="line-clamp-2 text-base font-semibold leading-6 text-white transition-colors hover:text-white/80">
+            {diagnostic.video.title}
+          </a>
+        </div>
       </div>
-      <ExternalLink className="h-4 w-4 shrink-0 text-white/50" />
-    </a>
+      <div className="mt-4 grid gap-2 md:grid-cols-2">
+        {metricItems.map(({ label, value, Icon, className }) => (
+          <div key={label} className="rounded-xl border border-white/10 bg-white/[0.035] p-3">
+            <div className="mb-2 flex items-center gap-2">
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/[0.05]">
+                <Icon className={cn("h-4 w-4", className)} />
+              </span>
+              <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-white/40">{label}</p>
+            </div>
+            <p className="text-sm leading-6 text-white/70">{value}</p>
+          </div>
+        ))}
+      </div>
+    </PanelCardSoft>
+  );
+}
+
+function AnalysisLane({
+  title,
+  subtitle,
+  Icon,
+  diagnostics,
+  tone,
+}: {
+  title: string;
+  subtitle: string;
+  Icon: LucideIcon;
+  diagnostics: VideoDiagnostic[];
+  tone: "positive" | "negative";
+}) {
+  const positive = tone === "positive";
+  return (
+    <PanelCardSoft className={cn("space-y-4 p-5", positive ? "border-emerald-300/15" : "border-red-300/15")}>
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex items-start gap-3">
+          <span className={cn(
+            "flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border",
+            positive ? "border-emerald-300/20 bg-emerald-400/10" : "border-red-300/20 bg-red-400/10",
+          )}>
+            <Icon className={cn("h-5 w-5", positive ? "text-emerald-200" : "text-red-200")} />
+          </span>
+          <div>
+            <h3 className="text-xl font-semibold text-white">{title}</h3>
+            <p className="mt-1 max-w-2xl text-sm leading-6 text-white/50">{subtitle}</p>
+          </div>
+        </div>
+        <Badge className={cn(
+          "rounded-full border px-3 py-1 text-xs hover:brightness-100",
+          positive ? "border-emerald-300/20 bg-emerald-400/10 text-emerald-100" : "border-red-300/20 bg-red-400/10 text-red-100",
+        )}>
+          {diagnostics.length} video{diagnostics.length === 1 ? "" : "s"}
+        </Badge>
+      </div>
+      {diagnostics.length ? (
+        <div className="space-y-3">
+          {diagnostics.map((diagnostic) => (
+            <VideoDiagnosticCard key={`${tone}-${diagnostic.video.id}`} diagnostic={diagnostic} tone={tone} />
+          ))}
+        </div>
+      ) : (
+        <PanelCardSoft className="border border-white/10 p-5 text-sm text-white/55">
+          Sync more uploads to generate channel-specific evidence here.
+        </PanelCardSoft>
+      )}
+    </PanelCardSoft>
+  );
+}
+
+function CommandStat({
+  label,
+  value,
+  caption,
+  Icon,
+}: {
+  label: string;
+  value: string;
+  caption: string;
+  Icon: LucideIcon;
+}) {
+  return (
+    <PanelCardSoft className="flex items-center gap-3 p-3">
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.05]">
+        <Icon className="h-4 w-4 text-white/55" />
+      </span>
+      <div className="min-w-0">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/35">{label}</p>
+        <p className="mt-1 truncate text-sm font-semibold text-white">{value}</p>
+        <p className="mt-0.5 truncate text-xs text-white/40">{caption}</p>
+      </div>
+    </PanelCardSoft>
   );
 }
 
@@ -1428,7 +1503,7 @@ function BestTimeHeatmap({ cells }: { cells?: Array<{ day: string; hour: string;
                 className="flex min-h-12 items-center justify-center border-l border-white/10 text-[11px] text-white/80"
                 style={{ backgroundColor: `rgba(248, 113, 113, ${intensity})` }}
               >
-                {cell?.value ? formatNumber(cell.value) : "—"}
+                {cell?.value ? formatNumber(cell.value) : "No data"}
               </div>
             );
           })}
@@ -1953,7 +2028,6 @@ export default function YouTubeGrowthPlannerV2Tab() {
   const resultsByDay = useMemo(() => new Map(latestResults.map((result) => [result.dayIndex, result])), [latestResults]);
   const topDiagnostics = useMemo(() => buildVideoDiagnostics(overview.whatWorkedVideos ?? [], recentVideos, titleLengthSummary, bestTime, "top"), [overview, recentVideos, titleLengthSummary, bestTime]);
   const underperformerDiagnostics = useMemo(() => buildVideoDiagnostics(overview.underperformerVideos ?? [], recentVideos, titleLengthSummary, bestTime, "bottom"), [overview, recentVideos, titleLengthSummary, bestTime]);
-  const teachingRecommendations = useMemo(() => buildTeachingRecommendations(recentVideos, hookInsight, titleLengthSummary, bestTime), [recentVideos, hookInsight, titleLengthSummary, bestTime]);
   const competitorTiers = useMemo(() => partitionCompetitors(ownSubscribers, competitorRows), [ownSubscribers, competitorRows]);
   const weeklyComparison = useMemo(() => deriveWeeklyComparisonData(competitorTiers.tier1, latestPlan, latestResults, recentVideoById, status?.channel?.channelName), [competitorTiers.tier1, latestPlan, latestResults, recentVideoById, status?.channel?.channelName]);
 
@@ -2115,8 +2189,9 @@ export default function YouTubeGrowthPlannerV2Tab() {
     <PanelPage className="max-w-7xl space-y-8 py-8">
       <PanelHeader className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
         <div className="space-y-3">
-          <PanelTitle className="text-4xl">Plan from your real channel data.</PanelTitle>
-          <PanelSubtitle className="max-w-3xl">Connect your channel, use live YouTube and YouTube Analytics data, then turn actual performance patterns into a weekly plan you can execute.</PanelSubtitle>
+          <PanelEyebrow>YouTube Growth Planner</PanelEyebrow>
+          <PanelTitle className="text-4xl">Plan your next upload week.</PanelTitle>
+          <PanelSubtitle className="max-w-3xl">A focused workspace for channel patterns, weekly planning, competitor context, and publishing follow-through.</PanelSubtitle>
         </div>
         {status?.connected && (
           <div className="flex flex-wrap items-start gap-2 lg:justify-end">
@@ -2177,8 +2252,37 @@ export default function YouTubeGrowthPlannerV2Tab() {
         </section>
       ) : (
         <>
+          <PanelCard className="p-4">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <CommandStat
+                label="Weekly target"
+                value={`${preferredPostsPerWeek} upload${preferredPostsPerWeek === 1 ? "" : "s"}`}
+                caption="Used when generating plans"
+                Icon={CalendarDays}
+              />
+              <CommandStat
+                label="Source data"
+                value={`${recentVideos.length} videos`}
+                caption="Recent uploads analyzed"
+                Icon={BarChart3}
+              />
+              <CommandStat
+                label="Current plan"
+                value={latestPlan ? `Week ${calendarWeek ?? latestPlan.weekNumber}` : "Not generated"}
+                caption={latestPlan ? `${formatIsoDate(latestPlan.startDate)} to ${formatIsoDate(latestPlan.endDate)}` : "Generate when ready"}
+                Icon={ListChecks}
+              />
+              <CommandStat
+                label="Progress"
+                value={`${progressState.posted}/${Math.max(days.length, preferredPostsPerWeek)} published`}
+                caption="Linked uploads this week"
+                Icon={CheckCircle2}
+              />
+            </div>
+          </PanelCard>
+
           <section className="grid gap-4 md:grid-cols-5">
-            <PanelCardStrong className="h-[188px] border border-white/10 p-5 transition-all hover:-translate-y-1 hover:bg-white/[0.05] md:col-span-2">
+            <PanelCardStrong className="border border-white/10 p-5 transition-all hover:-translate-y-1 hover:bg-white/[0.05] md:col-span-2">
               <div className="flex items-start gap-4">
                 <div className="relative">
                   <Avatar className="h-20 w-20 rounded-[20px] border border-white/10">
@@ -2211,53 +2315,42 @@ export default function YouTubeGrowthPlannerV2Tab() {
             <StatCard label="Videos" value={status.channel?.videoCount} caption="Current published video count from YouTube." />
           </section>
 
-          <section className="grid gap-6 lg:grid-cols-[1fr_360px]">
-          <PanelCard className="p-6 transition-all hover:-translate-y-1 hover:bg-white/[0.04]">
-              <div className="flex items-center gap-3">
-                <BarChart3 className="h-5 w-5 text-emerald-300" />
-                <h2 className="text-2xl font-semibold text-white">Channel Overview</h2>
-              </div>
-              <p className="mt-2 text-sm text-white/55">Start with what your channel is already doing right, then turn the gaps into one clear move you can make today.</p>
-              {channelDescription(status.channel) ? (
-                <PanelCardSoft className="mt-5 border border-white/10 p-4 text-sm leading-6 text-white/65">
-                  {channelDescription(status.channel)}
-                </PanelCardSoft>
-              ) : null}
-              <div className="mt-5 grid gap-3 md:grid-cols-2">
-                {[
-                  { key: "whatWorked", title: "What Worked", Icon: CheckCircle2, diagnostics: topDiagnostics },
-                  { key: "whyItWorked", title: "Why It Worked", Icon: Lightbulb, items: overview.whyItWorked },
-                  { key: "underperformers", title: "Underperformers", Icon: TrendingDown, diagnostics: underperformerDiagnostics },
-                  { key: "recommendations", title: "Recommendations", Icon: Target, items: teachingRecommendations.length ? teachingRecommendations : overview.recommendations },
-                ].map(({ key, title, Icon, items = [], diagnostics }) => (
-                  <PanelCardSoft key={key} className="p-4 transition-all hover:-translate-y-1 hover:bg-white/[0.05]">
-                    <div className="flex items-center gap-2">
-                      <Icon className="h-4 w-4 text-white/40" />
-                      <p className="text-lg font-semibold text-white">{title}</p>
+          <section className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
+            <PanelCard className="overflow-hidden border border-white/10 p-0 transition-all hover:-translate-y-1 hover:bg-white/[0.04]">
+              <div className="border-b border-white/10 bg-white/[0.03] p-6">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div>
+                    <div className="flex items-center gap-3">
+                      <BarChart3 className="h-5 w-5 text-emerald-300" />
+                      <h2 className="text-2xl font-semibold text-white">Channel Patterns</h2>
                     </div>
-                    {diagnostics?.length ? (
-                      <div className="mt-3 space-y-3">
-                        {diagnostics.map((diagnostic) => (
-                          <div key={`${key}-${diagnostic.video.id}`} className="rounded-2xl border border-white/10 bg-[#111111] p-3">
-                            <CompactVideoCard video={diagnostic.video} accent={key === "whatWorked" ? "border-emerald-400/20" : "border-red-400/20"} />
-                            <div className="mt-3 space-y-2 text-sm leading-6 text-white/65">
-                              <p>{diagnostic.hook}</p>
-                              <p>{diagnostic.tags}</p>
-                              <p>{diagnostic.titleLength}</p>
-                              <p>{diagnostic.conceptType}</p>
-                              <p>{diagnostic.timing}</p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <ul className="mt-3 space-y-2 text-sm leading-6 text-white/60">
-                        {items.slice(0, 4).map((item) => <li key={item}>{renderQuotedTitles(item)}</li>)}
-                        {!items.length && <li>Sync more uploads to generate channel-specific evidence here.</li>}
-                      </ul>
-                    )}
+                    <p className="mt-2 max-w-3xl text-sm leading-6 text-white/55">Two focused reads from your recent uploads. Repeat what is working, then fix the weakest signals without digging through four separate report boxes.</p>
+                  </div>
+                  <Badge className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-white/65 hover:brightness-100">
+                    {topDiagnostics.length + underperformerDiagnostics.length} cards
+                  </Badge>
+                </div>
+                {channelDescription(status.channel) ? (
+                  <PanelCardSoft className="mt-5 border border-white/10 p-4 text-sm leading-6 text-white/65">
+                    {channelDescription(status.channel)}
                   </PanelCardSoft>
-                ))}
+                ) : null}
+              </div>
+              <div className="grid gap-4 p-5 md:p-6 2xl:grid-cols-2">
+                <AnalysisLane
+                  title="What worked"
+                  subtitle="Your strongest recent videos, broken into the exact creative signals worth repeating."
+                  Icon={CheckCircle2}
+                  diagnostics={topDiagnostics}
+                  tone="positive"
+                />
+                <AnalysisLane
+                  title="Needs work"
+                  subtitle="The weakest recent uploads, shown as specific hook, tag, title, concept, and timing issues."
+                  Icon={TrendingDown}
+                  diagnostics={underperformerDiagnostics}
+                  tone="negative"
+                />
               </div>
             </PanelCard>
 
@@ -2377,10 +2470,10 @@ export default function YouTubeGrowthPlannerV2Tab() {
                           const bottom = titleLengthSummary.bottom[index];
                           return (
                             <tr key={`title-row-${index}`} className="border-t border-white/10">
-                              <td className="px-4 py-3 text-white">{top?.title ?? "—"}</td>
-                              <td className="px-4 py-3 text-white/65">{top ? `${top.titleLength} · ${formatNumber(top.views)}` : "—"}</td>
-                              <td className="px-4 py-3 text-white">{bottom?.title ?? "—"}</td>
-                              <td className="px-4 py-3 text-white/65">{bottom ? `${bottom.titleLength} · ${formatNumber(bottom.views)}` : "—"}</td>
+                              <td className="px-4 py-3 text-white">{top?.title ?? "No data"}</td>
+                              <td className="px-4 py-3 text-white/65">{top ? `${top.titleLength} · ${formatNumber(top.views)}` : "No data"}</td>
+                              <td className="px-4 py-3 text-white">{bottom?.title ?? "No data"}</td>
+                              <td className="px-4 py-3 text-white/65">{bottom ? `${bottom.titleLength} · ${formatNumber(bottom.views)}` : "No data"}</td>
                             </tr>
                           );
                         })}
@@ -2389,7 +2482,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
                   </div>
                   {titleLengthSummary.winningBucket ? (
                     <p className="mt-4 text-sm text-white/65">
-                      Videos with titles between {titleLengthSummary.winningBucket.min} and {Number.isFinite(titleLengthSummary.winningBucket.max) ? titleLengthSummary.winningBucket.max : "70+"} characters average {formatNumber(titleLengthSummary.winningBucket.averageViews)} views on your channel — that is {formatPercent(titleLengthSummary.percentAboveAverage)} above your overall average.
+                      Videos with titles between {titleLengthSummary.winningBucket.min} and {Number.isFinite(titleLengthSummary.winningBucket.max) ? titleLengthSummary.winningBucket.max : "70+"} characters average {formatNumber(titleLengthSummary.winningBucket.averageViews)} views on your channel, which is {formatPercent(titleLengthSummary.percentAboveAverage)} above your overall average.
                     </p>
                   ) : null}
                 </PanelCardSoft>
@@ -2566,21 +2659,21 @@ export default function YouTubeGrowthPlannerV2Tab() {
                 {[
                   {
                     key: "tier1",
-                    title: "Tier 1 — Your Level: Channels You Can Beat",
+                    title: "Tier 1: Your Level, Channels You Can Beat",
                     subtitle: "These are the channels close enough to race right now. Treat them like proof that your next push can move the leaderboard.",
                     rows: competitorTiers.tier1,
                     accent: "border-emerald-400/25",
                   },
                   {
                     key: "tier2",
-                    title: "Tier 2 — Growing Fast: Just Ahead of You",
+                    title: "Tier 2: Growing Fast, Just Ahead of You",
                     subtitle: "These channels are realistic near-term targets. Study the patterns that helped them break away.",
                     rows: competitorTiers.tier2,
                     accent: "border-white/10",
                   },
                   {
                     key: "tier3",
-                    title: "Tier 3 — Top of Your Niche: Study Their Playbook",
+                    title: "Tier 3: Top of Your Niche, Study Their Playbook",
                     subtitle: "Learn from the best in your niche. Use them as ideation fuel, not intimidation.",
                     rows: competitorTiers.tier3,
                     accent: "border-amber-300/25",
