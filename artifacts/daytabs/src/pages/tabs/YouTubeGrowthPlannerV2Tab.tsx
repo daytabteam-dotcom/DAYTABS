@@ -1060,29 +1060,70 @@ function deriveWeeklyComparisonData(
   };
   const yourVideos = recentVideos.filter((video) => inWindow(video.publishedAt));
 
-  const rows = [
-    {
-      name: channelName || "You",
-      shortName: "You",
-      views: yourVideos.reduce((sum, video) => sum + parseNumber(video.viewCount), 0),
-      uploads: yourVideos.length,
-      fill: "#34d399",
-      isYou: true,
-    },
-    ...tier1.slice(0, 4).map((competitor) => {
-      const weeklyVideos = (competitor.mostViewedRecentVideos ?? []).filter((video) => inWindow(video.publishedAt));
+  const competitorRows = tier1.slice(0, 4).map((competitor) => {
+    const weeklyVideos = (competitor.mostViewedRecentVideos ?? []).filter((video) => inWindow(video.publishedAt));
+    return {
+      name: competitor.channelName,
+      shortName: competitor.channelName,
+      views: weeklyVideos.reduce((sum, video) => sum + parseNumber(video.viewCount), 0),
+      uploads: weeklyVideos.length,
+      fill: "#fca5a5",
+      isYou: false,
+      videos: weeklyVideos,
+    };
+  });
+  const youRow = {
+    name: channelName || "You",
+    shortName: "You",
+    views: yourVideos.reduce((sum, video) => sum + parseNumber(video.viewCount), 0),
+    uploads: yourVideos.length,
+    fill: "#34d399",
+    isYou: true,
+    videos: yourVideos,
+  };
+  const motivatingCompetitor = competitorRows.sort((a, b) => Math.abs(a.uploads - youRow.uploads) - Math.abs(b.uploads - youRow.uploads) || Math.abs(a.views - youRow.views) - Math.abs(b.views - youRow.views))[0];
+  const weekdayRows = latestPlan.startDate && latestPlan.endDate
+    ? Array.from({ length: 7 }).map((_, index) => {
+      const iso = toIsoDate(addUtcDays(new Date(`${latestPlan.startDate}T00:00:00Z`), index));
+      const day = daysOfWeek[new Date(`${iso}T00:00:00Z`).getUTCDay()];
+      const yourDayVideos = yourVideos.filter((video) => video.publishedAt?.slice(0, 10) === iso);
+      const competitorDayVideos = (motivatingCompetitor?.videos ?? []).filter((video) => video.publishedAt?.slice(0, 10) === iso);
       return {
-        name: competitor.channelName,
-        shortName: competitor.channelName,
-        views: weeklyVideos.reduce((sum, video) => sum + parseNumber(video.viewCount), 0),
-        uploads: weeklyVideos.length,
-        fill: "#fca5a5",
-        isYou: false,
+        iso,
+        day,
+        youViews: yourDayVideos.reduce((sum, video) => sum + parseNumber(video.viewCount), 0),
+        competitorViews: competitorDayVideos.reduce((sum, video) => sum + parseNumber(video.viewCount), 0),
+        youUploads: yourDayVideos.length,
+        competitorUploads: competitorDayVideos.length,
       };
-    }),
-  ];
-  const motivatingCompetitor = rows.slice(1).sort((a, b) => Math.abs(a.uploads - rows[0].uploads) - Math.abs(b.uploads - rows[0].uploads))[0];
-  return { rows, motivatingCompetitor };
+    })
+    : [];
+
+  return { rows: [youRow, ...competitorRows], motivatingCompetitor, weekdayRows };
+}
+
+function deriveCurrentWeekConsistencyData(weekDates: string[], plannedDates: Set<string>, videos: RecentVideo[]) {
+  const postedCountByDate = videos.reduce<Map<string, number>>((map, video) => {
+    const iso = video.publishedAt?.slice(0, 10);
+    if (!iso) return map;
+    map.set(iso, (map.get(iso) ?? 0) + 1);
+    return map;
+  }, new Map<string, number>());
+  const todayIso = new Date().toISOString().slice(0, 10);
+
+  return weekDates.map((iso) => {
+    const postedCount = postedCountByDate.get(iso) ?? 0;
+    const plannedCount = plannedDates.has(iso) ? 1 : 0;
+    const status: "posted" | "missed" | "planned" | "empty" = postedCount > 0 ? "posted" : iso < todayIso && plannedCount > 0 ? "missed" : plannedCount > 0 ? "planned" : "empty";
+    return {
+      iso,
+      day: daysOfWeek[new Date(`${iso}T00:00:00Z`).getUTCDay()],
+      postedCount,
+      plannedCount,
+      missed: iso < todayIso && plannedCount > 0 && postedCount === 0,
+      status,
+    };
+  });
 }
 
 function deriveCompetitorGapSummary(ownAverageViews: number, competitorRows: Array<ReturnType<typeof deriveCompetitorRows>[number]>) {
@@ -1413,9 +1454,7 @@ function CalendarPreviewCard({
   onDelete: (day: PlanDay) => void;
   onQuickPublish: (day: PlanDay) => void;
 }) {
-  const meta = contentTypeMeta(day);
   const origin = ideaOriginMeta(day);
-  const Icon = meta.Icon;
   return (
     <HoverCard>
       <HoverCardTrigger asChild>
@@ -1454,20 +1493,16 @@ function CalendarPreviewCard({
             </PopoverContent>
           </Popover>
           <div className="p-4">
-            <div className="mb-3 flex items-center gap-2">
-              <span className="flex h-8 w-8 items-center justify-center rounded-xl border border-white/10 bg-white/[0.05]">
-                <Icon className={cn("h-4 w-4", isManualIdea(day) ? "text-sky-100/80" : "text-red-100/75")} />
-              </span>
+            <div className="mb-3 flex items-center justify-between gap-2">
               <div className="min-w-0 flex-1">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/35">{meta.label}</p>
-                <p className="text-xs text-white/45">{postingTime(day)}</p>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/35">{formatIsoDate(day.date, { month: "short", day: "numeric" })}</p>
               </div>
               <span className={cn("rounded-full border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]", origin.chipClassName)}>
                 {origin.label}
               </span>
             </div>
-            <p className="line-clamp-3 text-base font-semibold leading-6 text-white">{day.hook}</p>
-            <p className="mt-3 line-clamp-2 text-sm leading-5 text-white/50">{day.contentIdea}</p>
+            <p className="line-clamp-3 text-base font-semibold leading-6 text-white">{day.contentIdea}</p>
+            {day.hook && day.hook !== day.contentIdea ? <p className="mt-3 line-clamp-2 text-sm leading-5 text-white/50">{day.hook}</p> : null}
             <div className="mt-4 flex gap-2">
               <Button
                 type="button"
@@ -1504,59 +1539,118 @@ function CalendarPreviewCard({
   );
 }
 
-function WeeklyComparisonChart({ rows }: { rows: Array<{ name: string; shortName: string; views: number; uploads: number; fill: string; isYou: boolean }> }) {
+function WeeklyComparisonChart({
+  rows,
+  weekdayRows,
+  competitorName,
+}: {
+  rows: Array<{ name: string; shortName: string; views: number; uploads: number; fill: string; isYou: boolean }>;
+  weekdayRows: Array<{ iso: string; day: string; youViews: number; competitorViews: number; youUploads: number; competitorUploads: number }>;
+  competitorName?: string;
+}) {
   return (
     <div className="mt-4 grid gap-4 xl:grid-cols-2">
       <PanelCardSoft className="p-4">
-        <h5 className="text-sm font-semibold text-white">Consistency track</h5>
-        <p className="mt-1 text-xs text-white/45">Upload count comparison for the same weekly window.</p>
+        <h5 className="text-sm font-semibold text-white">Upload count by weekday</h5>
+        <p className="mt-1 text-xs text-white/45">Current scheduled week, comparing your uploads with {competitorName ?? "the closest competitor"}.</p>
         <div className="mt-4 h-56">
-          <ChartContainer config={{ uploads: { label: "Weekly uploads", color: "#34d399" } }} className="h-full w-full">
-            <BarChart data={rows} margin={{ left: 6, right: 6, top: 12, bottom: 32 }}>
+          <ChartContainer config={{ youUploads: { label: "You", color: "#34d399" }, competitorUploads: { label: competitorName ?? "Competitor", color: "#fca5a5" } }} className="h-full w-full">
+            <BarChart data={weekdayRows} margin={{ left: 6, right: 6, top: 12, bottom: 32 }}>
               <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.08)" />
-              <XAxis dataKey="shortName" tickLine={false} axisLine={false} interval={0} angle={-10} textAnchor="end" height={54} />
+              <XAxis dataKey="day" tickLine={false} axisLine={false} interval={0} height={42} />
               <YAxis tickLine={false} axisLine={false} />
               <ChartTooltip
                 content={({ active, payload }: TooltipProps<number, string>) => {
                   if (!active || !payload?.length) return null;
-                  const point = payload[0]?.payload as { name: string; uploads: number; isYou: boolean };
+                  const point = payload[0]?.payload as { iso: string; youUploads: number; competitorUploads: number };
                   return (
                     <div className="rounded-lg border border-white/10 bg-[#120d1f] px-3 py-2 text-xs text-white shadow-xl">
-                      <p className="font-medium">{point.name}{point.isYou ? " · You" : ""}</p>
-                      <p className="mt-1 text-white/65">{point.uploads} upload{point.uploads === 1 ? "" : "s"}</p>
+                      <p className="font-medium">{formatIsoDate(point.iso)}</p>
+                      <p className="mt-1 text-white/65">You: {point.youUploads} upload{point.youUploads === 1 ? "" : "s"}</p>
+                      <p className="mt-1 text-white/65">{competitorName ?? "Competitor"}: {point.competitorUploads} upload{point.competitorUploads === 1 ? "" : "s"}</p>
                     </div>
                   );
                 }}
               />
-              <Bar dataKey="uploads" radius={[8, 8, 0, 0]} fill="#34d399" />
+              <Bar dataKey="youUploads" radius={[8, 8, 0, 0]} fill="#34d399" />
+              <Bar dataKey="competitorUploads" radius={[8, 8, 0, 0]} fill="#fca5a5" />
             </BarChart>
           </ChartContainer>
         </div>
       </PanelCardSoft>
       <PanelCardSoft className="p-4">
-        <h5 className="text-sm font-semibold text-white">Results track</h5>
-        <p className="mt-1 text-xs text-white/45">Total views from videos published in this window.</p>
+        <h5 className="text-sm font-semibold text-white">Views by weekday</h5>
+        <p className="mt-1 text-xs text-white/45">Current scheduled week view totals, sourced from published videos in this window.</p>
         <div className="mt-4 h-56">
-          <ChartContainer config={{ views: { label: "Weekly views", color: "#fca5a5" } }} className="h-full w-full">
-            <BarChart data={rows} margin={{ left: 6, right: 6, top: 12, bottom: 32 }}>
+          <ChartContainer config={{ youViews: { label: "You", color: "#34d399" }, competitorViews: { label: competitorName ?? "Competitor", color: "#fca5a5" } }} className="h-full w-full">
+            <BarChart data={weekdayRows} margin={{ left: 6, right: 6, top: 12, bottom: 32 }}>
               <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.08)" />
-              <XAxis dataKey="shortName" tickLine={false} axisLine={false} interval={0} angle={-10} textAnchor="end" height={54} />
+              <XAxis dataKey="day" tickLine={false} axisLine={false} interval={0} height={42} />
               <YAxis tickLine={false} axisLine={false} />
               <ChartTooltip
                 content={({ active, payload }: TooltipProps<number, string>) => {
                   if (!active || !payload?.length) return null;
-                  const point = payload[0]?.payload as { name: string; views: number; isYou: boolean };
+                  const point = payload[0]?.payload as { iso: string; youViews: number; competitorViews: number };
                   return (
                     <div className="rounded-lg border border-white/10 bg-[#120d1f] px-3 py-2 text-xs text-white shadow-xl">
-                      <p className="font-medium">{point.name}{point.isYou ? " · You" : ""}</p>
-                      <p className="mt-1 text-white/65">{formatNumber(point.views)} weekly views</p>
+                      <p className="font-medium">{formatIsoDate(point.iso)}</p>
+                      <p className="mt-1 text-white/65">You: {formatNumber(point.youViews)} views</p>
+                      <p className="mt-1 text-white/65">{competitorName ?? "Competitor"}: {formatNumber(point.competitorViews)} views</p>
                     </div>
                   );
                 }}
               />
-              <Bar dataKey="views" radius={[8, 8, 0, 0]} fill="#fca5a5" />
+              <Bar dataKey="youViews" radius={[8, 8, 0, 0]} fill="#34d399" />
+              <Bar dataKey="competitorViews" radius={[8, 8, 0, 0]} fill="#fca5a5" />
             </BarChart>
           </ChartContainer>
+        </div>
+      </PanelCardSoft>
+    </div>
+  );
+}
+
+function CurrentWeekConsistencyChart({ rows }: { rows: Array<{ iso: string; day: string; postedCount: number; plannedCount: number; missed: boolean; status: "posted" | "missed" | "planned" | "empty" }> }) {
+  return (
+    <div className="mt-4 grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+      <PanelCardSoft className="p-4">
+        <h5 className="text-sm font-semibold text-white">Current week consistency</h5>
+        <p className="mt-1 text-xs text-white/45">Every day turns green if at least one real uploaded video exists on that date.</p>
+        <div className="mt-4 grid grid-cols-7 gap-2">
+          {rows.map((day) => (
+            <div key={day.iso} className="space-y-2">
+              <div className="text-center text-[11px] font-medium text-white/45">{day.day}</div>
+              <div className={cn(
+                "rounded-2xl border p-3 text-center transition-all",
+                day.status === "posted" && "border-emerald-300/35 bg-emerald-400/15 text-emerald-100",
+                day.status === "missed" && "border-red-300/35 bg-red-400/15 text-red-100",
+                day.status === "planned" && "border-sky-300/25 bg-sky-400/15 text-sky-100",
+                day.status === "empty" && "border-white/10 bg-white/[0.04] text-white/45",
+              )}>
+                <p className="text-xs font-semibold">{formatIsoDate(day.iso, { month: "short", day: "numeric" })}</p>
+                <p className="mt-2 text-lg font-semibold">{day.postedCount > 0 ? day.postedCount : day.plannedCount > 0 ? day.plannedCount : 0}</p>
+                <p className="mt-1 text-[11px] uppercase tracking-[0.14em]">
+                  {day.status === "posted" ? "Published" : day.status === "missed" ? "Missed" : day.status === "planned" ? "Planned" : "Open"}
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </PanelCardSoft>
+      <PanelCardSoft className="p-4">
+        <h5 className="text-sm font-semibold text-white">Week totals</h5>
+        <p className="mt-1 text-xs text-white/45">Planned vs published, based on actual videos in the current scheduled week.</p>
+        <div className="mt-4 space-y-3">
+          {[
+            { label: "Published days", value: rows.filter((row) => row.status === "posted").length, tone: "border-emerald-300/20 bg-emerald-400/10 text-emerald-100" },
+            { label: "Planned only", value: rows.filter((row) => row.status === "planned").length, tone: "border-sky-300/20 bg-sky-400/10 text-sky-100" },
+            { label: "Missed days", value: rows.filter((row) => row.status === "missed").length, tone: "border-red-300/20 bg-red-400/10 text-red-100" },
+          ].map((item) => (
+            <div key={item.label} className={cn("rounded-2xl border p-4", item.tone)}>
+              <p className="text-[11px] uppercase tracking-[0.16em] opacity-70">{item.label}</p>
+              <p className="mt-2 text-2xl font-semibold">{item.value}</p>
+            </div>
+          ))}
         </div>
       </PanelCardSoft>
     </div>
@@ -1589,8 +1683,7 @@ function PlannerIdeaCard({ day, onDragStart, onDelete, onOpen }: { day: PlanDay;
             {origin.label}
           </span>
           <p className="text-sm font-semibold leading-5 text-white">{day.contentIdea}</p>
-          {day.hook ? <p className={cn("mt-2 text-xs leading-5", isManualIdea(day) ? "text-sky-100/75" : "text-red-100/75")}>Hook: {day.hook}</p> : null}
-          <p className="mt-2 text-xs text-white/35">{postingTime(day)}</p>
+          {day.hook && day.hook !== day.contentIdea ? <p className="mt-2 text-xs leading-5 text-white/55">{day.hook}</p> : null}
         </div>
       </div>
     </div>
@@ -2121,6 +2214,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
   const [saveConfirmationDay, setSaveConfirmationDay] = useState<number | null>(null);
   const [linkingDay, setLinkingDay] = useState<number | null>(null);
   const [ideaActionDay, setIdeaActionDay] = useState<number | null>(null);
+  const [movingDay, setMovingDay] = useState<PlanDay | null>(null);
   const [postingFrequencyInput, setPostingFrequencyInput] = useState("3");
   const [savingSettings, setSavingSettings] = useState(false);
 
@@ -2216,7 +2310,6 @@ export default function YouTubeGrowthPlannerV2Tab() {
   const plannedDateSet = useMemo(() => new Set(calendarDays.map((day) => day.date)), [calendarDays]);
   const progressState = weekProgress(days, status?.latestResults ?? []);
   const overview = useMemo(() => buildOverviewSections(recentVideos), [recentVideos]);
-  const postingPattern = useMemo(() => buildPostingPattern(recentVideos, status?.settings?.connectedAt), [recentVideos, status?.settings?.connectedAt]);
   const bestTime = useMemo(() => deriveBestTimeSummary(contextSnapshot?.recentVideos ?? recentVideos), [contextSnapshot?.recentVideos, recentVideos]);
   const bestPostingSlotByDay = useMemo(() => deriveBestPostingSlotByDay(bestTime.cells), [bestTime.cells]);
   const hookRows = useMemo(() => deriveHookRows(recentVideos), [recentVideos]);
@@ -2236,13 +2329,22 @@ export default function YouTubeGrowthPlannerV2Tab() {
   const underperformerDiagnostics = useMemo(() => buildVideoDiagnostics(overview.underperformerVideos ?? [], recentVideos, titleLengthSummary, bestTime, "bottom"), [overview, recentVideos, titleLengthSummary, bestTime]);
   const competitorTiers = useMemo(() => partitionCompetitors(ownSubscribers, competitorRows), [ownSubscribers, competitorRows]);
   const weeklyComparison = useMemo(() => deriveWeeklyComparisonData(competitorTiers.tier1, latestPlan, recentVideos, status?.channel?.channelName), [competitorTiers.tier1, latestPlan, recentVideos, status?.channel?.channelName]);
-  const nextActionDay = useMemo(() => {
-    const today = new Date().toISOString().slice(0, 10);
-    return calendarDays.find((day) => day.date >= today && !resultsByDay.has(day.day)) ?? calendarDays.find((day) => !resultsByDay.has(day.day)) ?? null;
-  }, [calendarDays, resultsByDay]);
   const publishableVideos = useMemo(
     () => [...recentVideos].sort((a, b) => new Date(b.publishedAt || 0).getTime() - new Date(a.publishedAt || 0).getTime()),
     [recentVideos],
+  );
+  const unlinkedWeekVideos = useMemo(
+    () => publishableVideos.filter((video) => isVideoInPlanWindow(video, latestPlan) && !linkedVideoIds.has(video.id)),
+    [publishableVideos, latestPlan, linkedVideoIds],
+  );
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const todayPlannedDays = useMemo(
+    () => (daysByDate.get(todayIso) ?? []).filter((day) => !resultsByDay.has(day.day)),
+    [daysByDate, resultsByDay, todayIso],
+  );
+  const currentWeekConsistency = useMemo(
+    () => deriveCurrentWeekConsistencyData(weekCalendarDates, plannedDateSet, recentVideos),
+    [weekCalendarDates, plannedDateSet, recentVideos],
   );
 
   if (!plan.isStudio) return <GrowthPlannerComingSoon />;
@@ -2439,6 +2541,44 @@ export default function YouTubeGrowthPlannerV2Tab() {
     setCustomOpen(false);
   }
 
+  function moveIdeaToDate(day: PlanDay, date: string) {
+    updateDay(toCardId(day), { date });
+    setMovingDay(null);
+    setDetailDay((current) => current && current.day === day.day ? { ...current, date } : current);
+  }
+
+  async function linkVideoToPlannedDay(video: RecentVideo, day: PlanDay) {
+    setResultSelections((current) => ({ ...current, [day.day]: video.id }));
+    await submitResults([{ dayIndex: day.day, plannedTitle: day.contentIdea, videoId: video.id }]);
+    updateDay(toCardId(day), { stage: "published" });
+  }
+
+  async function addUploadedVideoAsIdea(video: RecentVideo) {
+    const nextDay = Math.max(0, ...days.map((day) => day.day)) + 1;
+    const date = video.publishedAt?.slice(0, 10) || (latestPlan?.startDate ?? new Date().toISOString().slice(0, 10));
+    const newDay: PlanDay = {
+      id: `upload-${video.id}`,
+      day: nextDay,
+      date,
+      stage: "published",
+      ideaOrigin: "manual",
+      aiFeedback: null,
+      contentIdea: video.title,
+      hook: video.title,
+      outline: [],
+      bestPostingTime: "",
+      rationale: "Created from a real uploaded video that did not match an existing planned idea.",
+      tags: video.tags ?? [],
+      soundSuggestion: "",
+      competitorReference: "",
+      descriptionSuggestion: video.description ?? "",
+      thumbnailConcept: "",
+    };
+    setDays((current) => [...current, newDay]);
+    setResultSelections((current) => ({ ...current, [nextDay]: video.id }));
+    await submitResults([{ dayIndex: nextDay, plannedTitle: video.title, videoId: video.id }]);
+  }
+
   async function saveIdeaFeedback(day: PlanDay, feedback: IdeaFeedback) {
     if (!latestPlan || !isAiIdea(day)) return;
     setIdeaActionDay(day.day);
@@ -2499,13 +2639,14 @@ export default function YouTubeGrowthPlannerV2Tab() {
       </div>
       {latestPlan?.plan?.summary && <p className="mt-4 text-sm text-white/55">{latestPlan.plan.summary}</p>}
       {viewMode === "calendar" ? (
-        <div className="mt-5 grid gap-3 lg:grid-cols-7">
+        <div className="mt-5 overflow-x-auto pb-2">
+          <div className="flex min-w-max gap-3">
           {weekCalendarDates.map((date) => {
             const dateDays = daysByDate.get(date) ?? [];
             const hasPublished = dateDays.some((day) => resultsByDay.has(day.day));
             const isToday = date === new Date().toISOString().slice(0, 10);
             return (
-              <div key={date} onDragOver={(event) => event.preventDefault()} onDrop={() => handleDropOnDate(date)} className={cn("min-h-[260px] rounded-2xl border bg-white/[0.025] p-3 transition-all hover:bg-white/[0.04]", isToday ? "border-red-300/35" : "border-white/10")}>
+              <div key={date} onDragOver={(event) => event.preventDefault()} onDrop={() => handleDropOnDate(date)} className={cn("min-h-[260px] w-[290px] shrink-0 rounded-2xl border bg-white/[0.025] p-3 transition-all hover:bg-white/[0.04] xl:w-[calc((100vw-10rem)/4)] xl:max-w-[320px]", isToday ? "border-red-300/35" : "border-white/10")}>
                 <div className="mb-3 flex items-start justify-between gap-2 rounded-xl border border-white/10 bg-black/10 px-3 py-2">
                   <div>
                     <p className="text-sm font-semibold text-white">{dayName(date)}</p>
@@ -2554,7 +2695,8 @@ export default function YouTubeGrowthPlannerV2Tab() {
               </div>
             );
           })}
-          {!days.length && <div className="rounded-lg border border-white/10 p-8 text-center text-sm text-white/45 lg:col-span-7">Generate a plan to create exactly {preferredPostsPerWeek} YouTube ideas grounded in your channel data and strongest posting windows.</div>}
+          {!days.length && <div className="w-full rounded-lg border border-white/10 p-8 text-center text-sm text-white/45">Generate a plan to create exactly {preferredPostsPerWeek} YouTube ideas grounded in your channel data and strongest posting windows.</div>}
+          </div>
         </div>
       ) : (
         <div className="mt-5 grid gap-3 lg:grid-cols-5">
@@ -2583,9 +2725,63 @@ export default function YouTubeGrowthPlannerV2Tab() {
         </div>
         <Badge className={`${confidenceClass(recentVideos.length >= 4 ? "high" : "medium")} hover:brightness-100`}>{recentVideos.length >= 4 ? "high" : "medium"}</Badge>
       </div>
-      <PostingPatternStrip days={postingPattern} plannedDates={plannedDateSet} />
+      <CurrentWeekConsistencyChart rows={currentWeekConsistency} />
     </PanelCard>
   );
+
+  const uploadReviewSection = unlinkedWeekVideos.length ? (
+    <PanelCardSoft className="border-emerald-300/15 p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-emerald-100/70">Published this week</p>
+          <h3 className="mt-2 text-xl font-semibold text-white">Match new uploads to this week&apos;s plan</h3>
+          <p className="mt-1 text-sm text-white/50">These videos were published in the scheduled week but are not linked yet. Choose the matching plan card or create a new idea from the upload.</p>
+        </div>
+        <Button variant="secondary" className="rounded-lg" onClick={() => void syncChannel()} disabled={working === "sync"}>
+          {working === "sync" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="mr-2 h-4 w-4" />}
+          Refresh uploads
+        </Button>
+      </div>
+      <div className="mt-5 space-y-4">
+        {unlinkedWeekVideos.map((video) => {
+          const videoDate = video.publishedAt?.slice(0, 10) ?? "";
+          const matchingIdeas = (daysByDate.get(videoDate) ?? []).filter((day) => !resultsByDay.has(day.day));
+          return (
+            <PanelCardSoft key={video.id} className="border border-white/10 p-4 transition-all hover:-translate-y-0.5 hover:bg-white/[0.05]">
+              <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                <div className="flex min-w-0 items-start gap-3">
+                  {video.thumbnailUrl ? <img src={video.thumbnailUrl} alt="" className="h-20 w-32 rounded-xl object-cover" /> : <div className="flex h-20 w-32 items-center justify-center rounded-xl bg-white/[0.05]"><Play className="h-5 w-5 text-white/50" /></div>}
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/35">{formatIsoDate(video.publishedAt)} · {formatNumber(video.viewCount)} views</p>
+                    <p className="mt-2 line-clamp-2 text-base font-semibold text-white">{video.title}</p>
+                    <p className="mt-1 text-sm text-white/50">Was this one of your planned cards for that day?</p>
+                  </div>
+                </div>
+                <Button className="rounded-lg bg-white text-black hover:bg-white/90" onClick={() => void addUploadedVideoAsIdea(video)}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  Add as new idea
+                </Button>
+              </div>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {matchingIdeas.map((day) => (
+                  <button
+                    key={`${video.id}-${day.day}`}
+                    type="button"
+                    onClick={() => void linkVideoToPlannedDay(video, day)}
+                    className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-left text-sm text-white transition-all hover:-translate-y-0.5 hover:border-emerald-300/35 hover:bg-emerald-500/10"
+                  >
+                    <p className="font-semibold">{day.contentIdea}</p>
+                    {day.hook && day.hook !== day.contentIdea ? <p className="mt-1 text-white/55">{day.hook}</p> : null}
+                  </button>
+                ))}
+                {!matchingIdeas.length ? <div className="rounded-xl border border-dashed border-white/10 px-4 py-3 text-sm text-white/45">No planned cards on this publish date. Add it as a new idea.</div> : null}
+              </div>
+            </PanelCardSoft>
+          );
+        })}
+      </div>
+    </PanelCardSoft>
+  ) : null;
 
   const sectionNav = (
     <PanelCardSoft className="sticky top-4 z-20 flex flex-wrap gap-2 p-2 backdrop-blur">
@@ -2605,13 +2801,13 @@ export default function YouTubeGrowthPlannerV2Tab() {
 
   const todayActionCard = (
     <PanelCardSoft className="border-red-300/15 p-4">
-      <div className="flex flex-wrap items-center justify-between gap-4">
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/35">Today</p>
-          {nextActionDay ? (
+          {todayPlannedDays.length ? (
             <>
-              <h3 className="mt-2 text-lg font-semibold text-white">{nextActionDay.hook}</h3>
-              <p className="mt-1 text-sm text-white/50">{formatIsoDate(nextActionDay.date)} · {postingTime(nextActionDay)}</p>
+              <h3 className="mt-2 text-lg font-semibold text-white">Today&apos;s planned cards</h3>
+              <p className="mt-1 text-sm text-white/50">Publish what shipped, or move an idea to a better day without opening the full planner.</p>
             </>
           ) : (
             <>
@@ -2621,17 +2817,30 @@ export default function YouTubeGrowthPlannerV2Tab() {
           )}
         </div>
         <div className="flex flex-wrap gap-2">
-          {nextActionDay ? (
-            <Button type="button" className="rounded-lg bg-red-500 text-white hover:bg-red-400" onClick={() => setDetailDay(nextActionDay)}>
-              Open brief
-            </Button>
-          ) : null}
           <Button type="button" variant="secondary" className="rounded-lg" onClick={() => openCustomIdeaForDate(new Date().toISOString().slice(0, 10))}>
             <Plus className="mr-2 h-4 w-4" />
             Add idea
           </Button>
         </div>
       </div>
+      {todayPlannedDays.length ? (
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {todayPlannedDays.map((day) => (
+            <PanelCardSoft key={`today-${toCardId(day)}`} className="border border-white/10 p-4 transition-all duration-200 hover:-translate-y-1 hover:border-red-300/25 hover:bg-white/[0.05]">
+              <p className="text-base font-semibold text-white">{day.contentIdea}</p>
+              {day.hook && day.hook !== day.contentIdea ? <p className="mt-2 text-sm text-white/55">{day.hook}</p> : null}
+              <div className="mt-4 flex gap-2">
+                <Button type="button" className="flex-1 rounded-lg bg-emerald-500 text-emerald-950 hover:bg-emerald-400" onClick={() => { setDetailDay(day); setLinkingDay(day.day); }}>
+                  Publish
+                </Button>
+                <Button type="button" variant="secondary" className="flex-1 rounded-lg transition-all hover:-translate-y-0.5" onClick={() => setMovingDay(day)}>
+                  Move
+                </Button>
+              </div>
+            </PanelCardSoft>
+          ))}
+        </div>
+      ) : null}
     </PanelCardSoft>
   );
 
@@ -2747,6 +2956,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
           </PanelCardStrong>
 
           {sectionNav}
+          {uploadReviewSection}
           {todayActionCard}
           {planCalendarSection}
 
@@ -3064,8 +3274,8 @@ export default function YouTubeGrowthPlannerV2Tab() {
                     {tier.key === "tier1" && weeklyComparison ? (
                       <PanelCardSoft className="border border-emerald-400/20 p-4">
                         <h4 className="text-base font-semibold text-white">This Week&apos;s Friendly Leaderboard</h4>
-                        <p className="mt-1 text-sm text-white/50">Weekly views and uploads for you and the channels closest to your current level.</p>
-                        <WeeklyComparisonChart rows={weeklyComparison.rows} />
+                        <p className="mt-1 text-sm text-white/50">Weekday-by-weekday uploads and views for the current scheduled week.</p>
+                        <WeeklyComparisonChart rows={weeklyComparison.rows} weekdayRows={weeklyComparison.weekdayRows} competitorName={weeklyComparison.motivatingCompetitor?.name} />
                         {weeklyComparison.motivatingCompetitor ? (
                           <p className="mt-3 text-sm text-white/65">You posted {weeklyComparison.rows[0]?.uploads ?? 0} video{(weeklyComparison.rows[0]?.uploads ?? 0) === 1 ? "" : "s"} this week and gained {formatNumber(weeklyComparison.rows[0]?.views ?? 0)} views. {weeklyComparison.motivatingCompetitor.name} posted {weeklyComparison.motivatingCompetitor.uploads} and gained {formatNumber(weeklyComparison.motivatingCompetitor.views)} views. {(weeklyComparison.rows[0]?.views ?? 0) >= weeklyComparison.motivatingCompetitor.views ? "You are ahead this week, so keep the momentum." : "Closing the gap starts with one more strong upload in your best slot."}</p>
                         ) : null}
@@ -3296,6 +3506,47 @@ export default function YouTubeGrowthPlannerV2Tab() {
                   </>
                 );
               })()}
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(movingDay)} onOpenChange={(open) => !open && setMovingDay(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Move idea</DialogTitle>
+            <DialogDescription>Choose a new day for this card, or delete it if it no longer fits the week.</DialogDescription>
+          </DialogHeader>
+          {movingDay ? (
+            <div className="space-y-4">
+              <PanelCardSoft className="p-4">
+                <p className="text-sm font-semibold text-white">{movingDay.contentIdea}</p>
+                {movingDay.hook && movingDay.hook !== movingDay.contentIdea ? <p className="mt-2 text-sm text-white/55">{movingDay.hook}</p> : null}
+              </PanelCardSoft>
+              <div className="grid grid-cols-2 gap-2">
+                {weekCalendarDates.map((date) => (
+                  <Button
+                    key={`move-${date}`}
+                    type="button"
+                    variant={movingDay.date === date ? "default" : "secondary"}
+                    className="justify-start rounded-lg"
+                    onClick={() => moveIdeaToDate(movingDay, date)}
+                  >
+                    {dayName(date)}
+                  </Button>
+                ))}
+              </div>
+              <Button
+                type="button"
+                variant="secondary"
+                className="w-full rounded-lg border-red-300/20 text-red-200 hover:bg-red-500/10 hover:text-red-100"
+                onClick={() => {
+                  deleteDay(movingDay);
+                  setMovingDay(null);
+                }}
+              >
+                Delete idea
+              </Button>
             </div>
           ) : null}
         </DialogContent>
