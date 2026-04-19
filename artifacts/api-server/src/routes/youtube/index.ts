@@ -12,9 +12,11 @@ import {
   getYoutubeRedirectUri,
   getYoutubeStatus,
   improveYoutubeIdea,
+  regenerateYoutubePlanIdea,
   savePlanResults,
   storeYoutubeTokens,
   syncYoutubeChannel,
+  updateYoutubeIdeaFeedback,
   updateYoutubeSettings,
 } from "../../lib/youtube";
 
@@ -171,6 +173,43 @@ router.post("/ideas/improve", requireAuth, async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "YouTube idea improvement error");
     res.status(500).json({ error: err instanceof Error ? err.message : "Failed to improve idea" });
+  }
+});
+
+router.post("/plans/:planId/days/:dayIndex/feedback", requireAuth, async (req, res) => {
+  try {
+    const planId = Number(req.params.planId);
+    const dayIndex = Number(req.params.dayIndex);
+    const feedback = req.body?.feedback;
+    if (!Number.isInteger(planId) || planId <= 0 || !Number.isInteger(dayIndex) || dayIndex <= 0) {
+      res.status(400).json({ error: "Valid plan ID and day index are required" });
+      return;
+    }
+    if (![null, "liked", "disliked"].includes(feedback ?? null)) {
+      res.status(400).json({ error: "feedback must be liked, disliked, or null" });
+      return;
+    }
+    const updated = await updateYoutubeIdeaFeedback(req.auth!.user_id, planId, dayIndex, feedback ?? null);
+    res.json(updated);
+  } catch (err) {
+    req.log.error({ err }, "YouTube idea feedback error");
+    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to save idea feedback" });
+  }
+});
+
+router.post("/plans/:planId/days/:dayIndex/regenerate", requireAuth, async (req, res) => {
+  try {
+    const planId = Number(req.params.planId);
+    const dayIndex = Number(req.params.dayIndex);
+    if (!Number.isInteger(planId) || planId <= 0 || !Number.isInteger(dayIndex) || dayIndex <= 0) {
+      res.status(400).json({ error: "Valid plan ID and day index are required" });
+      return;
+    }
+    const updated = await regenerateYoutubePlanIdea(req.auth!.user_id, planId, dayIndex);
+    res.json(updated);
+  } catch (err) {
+    req.log.error({ err }, "YouTube idea regenerate error");
+    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to regenerate idea" });
   }
 });
 

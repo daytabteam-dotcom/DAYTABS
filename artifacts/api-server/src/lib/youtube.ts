@@ -66,6 +66,9 @@ interface YoutubeSettings {
   needsPostingPreference: boolean;
 }
 
+type IdeaOrigin = "ai" | "manual";
+type IdeaFeedback = "liked" | "disliked" | null;
+
 interface YoutubeAnalyticsPoint {
   date: string;
   views: number;
@@ -342,6 +345,18 @@ function selectBestPostingSlotByDay(videos: YoutubeRecentVideo[]) {
 function parsePlanDayIndex(value: unknown, fallback: number) {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function normalizeIdeaOrigin(value: unknown): IdeaOrigin {
+  return value === "manual" ? "manual" : "ai";
+}
+
+function normalizeIdeaFeedback(value: unknown): IdeaFeedback {
+  return value === "liked" || value === "disliked" ? value : null;
+}
+
+function asPlanDays(value: unknown[]) {
+  return value.map((item) => asRecord(item));
 }
 
 function derivePerformanceSignals(
@@ -936,7 +951,7 @@ export async function syncYoutubeChannel(userId: number) {
 }
 
 export async function getYoutubeStatus(userId: number) {
-  const [connection] = await db.select().from(youtubeConnectionsTable).where(eq(youtubeConnectionsTable.userId, userId)).limit(1);
+  let [connection] = await db.select().from(youtubeConnectionsTable).where(eq(youtubeConnectionsTable.userId, userId)).limit(1);
   let [profile] = await db.select().from(youtubeChannelProfilesTable).where(eq(youtubeChannelProfilesTable.userId, userId)).limit(1);
   const plans = await db.select().from(youtubeWeeklyPlansTable).where(eq(youtubeWeeklyPlansTable.userId, userId)).orderBy(desc(youtubeWeeklyPlansTable.weekNumber));
   const latestPlan = plans[0] ?? null;
@@ -944,6 +959,25 @@ export async function getYoutubeStatus(userId: number) {
     ? await db.select().from(youtubePlanResultsTable).where(eq(youtubePlanResultsTable.planId, latestPlan.id))
     : [];
   let competitors = await db.select().from(youtubeCompetitorsTable).where(eq(youtubeCompetitorsTable.userId, userId)).orderBy(desc(youtubeCompetitorsTable.fetchedAt));
+
+  const shouldAutoSync = Boolean(
+    connection && (
+      !profile
+      || !Array.isArray(profile.recentVideos)
+      || profile.recentVideos.length === 0
+      || !connection.lastSyncedAt
+      || (Date.now() - connection.lastSyncedAt.getTime()) > (15 * 60 * 1000)
+    ),
+  );
+
+  if (shouldAutoSync) {
+    try {
+      profile = await syncYoutubeChannel(userId);
+      [connection] = await db.select().from(youtubeConnectionsTable).where(eq(youtubeConnectionsTable.userId, userId)).limit(1);
+    } catch {
+      // Fall back to the last saved channel snapshot if live sync fails.
+    }
+  }
 
   if (connection && profile && !profile.channelThumbnailUrl) {
     try {
@@ -1289,6 +1323,10 @@ function normalizeGeneratedYoutubePlan(
       competitorReference: asString(source.competitorReference) || "",
       descriptionSuggestion: asString(source.descriptionSuggestion) || "",
       thumbnailConcept: asString(source.thumbnailConcept) || "",
+      ideaOrigin: "ai" as const,
+      aiFeedback: null,
+      feedbackUpdatedAt: null,
+      regeneratedAt: null,
     };
   });
 
@@ -1298,10 +1336,67 @@ function normalizeGeneratedYoutubePlan(
   };
 }
 
+function summarizeIdeaFeedbackFromPlans(plans: Array<typeof youtubeWeeklyPlansTable.$inferSelect>) {
+  const liked: string[] = [];
+  const disliked: string[] = [];
+
+  for (const plan of plans) {
+    const planRecord = asRecord(plan.plan);
+    const days = asPlanDays(asArray(planRecord.days));
+    for (const day of days) {
+      const title = asString(day.contentIdea)?.trim();
+      const feedback = normalizeIdeaFeedback(day.aiFeedback);
+      if (!title || !feedback) continue;
+      if (feedback === "liked") liked.push(title);
+      if (feedback === "disliked") disliked.push(title);
+    }
+  }
+
+  return {
+    likedIdeas: liked.slice(-12),
+    dislikedIdeas: disliked.slice(-12),
+    summary: [
+      liked.length ? `Creator liked ${liked.length} AI suggestions recently.` : null,
+      disliked.length ? `Creator disliked ${disliked.length} AI suggestions recently.` : null,
+    ].filter(Boolean).join(" "),
+  };
+}
+
+async function updatePlanDay(
+  userId: number,
+  planId: number,
+  dayIndex: number,
+  mutate: (day: JsonRecord) => JsonRecord,
+) {
+  const [plan] = await db.select().from(youtubeWeeklyPlansTable).where(and(eq(youtubeWeeklyPlansTable.id, planId), eq(youtubeWeeklyPlansTable.userId, userId))).limit(1);
+  if (!plan) throw new Error("Plan not found");
+
+  const planRecord = asRecord(plan.plan);
+  const rawDays = asPlanDays(asArray(planRecord.days));
+  const dayPosition = rawDays.findIndex((day) => parsePlanDayIndex(day.day, -1) === dayIndex);
+  if (dayPosition === -1) throw new Error("Idea not found");
+
+  const updatedDay = mutate(rawDays[dayPosition]);
+  const nextDays = [...rawDays];
+  nextDays[dayPosition] = updatedDay;
+  const nextPlan = { ...planRecord, days: nextDays };
+
+  const [saved] = await db.update(youtubeWeeklyPlansTable)
+    .set({
+      plan: nextPlan,
+      updatedAt: new Date(),
+    })
+    .where(eq(youtubeWeeklyPlansTable.id, planId))
+    .returning();
+
+  return { plan: saved ?? { ...plan, plan: nextPlan }, day: updatedDay };
+}
+
 export async function generateYoutubeWeeklyPlan(userId: number) {
   const [profile] = await db.select().from(youtubeChannelProfilesTable).where(eq(youtubeChannelProfilesTable.userId, userId)).limit(1);
   if (!profile) throw new Error("Connect YouTube before generating a plan");
   const connection = await getYoutubeConnection(userId);
+  const plans = await db.select().from(youtubeWeeklyPlansTable).where(eq(youtubeWeeklyPlansTable.userId, userId)).orderBy(desc(youtubeWeeklyPlansTable.weekNumber));
   const nicheProfile = asRecord(profile.nicheProfile) as unknown as YoutubeNicheProfile;
   const preferredPostsPerWeek = Math.max(1, parseNumber(connection?.preferredPostsPerWeek) || 3);
   const trends = await fetchTrendingVideos(userId, nicheProfile);
@@ -1310,7 +1405,7 @@ export async function generateYoutubeWeeklyPlan(userId: number) {
   const analyticsTimeline = await channelAnalyticsTimeline(userId);
   const hydratedResults = await hydrateStoredResultMetrics(userId);
   const pastPerformance = await previousPerformanceSummary(userId);
-  const [lastPlan] = await db.select().from(youtubeWeeklyPlansTable).where(eq(youtubeWeeklyPlansTable.userId, userId)).orderBy(desc(youtubeWeeklyPlansTable.weekNumber)).limit(1);
+  const [lastPlan] = plans;
   const lastPlanResults = lastPlan
     ? await db.select().from(youtubePlanResultsTable).where(eq(youtubePlanResultsTable.planId, lastPlan.id)).limit(1)
     : [];
@@ -1331,7 +1426,8 @@ export async function generateYoutubeWeeklyPlan(userId: number) {
       metrics: asRecord(result.metrics),
     })),
   );
-  const context = { profile, nicheProfile, recentVideos, trends, competitors, analytics, analyticsTimeline, performanceSignals, pastPerformance, weekNumber, startDate, endDate, preferredPostsPerWeek };
+  const ideaFeedbackSummary = summarizeIdeaFeedbackFromPlans(plans);
+  const context = { profile, nicheProfile, recentVideos, trends, competitors, analytics, analyticsTimeline, performanceSignals, ideaFeedbackSummary, pastPerformance, weekNumber, startDate, endDate, preferredPostsPerWeek };
 
   const completion = await openai.chat.completions.create({
     model: "gpt-4o",
@@ -1457,14 +1553,16 @@ Rules:
 export async function improveYoutubeIdea(userId: number, idea: { title?: string; angle?: string; date?: string }) {
   const [profile] = await db.select().from(youtubeChannelProfilesTable).where(eq(youtubeChannelProfilesTable.userId, userId)).limit(1);
   if (!profile) throw new Error("Connect YouTube before improving ideas");
+  const plans = await db.select().from(youtubeWeeklyPlansTable).where(eq(youtubeWeeklyPlansTable.userId, userId)).orderBy(desc(youtubeWeeklyPlansTable.weekNumber));
   const [lastPlan] = await db.select().from(youtubeWeeklyPlansTable).where(eq(youtubeWeeklyPlansTable.userId, userId)).orderBy(desc(youtubeWeeklyPlansTable.weekNumber)).limit(1);
   const latestSignals = asRecord(asRecord(lastPlan?.contextSnapshot).performanceSignals);
+  const ideaFeedbackSummary = summarizeIdeaFeedbackFromPlans(plans);
   const completion = await openai.chat.completions.create({
     model: "gpt-4o",
     messages: [
       {
         role: "system",
-        content: "Improve a YouTube content idea using the creator's channel profile and current plan context. Return JSON only with contentIdea, hook, outline, bestPostingTime, rationale, tags, soundSuggestion, competitorReference, descriptionSuggestion, and thumbnailConcept. Keep the title inside the supplied optimal title range when one is available, and align bestPostingTime to the supplied strongest posting window.",
+        content: "Improve a YouTube content idea using the creator's channel profile, current plan context, and past like/dislike feedback on AI suggestions. Return JSON only with contentIdea, hook, outline, bestPostingTime, rationale, tags, soundSuggestion, competitorReference, descriptionSuggestion, and thumbnailConcept. Keep the title inside the supplied optimal title range when one is available, and align bestPostingTime to the supplied strongest posting window.",
       },
       {
         role: "user",
@@ -1473,6 +1571,7 @@ export async function improveYoutubeIdea(userId: number, idea: { title?: string;
           channelProfile: profile,
           latestPlan: lastPlan?.plan ?? null,
           performanceSignals: latestSignals,
+          ideaFeedbackSummary,
         }),
       },
     ],
@@ -1480,6 +1579,77 @@ export async function improveYoutubeIdea(userId: number, idea: { title?: string;
     max_completion_tokens: 1400,
   });
   return parseAiJson(completion.choices[0]?.message?.content ?? "{}");
+}
+
+export async function updateYoutubeIdeaFeedback(userId: number, planId: number, dayIndex: number, feedback: IdeaFeedback) {
+  const normalizedFeedback = normalizeIdeaFeedback(feedback);
+  return updatePlanDay(userId, planId, dayIndex, (day) => ({
+    ...day,
+    ideaOrigin: normalizeIdeaOrigin(day.ideaOrigin),
+    aiFeedback: normalizedFeedback,
+    feedbackUpdatedAt: new Date().toISOString(),
+  }));
+}
+
+export async function regenerateYoutubePlanIdea(userId: number, planId: number, dayIndex: number) {
+  const [profile] = await db.select().from(youtubeChannelProfilesTable).where(eq(youtubeChannelProfilesTable.userId, userId)).limit(1);
+  if (!profile) throw new Error("Connect YouTube before regenerating ideas");
+
+  const plans = await db.select().from(youtubeWeeklyPlansTable).where(eq(youtubeWeeklyPlansTable.userId, userId)).orderBy(desc(youtubeWeeklyPlansTable.weekNumber));
+  const { plan, day } = await updatePlanDay(userId, planId, dayIndex, (existingDay) => existingDay);
+  const latestSignals = asRecord(asRecord(plan.contextSnapshot).performanceSignals);
+  const ideaFeedbackSummary = summarizeIdeaFeedbackFromPlans(plans);
+  const siblingIdeas = asPlanDays(asArray(asRecord(plan.plan).days))
+    .filter((item) => parsePlanDayIndex(item.day, -1) !== dayIndex)
+    .map((item) => asString(item.contentIdea))
+    .filter((item): item is string => Boolean(item));
+
+  const completion = await openai.chat.completions.create({
+    model: "gpt-4o",
+    messages: [
+      {
+        role: "system",
+        content: "Regenerate one YouTube plan idea using the creator's saved channel profile, current weekly plan context, and past like/dislike feedback on AI suggestions. Return JSON only with contentIdea, hook, outline, bestPostingTime, rationale, tags, soundSuggestion, competitorReference, descriptionSuggestion, and thumbnailConcept. Avoid duplicating sibling ideas from the same plan.",
+      },
+      {
+        role: "user",
+        content: JSON.stringify({
+          currentIdea: day,
+          date: asString(day.date),
+          dayIndex,
+          channelProfile: profile,
+          plan: plan.plan,
+          performanceSignals: latestSignals,
+          ideaFeedbackSummary,
+          siblingIdeas,
+        }),
+      },
+    ],
+    response_format: { type: "json_object" },
+    max_completion_tokens: 1600,
+  });
+
+  const raw = asRecord(parseAiJson(completion.choices[0]?.message?.content ?? "{}"));
+  const currentTitle = asString(day.contentIdea) || `Week ${dayIndex} YouTube idea`;
+  const nextDay = {
+    ...day,
+    contentIdea: asString(raw.contentIdea)?.trim() || currentTitle,
+    hook: asString(raw.hook)?.trim() || asString(day.hook) || currentTitle,
+    outline: asArray(raw.outline).map((item) => String(item)).filter(Boolean).slice(0, 6),
+    bestPostingTime: asString(raw.bestPostingTime)?.trim() || asString(day.bestPostingTime) || "",
+    rationale: asString(raw.rationale)?.trim() || asString(day.rationale) || "",
+    tags: asArray(raw.tags).map((item) => String(item)).filter(Boolean).slice(0, 8),
+    soundSuggestion: asString(raw.soundSuggestion) || "",
+    competitorReference: asString(raw.competitorReference) || "",
+    descriptionSuggestion: asString(raw.descriptionSuggestion) || "",
+    thumbnailConcept: asString(raw.thumbnailConcept) || "",
+    ideaOrigin: "ai",
+    aiFeedback: null,
+    feedbackUpdatedAt: new Date().toISOString(),
+    regeneratedAt: new Date().toISOString(),
+  };
+
+  return updatePlanDay(userId, planId, dayIndex, () => nextDay);
 }
 
 export function extractYoutubeVideoId(url: string) {

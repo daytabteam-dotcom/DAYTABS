@@ -31,6 +31,8 @@ import {
   Settings,
   Send,
   Sparkles,
+  ThumbsDown,
+  ThumbsUp,
   TrendingDown,
   Type,
   Youtube,
@@ -70,6 +72,8 @@ import { cn } from "@/lib/utils";
 type Stage = "idea" | "recording" | "editing" | "published" | "draft";
 type ViewMode = "calendar" | "planner";
 type InsightConfidence = "high" | "medium" | "low";
+type IdeaOrigin = "ai" | "manual";
+type IdeaFeedback = "liked" | "disliked" | null;
 
 interface RecentVideo {
   id: string;
@@ -141,6 +145,10 @@ interface PlanDay {
   competitorReference?: string;
   descriptionSuggestion?: string;
   thumbnailConcept?: string;
+  ideaOrigin?: IdeaOrigin;
+  aiFeedback?: IdeaFeedback;
+  feedbackUpdatedAt?: string | null;
+  regeneratedAt?: string | null;
 }
 
 interface PerformanceInsight {
@@ -356,7 +364,7 @@ function getIsoWeekNumber(isoDate?: string) {
 }
 
 function postingTime(day: PlanDay) {
-  return day.bestPostingTime?.trim() || "12:00";
+  return day.bestPostingTime?.trim() || "Time TBD";
 }
 
 function isVideoInPlanWindow(video: RecentVideo, plan: YoutubeWeeklyPlan | null) {
@@ -677,6 +685,31 @@ function contentTypeMeta(day: PlanDay) {
   if (text.includes("process") || text.includes("paint") || text.includes("draw with me")) return { label: "Process", Icon: Paintbrush };
   if (text.includes("?") || text.includes("what if") || text.includes("will ") || text.includes("can ")) return { label: "Curiosity", Icon: CircleHelp };
   return { label: "Emotional", Icon: Heart };
+}
+
+function isManualIdea(day: PlanDay) {
+  return day.ideaOrigin === "manual" || Boolean(day.id?.startsWith("custom-"));
+}
+
+function isAiIdea(day: PlanDay) {
+  return !isManualIdea(day);
+}
+
+function ideaOriginMeta(day: PlanDay) {
+  if (isManualIdea(day)) {
+    return {
+      label: "Manual",
+      chipClassName: "border-sky-300/25 bg-sky-400/10 text-sky-100",
+      cardClassName: "border-sky-300/20 bg-sky-500/[0.05] hover:border-sky-300/35",
+      accentClassName: "from-sky-300 to-cyan-300",
+    };
+  }
+  return {
+    label: "AI",
+    chipClassName: "border-amber-300/25 bg-amber-400/10 text-amber-100",
+    cardClassName: "border-red-300/20 bg-red-500/[0.05] hover:border-red-300/35",
+    accentClassName: "from-red-300 to-amber-300",
+  };
 }
 
 function conceptTypeFromVideo(video: RecentVideo) {
@@ -1014,8 +1047,7 @@ function partitionCompetitors(ownSubscribers: number, competitors: Array<ReturnT
 function deriveWeeklyComparisonData(
   tier1: Array<ReturnType<typeof deriveCompetitorRows>[number]>,
   latestPlan: YoutubeWeeklyPlan | null,
-  linkedResults: YoutubePlanResult[],
-  recentVideoById: Map<string, RecentVideo>,
+  recentVideos: RecentVideo[],
   channelName?: string,
 ) {
   if (!latestPlan) return null;
@@ -1026,10 +1058,7 @@ function deriveWeeklyComparisonData(
     const time = new Date(value).getTime();
     return Number.isFinite(time) && time >= new Date(start).getTime() && time <= new Date(end).getTime();
   };
-  const yourVideos = linkedResults
-    .map((result) => recentVideoById.get(result.videoId))
-    .filter((video): video is RecentVideo => Boolean(video))
-    .filter((video) => inWindow(video.publishedAt));
+  const yourVideos = recentVideos.filter((video) => inWindow(video.publishedAt));
 
   const rows = [
     {
@@ -1155,7 +1184,7 @@ function VideoPicker({
     () => [...videos].sort((a, b) => new Date(b.publishedAt || 0).getTime() - new Date(a.publishedAt || 0).getTime()),
     [videos],
   );
-  if (!videos.length) return <p className="mt-3 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-white/35">No videos uploaded during this week. Skip this day.</p>;
+  if (!videos.length) return <p className="mt-3 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-white/35">No synced YouTube uploads found yet. Refresh uploaded videos and try again.</p>;
   return (
     <div className="mt-3">
       <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
@@ -1375,14 +1404,17 @@ function CalendarPreviewCard({
   onDragStart,
   onOpen,
   onDelete,
+  onQuickPublish,
 }: {
   day: PlanDay;
   linked?: boolean;
   onDragStart: (day: PlanDay) => void;
   onOpen: (day: PlanDay) => void;
   onDelete: (day: PlanDay) => void;
+  onQuickPublish: (day: PlanDay) => void;
 }) {
   const meta = contentTypeMeta(day);
+  const origin = ideaOriginMeta(day);
   const Icon = meta.Icon;
   return (
     <HoverCard>
@@ -1396,13 +1428,9 @@ function CalendarPreviewCard({
           onKeyDown={(event) => {
             if (event.key === "Enter" || event.key === " ") onOpen(day);
           }}
-          onContextMenu={(event) => {
-            event.preventDefault();
-            onDelete(day);
-          }}
-          className="group relative w-full overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04] text-left transition-all hover:-translate-y-1 hover:border-red-300/25 hover:bg-white/[0.06]"
+          className={cn("group relative w-full overflow-hidden rounded-2xl border text-left transition-all hover:-translate-y-1 hover:bg-white/[0.06]", origin.cardClassName)}
         >
-          <div className={cn("h-2 bg-gradient-to-r", linked ? "from-emerald-300 to-emerald-500" : "from-red-300 to-amber-300")} />
+          <div className={cn("h-2 bg-gradient-to-r", linked ? "from-emerald-300 to-emerald-500" : origin.accentClassName)} />
           {linked ? (
             <span className="absolute right-12 top-3 flex h-6 w-6 items-center justify-center rounded-full border border-emerald-400/30 bg-emerald-500/15 text-emerald-300">
               <Check className="h-3.5 w-3.5" />
@@ -1428,15 +1456,43 @@ function CalendarPreviewCard({
           <div className="p-4">
             <div className="mb-3 flex items-center gap-2">
               <span className="flex h-8 w-8 items-center justify-center rounded-xl border border-white/10 bg-white/[0.05]">
-                <Icon className="h-4 w-4 text-red-100/75" />
+                <Icon className={cn("h-4 w-4", isManualIdea(day) ? "text-sky-100/80" : "text-red-100/75")} />
               </span>
-              <div>
+              <div className="min-w-0 flex-1">
                 <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/35">{meta.label}</p>
                 <p className="text-xs text-white/45">{postingTime(day)}</p>
               </div>
+              <span className={cn("rounded-full border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]", origin.chipClassName)}>
+                {origin.label}
+              </span>
             </div>
             <p className="line-clamp-3 text-base font-semibold leading-6 text-white">{day.hook}</p>
             <p className="mt-3 line-clamp-2 text-sm leading-5 text-white/50">{day.contentIdea}</p>
+            <div className="mt-4 flex gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                className="flex-1 rounded-lg"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onOpen(day);
+                }}
+              >
+                Open
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                className="flex-1 rounded-lg bg-emerald-500 text-emerald-950 hover:bg-emerald-400"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onQuickPublish(day);
+                }}
+              >
+                {linked ? "Linked" : "Publish"}
+              </Button>
+            </div>
           </div>
         </div>
       </HoverCardTrigger>
@@ -1508,15 +1564,12 @@ function WeeklyComparisonChart({ rows }: { rows: Array<{ name: string; shortName
 }
 
 function PlannerIdeaCard({ day, onDragStart, onDelete, onOpen }: { day: PlanDay; onDragStart: (day: PlanDay) => void; onDelete: (day: PlanDay) => void; onOpen: (day: PlanDay) => void }) {
+  const origin = ideaOriginMeta(day);
   return (
     <div
       draggable
       onDragStart={() => onDragStart(day)}
-      onContextMenu={(event) => {
-        event.preventDefault();
-        onDelete(day);
-      }}
-      className="relative rounded-lg border border-white/10 bg-white/[0.04] p-3 pr-10 transition-all hover:-translate-y-0.5 hover:bg-white/[0.07]"
+      className={cn("relative rounded-lg border p-3 pr-10 transition-all hover:-translate-y-0.5 hover:bg-white/[0.07]", origin.cardClassName)}
     >
       <Popover>
         <PopoverTrigger asChild>
@@ -1532,8 +1585,11 @@ function PlannerIdeaCard({ day, onDragStart, onDelete, onOpen }: { day: PlanDay;
       <div className="flex items-start gap-2">
         <GripVertical className="mt-1 h-4 w-4 shrink-0 text-white/25" />
         <div className="min-w-0">
+          <span className={cn("inline-flex rounded-full border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]", origin.chipClassName)}>
+            {origin.label}
+          </span>
           <p className="text-sm font-semibold leading-5 text-white">{day.contentIdea}</p>
-          <p className="mt-2 text-xs leading-5 text-red-100/75">Hook: {day.hook}</p>
+          {day.hook ? <p className={cn("mt-2 text-xs leading-5", isManualIdea(day) ? "text-sky-100/75" : "text-red-100/75")}>Hook: {day.hook}</p> : null}
           <p className="mt-2 text-xs text-white/35">{postingTime(day)}</p>
         </div>
       </div>
@@ -1619,7 +1675,7 @@ function PostingPatternStrip({
   const today = new Date();
   const todayIso = today.toISOString().slice(0, 10);
   const postedByIso = new Map(days.filter((day) => day.posted).map((day) => [day.iso, day]));
-  const start = startOfWeek(addUtcDays(today, -14));
+  const start = addUtcDays(startOfWeek(today), -21);
   const weeks = Array.from({ length: 4 }).map((_, weekIndex) => {
     const weekStart = addUtcDays(start, weekIndex * 7);
     const weekDays = Array.from({ length: 7 }).map((_, dayIndex) => {
@@ -2064,6 +2120,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
   const [savingResultDay, setSavingResultDay] = useState<number | null>(null);
   const [saveConfirmationDay, setSaveConfirmationDay] = useState<number | null>(null);
   const [linkingDay, setLinkingDay] = useState<number | null>(null);
+  const [ideaActionDay, setIdeaActionDay] = useState<number | null>(null);
   const [postingFrequencyInput, setPostingFrequencyInput] = useState("3");
   const [savingSettings, setSavingSettings] = useState(false);
 
@@ -2072,7 +2129,6 @@ export default function YouTubeGrowthPlannerV2Tab() {
   const recentVideos = status?.channel?.recentVideos ?? [];
   const contextSnapshot = latestPlan?.contextSnapshot;
   const analyticsPoints = status?.channelAnalytics?.daily ?? [];
-  const weekVideos = recentVideos.filter((video) => isVideoInPlanWindow(video, latestPlan));
   const linkedVideoIds = new Set((status?.latestResults ?? []).map((result) => result.videoId));
   const selectedVideoIds = new Set(Object.values(resultSelections).filter(Boolean));
   const ownSubscribers = parseNumber(status?.channel?.subscriberCount);
@@ -2081,7 +2137,13 @@ export default function YouTubeGrowthPlannerV2Tab() {
   const needsPostingPreference = Boolean(status?.connected && status?.settings?.needsPostingPreference);
 
   useEffect(() => {
-    setDays((latestPlan?.plan?.days ?? []).map((day) => ({ ...day, id: toCardId(day), stage: day.stage ?? "idea" })));
+    setDays((latestPlan?.plan?.days ?? []).map((day) => ({
+      ...day,
+      id: toCardId(day),
+      stage: day.stage ?? "idea",
+      ideaOrigin: day.ideaOrigin ?? "ai",
+      aiFeedback: day.aiFeedback ?? null,
+    })));
   }, [latestPlan?.id]);
 
   useEffect(() => {
@@ -2173,17 +2235,35 @@ export default function YouTubeGrowthPlannerV2Tab() {
   const topDiagnostics = useMemo(() => buildVideoDiagnostics(overview.whatWorkedVideos ?? [], recentVideos, titleLengthSummary, bestTime, "top"), [overview, recentVideos, titleLengthSummary, bestTime]);
   const underperformerDiagnostics = useMemo(() => buildVideoDiagnostics(overview.underperformerVideos ?? [], recentVideos, titleLengthSummary, bestTime, "bottom"), [overview, recentVideos, titleLengthSummary, bestTime]);
   const competitorTiers = useMemo(() => partitionCompetitors(ownSubscribers, competitorRows), [ownSubscribers, competitorRows]);
-  const weeklyComparison = useMemo(() => deriveWeeklyComparisonData(competitorTiers.tier1, latestPlan, latestResults, recentVideoById, status?.channel?.channelName), [competitorTiers.tier1, latestPlan, latestResults, recentVideoById, status?.channel?.channelName]);
+  const weeklyComparison = useMemo(() => deriveWeeklyComparisonData(competitorTiers.tier1, latestPlan, recentVideos, status?.channel?.channelName), [competitorTiers.tier1, latestPlan, recentVideos, status?.channel?.channelName]);
   const nextActionDay = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
     return calendarDays.find((day) => day.date >= today && !resultsByDay.has(day.day)) ?? calendarDays.find((day) => !resultsByDay.has(day.day)) ?? null;
   }, [calendarDays, resultsByDay]);
+  const publishableVideos = useMemo(
+    () => [...recentVideos].sort((a, b) => new Date(b.publishedAt || 0).getTime() - new Date(a.publishedAt || 0).getTime()),
+    [recentVideos],
+  );
 
   if (!plan.isStudio) return <GrowthPlannerComingSoon />;
   if (loading || planLoading) return <LoadingState />;
 
   function updateDay(cardId: string, patch: Partial<PlanDay>) {
     setDays((current) => current.map((day) => toCardId(day) === cardId ? { ...day, ...patch } : day));
+  }
+
+  function applyServerPlanUpdate(nextPlan: YoutubeWeeklyPlan, nextDay?: Partial<PlanDay> | null) {
+    setStatus((current) => current ? { ...current, latestPlan: nextPlan } : current);
+    setDays((nextPlan.plan.days ?? []).map((day) => ({
+      ...day,
+      id: toCardId(day),
+      stage: day.stage ?? "idea",
+      ideaOrigin: day.ideaOrigin ?? "ai",
+      aiFeedback: day.aiFeedback ?? null,
+    })));
+    if (nextDay) {
+      setDetailDay((current) => current && current.day === nextDay.day ? { ...current, ...nextDay } : current);
+    }
   }
 
   function deleteDay(day: PlanDay) {
@@ -2336,19 +2416,61 @@ export default function YouTubeGrowthPlannerV2Tab() {
     if (!title) return;
     const nextDay = Math.max(0, ...days.map((day) => day.day)) + 1;
     const date = customIdea.date || days[days.length - 1]?.date || new Date().toISOString().slice(0, 10);
+    const ideaLines = customIdea.angle.split("\n").map((line) => line.trim()).filter(Boolean);
     setDays((current) => [...current, {
       id: `custom-${crypto.randomUUID()}`,
       day: nextDay,
       date,
       stage: "idea",
+      ideaOrigin: "manual",
+      aiFeedback: null,
       contentIdea: title,
-      hook: customIdea.angle.split("\n")[0] || "AI-improved custom idea",
-      outline: customIdea.angle.split("\n").filter(Boolean).slice(1, 5),
-      bestPostingTime: "Use your best recent posting window",
-      rationale: customIdea.angle || "User-added idea for this week's plan.",
+      hook: ideaLines[0] || title,
+      outline: ideaLines.slice(1, 5),
+      bestPostingTime: "",
+      rationale: customIdea.angle.trim(),
+      tags: [],
+      soundSuggestion: "",
+      competitorReference: "",
+      descriptionSuggestion: "",
+      thumbnailConcept: "",
     }]);
     setCustomIdea({ title: "", angle: "", date: "" });
     setCustomOpen(false);
+  }
+
+  async function saveIdeaFeedback(day: PlanDay, feedback: IdeaFeedback) {
+    if (!latestPlan || !isAiIdea(day)) return;
+    setIdeaActionDay(day.day);
+    setError(null);
+    try {
+      const data = await jsonFetch<{ plan: YoutubeWeeklyPlan; day: PlanDay }>(`/api/youtube/plans/${latestPlan.id}/days/${day.day}/feedback`, {
+        method: "POST",
+        body: JSON.stringify({ feedback }),
+      });
+      applyServerPlanUpdate(data.plan, data.day);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save idea feedback");
+    } finally {
+      setIdeaActionDay(null);
+    }
+  }
+
+  async function regenerateIdea(day: PlanDay) {
+    if (!latestPlan || !isAiIdea(day)) return;
+    setIdeaActionDay(day.day);
+    setError(null);
+    try {
+      const data = await jsonFetch<{ plan: YoutubeWeeklyPlan; day: PlanDay }>(`/api/youtube/plans/${latestPlan.id}/days/${day.day}/regenerate`, {
+        method: "POST",
+        body: "{}",
+      });
+      applyServerPlanUpdate(data.plan, data.day);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not generate a new idea");
+    } finally {
+      setIdeaActionDay(null);
+    }
   }
 
   const planCalendarSection = (
@@ -2401,6 +2523,10 @@ export default function YouTubeGrowthPlannerV2Tab() {
                         onDragStart={handleDragStart}
                         onOpen={setDetailDay}
                         onDelete={deleteDay}
+                        onQuickPublish={(targetDay) => {
+                          setDetailDay(targetDay);
+                          setLinkingDay(targetDay.day);
+                        }}
                       />
                     ))}
                     <Button
@@ -2969,50 +3095,145 @@ export default function YouTubeGrowthPlannerV2Tab() {
                 const titleRange = titleLengthSummary.winningBucket ? rangeLabelForBucket(titleLengthSummary.winningBucket.label) : "35-55";
                 const selectedVideoId = resultSelections[detailDay.day] ?? linked?.videoId ?? "";
                 const disabledIds = new Set([...linkedVideoIds, ...selectedVideoIds].filter((videoId) => videoId !== selectedVideoId && videoId !== linked?.videoId));
-                return slot ? (
+                const origin = ideaOriginMeta(detailDay);
+                const showGeneratedSections = isAiIdea(detailDay);
+                return (
                   <>
-                    <PanelCardSoft className="border border-red-400/20 bg-red-500/10 p-4">
-                      <p className="text-xs uppercase tracking-[0.16em] text-red-100/70">Primary Hook</p>
-                      <p className="mt-3 text-lg font-semibold leading-7 text-white">{detailDay.hook}</p>
+                    <PanelCardSoft className={cn("border p-4", isManualIdea(detailDay) ? "border-sky-300/20 bg-sky-500/10" : "border-red-400/20 bg-red-500/10")}>
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <p className={cn("text-xs uppercase tracking-[0.16em]", isManualIdea(detailDay) ? "text-sky-100/75" : "text-red-100/70")}>
+                            {origin.label} idea
+                          </p>
+                          {detailDay.hook ? <p className="mt-3 text-lg font-semibold leading-7 text-white">{detailDay.hook}</p> : <p className="mt-3 text-lg font-semibold leading-7 text-white">{detailDay.contentIdea}</p>}
+                        </div>
+                        <span className={cn("rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]", origin.chipClassName)}>
+                          {origin.label}
+                        </span>
+                      </div>
+                      {isAiIdea(detailDay) ? (
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant={detailDay.aiFeedback === "liked" ? "default" : "secondary"}
+                            className="rounded-lg"
+                            disabled={ideaActionDay === detailDay.day}
+                            onClick={() => void saveIdeaFeedback(detailDay, detailDay.aiFeedback === "liked" ? null : "liked")}
+                          >
+                            <ThumbsUp className="mr-2 h-4 w-4" />
+                            Like
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant={detailDay.aiFeedback === "disliked" ? "default" : "secondary"}
+                            className="rounded-lg"
+                            disabled={ideaActionDay === detailDay.day}
+                            onClick={() => void saveIdeaFeedback(detailDay, detailDay.aiFeedback === "disliked" ? null : "disliked")}
+                          >
+                            <ThumbsDown className="mr-2 h-4 w-4" />
+                            Dislike
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="secondary"
+                            className="rounded-lg"
+                            disabled={ideaActionDay === detailDay.day}
+                            onClick={() => void regenerateIdea(detailDay)}
+                          >
+                            {ideaActionDay === detailDay.day ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="mr-2 h-4 w-4" />}
+                            Generate new idea
+                          </Button>
+                        </div>
+                      ) : null}
                     </PanelCardSoft>
-                    <PanelCardSoft className="p-4">
-                      <p className="text-white">{weekday} {slot.slot} is your best window for this day at about {formatNumber(slot.value)} average views.</p>
-                    </PanelCardSoft>
-                    <PanelCardSoft className="p-4">
-                      <p className="text-xs uppercase tracking-[0.16em] text-white/40">Why this might work</p>
-                      <p className="mt-3 leading-6 text-white/70">{buildWhyThisMightWork(detailDay, weekday, slot, hookInsight, trendingTagSuggestions)}</p>
-                    </PanelCardSoft>
+                    {slot ? (
+                      <PanelCardSoft className="p-4">
+                        <p className="text-white">{weekday} {slot.slot} is your best window for this day at about {formatNumber(slot.value)} average views.</p>
+                      </PanelCardSoft>
+                    ) : null}
+                    {detailDay.rationale ? (
+                      <PanelCardSoft className="p-4">
+                        <p className="text-xs uppercase tracking-[0.16em] text-white/40">{showGeneratedSections ? "Why this might work" : "Notes"}</p>
+                        <p className="mt-3 leading-6 text-white/70">
+                          {showGeneratedSections && slot ? `${detailDay.rationale} ${buildWhyThisMightWork(detailDay, weekday, slot, hookInsight, trendingTagSuggestions)}` : detailDay.rationale}
+                        </p>
+                      </PanelCardSoft>
+                    ) : null}
                     <PanelCardSoft className="p-4">
                       <p className="text-white">{detailDay.contentIdea}</p>
                       <p className="mt-2 text-white/60">{detailDay.contentIdea.length} chars · Your sweet spot: {titleRange} chars.</p>
                     </PanelCardSoft>
+                    {(detailDay.tags ?? []).length ? (
+                      <PanelCardSoft className="p-4">
+                        <div className="flex flex-wrap gap-2">
+                          {(detailDay.tags ?? []).map((tag) => (
+                            <button
+                              key={tag}
+                              type="button"
+                              onClick={() => void navigator.clipboard?.writeText(tag)}
+                              className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-xs text-white transition-colors hover:bg-white/[0.08]"
+                            >
+                              {tag}
+                            </button>
+                          ))}
+                        </div>
+                      </PanelCardSoft>
+                    ) : null}
+                    {(detailDay.outline ?? []).length ? (
+                      <PanelCardSoft className="p-4">
+                        <p className="text-xs uppercase tracking-[0.16em] text-white/40">Outline</p>
+                        <div className="mt-3 space-y-2">
+                          {(detailDay.outline ?? []).map((item, index) => (
+                            <p key={`${detailDay.day}-outline-${index}`} className="leading-6 text-white/70">
+                              <span className="text-white">{index + 1}.</span> {item}
+                            </p>
+                          ))}
+                        </div>
+                      </PanelCardSoft>
+                    ) : null}
+                    {detailDay.descriptionSuggestion ? (
+                      <PanelCardSoft className="p-4">
+                        <p className="text-xs uppercase tracking-[0.16em] text-white/40">Description idea</p>
+                        <p className="mt-3 leading-6 text-white/70">{detailDay.descriptionSuggestion}</p>
+                      </PanelCardSoft>
+                    ) : null}
+                    {detailDay.thumbnailConcept ? (
+                      <PanelCardSoft className="p-4">
+                        <p className="text-xs uppercase tracking-[0.16em] text-white/40">Thumbnail concept</p>
+                        <p className="mt-3 leading-6 text-white/70">{detailDay.thumbnailConcept}</p>
+                      </PanelCardSoft>
+                    ) : null}
+                    {detailDay.competitorReference ? (
+                      <PanelCardSoft className="p-4">
+                        <p className="text-xs uppercase tracking-[0.16em] text-white/40">Competitor reference</p>
+                        <p className="mt-3 leading-6 text-white/70">{detailDay.competitorReference}</p>
+                      </PanelCardSoft>
+                    ) : null}
                     <PanelCardSoft className="p-4">
-                      <div className="flex flex-wrap gap-2">
-                        {(detailDay.tags ?? []).map((tag) => (
-                          <button
-                            key={tag}
-                            type="button"
-                            onClick={() => void navigator.clipboard?.writeText(tag)}
-                            className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-xs text-white transition-colors hover:bg-white/[0.08]"
-                          >
-                            {tag}
-                          </button>
-                        ))}
+                      <div className="mb-3 flex items-center justify-between gap-3">
+                        <p className="text-xs uppercase tracking-[0.16em] text-white/40">Publish sync</p>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="secondary"
+                          className="rounded-lg"
+                          disabled={working === "sync"}
+                          onClick={() => void syncChannel()}
+                        >
+                          {working === "sync" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="mr-2 h-4 w-4" />}
+                          Refresh uploaded videos
+                        </Button>
                       </div>
-                    </PanelCardSoft>
-                    <PanelCardSoft className="p-4">
-                      <p className="leading-6 text-white/70"><span className="text-white">Intro:</span> Film the opening around {detailDay.outline?.[0] || detailDay.hook}.</p>
-                      <p className="mt-2 leading-6 text-white/70"><span className="text-white">Middle:</span> Show {detailDay.outline?.slice(1, -1).join(" ") || "the core process, tension, or transformation that makes the hook pay off"}.</p>
-                      <p className="mt-2 leading-6 text-white/70"><span className="text-white">End:</span> Close with {detailDay.outline?.[detailDay.outline.length - 1] || "the result, reflection, and a clear next-step CTA"}.</p>
-                    </PanelCardSoft>
-                    <PanelCardSoft className="p-4">
                       {!linked ? (
                         <>
                           {saveConfirmationDay === detailDay.day ? <p className="mb-3 text-xs text-emerald-300">Saved</p> : null}
                           {linkingDay === detailDay.day ? (
                             <>
                               <VideoPicker
-                                videos={weekVideos}
+                                videos={publishableVideos}
                                 selected={selectedVideoId}
                                 disabledIds={disabledIds}
                                 onSelect={(videoId) => setResultSelections((current) => ({ ...current, [detailDay.day]: videoId }))}
@@ -3052,7 +3273,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
                           {linkingDay === detailDay.day ? (
                             <>
                               <VideoPicker
-                                videos={weekVideos}
+                                videos={publishableVideos}
                                 selected={selectedVideoId}
                                 disabledIds={disabledIds}
                                 onSelect={(videoId) => setResultSelections((current) => ({ ...current, [detailDay.day]: videoId }))}
@@ -3071,16 +3292,6 @@ export default function YouTubeGrowthPlannerV2Tab() {
                           ) : null}
                         </div>
                       )}
-                    </PanelCardSoft>
-                  </>
-                ) : (
-                  <>
-                    <PanelCardSoft className="border border-red-400/20 bg-red-500/10 p-4">
-                      <p className="text-xs uppercase tracking-[0.16em] text-red-100/70">Primary Hook</p>
-                      <p className="mt-3 text-lg font-semibold leading-7 text-white">{detailDay.hook}</p>
-                    </PanelCardSoft>
-                    <PanelCardSoft className="p-4">
-                      <p className="text-white">{weekday} has limited data - try Sunday Evening, which is currently your strongest nearby fallback.</p>
                     </PanelCardSoft>
                   </>
                 );
