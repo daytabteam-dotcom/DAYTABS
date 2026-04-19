@@ -2,6 +2,8 @@ import { type FormEvent, useEffect, useMemo, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
   Archive,
+  ArrowLeft,
+  ArrowRight,
   BarChart3,
   Bell,
   CalendarDays,
@@ -16,6 +18,7 @@ import {
   GripVertical,
   Hash,
   Heart,
+  Lightbulb,
   LayoutGrid,
   ListChecks,
   Loader2,
@@ -228,6 +231,7 @@ interface VideoDiagnostic {
   titleLength: string;
   conceptType: string;
   timing: string;
+  suggestion: string;
 }
 
 interface YoutubeStatus {
@@ -426,6 +430,16 @@ function startOfWeek(date: Date) {
   const diff = day === 0 ? -6 : 1 - day;
   normalized.setUTCDate(normalized.getUTCDate() + diff);
   return normalized;
+}
+
+function addUtcDays(date: Date, days: number) {
+  const next = new Date(date);
+  next.setUTCDate(next.getUTCDate() + days);
+  return next;
+}
+
+function toIsoDate(date: Date) {
+  return date.toISOString().slice(0, 10);
 }
 
 function endOfWeek(date: Date) {
@@ -742,6 +756,9 @@ function buildVideoDiagnostics(
       timing: kind === "top"
         ? `Posted ${postedDay}${bucket ? ` ${bucket.label === "00:00" ? "00:00-06:00" : bucket.label === "06:00" ? "06:00-12:00" : bucket.label === "12:00" ? "12:00-18:00" : "18:00-24:00"}` : ""}${bestTime.highest ? `. Compare that with ${strongestWindow}, your strongest signal at ${formatNumber(bestTime.highest.value)} avg views.` : "."}`
         : `It missed your strongest heatmap signal. Try the next version in ${strongestWindow} so the topic gets a better first push.`,
+      suggestion: kind === "top"
+        ? `Repeat the ${type.toLowerCase()} hook pattern, keep the title close to ${titleLengthSummary.winningBucket ? `${titleLengthSummary.winningBucket.min}-${Number.isFinite(titleLengthSummary.winningBucket.max) ? titleLengthSummary.winningBucket.max : "70+"}` : "35-55"} characters, and publish in a proven window.`
+        : `Try a stronger hook like "What happens if ${video.title.replace(/[?!.]+$/, "").slice(0, 58)}?" or "I tested ${video.title.replace(/[?!.]+$/, "").slice(0, 58)} so you do not have to." Pair it with tighter niche tags and your best posting window.`,
     } satisfies VideoDiagnostic;
   });
 }
@@ -1242,6 +1259,7 @@ function VideoDiagnosticCard({
     { label: "Title length", value: diagnostic.titleLength, Icon: Type, className: "text-sky-200" },
     { label: "Concept", value: diagnostic.conceptType, Icon: Paintbrush, className: "text-pink-200" },
     { label: "Timing", value: diagnostic.timing, Icon: Clock, className: "text-violet-200" },
+    { label: positive ? "Repeat this" : "Suggested fix", value: diagnostic.suggestion, Icon: Lightbulb, className: positive ? "text-emerald-200" : "text-amber-200" },
   ];
 
   return (
@@ -1310,6 +1328,12 @@ function AnalysisLane({
   tone: "positive" | "negative";
 }) {
   const positive = tone === "positive";
+  const [activeIndex, setActiveIndex] = useState(0);
+  const active = diagnostics[Math.min(activeIndex, Math.max(0, diagnostics.length - 1))];
+  function move(direction: -1 | 1) {
+    if (!diagnostics.length) return;
+    setActiveIndex((current) => (current + direction + diagnostics.length) % diagnostics.length);
+  }
   return (
     <PanelCardSoft className={cn("space-y-4 p-5", positive ? "border-emerald-300/15" : "border-red-300/15")}>
       <div className="flex items-start justify-between gap-4">
@@ -1329,14 +1353,38 @@ function AnalysisLane({
           "rounded-full border px-3 py-1 text-xs hover:brightness-100",
           positive ? "border-emerald-300/20 bg-emerald-400/10 text-emerald-100" : "border-red-300/20 bg-red-400/10 text-red-100",
         )}>
-          {diagnostics.length} video{diagnostics.length === 1 ? "" : "s"}
+          {diagnostics.length ? `${activeIndex + 1} of ${diagnostics.length}` : "0 videos"}
         </Badge>
       </div>
-      {diagnostics.length ? (
+      {active ? (
         <div className="space-y-3">
-          {diagnostics.map((diagnostic) => (
-            <VideoDiagnosticCard key={`${tone}-${diagnostic.video.id}`} diagnostic={diagnostic} tone={tone} />
-          ))}
+          <VideoDiagnosticCard key={`${tone}-${active.video.id}`} diagnostic={active} tone={tone} />
+          {diagnostics.length > 1 ? (
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex gap-1.5">
+                {diagnostics.map((diagnostic, index) => (
+                  <button
+                    key={`${tone}-dot-${diagnostic.video.id}`}
+                    type="button"
+                    aria-label={`Show video ${index + 1}`}
+                    onClick={() => setActiveIndex(index)}
+                    className={cn(
+                      "h-2 rounded-full transition-all",
+                      index === activeIndex ? (positive ? "w-6 bg-emerald-300" : "w-6 bg-red-300") : "w-2 bg-white/20 hover:bg-white/35",
+                    )}
+                  />
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <Button type="button" variant="secondary" className="h-9 rounded-lg px-3" onClick={() => move(-1)}>
+                  <ArrowLeft className="h-4 w-4" />
+                </Button>
+                <Button type="button" variant="secondary" className="h-9 rounded-lg px-3" onClick={() => move(1)}>
+                  <ArrowRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : (
         <PanelCardSoft className="border border-white/10 p-5 text-sm text-white/55">
@@ -1383,6 +1431,8 @@ function CalendarPreviewCard({
   onDragStart: (day: PlanDay) => void;
   onOpen: (day: PlanDay) => void;
 }) {
+  const meta = contentTypeMeta(day);
+  const Icon = meta.Icon;
   return (
     <HoverCard>
       <HoverCardTrigger asChild>
@@ -1391,19 +1441,26 @@ function CalendarPreviewCard({
           draggable
           onDragStart={() => onDragStart(day)}
           onClick={() => onOpen(day)}
-          className="relative w-full rounded-lg border border-white/10 bg-[#111111] text-left transition-all hover:-translate-y-0.5 hover:bg-[#171717]"
+          className="group relative w-full overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04] text-left transition-all hover:-translate-y-1 hover:border-red-300/25 hover:bg-white/[0.06]"
         >
+          <div className={cn("h-2 bg-gradient-to-r", linked ? "from-emerald-300 to-emerald-500" : "from-red-300 to-amber-300")} />
           {linked ? (
             <span className="absolute right-3 top-3 flex h-6 w-6 items-center justify-center rounded-full border border-emerald-400/30 bg-emerald-500/15 text-emerald-300">
               <Check className="h-3.5 w-3.5" />
             </span>
           ) : null}
           <div className="p-4">
-            <p className="text-base font-semibold leading-6 text-white">{day.hook}</p>
-            <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.16em] text-white/35">
-              <Clock className="h-3 w-3" />
-              {postingTime(day)}
+            <div className="mb-3 flex items-center gap-2">
+              <span className="flex h-8 w-8 items-center justify-center rounded-xl border border-white/10 bg-white/[0.05]">
+                <Icon className="h-4 w-4 text-red-100/75" />
+              </span>
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/35">{meta.label}</p>
+                <p className="text-xs text-white/45">{postingTime(day)}</p>
+              </div>
             </div>
+            <p className="line-clamp-3 text-base font-semibold leading-6 text-white">{day.hook}</p>
+            <p className="mt-3 line-clamp-2 text-sm leading-5 text-white/50">{day.contentIdea}</p>
           </div>
         </button>
       </HoverCardTrigger>
@@ -1417,30 +1474,59 @@ function CalendarPreviewCard({
 
 function WeeklyComparisonChart({ rows }: { rows: Array<{ name: string; shortName: string; views: number; uploads: number; fill: string; isYou: boolean }> }) {
   return (
-    <div className="mt-4 h-64">
-      <ChartContainer config={{ views: { label: "Weekly views", color: "#fca5a5" }, uploads: { label: "Weekly uploads", color: "#34d399" } }} className="h-full w-full">
-        <BarChart data={rows} margin={{ left: 6, right: 6, top: 12, bottom: 32 }}>
-          <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.08)" />
-          <XAxis dataKey="shortName" tickLine={false} axisLine={false} interval={0} angle={-10} textAnchor="end" height={54} />
-          <YAxis yAxisId="left" tickLine={false} axisLine={false} />
-          <YAxis yAxisId="right" tickLine={false} axisLine={false} orientation="right" />
-          <ChartTooltip
-            content={({ active, payload }: TooltipProps<number, string>) => {
-              if (!active || !payload?.length) return null;
-              const point = payload[0]?.payload as { name: string; views: number; uploads: number; isYou: boolean };
-              return (
-                <div className="rounded-lg border border-white/10 bg-[#120d1f] px-3 py-2 text-xs text-white shadow-xl">
-                  <p className="font-medium">{point.name}{point.isYou ? " · You" : ""}</p>
-                  <p className="mt-1 text-white/65">{formatNumber(point.views)} weekly views</p>
-                  <p className="mt-1 text-white/65">{point.uploads} upload{point.uploads === 1 ? "" : "s"}</p>
-                </div>
-              );
-            }}
-          />
-          <Bar yAxisId="left" dataKey="views" radius={[8, 8, 0, 0]} fill="#fca5a5" />
-          <Bar yAxisId="right" dataKey="uploads" radius={[8, 8, 0, 0]} fill="#34d399" />
-        </BarChart>
-      </ChartContainer>
+    <div className="mt-4 grid gap-4 xl:grid-cols-2">
+      <PanelCardSoft className="p-4">
+        <h5 className="text-sm font-semibold text-white">Consistency track</h5>
+        <p className="mt-1 text-xs text-white/45">Upload count comparison for the same weekly window.</p>
+        <div className="mt-4 h-56">
+          <ChartContainer config={{ uploads: { label: "Weekly uploads", color: "#34d399" } }} className="h-full w-full">
+            <BarChart data={rows} margin={{ left: 6, right: 6, top: 12, bottom: 32 }}>
+              <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.08)" />
+              <XAxis dataKey="shortName" tickLine={false} axisLine={false} interval={0} angle={-10} textAnchor="end" height={54} />
+              <YAxis tickLine={false} axisLine={false} />
+              <ChartTooltip
+                content={({ active, payload }: TooltipProps<number, string>) => {
+                  if (!active || !payload?.length) return null;
+                  const point = payload[0]?.payload as { name: string; uploads: number; isYou: boolean };
+                  return (
+                    <div className="rounded-lg border border-white/10 bg-[#120d1f] px-3 py-2 text-xs text-white shadow-xl">
+                      <p className="font-medium">{point.name}{point.isYou ? " · You" : ""}</p>
+                      <p className="mt-1 text-white/65">{point.uploads} upload{point.uploads === 1 ? "" : "s"}</p>
+                    </div>
+                  );
+                }}
+              />
+              <Bar dataKey="uploads" radius={[8, 8, 0, 0]} fill="#34d399" />
+            </BarChart>
+          </ChartContainer>
+        </div>
+      </PanelCardSoft>
+      <PanelCardSoft className="p-4">
+        <h5 className="text-sm font-semibold text-white">Results track</h5>
+        <p className="mt-1 text-xs text-white/45">Total views from videos published in this window.</p>
+        <div className="mt-4 h-56">
+          <ChartContainer config={{ views: { label: "Weekly views", color: "#fca5a5" } }} className="h-full w-full">
+            <BarChart data={rows} margin={{ left: 6, right: 6, top: 12, bottom: 32 }}>
+              <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.08)" />
+              <XAxis dataKey="shortName" tickLine={false} axisLine={false} interval={0} angle={-10} textAnchor="end" height={54} />
+              <YAxis tickLine={false} axisLine={false} />
+              <ChartTooltip
+                content={({ active, payload }: TooltipProps<number, string>) => {
+                  if (!active || !payload?.length) return null;
+                  const point = payload[0]?.payload as { name: string; views: number; isYou: boolean };
+                  return (
+                    <div className="rounded-lg border border-white/10 bg-[#120d1f] px-3 py-2 text-xs text-white shadow-xl">
+                      <p className="font-medium">{point.name}{point.isYou ? " · You" : ""}</p>
+                      <p className="mt-1 text-white/65">{formatNumber(point.views)} weekly views</p>
+                    </div>
+                  );
+                }}
+              />
+              <Bar dataKey="views" radius={[8, 8, 0, 0]} fill="#fca5a5" />
+            </BarChart>
+          </ChartContainer>
+        </div>
+      </PanelCardSoft>
     </div>
   );
 }
@@ -1520,66 +1606,125 @@ function BestTimeHeatmap({ cells }: { cells?: Array<{ day: string; hour: string;
   );
 }
 
-function PostingPatternStrip({ days, connectedAt }: { days: PostingPatternDay[]; connectedAt?: string | null }) {
-  const weeks = days.reduce<Array<PostingPatternDay[]>>((acc, day, index) => {
-    if (!acc[day.weekIndex]) acc[day.weekIndex] = [];
-    acc[day.weekIndex].push(day as PostingPatternDay);
-    return acc;
-  }, []);
-  const activeDays = days.filter((day) => !day.isFuture);
-  const postedCount = activeDays.filter((day) => day.posted).length;
-  const consistency = activeDays.length ? Math.round((postedCount / activeDays.length) * 100) : 0;
-  const upcomingWeekIndex = weeks.findIndex((week) => week.some((day) => day.isUpcoming));
+function weekRating(posted: number, missed: number, scheduled: number) {
+  if (scheduled === 0) return { label: "No schedule", className: "border-white/10 bg-white/[0.04] text-white/45" };
+  if (missed === 0 && posted >= scheduled) return { label: "Excellent", className: "border-emerald-300/25 bg-emerald-400/10 text-emerald-100" };
+  if (posted / scheduled >= 0.7) return { label: "Good", className: "border-sky-300/25 bg-sky-400/10 text-sky-100" };
+  if (posted > 0) return { label: "Needs focus", className: "border-amber-300/25 bg-amber-400/10 text-amber-100" };
+  return { label: "Missed", className: "border-red-300/25 bg-red-400/10 text-red-100" };
+}
+
+function PostingPatternStrip({
+  days,
+  plannedDates,
+}: {
+  days: PostingPatternDay[];
+  plannedDates: Set<string>;
+}) {
+  const today = new Date();
+  const todayIso = today.toISOString().slice(0, 10);
+  const postedByIso = new Map(days.filter((day) => day.posted).map((day) => [day.iso, day]));
+  const start = startOfWeek(addUtcDays(today, -14));
+  const weeks = Array.from({ length: 4 }).map((_, weekIndex) => {
+    const weekStart = addUtcDays(start, weekIndex * 7);
+    const weekDays = Array.from({ length: 7 }).map((_, dayIndex) => {
+      const date = addUtcDays(weekStart, dayIndex);
+      const iso = toIsoDate(date);
+      const posted = postedByIso.has(iso);
+      const scheduled = plannedDates.has(iso);
+      const isPast = iso < todayIso;
+      return {
+        iso,
+        label: date.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+        dayNumber: date.toLocaleDateString(undefined, { day: "numeric" }),
+        weekday: date.toLocaleDateString(undefined, { weekday: "short" }),
+        posted,
+        scheduled,
+        missed: scheduled && isPast && !posted,
+        future: iso >= todayIso,
+        videoTitle: postedByIso.get(iso)?.videoTitle,
+      };
+    });
+    const scheduled = weekDays.filter((day) => day.scheduled).length;
+    const posted = weekDays.filter((day) => day.posted).length;
+    const missed = weekDays.filter((day) => day.missed).length;
+    return { weekIndex, weekStart, weekDays, scheduled, posted, missed, rating: weekRating(posted, missed, scheduled) };
+  });
+  const rangeStart = weeks[0]?.weekDays[0]?.iso;
+  const rangeEnd = weeks[weeks.length - 1]?.weekDays[6]?.iso;
   return (
     <TooltipProvider>
       <div className="mt-4">
-      <p className="text-sm text-white/60">Your posting pattern since you connected your channel, plus the rest of this week and the full week ahead so you can see what is filled and what is still open.</p>
-      <div className="mt-3 overflow-x-auto pb-1">
-        <div className="grid min-w-[700px] grid-cols-7 gap-2 text-[11px] uppercase tracking-[0.16em] text-white/35">
-          {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((label) => (
-            <div key={label} className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-2 text-center">{label}</div>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-white/60">Four-week consistency view. Green means published, red means scheduled but missed, grey means no post was scheduled.</p>
+          <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs text-white/50">
+            {rangeStart && rangeEnd ? `${formatIsoDate(rangeStart)} to ${formatIsoDate(rangeEnd)}` : "Month range"}
+          </span>
+        </div>
+        <div className="mt-4 grid gap-3 xl:grid-cols-4">
+          {weeks.map((week) => (
+            <PanelCardSoft key={`consistency-week-${week.weekIndex}`} className="p-4">
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-white">Week {week.weekIndex + 1}</p>
+                  <p className="mt-1 text-xs text-white/40">{formatIsoDate(week.weekDays[0]?.iso)} to {formatIsoDate(week.weekDays[6]?.iso)}</p>
+                </div>
+                <span className={cn("rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]", week.rating.className)}>
+                  {week.rating.label}
+                </span>
+              </div>
+              <div className="grid grid-cols-7 gap-1.5">
+                {week.weekDays.map((day) => (
+                  <Tooltip key={day.iso}>
+                    <TooltipTrigger asChild>
+                      <div className="space-y-1">
+                        <div className={cn(
+                          "flex h-11 flex-col items-center justify-center rounded-lg border text-xs font-semibold",
+                          day.posted && "border-emerald-300/35 bg-emerald-400/80 text-emerald-950",
+                          day.missed && "border-red-300/35 bg-red-400/80 text-red-950",
+                          !day.posted && !day.missed && day.scheduled && "border-sky-300/25 bg-sky-400/15 text-sky-100",
+                          !day.posted && !day.missed && !day.scheduled && "border-white/10 bg-white/[0.05] text-white/35",
+                        )}>
+                          <span className="text-[9px] uppercase opacity-70">{day.weekday.slice(0, 1)}</span>
+                          {day.dayNumber}
+                        </div>
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-56 border border-white/10 bg-[#120d1f] text-white">
+                      <p>{formatIsoDate(day.iso)}</p>
+                      <p className="mt-1 text-white/70">{day.posted ? "Published" : day.missed ? "Scheduled but missed" : day.scheduled ? "Scheduled" : "Not scheduled"}</p>
+                      {day.videoTitle ? <p className="mt-1 text-white/70">{day.videoTitle}</p> : null}
+                    </TooltipContent>
+                  </Tooltip>
+                ))}
+              </div>
+              <div className="mt-3 grid grid-cols-3 gap-2 text-center text-xs">
+                <div className="rounded-lg border border-white/10 bg-white/[0.03] px-2 py-2">
+                  <p className="font-semibold text-white">{week.scheduled}</p>
+                  <p className="mt-0.5 text-white/35">Scheduled</p>
+                </div>
+                <div className="rounded-lg border border-emerald-300/15 bg-emerald-400/10 px-2 py-2">
+                  <p className="font-semibold text-emerald-100">{week.posted}</p>
+                  <p className="mt-0.5 text-emerald-100/55">Posted</p>
+                </div>
+                <div className="rounded-lg border border-red-300/15 bg-red-400/10 px-2 py-2">
+                  <p className="font-semibold text-red-100">{week.missed}</p>
+                  <p className="mt-0.5 text-red-100/55">Missed</p>
+                </div>
+              </div>
+            </PanelCardSoft>
           ))}
         </div>
-        {upcomingWeekIndex >= 0 ? <p className="mt-3 text-[11px] uppercase tracking-[0.16em] text-white/35">Upcoming</p> : null}
-        <div className="mt-3 space-y-2">
-        {weeks.map((week, weekIndex) => (
-          <div key={`week-${weekIndex}`} className={cn("grid min-w-[700px] grid-cols-7 gap-2 rounded-xl", weekIndex > 0 && "pt-2")}>
-              {week.map((day, dayIndex) => (
-                <Tooltip key={day.iso}>
-                  <TooltipTrigger asChild>
-                    <div
-                      className="space-y-1"
-                      style={dayIndex === 0 ? { gridColumnStart: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].indexOf(day.weekday) + 1 } : undefined}
-                    >
-                      <div className={cn(
-                        "flex h-16 flex-col items-center justify-center rounded-md border text-sm font-medium",
-                        day.posted && "border-emerald-300/40 bg-emerald-400/80 text-emerald-950",
-                        !day.posted && !day.isFuture && "border-white/10 bg-white/[0.08] text-white/70",
-                        day.isFuture && "border border-dashed border-white/25 bg-slate-200/10 text-slate-200/70",
-                      )}>
-                        <span className="text-[10px] uppercase tracking-[0.12em] opacity-70">{day.weekday}</span>
-                        {day.dayNumber}
-                      </div>
-                      <p className="text-center text-[10px] text-white/40">{day.label}</p>
-                    </div>
-                  </TooltipTrigger>
-                  <TooltipContent className="max-w-56 border border-white/10 bg-[#120d1f] text-white">
-                    <p>{formatIsoDate(day.iso)}</p>
-                    <p className="mt-1 text-white/70">{day.isFuture ? "Upcoming day" : day.posted ? "Video posted" : "No video posted"}</p>
-                    {day.videoTitle ? <p className="mt-1 text-white/70">{day.videoTitle}</p> : null}
-                  </TooltipContent>
-                </Tooltip>
-              ))}
-          </div>
-        ))}
+        <div className="mt-4 flex flex-wrap gap-3 text-xs text-white/45">
+          <span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-sm bg-emerald-400" />Published</span>
+          <span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-sm bg-red-400" />Scheduled but missed</span>
+          <span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-sm bg-sky-400/30" />Scheduled</span>
+          <span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-sm bg-white/15" />Not scheduled</span>
         </div>
-      </div>
-      <p className="mt-4 text-sm text-white/65">You have posted {postedCount} of {activeDays.length} days since connecting{connectedAt ? ` on ${formatIsoDate(connectedAt)}` : ""}. That is {consistency}% consistency. Channels that post 15+ days per month grow faster because they give the algorithm more chances to find momentum. Your next move today: claim one of the open days in the next row and ship into it.</p>
       </div>
     </TooltipProvider>
   );
 }
-
 function HookComparisonChart({ rows }: { rows: Array<{ type: string; averageViews: number; count: number; sample?: string }> }) {
   const max = Math.max(...rows.map((row) => row.averageViews), 1);
   return (
@@ -2005,10 +2150,10 @@ export default function YouTubeGrowthPlannerV2Tab() {
     return values;
   }, [latestPlan?.startDate, latestPlan?.endDate]);
   const dayByDate = useMemo(() => new Map(calendarDays.map((day) => [day.date, day])), [calendarDays]);
+  const plannedDateSet = useMemo(() => new Set(calendarDays.map((day) => day.date)), [calendarDays]);
   const subscriberTrend = deriveStatTrend(analyticsPoints, "subscribersNet");
   const viewTrend = deriveStatTrend(analyticsPoints, "views");
   const progressState = weekProgress(days, status?.latestResults ?? []);
-  const calendarWeek = getIsoWeekNumber(latestPlan?.startDate);
   const overview = useMemo(() => buildOverviewSections(recentVideos), [recentVideos]);
   const postingPattern = useMemo(() => buildPostingPattern(recentVideos, status?.settings?.connectedAt), [recentVideos, status?.settings?.connectedAt]);
   const bestTime = useMemo(() => deriveBestTimeSummary(contextSnapshot?.recentVideos ?? recentVideos), [contextSnapshot?.recentVideos, recentVideos]);
@@ -2261,15 +2406,9 @@ export default function YouTubeGrowthPlannerV2Tab() {
                 Icon={CalendarDays}
               />
               <CommandStat
-                label="Source data"
-                value={`${recentVideos.length} videos`}
-                caption="Recent uploads analyzed"
-                Icon={BarChart3}
-              />
-              <CommandStat
-                label="Current plan"
-                value={latestPlan ? `Week ${calendarWeek ?? latestPlan.weekNumber}` : "Not generated"}
-                caption={latestPlan ? `${formatIsoDate(latestPlan.startDate)} to ${formatIsoDate(latestPlan.endDate)}` : "Generate when ready"}
+                label="Plan window"
+                value={latestPlan ? dateRangeLabel(latestPlan.startDate, latestPlan.endDate) : "Not generated"}
+                caption="Dates this calendar covers"
                 Icon={ListChecks}
               />
               <CommandStat
@@ -2277,6 +2416,12 @@ export default function YouTubeGrowthPlannerV2Tab() {
                 value={`${progressState.posted}/${Math.max(days.length, preferredPostsPerWeek)} published`}
                 caption="Linked uploads this week"
                 Icon={CheckCircle2}
+              />
+              <CommandStat
+                label="Best slot"
+                value={bestTime.highest ? `${bestTime.highest.day} ${bestTime.highest.hour}` : "Needs more data"}
+                caption={bestTime.highest ? `${formatNumber(bestTime.highest.value)} avg views` : "More uploads improve this"}
+                Icon={Clock}
               />
             </div>
           </PanelCard>
@@ -2407,7 +2552,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
                   </div>
                   <Badge className={`${confidenceClass(recentVideos.length >= 4 ? "high" : "medium")} hover:brightness-100`}>{recentVideos.length >= 4 ? "high" : "medium"}</Badge>
                 </div>
-                <PostingPatternStrip days={postingPattern} connectedAt={status?.settings?.connectedAt} />
+                <PostingPatternStrip days={postingPattern} plannedDates={plannedDateSet} />
               </PanelCardSoft>
 
               <PanelCardSoft id="optimal-posting-schedule" className="border border-white/10 p-5 transition-all hover:-translate-y-1 hover:bg-white/[0.05]">
@@ -2588,7 +2733,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
                 <div className="flex items-center gap-3">
                   <CalendarDays className="h-5 w-5 text-red-300" />
                   <h2 className="text-2xl font-semibold text-white">
-                    {latestPlan ? `Week ${calendarWeek ?? latestPlan.weekNumber} Calendar` : "Weekly Calendar"}
+                    {latestPlan ? "Plan Calendar" : "Weekly Calendar"}
                   </h2>
                 </div>
                 <p className="mt-2 text-sm text-white/45">{dateRangeLabel(latestPlan?.startDate, latestPlan?.endDate)}</p>
@@ -2611,19 +2756,23 @@ export default function YouTubeGrowthPlannerV2Tab() {
                 {weekCalendarDates.map((date) => {
                   const day = dayByDate.get(date);
                   const linked = day ? resultsByDay.get(day.day) : null;
+                  const isToday = date === new Date().toISOString().slice(0, 10);
                   return (
-                  <div key={date} onDragOver={(event) => event.preventDefault()} onDrop={() => handleDropOnDate(date)} className="min-h-[260px] rounded-lg border border-white/10 bg-white/[0.025] p-3">
-                    <div className="flex items-start justify-between gap-2">
+                  <div key={date} onDragOver={(event) => event.preventDefault()} onDrop={() => handleDropOnDate(date)} className={cn("min-h-[260px] rounded-2xl border bg-white/[0.025] p-3 transition-all hover:bg-white/[0.04]", isToday ? "border-red-300/35" : "border-white/10")}>
+                    <div className="mb-3 flex items-start justify-between gap-2 rounded-xl border border-white/10 bg-black/10 px-3 py-2">
                       <div>
                         <p className="text-sm font-semibold text-white">{dayName(date)}</p>
-                        {day ? <p className="mb-3 mt-1 text-xs text-white/35">{postingTime(day)}</p> : <p className="mb-3 mt-1 text-xs text-white/25">Open day</p>}
+                        <p className="mt-1 text-xs text-white/35">{formatIsoDate(date, { month: "short", day: "numeric" })}</p>
                       </div>
-                      {linked ? <span className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-2 py-1 text-[10px] font-medium text-emerald-200">Published</span> : null}
+                      {linked ? <span className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-2 py-1 text-[10px] font-medium text-emerald-200">Published</span> : day ? <span className="rounded-full border border-sky-400/25 bg-sky-500/10 px-2 py-1 text-[10px] font-medium text-sky-100">Planned</span> : <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-[10px] font-medium text-white/35">Open</span>}
                     </div>
                     {day ? (
                       <CalendarPreviewCard day={day} linked={Boolean(linked)} onDragStart={handleDragStart} onOpen={setDetailDay} />
                     ) : (
-                      <div className="flex h-[180px] items-center justify-center rounded-lg border border-dashed border-white/10 bg-black/10 text-sm text-white/25">No post planned</div>
+                      <div className="flex h-[180px] flex-col items-center justify-center rounded-2xl border border-dashed border-white/10 bg-black/10 text-center text-sm text-white/25">
+                        <Plus className="mb-2 h-5 w-5" />
+                        No post planned
+                      </div>
                     )}
                   </div>
                 )})}
@@ -2643,7 +2792,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
             )}
           </PanelCard>
 
-          <section className="grid gap-6 lg:grid-cols-[1fr_420px]">
+          <section>
             <PanelCard className="p-6 transition-all hover:-translate-y-1 hover:bg-white/[0.04]">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>

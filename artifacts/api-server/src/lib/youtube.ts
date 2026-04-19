@@ -1237,7 +1237,7 @@ async function hydrateStoredResultMetrics(userId: number) {
       hydrated.push(result);
       continue;
     }
-    const metrics = await fetchVideoAnalytics(userId, result.videoId);
+    const metrics = await fetchVideoAnalytics(userId, result.videoId).catch(() => ({}));
     const [updated] = await db.update(youtubePlanResultsTable)
       .set({ metrics, fetchedAt: new Date(), updatedAt: new Date() })
       .where(eq(youtubePlanResultsTable.id, result.id))
@@ -1500,13 +1500,25 @@ export function extractYoutubeVideoId(url: string) {
 async function fetchVideoAnalytics(userId: number, videoId: string) {
   const endDate = isoDate(new Date());
   const startDate = isoDate(addDays(new Date(), -30));
-  const analytics = await youtubeJson<{ columnHeaders?: unknown[]; rows?: unknown[] }>(userId, analyticsUrl({
+  const baseParams = {
     ids: "channel==MINE",
     startDate,
     endDate,
-    metrics: "views,estimatedMinutesWatched,impressions,impressionClickThroughRate,averageViewDuration,likes,comments",
     filters: `video==${videoId}`,
-  }), { cacheKey: `video-analytics:${videoId}:${startDate}:${endDate}`, quotaCost: 1, ttlMs: 60 * 60 * 1000 });
+  };
+  const options = { quotaCost: 1, ttlMs: 60 * 60 * 1000 };
+  let analytics: { columnHeaders?: unknown[]; rows?: unknown[] };
+  try {
+    analytics = await youtubeJson<{ columnHeaders?: unknown[]; rows?: unknown[] }>(userId, analyticsUrl({
+      ...baseParams,
+      metrics: "views,estimatedMinutesWatched,impressionClickThroughRate,averageViewDuration,likes,comments",
+    }), { ...options, cacheKey: `video-analytics:${videoId}:${startDate}:${endDate}:engagement` });
+  } catch {
+    analytics = await youtubeJson<{ columnHeaders?: unknown[]; rows?: unknown[] }>(userId, analyticsUrl({
+      ...baseParams,
+      metrics: "views,estimatedMinutesWatched,averageViewDuration",
+    }), { ...options, cacheKey: `video-analytics:${videoId}:${startDate}:${endDate}:basic` });
+  }
   const row = asArray(analytics.rows)[0] as unknown[] | undefined;
   const headers = asArray(analytics.columnHeaders).map((header) => asString(asRecord(header).name));
   const metrics: JsonRecord = {};
