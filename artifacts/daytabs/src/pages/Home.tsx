@@ -563,7 +563,7 @@ export default function Home() {
         <div className="absolute inset-0 bg-background/55" />
       </div>
       <header className="w-full border-b border-white/5 bg-background/45 backdrop-blur-xl sticky top-0 z-50">
-        <div className="panel-shell h-20 flex items-center justify-between">
+        <div className="panel-shell flex h-16 items-center justify-between sm:h-20">
           <div
             className="flex items-center gap-3 cursor-pointer"
             onClick={() => (window.location.href = "/")}
@@ -571,9 +571,9 @@ export default function Home() {
             <img
               src={`${import.meta.env.BASE_URL}images/logo.jpg`}
               alt="DayTabs"
-              className="w-10 h-10 object-contain rounded-xl drop-shadow-[0_0_15px_rgba(124,58,237,0.5)]"
+              className="h-9 w-9 rounded-xl object-contain drop-shadow-[0_0_15px_rgba(124,58,237,0.5)] sm:h-10 sm:w-10"
             />
-            <span className="text-2xl font-display font-bold tracking-tight text-white">
+            <span className="text-xl font-display font-bold tracking-tight text-white sm:text-2xl">
               Day<span className="text-primary">Tabs</span>
             </span>
           </div>
@@ -585,9 +585,9 @@ export default function Home() {
           </div>
         </div>
       </header>
-      <div className="w-full border-b border-white/5 bg-background/25 backdrop-blur-md sticky top-20 z-40">
+      <div className="w-full border-b border-white/5 bg-background/25 backdrop-blur-md sticky top-16 z-40 sm:top-20">
         <div className="panel-shell">
-          <div className="flex items-center gap-2 overflow-x-auto scrollbar-none py-3">
+          <div className="flex items-center gap-2 overflow-x-auto scrollbar-none py-2.5 sm:py-3">
             {TABS.map((tab) => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
@@ -595,7 +595,7 @@ export default function Home() {
                 <button
                   key={tab.id}
                   onClick={() => handleTabClick(tab.id)}
-                  className={`panel-hover flex items-center gap-2.5 px-4 py-3 rounded-2xl text-sm font-semibold whitespace-nowrap transition-all duration-200 shrink-0 border ${
+                  className={`panel-hover flex shrink-0 items-center gap-2 px-3 py-2.5 rounded-xl text-[13px] font-semibold whitespace-nowrap transition-all duration-200 border sm:gap-2.5 sm:px-4 sm:py-3 sm:rounded-2xl sm:text-sm ${
                     isActive
                       ? "bg-primary/16 text-primary border-primary/30 shadow-lg shadow-primary/10"
                       : "bg-white/[0.025] text-white/50 border-white/8 hover:text-white/85"
@@ -614,7 +614,7 @@ export default function Home() {
           </div>
         </div>
       </div>
-      <main className="panel-shell py-10 md:py-12 relative z-10">
+      <main className="panel-shell relative z-10 py-6 sm:py-10 md:py-12">
         {activeTab === "dashboard" && (
           <Dashboard
             onNavigate={handleTabClick}

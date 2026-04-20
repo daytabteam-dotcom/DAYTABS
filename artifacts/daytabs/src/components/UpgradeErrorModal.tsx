@@ -28,7 +28,7 @@ const PLAN_COMPARE: Record<string, {
       label: "Creator",
       color: "text-amber-400",
       price: "$19/mo",
-      perks: ["Up to 10 video analyses each month*", "Unlock publishing package and full editing plan", "20 script generations"],
+      perks: ["Up to 10 videos each month*", "Unlock publishing package and full editing plan", "20 script generations"],
     },
   },
   creator: {
@@ -37,7 +37,7 @@ const PLAN_COMPARE: Record<string, {
       label: "Pro",
       color: "text-emerald-400",
       price: "$39/mo",
-      perks: ["Up to 25 video analyses each month*", "Subtitle export", "60 script generations"],
+      perks: ["Up to 25 videos each month*", "Subtitle export", "60 script generations"],
     },
   },
   pro: {
@@ -46,7 +46,7 @@ const PLAN_COMPARE: Record<string, {
       label: "Studio",
       color: "text-pink-400",
       price: "$89/mo",
-      perks: ["Up to 80 video analyses each month*", "Priority processing", "Priority support"],
+      perks: ["Up to 80 videos each month*", "Priority processing", "Priority support"],
     },
   },
 };

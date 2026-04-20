@@ -41,7 +41,7 @@ const PLAN_META = [
     badge: null as string | null,
     price: "$19",
     features: [
-      "Up to 10 video analyses / month*",
+      "Up to 10 videos per month*",
       "Up to 25 min per video",
       "1 GB upload limit",
       "Full analysis across quality, editing, SEO, and clips",
@@ -62,7 +62,7 @@ const PLAN_META = [
     badge: "Most Popular",
     price: "$39",
     features: [
-      "Up to 25 video analyses / month*",
+      "Up to 25 videos per month*",
       "Up to 60 min per video",
       "5 GB upload limit",
       "All Creator features",
@@ -83,7 +83,7 @@ const PLAN_META = [
     badge: null as string | null,
     price: "$89",
     features: [
-      "Up to 80 video analyses / month*",
+      "Up to 80 videos per month*",
       "Up to 90 min per video",
       "100 GB upload limit",
       "All Pro features",

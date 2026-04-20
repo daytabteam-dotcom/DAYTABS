@@ -42,7 +42,7 @@ const plans = [
     borderColor: "border-violet-500/50",
     popular: true,
     features: [
-      { text: "10 video analyses / month" },
+      { text: "Up to 10 videos per month" },
       { text: "Up to 1 GB per video" },
       { text: "Up to 25 min video duration" },
       { text: "Quality and editing reports" },
@@ -66,7 +66,7 @@ const plans = [
     borderColor: "border-emerald-500/30",
     popular: false,
     features: [
-      { text: "25 video analyses / month" },
+      { text: "Up to 25 videos per month" },
       { text: "Up to 5 GB per video" },
       { text: "Up to 60 min video duration" },
       { text: "All Creator features included" },
@@ -88,7 +88,7 @@ const plans = [
     borderColor: "border-white/10",
     popular: false,
     features: [
-      { text: "80 video analyses / month" },
+      { text: "Up to 80 videos per month" },
       { text: "Up to 100 GB per video" },
       { text: "Up to 90 min video duration" },
       { text: "All Pro features included" },
