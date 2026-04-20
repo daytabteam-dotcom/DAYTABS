@@ -45,11 +45,12 @@ const MODULE_COLORS: Record<string, string> = {
 };
 
 const RESULT_TABS = [
-  { id: "quality",    label: "Fix This Video", icon: Shield },
-  { id: "editing",    label: "Edit Style",     icon: Scissors },
-  { id: "publish",    label: "Get More Views", icon: TrendingUp },
-  { id: "shortClips", label: "Repurpose",      icon: Sparkles },
-  { id: "transcript", label: "Transcript",   icon: AlignLeft },
+  { id: "overview",   label: "Report",            icon: Eye },
+  { id: "quality",    label: "Fix First",         icon: Shield },
+  { id: "editing",    label: "Timeline And Edit", icon: Scissors },
+  { id: "publish",    label: "Publish Package",   icon: TrendingUp },
+  { id: "shortClips", label: "Clip Ideas",        icon: Sparkles },
+  { id: "transcript", label: "Transcript",        icon: AlignLeft },
 ];
 
 const PROGRESS_STEPS = [
@@ -434,6 +435,15 @@ function scoreVerdict(score: number) {
   return { label: "Rework before publishing", tone: "border-red-400/25 bg-red-500/10 text-red-100", description: "The current cut is likely to underperform unless you fix the main clarity or pacing problems first." };
 }
 
+function overallScoreFromResults(results: any) {
+  return Number(
+    results?.quality?.score
+    ?? results?.quality?.overallScore
+    ?? results?.quality?.overallVisualScore
+    ?? 0,
+  );
+}
+
 function strongestMetric(data: any, profile?: any) {
   const candidates = [
     { key: "lighting", label: "Lighting", metric: data?.lighting },
@@ -472,6 +482,83 @@ function compactTags(tags: Array<{ tag?: string }> = [], max = 8) {
     .map((item) => String(item?.tag ?? "").replace(/^#+/, "").trim())
     .filter(Boolean)
     .slice(0, max);
+}
+
+function parseTimestampToSeconds(value?: string | null) {
+  if (!value?.trim()) return Number.POSITIVE_INFINITY;
+  const parts = value.trim().split(":").map((part) => Number(part));
+  if (parts.some((part) => Number.isNaN(part))) return Number.POSITIVE_INFINITY;
+  if (parts.length === 2) return (parts[0] * 60) + parts[1];
+  if (parts.length === 3) return (parts[0] * 3600) + (parts[1] * 60) + parts[2];
+  return Number.POSITIVE_INFINITY;
+}
+
+function weakestMetrics(results: any, profile?: any) {
+  const quality = results?.quality ?? {};
+  return [
+    { label: "Lighting", metric: quality.lighting },
+    { label: "Brightness", metric: quality.brightness },
+    { label: "Contrast", metric: quality.contrast },
+    { label: metricDisplayLabel("Background", profile), metric: quality.background },
+    { label: metricDisplayLabel("Framing", profile), metric: quality.framing },
+    { label: "Sharpness", metric: quality.sharpness },
+    { label: "Stability", metric: quality.stability },
+    { label: "Audio clarity", metric: quality.audioClarity },
+    { label: "Audio volume", metric: quality.audioVolume },
+    { label: "Background noise", metric: quality.backgroundNoise },
+    { label: "Pacing", metric: quality.pacing },
+  ]
+    .filter((item) => typeof item.metric?.numeric === "number")
+    .sort((a, b) => (a.metric.numeric ?? 0) - (b.metric.numeric ?? 0))
+    .slice(0, 3);
+}
+
+function scoreReasonSummary(results: any, profile?: any) {
+  const drivers = weakestMetrics(results, profile).map((item) => item.label.toLowerCase());
+  if (drivers.length === 0) return "No major blockers were surfaced in the current analysis.";
+  if (drivers.length === 1) return `The score is mostly being held back by ${drivers[0]}.`;
+  if (drivers.length === 2) return `The score is mostly being held back by ${drivers[0]} and ${drivers[1]}.`;
+  return `The score is mostly being held back by ${drivers[0]}, ${drivers[1]}, and ${drivers[2]}.`;
+}
+
+function buildTimelineMoments(results: any) {
+  const hooks = Array.isArray(results?.editing?.hooks) ? results.editing.hooks : [];
+  const dropOffs = Array.isArray(results?.quality?.retention?.dropOffMoments) ? results.quality.retention.dropOffMoments : [];
+  const removeSections = Array.isArray(results?.editing?.removeSections) ? results.editing.removeSections : [];
+  const clips = Array.isArray(results?.shortClips?.clips) ? results.shortClips.clips : Array.isArray(results?.shortClips) ? results.shortClips : [];
+
+  return [
+    ...hooks.slice(0, 2).map((hook: any, index: number) => ({
+      time: hook?.start ?? `Hook ${index + 1}`,
+      sortTime: parseTimestampToSeconds(hook?.start),
+      title: index === 0 ? "Hook window" : "Alternate hook",
+      detail: hook?.text ?? hook?.description ?? "Strong opening moment",
+      tone: "emerald" as const,
+    })),
+    ...dropOffs.slice(0, 3).map((moment: any) => ({
+      time: moment?.at ?? "Risk",
+      sortTime: parseTimestampToSeconds(moment?.at),
+      title: "Drop-off risk",
+      detail: moment?.fix ? `${moment.reason} Fix: ${moment.fix}` : (moment?.reason ?? "Likely retention dip"),
+      tone: "red" as const,
+    })),
+    ...removeSections.slice(0, 2).map((section: any) => ({
+      time: section?.start ? `${section.start}${section?.end ? `-${section.end}` : ""}` : "Cut",
+      sortTime: parseTimestampToSeconds(section?.start),
+      title: "Cut or tighten",
+      detail: section?.reason ?? section?.description ?? "Trim this section to keep the pace moving.",
+      tone: "amber" as const,
+    })),
+    ...clips.slice(0, 2).map((clip: any) => ({
+      time: clip?.start ? `${clip.start}${clip?.end ? `-${clip.end}` : ""}` : "Clip",
+      sortTime: parseTimestampToSeconds(clip?.start),
+      title: "Best clip moment",
+      detail: clip?.whyItWorks ?? clip?.hook ?? clip?.title ?? "Strong repurposing moment",
+      tone: "sky" as const,
+    })),
+  ]
+    .sort((a, b) => a.sortTime - b.sortTime)
+    .slice(0, 7);
 }
 
 function SignalChip({ label, value }: { label: string; value: string }) {
@@ -515,45 +602,6 @@ function ActionCard({
   );
 }
 
-function ResultStat({
-  label,
-  value,
-  hint,
-}: {
-  label: string;
-  value: string;
-  hint?: string;
-}) {
-  return (
-    <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
-      <p className="text-[10px] uppercase tracking-[0.18em] text-white/35">{label}</p>
-      <p className="mt-2 text-lg font-semibold text-white">{value}</p>
-      {hint ? <p className="mt-1 text-xs text-white/45">{hint}</p> : null}
-    </div>
-  );
-}
-
-function ProofMomentCard({
-  title,
-  eyebrow,
-  detail,
-  accent,
-}: {
-  title: string;
-  eyebrow: string;
-  detail: string;
-  accent: string;
-}) {
-  return (
-    <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-background/70 p-4">
-      <div className={`absolute inset-x-0 top-0 h-1 ${accent}`} />
-      <p className="text-[10px] uppercase tracking-[0.16em] text-white/35">{eyebrow}</p>
-      <p className="mt-3 text-base font-semibold text-white">{title}</p>
-      <p className="mt-2 text-sm leading-relaxed text-white/60">{detail}</p>
-    </div>
-  );
-}
-
 function CreatorReportIntro({ results, profile }: { results: any; profile?: any }) {
   if (!results) return null;
   const formatProfile = getFormatProfile(profile);
@@ -562,150 +610,155 @@ function CreatorReportIntro({ results, profile }: { results: any; profile?: any 
   const topFixes = collectTopFixes(results);
   const usefulTags = compactTags(publishData?.hashtags ?? []);
   const strongest = strongestMetric(results?.quality, profile);
-  const firstHook = results?.editing?.hooks?.[0] ?? null;
-  const firstRisk = results?.quality?.retention?.dropOffMoments?.[0] ?? null;
   const primaryPromise = publishData?.audiencePromise ?? editingData?.packagingAngle ?? formatProfile?.viewerIntent ?? "Clear outcome-driven packaging";
-  const score = Number(results?.quality?.score ?? results?.quality?.overallScore ?? results?.quality?.overallVisualScore ?? 0);
+  const score = overallScoreFromResults(results);
+  const verdict = scoreVerdict(score);
+  const scoreDrivers = weakestMetrics(results, profile);
+  const timelineMoments = buildTimelineMoments(results);
+  const leadTitle = publishData?.titles?.[0] ?? null;
 
   return (
-    <div className="space-y-5">
-      <PanelCard className="overflow-hidden border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(244,114,182,0.14),transparent_28%),radial-gradient(circle_at_top_right,rgba(59,130,246,0.12),transparent_30%)] p-5">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="max-w-3xl">
-            <p className="text-[11px] uppercase tracking-[0.18em] text-white/35">AI Spotted This Fast</p>
-            <h3 className="mt-3 text-2xl font-semibold text-white">
-              {editingData?.topic ?? formatProfile?.primarySubject ?? "Your core video idea"} 
+    <div className="space-y-6">
+      <PanelCard className="overflow-hidden border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(244,114,182,0.12),transparent_30%),radial-gradient(circle_at_top_right,rgba(56,189,248,0.12),transparent_28%)] p-6">
+        <div className="grid gap-6 lg:grid-cols-[1.15fr,0.85fr]">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${verdict.tone}`}>{verdict.label}</span>
+              {formatProfile?.contentFormat ? <SignalChip label="Format" value={contentFormatLabel(formatProfile.contentFormat)} /> : null}
+            </div>
+            <h3 className="mt-4 text-3xl font-semibold text-white">
+              {editingData?.topic ?? formatProfile?.primarySubject ?? "Video verdict"}
             </h3>
-            <p className="mt-3 max-w-2xl text-sm leading-7 text-white/68">
-              {editingData?.viewPotential ?? "This section gives the fast answer on whether the cut is strong enough and what is holding it back."}
+            <p className="mt-3 max-w-3xl text-sm leading-7 text-white/72">
+              {editingData?.viewPotential ?? verdict.description}
             </p>
+            <p className="mt-3 text-sm text-white/60">{scoreReasonSummary(results, profile)}</p>
           </div>
-          <div className="rounded-2xl border border-primary/20 bg-primary/10 px-4 py-4 text-center">
-            <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Fast Promise</p>
-            <p className="mt-2 max-w-[220px] text-sm font-medium leading-relaxed text-white/82">{primaryPromise}</p>
+          <div className="rounded-2xl border border-white/10 bg-black/15 p-5">
+            <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Verdict</p>
+            <div className="mt-4 flex items-end gap-3">
+              <span className="text-5xl font-bold font-mono text-white">{score}</span>
+              <span className="pb-1 text-sm text-white/45">readiness score</span>
+            </div>
+            <p className="mt-4 text-sm font-semibold text-white">Fix first</p>
+            <p className="mt-2 text-sm leading-relaxed text-white/68">{topFixes[0] ?? "Review the edit notes and tighten the opening before publishing."}</p>
+            <p className="mt-4 text-sm font-semibold text-white">What the packaging should promise</p>
+            <p className="mt-2 text-sm leading-relaxed text-white/68">{primaryPromise}</p>
           </div>
-        </div>
-        <div className="mt-5 flex flex-wrap gap-2">
-          {formatProfile?.contentFormat ? <SignalChip label="Detected" value={contentFormatLabel(formatProfile.contentFormat)} /> : null}
-          {formatProfile?.primarySubject ? <SignalChip label="Topic" value={formatProfile.primarySubject} /> : null}
-          {formatProfile?.viewerIntent ? <SignalChip label="Viewer Wants" value={formatProfile.viewerIntent} /> : null}
-          {editingData?.editingStyle ? <SignalChip label="Edit Style" value={editingData.editingStyle} /> : null}
         </div>
       </PanelCard>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <ResultStat label="Publish Call" value={score >= 85 ? "Almost there" : score >= 60 ? "Needs one pass" : "Rework first"} hint="Fast decision before you read the details" />
-        <ResultStat label="Biggest Win" value={primaryPromise} hint="The angle worth amplifying" />
-        <ResultStat label="Main Fix" value={topFixes[0] ?? "Open the detailed notes"} hint="Highest-impact change to make next" />
-        <ResultStat label="Best Hook" value={firstHook?.start ?? "No hook found"} hint={firstHook?.text ?? "The strongest grab point will appear here"} />
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {firstHook ? (
-          <ProofMomentCard
-            eyebrow="Best Hook"
-            title={firstHook.start ?? "Opening"}
-            detail={firstHook.text ?? firstHook.description ?? "Strong opening moment"}
-            accent="bg-gradient-to-r from-yellow-400 to-amber-500"
-          />
-        ) : null}
-        {firstRisk ? (
-          <ProofMomentCard
-            eyebrow="Attention Risk"
-            title={firstRisk.at ?? "Early drop-off"}
-            detail={firstRisk.reason ?? "This is where the video is most likely to lose people."}
-            accent="bg-gradient-to-r from-red-400 to-rose-500"
-          />
-        ) : null}
-        {strongest ? (
-          <ProofMomentCard
-            eyebrow="Strongest Signal"
-            title={strongest.label}
-            detail={strongest.metric.assessment ?? "This is one of the cleanest parts of the current cut."}
-            accent="bg-gradient-to-r from-emerald-400 to-green-500"
-          />
-        ) : null}
-        <ProofMomentCard
-          eyebrow="Packaging Angle"
-          title={publishData?.audiencePromise ?? "Core click promise"}
-          detail={editingData?.packagingAngle ?? publishData?.packagingStrategy ?? "This is the angle the title and thumbnail should sell first."}
-          accent="bg-gradient-to-r from-sky-400 to-blue-500"
-        />
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-3">
-        <PanelCardSoft className="border border-white/10 p-4">
-          <p className="text-[11px] uppercase tracking-[0.16em] text-white/40">Will This Pull?</p>
-          {editingData?.viewPotential ? (
-            <>
-              <p className="mt-3 text-lg font-semibold text-white">{editingData.topic ?? "Current cut outlook"}</p>
-              <p className="mt-2 text-sm text-white/60">{editingData.viewPotential}</p>
-            </>
-          ) : (
-            <p className="mt-3 text-sm text-white/55">This section will tell you if the current structure has a real chance to pull views and why.</p>
-          )}
-        </PanelCardSoft>
-
-        <PanelCardSoft className="border border-white/10 p-4">
-          <p className="text-[11px] uppercase tracking-[0.16em] text-white/40">How To Edit It</p>
-          {editingData?.editingStyle ? (
-            <>
-              <p className="mt-3 text-lg font-semibold text-white">{editingData.editingStyle}</p>
-              <p className="mt-2 text-sm text-white/60">{editingData.pacingGuidance ?? editingData.motionGuidance ?? "This tells the editor how aggressively or simply the video should be cut."}</p>
-            </>
-          ) : (
-            <p className="mt-3 text-sm text-white/55">This section will explain what editing style this format actually wants.</p>
-          )}
-        </PanelCardSoft>
-
-        <PanelCardSoft className="border border-white/10 p-4">
-          <p className="text-[11px] uppercase tracking-[0.16em] text-white/40">What Wins The Click</p>
-          {editingData?.packagingAngle || publishData?.audiencePromise ? (
-            <>
-              <p className="mt-3 text-lg font-semibold text-white">{publishData?.audiencePromise ?? "Core click promise"}</p>
-              <p className="mt-2 text-sm text-white/60">{editingData.packagingAngle ?? publishData?.packagingStrategy ?? "This section should tell you what promise the title and packaging need to make."}</p>
-            </>
-          ) : (
-            <p className="mt-3 text-sm text-white/55">This section will tell you what the title, thumbnail, and description should actually promise.</p>
-          )}
-        </PanelCardSoft>
-      </div>
-
-      {formatProfile?.viewerIntent && (
-        <PanelCardSoft className="border border-white/10 p-4">
-          <p className="text-[11px] uppercase tracking-[0.16em] text-white/40">Why Someone Would Watch</p>
-          <p className="mt-3 text-sm leading-6 text-white/65">{formatProfile.viewerIntent}</p>
-        </PanelCardSoft>
-      )}
-
-      {topFixes.length ? (
+      {topFixes.length > 0 && (
         <PanelCardSoft className="border border-amber-400/20 bg-amber-400/5 p-5">
-          <p className="text-[11px] uppercase tracking-[0.16em] text-amber-200/70">Fix First</p>
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <p className="text-[11px] uppercase tracking-[0.16em] text-amber-200/70">Fix First</p>
+              <p className="mt-2 text-sm text-white/65">Three changes to make before you worry about anything else.</p>
+            </div>
+          </div>
           <div className="mt-4 grid gap-3 md:grid-cols-3">
             {topFixes.map((fix, index) => (
               <ActionCard
                 key={`${index}-${fix}`}
                 index={index + 1}
                 title={fix}
-                detail={index === 0 ? "Do this before you touch anything else." : index === 1 ? "This is the next most valuable improvement." : "Worth doing if you want a stronger final cut."}
+                detail={index === 0 ? "Highest impact on this cut." : index === 1 ? "Next best improvement after the main fix." : "Finish with this if you want the strongest export."}
               />
             ))}
           </div>
         </PanelCardSoft>
-      ) : null}
+      )}
 
-      {usefulTags.length ? (
-        <PanelCardSoft className="border border-white/10 p-4">
-          <p className="text-[11px] uppercase tracking-[0.16em] text-white/40">Best Tags To Paste</p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {usefulTags.map((tag) => (
-              <span key={tag} className="rounded-lg border border-primary/20 bg-primary/10 px-2.5 py-1 text-xs font-mono text-primary/80">
-                {tag}
-              </span>
-            ))}
+      <div className="grid gap-6 xl:grid-cols-[1.15fr,0.85fr]">
+        <PanelCardSoft className="border border-white/10 p-5">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-[11px] uppercase tracking-[0.16em] text-white/40">Video Timeline</p>
+              <p className="mt-2 text-sm text-white/65">Hook windows, risk moments, cuts, and clip opportunities in the order they happen.</p>
+            </div>
+          </div>
+          <div className="mt-5 space-y-4">
+            {timelineMoments.length > 0 ? timelineMoments.map((moment, index) => {
+              const toneClass = moment.tone === "emerald"
+                ? "border-emerald-400/20 bg-emerald-400/10 text-emerald-100"
+                : moment.tone === "red"
+                  ? "border-red-400/20 bg-red-400/10 text-red-100"
+                  : moment.tone === "sky"
+                    ? "border-sky-400/20 bg-sky-400/10 text-sky-100"
+                    : "border-amber-400/20 bg-amber-400/10 text-amber-100";
+              return (
+                <div key={`${moment.time}-${index}`} className="grid gap-3 sm:grid-cols-[88px,1fr]">
+                  <div className="text-sm font-mono text-primary/80">{moment.time}</div>
+                  <div className="rounded-xl border border-white/8 bg-background/50 p-4">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${toneClass}`}>{moment.title}</span>
+                    </div>
+                    <p className="mt-3 text-sm leading-relaxed text-white/68">{moment.detail}</p>
+                  </div>
+                </div>
+              );
+            }) : (
+              <p className="text-sm text-white/45">No timestamped moments were surfaced for this video.</p>
+            )}
           </div>
         </PanelCardSoft>
-      ) : null}
+
+        <div className="space-y-6">
+          <PanelCardSoft className="border border-white/10 p-5">
+            <p className="text-[11px] uppercase tracking-[0.16em] text-white/40">Why The Score Landed Here</p>
+            <div className="mt-4 grid gap-3">
+              {scoreDrivers.length > 0 ? scoreDrivers.map((item) => (
+                <div key={item.label} className="rounded-xl border border-white/8 bg-background/50 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm font-semibold text-white">{item.label}</p>
+                    <span className="text-sm font-mono text-white/55">{item.metric.numeric}</span>
+                  </div>
+                  {item.metric?.assessment ? <p className="mt-2 text-xs leading-relaxed text-white/55">{item.metric.assessment}</p> : null}
+                </div>
+              )) : (
+                <p className="text-sm text-white/45">No score drivers were surfaced.</p>
+              )}
+              {strongest ? (
+                <div className="rounded-xl border border-emerald-400/20 bg-emerald-400/5 p-4">
+                  <p className="text-xs uppercase tracking-[0.16em] text-emerald-100/70">Working Well</p>
+                  <p className="mt-2 text-sm font-semibold text-white">{strongest.label}</p>
+                  <p className="mt-2 text-xs leading-relaxed text-white/55">{strongest.metric.assessment ?? "This is one of the cleanest parts of the current cut."}</p>
+                </div>
+              ) : null}
+            </div>
+          </PanelCardSoft>
+
+          <PanelCardSoft className="border border-white/10 p-5">
+            <p className="text-[11px] uppercase tracking-[0.16em] text-white/40">Publish Package</p>
+            <div className="mt-4 space-y-4">
+              <div className="rounded-xl border border-white/8 bg-background/50 p-4">
+                <p className="text-xs uppercase tracking-[0.16em] text-white/35">Title to test</p>
+                <p className="mt-2 text-sm font-semibold leading-relaxed text-white">{leadTitle ?? "Open the publish package tab for title options."}</p>
+              </div>
+              <div className="rounded-xl border border-white/8 bg-background/50 p-4">
+                <p className="text-xs uppercase tracking-[0.16em] text-white/35">Thumbnail angle</p>
+                <p className="mt-2 text-sm leading-relaxed text-white/68">{publishData?.packagingStrategy ?? editingData?.packagingAngle ?? primaryPromise}</p>
+              </div>
+              {usefulTags.length > 0 && (
+                <div className="rounded-xl border border-white/8 bg-background/50 p-4">
+                  <p className="text-xs uppercase tracking-[0.16em] text-white/35">Tags to paste</p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {usefulTags.map((tag) => (
+                      <span key={tag} className="rounded-lg border border-primary/20 bg-primary/10 px-2.5 py-1 text-xs font-mono text-primary/80">
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </PanelCardSoft>
+        </div>
+      </div>
+
+      <CollapsibleSection title="Analysis Details" subtitle="Format context, transcript weighting, and the signals this report emphasized." defaultOpen={false}>
+        <AnalysisModeCard profile={profile} />
+      </CollapsibleSection>
     </div>
   );
 }
@@ -759,17 +812,17 @@ function DecisionBar({ results, profile }: { results: any; profile?: any }) {
   const editingData = results?.editing ?? {};
   const qualityData = results?.quality ?? {};
   const publishData = results?.publish ? Object.values(results.publish)[0] as any : null;
-  const score = Number(qualityData?.score ?? qualityData?.overallScore ?? qualityData?.overallVisualScore ?? 0);
+  const score = overallScoreFromResults(results);
   const verdict = scoreVerdict(score);
   const topBlocker = collectTopFixes(results)[0] ?? qualityData?.topFix ?? editingData?.nowFixes?.[0] ?? "Review the detailed recommendations below.";
   const topOpportunity = editingData?.packagingAngle ?? publishData?.audiencePromise ?? editingData?.editingStyle ?? "Tighten the first 10 seconds and sharpen the promise.";
   const actionLabel = score >= 85 ? "Publish after a quick pass" : score >= 60 ? "Fix the opening, then publish" : "Rework before publishing";
 
   return (
-    <div className="sticky top-3 z-20 rounded-2xl border border-white/10 bg-background/90 p-4 backdrop-blur shadow-[0_20px_60px_rgba(0,0,0,0.25)]">
+    <div className="rounded-2xl border border-white/10 bg-background/75 p-4 backdrop-blur shadow-[0_20px_60px_rgba(0,0,0,0.18)]">
       <div className="grid gap-4 lg:grid-cols-[1.15fr,1fr,1fr,auto] lg:items-center">
         <div>
-          <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Publish Decision</p>
+          <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Verdict</p>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${verdict.tone}`}>{verdict.label}</span>
             {getFormatProfile(profile)?.contentFormat ? (
@@ -790,7 +843,7 @@ function DecisionBar({ results, profile }: { results: any; profile?: any }) {
         </div>
         <div className="rounded-xl border border-primary/20 bg-primary/10 px-4 py-3 text-center">
           <p className="text-3xl font-bold font-mono text-white">{score}</p>
-          <p className="mt-1 text-xs text-white/45">confidence score</p>
+          <p className="mt-1 text-xs text-white/45">readiness score</p>
           <p className="mt-2 text-xs font-semibold text-primary">{actionLabel}</p>
         </div>
       </div>
@@ -1148,7 +1201,7 @@ function QualityPanel({ data, isPaid, profile }: { data: any; isPaid: boolean; p
       )}
 
       {retentionPreview && (
-        <CollapsibleSection title="Forecast And Diagnostics" subtitle="Open only if you want deeper detail on projected retention and drop-off points." defaultOpen={false}>
+        <CollapsibleSection title="Where Viewers May Drop" subtitle="Projected retention dips and the fixes most likely to keep people watching." defaultOpen={false}>
           <BlurSection blur={!isPaid} feature="retention-forecast" label="Unlock retention forecasting with estimated viewer drop-off points and timestamp-specific fixes">
             <RetentionForecastCard data={retentionPreview} />
           </BlurSection>
@@ -1253,7 +1306,7 @@ function EditingPanel({ data, isPaid, profile }: { data: any; isPaid: boolean; p
           </div>
         </div>
       )}
-      <CollapsibleSection title="Detailed Edit Notes" subtitle="Hook options, cut list, and extra craft notes for when you want to go deeper." defaultOpen={false}>
+      <CollapsibleSection title="What To Cut And Rewrite" subtitle="Hook options, cut list, and the extra edit notes for your next pass." defaultOpen={false}>
         <div className="space-y-6">
           {data.rewrittenHook && isPaid && (
             <div className="p-4 rounded-xl bg-primary/8 border border-primary/20">
@@ -1494,7 +1547,7 @@ function PublishPanel({ data, platforms, isPaid, subtitleFile, videoFileName, pr
           )}
 
           {pData.description && (
-            <CollapsibleSection title="Description And Chapters" subtitle="Open when you want the full platform copy package." defaultOpen={false}>
+            <CollapsibleSection title="Copy/Paste Publish Package" subtitle="Description, chapters, and platform copy you can lift straight into upload." defaultOpen={false}>
               <div className="space-y-4">
                 <div className="rounded-xl bg-background/60 border border-white/8 p-4">
                   <div className="flex items-center justify-between mb-2">
@@ -2147,7 +2200,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
   const [file, setFile] = useState<File | null>(null);
   const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>([]);
   const [selectedModules, setSelectedModules] = useState<string[]>(["quality", "editing"]);
-  const [activeResultTab, setActiveResultTab] = useState<string>("quality");
+  const [activeResultTab, setActiveResultTab] = useState<string>("overview");
   const [showPlanModal, setShowPlanModal] = useState(false);
   const [showLimitModal, setShowLimitModal] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
@@ -2273,9 +2326,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
     if (hasResults) {
       clearPendingUploadRecovery();
       onDataReady();
-      const resultModules = getResultModules(displayedResults);
-      const firstModule = resultModules.find(m => (displayedResults as any)?.[m]);
-      setActiveResultTab(firstModule ?? "quality");
+      setActiveResultTab("overview");
 
       // Refresh plan usage so the Home page counter updates immediately
       window.dispatchEvent(new CustomEvent("daytabs:plan-updated"));
@@ -2522,6 +2573,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
   const resultModules = getResultModules(displayedResults);
   const resultPlatforms = getResultPlatforms(displayedResults);
   const availableResultTabs = RESULT_TABS.filter(t => {
+    if (t.id === "overview") return true;
     if (t.id === "transcript") return resultModules.includes("transcript") && !!(displayedResults as any)?.transcript && analysisProfile?.hasMeaningfulSpeech !== false;
     return resultModules.includes(t.id) && !!(displayedResults as any)?.[t.id];
   });
@@ -2738,12 +2790,11 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
           </div>
 
           <DecisionBar results={displayedResults} profile={analysisProfile} />
-          <AnalysisModeCard profile={analysisProfile} />
-          <CreatorReportIntro results={displayedResults} profile={analysisProfile} />
 
           {availableResultTabs.length > 0 && (
             <>
-              <div className="flex gap-1 border-b border-white/8 overflow-x-auto">
+              <div className="sticky top-3 z-10 -mt-1 overflow-x-auto rounded-2xl border border-white/8 bg-background/88 px-2 py-2 backdrop-blur">
+                <div className="flex gap-1 min-w-max">
                 {availableResultTabs.map(tab => {
                   const Icon = tab.icon;
                   const isActive = activeResultTab === tab.id;
@@ -2751,15 +2802,19 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
                     <button
                       key={tab.id}
                       onClick={() => setActiveResultTab(tab.id)}
-                      className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold transition-all border-b-2 -mb-px whitespace-nowrap ${isActive ? "text-primary border-primary" : "text-white/40 border-transparent hover:text-white/70"}`}
+                      className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-all whitespace-nowrap ${isActive ? "bg-primary/15 text-primary border border-primary/30" : "text-white/45 border border-transparent hover:text-white/75 hover:bg-white/[0.04]"}`}
                     >
                       <Icon className="w-4 h-4" />{tab.label}
                     </button>
                   );
                 })}
+                </div>
               </div>
               <AnimatePresence mode="wait">
                 <motion.div key={activeResultTab} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
+                  {activeResultTab === "overview"   && (
+                    <CreatorReportIntro results={displayedResults} profile={analysisProfile} />
+                  )}
                   {activeResultTab === "quality"    && <QualityPanel    data={(displayedResults as any).quality}    isPaid={isPaid} profile={analysisProfile} />}
                   {activeResultTab === "editing"    && <EditingPanel    data={(displayedResults as any).editing}    isPaid={isPaid} profile={analysisProfile} />}
                   {activeResultTab === "publish"    && <PublishPanel    data={(displayedResults as any).publish}    platforms={resultPlatforms} isPaid={isPaid} subtitleFile={(displayedResults as any).subtitleFile} videoFileName={file?.name} profile={analysisProfile} />}
@@ -2783,9 +2838,6 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
                 <p className="mt-2 text-sm text-white/55">Full report export with every available section from the live analysis view.</p>
               </div>
 
-              <AnalysisModeCard profile={analysisProfile} />
-              <CreatorReportIntro results={displayedResults} profile={analysisProfile} />
-
               {availableResultTabs.map((tab) => (
                 <section key={`pdf-${tab.id}`} data-pdf-tab-section="true" className="space-y-4 pt-2">
                   <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
@@ -2793,6 +2845,9 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
                     <h2 className="mt-2 text-2xl font-semibold text-white">{tab.label}</h2>
                   </div>
 
+                  {tab.id === "overview" && (
+                    <CreatorReportIntro results={displayedResults} profile={analysisProfile} />
+                  )}
                   {tab.id === "quality" && <QualityPanel data={(displayedResults as any).quality} isPaid={isPaid} profile={analysisProfile} />}
                   {tab.id === "editing" && <EditingPanel data={(displayedResults as any).editing} isPaid={isPaid} profile={analysisProfile} />}
                   {tab.id === "publish" && <PublishPanel data={(displayedResults as any).publish} platforms={resultPlatforms} isPaid={isPaid} subtitleFile={(displayedResults as any).subtitleFile} videoFileName={file?.name ?? fileNameRef.current} profile={analysisProfile} />}
