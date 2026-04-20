@@ -7,7 +7,7 @@ import {
   CheckCircle2, AlertTriangle, XCircle, RefreshCcw,
   Volume2, Eye, Zap, Hash, FileText, Lock, Download,
   Copy, Check, AlignLeft, ChevronRight, FileDown, X, History,
-  Lamp, Sun, Contrast, Image, Frame, Focus, Palette, Mic2, Waves, Gauge,
+  Lamp, Sun, Contrast, Image, Frame, Focus, Palette, Mic2, Waves, Gauge, ChevronDown,
 } from "lucide-react";
 import { useAnalysisPolling, useAnalysisResults } from "@/hooks/use-analysis";
 import { usePdfExport } from "@/hooks/use-pdf-export";
@@ -45,10 +45,10 @@ const MODULE_COLORS: Record<string, string> = {
 };
 
 const RESULT_TABS = [
-  { id: "quality",    label: "Quality",      icon: Shield },
-  { id: "editing",    label: "Editing",      icon: Scissors },
-  { id: "publish",    label: "Publish",      icon: TrendingUp },
-  { id: "shortClips", label: "Short Clips",  icon: Sparkles },
+  { id: "quality",    label: "Fix This Video", icon: Shield },
+  { id: "editing",    label: "Edit Style",     icon: Scissors },
+  { id: "publish",    label: "Get More Views", icon: TrendingUp },
+  { id: "shortClips", label: "Repurpose",      icon: Sparkles },
   { id: "transcript", label: "Transcript",   icon: AlignLeft },
 ];
 
@@ -477,8 +477,6 @@ function compactTags(tags: Array<{ tag?: string }> = [], max = 8) {
 function CreatorReportIntro({ results, profile }: { results: any; profile?: any }) {
   if (!results) return null;
   const formatProfile = getFormatProfile(profile);
-  const overallScore = Number(results?.quality?.score ?? results?.quality?.overallScore ?? results?.quality?.overallVisualScore ?? 0);
-  const verdict = scoreVerdict(overallScore);
   const editingData = results?.editing ?? {};
   const publishData = results?.publish ? Object.values(results.publish)[0] as any : null;
   const topFixes = collectTopFixes(results);
@@ -486,32 +484,6 @@ function CreatorReportIntro({ results, profile }: { results: any; profile?: any 
 
   return (
     <div className="space-y-5">
-      <PanelCard className="p-5">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="max-w-3xl">
-            <p className="text-xs uppercase tracking-[0.16em] text-white/40">Creator Summary</p>
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${verdict.tone}`}>{verdict.label}</span>
-              {formatProfile?.contentFormat ? (
-                <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-semibold text-white/70">
-                  {contentFormatLabel(formatProfile.contentFormat)}
-                </span>
-              ) : null}
-            </div>
-            <p className="mt-3 text-sm leading-6 text-white/70">{editingData?.viewPotential ?? verdict.description}</p>
-            {formatProfile?.viewerIntent ? (
-              <p className="mt-3 text-sm leading-6 text-white/55">
-                <span className="text-white/75">What this video is trying to do:</span> {formatProfile.viewerIntent}
-              </p>
-            ) : null}
-          </div>
-          <div className="min-w-[120px] rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-center">
-            <p className="text-4xl font-bold font-mono text-white">{overallScore}</p>
-            <p className="mt-1 text-xs text-white/40">overall score</p>
-          </div>
-        </div>
-      </PanelCard>
-
       <div className="grid gap-4 lg:grid-cols-3">
         <PanelCardSoft className="border border-white/10 p-4">
           <p className="text-[11px] uppercase tracking-[0.16em] text-white/40">Will This Get Views?</p>
@@ -549,6 +521,13 @@ function CreatorReportIntro({ results, profile }: { results: any; profile?: any 
           )}
         </PanelCardSoft>
       </div>
+
+      {formatProfile?.viewerIntent && (
+        <PanelCardSoft className="border border-white/10 p-4">
+          <p className="text-[11px] uppercase tracking-[0.16em] text-white/40">Viewer Intent</p>
+          <p className="mt-3 text-sm leading-6 text-white/65">{formatProfile.viewerIntent}</p>
+        </PanelCardSoft>
+      )}
 
       {topFixes.length ? (
         <PanelCardSoft className="border border-amber-400/20 bg-amber-400/5 p-5">
@@ -588,6 +567,81 @@ function LimitedSpeechNotice({ profile, children }: { profile?: any; children: R
       <div>
         <p className="text-xs text-white/40 uppercase tracking-wider mb-1">Limited transcript signal</p>
         <p className="text-sm text-white/70 leading-relaxed">{children}</p>
+      </div>
+    </div>
+  );
+}
+
+function CollapsibleSection({
+  title,
+  subtitle,
+  defaultOpen = false,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+
+  return (
+    <div className="rounded-2xl border border-white/8 bg-white/[0.02]">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left"
+      >
+        <div>
+          <p className="text-xs uppercase tracking-[0.16em] text-white/35">{title}</p>
+          {subtitle ? <p className="mt-1 text-xs text-white/40">{subtitle}</p> : null}
+        </div>
+        <ChevronDown className={`h-4 w-4 shrink-0 text-white/35 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open ? <div className="border-t border-white/8 px-4 py-4">{children}</div> : null}
+    </div>
+  );
+}
+
+function DecisionBar({ results, profile }: { results: any; profile?: any }) {
+  if (!results) return null;
+  const editingData = results?.editing ?? {};
+  const qualityData = results?.quality ?? {};
+  const publishData = results?.publish ? Object.values(results.publish)[0] as any : null;
+  const score = Number(qualityData?.score ?? qualityData?.overallScore ?? qualityData?.overallVisualScore ?? 0);
+  const verdict = scoreVerdict(score);
+  const topBlocker = collectTopFixes(results)[0] ?? qualityData?.topFix ?? editingData?.nowFixes?.[0] ?? "Review the detailed recommendations below.";
+  const topOpportunity = editingData?.packagingAngle ?? publishData?.audiencePromise ?? editingData?.editingStyle ?? "Tighten the first 10 seconds and sharpen the promise.";
+  const actionLabel = score >= 85 ? "Publish after a quick pass" : score >= 60 ? "Fix the opening, then publish" : "Rework before publishing";
+
+  return (
+    <div className="sticky top-3 z-20 rounded-2xl border border-white/10 bg-background/90 p-4 backdrop-blur">
+      <div className="grid gap-4 lg:grid-cols-[1.15fr,1fr,1fr,auto] lg:items-center">
+        <div>
+          <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Decision</p>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${verdict.tone}`}>{verdict.label}</span>
+            {getFormatProfile(profile)?.contentFormat ? (
+              <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-semibold text-white/70">
+                {contentFormatLabel(getFormatProfile(profile)?.contentFormat)}
+              </span>
+            ) : null}
+          </div>
+          <p className="mt-3 text-sm text-white/70">{editingData?.viewPotential ?? verdict.description}</p>
+        </div>
+        <div>
+          <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Top Blocker</p>
+          <p className="mt-2 text-sm text-white/75">{topBlocker}</p>
+        </div>
+        <div>
+          <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Top Opportunity</p>
+          <p className="mt-2 text-sm text-white/75">{topOpportunity}</p>
+        </div>
+        <div className="rounded-xl border border-primary/20 bg-primary/10 px-4 py-3 text-center">
+          <p className="text-3xl font-bold font-mono text-white">{score}</p>
+          <p className="mt-1 text-xs text-white/45">overall score</p>
+          <p className="mt-2 text-xs font-semibold text-primary">{actionLabel}</p>
+        </div>
       </div>
     </div>
   );
@@ -821,6 +875,8 @@ function QualityPanel({ data, isPaid, profile }: { data: any; isPaid: boolean; p
   const surfacedAudioMetrics = audioMetricDefs.filter((item) => shouldSurfaceMetric(item.metric));
   const visibleAudioMetrics = surfacedAudioMetrics.length > 0 ? surfacedAudioMetrics : audioMetricDefs.slice(0, Math.min(3, audioMetricDefs.length));
   const hiddenAudioCount = Math.max(0, audioMetricDefs.length - visibleAudioMetrics.length);
+  const workingWellVisual = visualMetricDefs.filter((item) => !visibleVisualMetrics.some((visible) => visible.title === item.title)).map((item) => item.title);
+  const workingWellAudio = audioMetricDefs.filter((item) => !visibleAudioMetrics.some((visible) => visible.title === item.title)).map((item) => item.title);
   const retentionPreview = data.retention ?? (!isPaid ? {
     estimatedRetentionPct: 43,
     retentionGrade: "C",
@@ -887,46 +943,65 @@ function QualityPanel({ data, isPaid, profile }: { data: any; isPaid: boolean; p
         </div>
       </div>
 
-      <div className="space-y-5">
-        <div className="space-y-3">
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-xs text-white/35 uppercase tracking-wider">Visual Quality</p>
-            {hiddenVisualCount > 0 && <p className="text-xs text-white/30">{hiddenVisualCount} strong metrics hidden to keep this focused</p>}
+      <CollapsibleSection
+        title="Main Issues"
+        subtitle="Only the weaker metrics are shown first so you can focus on what actually needs work."
+        defaultOpen
+      >
+        <div className="space-y-5">
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs text-white/35 uppercase tracking-wider">Visual Quality</p>
+              {hiddenVisualCount > 0 && <p className="text-xs text-white/30">{hiddenVisualCount} strong metrics hidden</p>}
+            </div>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {visibleVisualMetrics.map((item) => (
+                <MetricCard key={item.title} title={item.title} metric={item.metric} />
+              ))}
+            </div>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-            {visibleVisualMetrics.map((item) => (
-              <MetricCard key={item.title} title={item.title} metric={item.metric} />
-            ))}
+
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs text-white/35 uppercase tracking-wider">Audio Quality</p>
+              {hiddenAudioCount > 0 && <p className="text-xs text-white/30">{hiddenAudioCount} strong metrics hidden</p>}
+            </div>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {visibleAudioMetrics.map((item) =>
+                item.type === "filler"
+                  ? <FillerCard key={item.title} metric={item.metric} />
+                  : <MetricCard key={item.title} title={item.title} metric={item.metric} />
+              )}
+            </div>
           </div>
         </div>
+      </CollapsibleSection>
 
-        <div className="space-y-3">
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-xs text-white/35 uppercase tracking-wider">Audio Quality</p>
-            {hiddenAudioCount > 0 && <p className="text-xs text-white/30">{hiddenAudioCount} strong metrics hidden to keep this focused</p>}
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-            {visibleAudioMetrics.map((item) =>
-              item.type === "filler"
-                ? <FillerCard key={item.title} metric={item.metric} />
-                : <MetricCard key={item.title} title={item.title} metric={item.metric} />
-            )}
-          </div>
-        </div>
-      </div>
-
-      {retentionPreview && (
-        <BlurSection blur={!isPaid} feature="retention-forecast" label="Unlock retention forecasting with estimated viewer drop-off points and timestamp-specific fixes">
-          <RetentionForecastCard data={retentionPreview} />
-        </BlurSection>
+      {(workingWellVisual.length > 0 || workingWellAudio.length > 0) && (
+        <PanelCardSoft className="border border-white/10 p-4">
+          <p className="text-[11px] uppercase tracking-[0.16em] text-white/40">Working Well</p>
+          <p className="mt-3 text-sm text-white/65">
+            {[...workingWellVisual, ...workingWellAudio].join(", ")}
+          </p>
+        </PanelCardSoft>
       )}
 
       {data.colorGradingRecommendation && isPaid && (
-        <div className="p-4 rounded-xl bg-background/60 border border-white/8">
-          <p className="text-xs text-white/40 uppercase tracking-wider mb-2 flex items-center gap-1.5"><Eye className="w-3.5 h-3.5" />Color Grading Recommendation</p>
-          <p className="text-sm text-white/70">{gradingGuidance.fixNow || gradingGuidance.plain}</p>
-          {gradingGuidance.nextVideo && <p className="mt-2 text-xs text-white/55"><span className="text-white/35">Next video:</span> {gradingGuidance.nextVideo}</p>}
-        </div>
+        <CollapsibleSection title="Color And Finish" subtitle="Post-production polish and next-shoot prevention." defaultOpen={false}>
+          <div className="rounded-xl bg-background/60 border border-white/8 p-4">
+            <p className="text-xs text-white/40 uppercase tracking-wider mb-2 flex items-center gap-1.5"><Eye className="w-3.5 h-3.5" />Color Grading Recommendation</p>
+            <p className="text-sm text-white/70">{gradingGuidance.fixNow || gradingGuidance.plain}</p>
+            {gradingGuidance.nextVideo && <p className="mt-2 text-xs text-white/55"><span className="text-white/35">Next video:</span> {gradingGuidance.nextVideo}</p>}
+          </div>
+        </CollapsibleSection>
+      )}
+
+      {retentionPreview && (
+        <CollapsibleSection title="Forecast And Diagnostics" subtitle="Open only if you want deeper detail on projected retention and drop-off points." defaultOpen={false}>
+          <BlurSection blur={!isPaid} feature="retention-forecast" label="Unlock retention forecasting with estimated viewer drop-off points and timestamp-specific fixes">
+            <RetentionForecastCard data={retentionPreview} />
+          </BlurSection>
+        </CollapsibleSection>
       )}
     </div>
   );
@@ -1027,78 +1102,82 @@ function EditingPanel({ data, isPaid, profile }: { data: any; isPaid: boolean; p
           </div>
         </div>
       )}
-      {data.rewrittenHook && isPaid && (
-        <div className="p-4 rounded-xl bg-primary/8 border border-primary/20">
-          <p className="text-xs text-primary/70 uppercase tracking-wider mb-2 flex items-center gap-1.5"><Wand2 className="w-3.5 h-3.5" />Rewritten Hook</p>
-          <p className="text-sm text-white/90 font-medium leading-relaxed">"{data.rewrittenHook}"</p>
-        </div>
-      )}
+      <CollapsibleSection title="Detailed Edit Notes" subtitle="Hook options, cut list, and extra craft notes for when you want to go deeper." defaultOpen={false}>
+        <div className="space-y-6">
+          {data.rewrittenHook && isPaid && (
+            <div className="p-4 rounded-xl bg-primary/8 border border-primary/20">
+              <p className="text-xs text-primary/70 uppercase tracking-wider mb-2 flex items-center gap-1.5"><Wand2 className="w-3.5 h-3.5" />Rewritten Hook</p>
+              <p className="text-sm text-white/90 font-medium leading-relaxed">"{data.rewrittenHook}"</p>
+            </div>
+          )}
 
-      {hooks.length > 0 && (
-        <div>
-          <h3 className="text-sm font-semibold text-white/60 uppercase tracking-wider mb-3 flex items-center gap-2"><Zap className="w-4 h-4 text-yellow-400" />Hook Moments</h3>
-          <div className="space-y-2">
-            {[hooks[0]].filter(Boolean).map((h: any, i: number) => (
-              <div key={i} className="flex items-start gap-3 p-3 rounded-xl bg-yellow-400/5 border border-yellow-400/15">
-                <span className="text-xs font-mono text-yellow-400 mt-0.5 min-w-[50px]">{h.start ?? `#${i + 1}`}</span>
-                <p className="text-sm text-white/70">{h.text ?? h.description ?? h}</p>
-              </div>
-            ))}
-            {hooks.length > 1 && (
-              <BlurSection blur={!isPaid} feature="hook-moments" label="Unlock all hook moments, see every high-value clip opportunity in your video">
-                <div className="space-y-2">
-                  {hooks.slice(1).map((h: any, i: number) => (
-                    <div key={i} className="flex items-start gap-3 p-3 rounded-xl bg-yellow-400/5 border border-yellow-400/15">
-                      <span className="text-xs font-mono text-yellow-400 mt-0.5 min-w-[50px]">{h.start ?? `#${i + 2}`}</span>
-                      <p className="text-sm text-white/70">{h.text ?? h.description ?? h}</p>
+          {hooks.length > 0 && (
+            <div>
+              <h3 className="text-sm font-semibold text-white/60 uppercase tracking-wider mb-3 flex items-center gap-2"><Zap className="w-4 h-4 text-yellow-400" />Hook Moments</h3>
+              <div className="space-y-2">
+                {[hooks[0]].filter(Boolean).map((h: any, i: number) => (
+                  <div key={i} className="flex items-start gap-3 p-3 rounded-xl bg-yellow-400/5 border border-yellow-400/15">
+                    <span className="text-xs font-mono text-yellow-400 mt-0.5 min-w-[50px]">{h.start ?? `#${i + 1}`}</span>
+                    <p className="text-sm text-white/70">{h.text ?? h.description ?? h}</p>
+                  </div>
+                ))}
+                {hooks.length > 1 && (
+                  <BlurSection blur={!isPaid} feature="hook-moments" label="Unlock all hook moments, see every high-value clip opportunity in your video">
+                    <div className="space-y-2">
+                      {hooks.slice(1).map((h: any, i: number) => (
+                        <div key={i} className="flex items-start gap-3 p-3 rounded-xl bg-yellow-400/5 border border-yellow-400/15">
+                          <span className="text-xs font-mono text-yellow-400 mt-0.5 min-w-[50px]">{h.start ?? `#${i + 2}`}</span>
+                          <p className="text-sm text-white/70">{h.text ?? h.description ?? h}</p>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-              </BlurSection>
-            )}
-          </div>
-        </div>
-      )}
-
-      {data.removeSections?.length > 0 && (
-        <div>
-          <h3 className="text-sm font-semibold text-white/60 uppercase tracking-wider mb-3 flex items-center gap-2"><XCircle className="w-4 h-4 text-red-400" />Sections to Cut</h3>
-          <div className="space-y-2">
-            {data.removeSections.slice(0, 8).map((s: any, i: number) => (
-              <div key={i} className="flex items-start gap-3 p-3 rounded-xl bg-red-400/5 border border-red-400/15">
-                {(s.start || s.end) && <span className="text-xs font-mono text-red-400 mt-0.5 min-w-[80px]">{s.start} → {s.end}</span>}
-                <p className="text-sm text-white/70">{s.reason ?? s.description ?? s}</p>
+                  </BlurSection>
+                )}
               </div>
-            ))}
-          </div>
-        </div>
-      )}
+            </div>
+          )}
 
-      {suggestions.length > 0 && (
-        <div>
-          <h3 className="text-sm font-semibold text-white/60 uppercase tracking-wider mb-3 flex items-center gap-2"><Scissors className="w-4 h-4 text-primary" />Editing Tips</h3>
-          <div className="grid gap-2">
-            {firstSuggestion && (
-              <div className="flex items-start gap-2 p-3 rounded-xl bg-primary/5 border border-primary/15">
-                <span className="text-primary/60 text-sm mt-0.5">→</span>
-                <p className="text-sm text-white/70">{firstSuggestion}</p>
+          {data.removeSections?.length > 0 && (
+            <div>
+              <h3 className="text-sm font-semibold text-white/60 uppercase tracking-wider mb-3 flex items-center gap-2"><XCircle className="w-4 h-4 text-red-400" />Sections to Cut</h3>
+              <div className="space-y-2">
+                {data.removeSections.slice(0, 8).map((s: any, i: number) => (
+                  <div key={i} className="flex items-start gap-3 p-3 rounded-xl bg-red-400/5 border border-red-400/15">
+                    {(s.start || s.end) && <span className="text-xs font-mono text-red-400 mt-0.5 min-w-[80px]">{s.start} → {s.end}</span>}
+                    <p className="text-sm text-white/70">{s.reason ?? s.description ?? s}</p>
+                  </div>
+                ))}
               </div>
-            )}
-            {extraSuggestions.length > 0 && (
-              <BlurSection blur={!isPaid} feature="editing-suggestions" label={`Unlock ${extraSuggestions.length} more editing tips with specific timestamps and cuts`}>
-                <div className="grid gap-2">
-                  {extraSuggestions.map((s: string, i: number) => (
-                    <div key={i} className="flex items-start gap-2 p-3 rounded-xl bg-primary/5 border border-primary/15">
-                      <span className="text-primary/60 text-sm mt-0.5">→</span>
-                      <p className="text-sm text-white/70">{s}</p>
+            </div>
+          )}
+
+          {suggestions.length > 0 && (
+            <div>
+              <h3 className="text-sm font-semibold text-white/60 uppercase tracking-wider mb-3 flex items-center gap-2"><Scissors className="w-4 h-4 text-primary" />Editing Tips</h3>
+              <div className="grid gap-2">
+                {firstSuggestion && (
+                  <div className="flex items-start gap-2 p-3 rounded-xl bg-primary/5 border border-primary/15">
+                    <span className="text-primary/60 text-sm mt-0.5">→</span>
+                    <p className="text-sm text-white/70">{firstSuggestion}</p>
+                  </div>
+                )}
+                {extraSuggestions.length > 0 && (
+                  <BlurSection blur={!isPaid} feature="editing-suggestions" label={`Unlock ${extraSuggestions.length} more editing tips with specific timestamps and cuts`}>
+                    <div className="grid gap-2">
+                      {extraSuggestions.map((s: string, i: number) => (
+                        <div key={i} className="flex items-start gap-2 p-3 rounded-xl bg-primary/5 border border-primary/15">
+                          <span className="text-primary/60 text-sm mt-0.5">→</span>
+                          <p className="text-sm text-white/70">{s}</p>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-              </BlurSection>
-            )}
-          </div>
+                  </BlurSection>
+                )}
+              </div>
+            </div>
+          )}
         </div>
-      )}
+      </CollapsibleSection>
     </div>
   );
 }
@@ -1128,10 +1207,11 @@ function PublishPanel({ data, platforms, isPaid, subtitleFile, videoFileName, pr
 
   const titles: string[] = pData?.titles ?? [];
   const firstTitle = titles[0];
-  const extraTitles = titles.slice(1);
+  const priorityTitles = titles.slice(0, 3);
+  const extraTitles = titles.slice(3);
   const hashtags: Array<{ tag: string; effect?: string }> = pData?.hashtags ?? [];
-  const firstTags = hashtags.slice(0, 3);
-  const extraTags = hashtags.slice(3);
+  const firstTags = hashtags.slice(0, 8);
+  const extraTags = hashtags.slice(8);
 
   const titleStrategies: string[] = pData?.titleStrategies ?? ["Curiosity gap", "How-to", "Number-based", "Problem/solution", "Bold claim"];
 
@@ -1191,7 +1271,7 @@ function PublishPanel({ data, platforms, isPaid, subtitleFile, videoFileName, pr
       </div>
       {pData && (
         <div className="space-y-4">
-          {firstTitle && (
+          {priorityTitles.length > 0 && (
             <div className="p-4 rounded-xl bg-background/60 border border-white/8">
               <div className="flex items-center justify-between mb-3">
                 <p className="text-xs text-white/40 uppercase tracking-wider flex items-center gap-1.5"><FileText className="w-3.5 h-3.5" />Titles for {platformLabel}</p>
@@ -1199,54 +1279,34 @@ function PublishPanel({ data, platforms, isPaid, subtitleFile, videoFileName, pr
                   {copiedSection === "titles" ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
                 </button>
               </div>
-              <div className="space-y-2">
-                <div className="flex items-start gap-2 group">
-                  <div className="flex-1">
-                    {isPaid && titleStrategies[0] && (
-                      <p className="text-[10px] text-primary/50 uppercase tracking-wider mb-0.5">{titleStrategies[0]}</p>
+              <div className="grid gap-3 md:grid-cols-3">
+                {priorityTitles.map((title: string, index: number) => (
+                  <button
+                    key={`${index}-${title}`}
+                    type="button"
+                    onClick={() => copyText(title, `title-${index}`)}
+                    className="rounded-xl border border-white/10 bg-black/10 p-4 text-left transition-all hover:border-primary/25 hover:bg-primary/5"
+                  >
+                    {titleStrategies[index] && (
+                      <p className="text-[10px] text-primary/50 uppercase tracking-wider mb-1">{titleStrategies[index]}</p>
                     )}
-                    <p className="text-sm text-white/80">{firstTitle}</p>
-                  </div>
-                </div>
-                {extraTitles.length > 0 && (
-                  <BlurSection blur={!isPaid} feature="title-options" label={`Get ${extraTitles.length} more title strategies: how-to, number-based, problem/solution, bold claim`}>
-                    <div className="space-y-2 mt-2">
-                      {extraTitles.map((t: string, i: number) => (
-                        <div key={i} className="flex items-start gap-2">
-                          <div className="flex-1">
-                            {titleStrategies[i + 1] && <p className="text-[10px] text-primary/50 uppercase tracking-wider mb-0.5">{titleStrategies[i + 1]}</p>}
-                            <p className="text-sm text-white/80">{t}</p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </BlurSection>
-                )}
-              </div>
-            </div>
-          )}
-
-          {pData.description && (
-            <div className="p-4 rounded-xl bg-background/60 border border-white/8">
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-xs text-white/40 uppercase tracking-wider flex items-center gap-1.5"><FileText className="w-3.5 h-3.5" />Description</p>
-                {isPaid && (
-                  <button onClick={() => copyText(pData.description, "desc")} className="text-white/30 hover:text-white/60 transition-colors">
-                    {copiedSection === "desc" ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    <p className="text-sm text-white/80 leading-relaxed">{title}</p>
                   </button>
-                )}
+                ))}
               </div>
-              {isPaid ? (
-                <p className="text-sm text-white/70 whitespace-pre-line leading-relaxed">{pData.description}</p>
-              ) : (
-                <>
-                  <p className="text-sm text-white/70 leading-relaxed">
-                    {pData.description.split(/[.!?]/).slice(0, 2).join(". ") + "."}
-                  </p>
-                  <BlurSection blur feature="full-description" label="Get the full description with chapters, links section, and CTA, 150-400 words">
-                    <p className="text-sm text-white/70 whitespace-pre-line leading-relaxed mt-2">{pData.description}</p>
-                  </BlurSection>
-                </>
+              {extraTitles.length > 0 && (
+                <CollapsibleSection title="More Title Options" subtitle="Open for additional variations and angles." defaultOpen={false}>
+                  <div className="space-y-2">
+                    {extraTitles.map((t: string, i: number) => (
+                      <div key={i} className="flex items-start gap-2">
+                        <div className="flex-1">
+                          {titleStrategies[i + 3] && <p className="text-[10px] text-primary/50 uppercase tracking-wider mb-0.5">{titleStrategies[i + 3]}</p>}
+                          <p className="text-sm text-white/80">{t}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </CollapsibleSection>
               )}
             </div>
           )}
@@ -1269,17 +1329,60 @@ function PublishPanel({ data, platforms, isPaid, subtitleFile, videoFileName, pr
                 ))}
               </div>
               {extraTags.length > 0 && (
-                <BlurSection blur={!isPaid} feature="tags" label={`Get ${extraTags.length + 3} more tags optimized for your niche, from broad to long-tail`}>
-                  <div className="flex flex-wrap gap-1.5 mt-2">
+                <CollapsibleSection title="More Tags" subtitle="Keep the first set focused, then expand if you need a broader tag bank." defaultOpen={false}>
+                  <div className="flex flex-wrap gap-1.5">
                     {extraTags.map((tag: { tag: string }, i: number) => (
                       <span key={i} className="px-2.5 py-1 bg-primary/10 border border-primary/20 text-primary/80 rounded-lg text-xs font-mono">
                         {String(tag.tag ?? "").replace(/^#+/, "")}
                       </span>
                     ))}
                   </div>
-                </BlurSection>
+                </CollapsibleSection>
               )}
             </div>
+          )}
+
+          {pData.description && (
+            <CollapsibleSection title="Description And Chapters" subtitle="Open when you want the full platform copy package." defaultOpen={false}>
+              <div className="space-y-4">
+                <div className="rounded-xl bg-background/60 border border-white/8 p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-xs text-white/40 uppercase tracking-wider flex items-center gap-1.5"><FileText className="w-3.5 h-3.5" />Description</p>
+                    {isPaid && (
+                      <button onClick={() => copyText(pData.description, "desc")} className="text-white/30 hover:text-white/60 transition-colors">
+                        {copiedSection === "desc" ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
+                      </button>
+                    )}
+                  </div>
+                  {isPaid ? (
+                    <p className="text-sm text-white/70 whitespace-pre-line leading-relaxed">{pData.description}</p>
+                  ) : (
+                    <>
+                      <p className="text-sm text-white/70 leading-relaxed">
+                        {pData.description.split(/[.!?]/).slice(0, 2).join(". ") + "."}
+                      </p>
+                      <BlurSection blur feature="full-description" label="Get the full description with chapters, links section, and CTA, 150-400 words">
+                        <p className="text-sm text-white/70 whitespace-pre-line leading-relaxed mt-2">{pData.description}</p>
+                      </BlurSection>
+                    </>
+                  )}
+                </div>
+
+                {pData.timestamps?.length > 0 && (
+                  <div className="rounded-xl bg-background/60 border border-white/8 p-4">
+                    <p className="text-xs text-white/40 uppercase tracking-wider mb-3 flex items-center gap-1.5"><Eye className="w-3.5 h-3.5" />Chapter Timestamps</p>
+                    <div className="space-y-1.5">
+                      {pData.timestamps.map((ts: { time: string; label: string }, i: number) => (
+                        <div key={i} className="flex items-center gap-3">
+                          <span className="text-xs font-mono text-primary/70 min-w-[48px]">{ts.time}</span>
+                          <span className="text-xs text-white/50">{ts.label}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </CollapsibleSection>
           )}
 
           {showSubtitleFile && (
@@ -1319,20 +1422,6 @@ function PublishPanel({ data, platforms, isPaid, subtitleFile, videoFileName, pr
                   </div>
                 </BlurSection>
               )}
-            </div>
-          )}
-
-          {pData.timestamps?.length > 0 && (
-            <div className="p-4 rounded-xl bg-background/60 border border-white/8">
-              <p className="text-xs text-white/40 uppercase tracking-wider mb-3 flex items-center gap-1.5"><Eye className="w-3.5 h-3.5" />Chapter Timestamps</p>
-              <div className="space-y-1.5">
-                {pData.timestamps.map((ts: { time: string; label: string }, i: number) => (
-                  <div key={i} className="flex items-center gap-3">
-                    <span className="text-xs font-mono text-primary/70 min-w-[48px]">{ts.time}</span>
-                    <span className="text-xs text-white/50">{ts.label}</span>
-                  </div>
-                ))}
-              </div>
             </div>
           )}
         </div>
@@ -2497,6 +2586,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
             </div>
           </div>
 
+          <DecisionBar results={displayedResults} profile={analysisProfile} />
           <AnalysisModeCard profile={analysisProfile} />
           <CreatorReportIntro results={displayedResults} profile={analysisProfile} />
 
