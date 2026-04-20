@@ -33,6 +33,7 @@ const PLATFORMS = [
 const MODULES = [
   { id: "quality",    label: "Quality Check",       icon: Shield,    desc: "Lighting, audio, framing, and pacing scores",    color: "blue",   freeIncluded: true  },
   { id: "editing",    label: "Editing Suggestions",  icon: Scissors,  desc: "Hook moments, cut points, and B-roll cues",      color: "yellow", freeIncluded: true  },
+  { id: "transcript", label: "Transcript",           icon: AlignLeft, desc: "Get the spoken transcript with timestamps",       color: "blue",   freeIncluded: true  },
   { id: "publish",    label: "Publish Package",      icon: TrendingUp, desc: "Titles, descriptions, and tags per platform",  color: "green",  freeIncluded: false },
 ];
 
@@ -466,15 +467,22 @@ function collectTopFixes(results: any) {
   return fixes.slice(0, 3);
 }
 
+function compactTags(tags: Array<{ tag?: string }> = [], max = 8) {
+  return tags
+    .map((item) => String(item?.tag ?? "").replace(/^#+/, "").trim())
+    .filter(Boolean)
+    .slice(0, max);
+}
+
 function CreatorReportIntro({ results, profile }: { results: any; profile?: any }) {
   if (!results) return null;
   const formatProfile = getFormatProfile(profile);
   const overallScore = Number(results?.quality?.score ?? results?.quality?.overallScore ?? results?.quality?.overallVisualScore ?? 0);
   const verdict = scoreVerdict(overallScore);
-  const strongest = strongestMetric(results?.quality, profile);
+  const editingData = results?.editing ?? {};
+  const publishData = results?.publish ? Object.values(results.publish)[0] as any : null;
   const topFixes = collectTopFixes(results);
-  const firstRisk = results?.quality?.retention?.dropOffMoments?.[0] ?? null;
-  const bestClip = results?.shortClips?.clips?.[0] ?? results?.editing?.hooks?.[0] ?? null;
+  const usefulTags = compactTags(publishData?.hashtags ?? []);
 
   return (
     <div className="space-y-5">
@@ -490,7 +498,7 @@ function CreatorReportIntro({ results, profile }: { results: any; profile?: any 
                 </span>
               ) : null}
             </div>
-            <p className="mt-3 text-sm leading-6 text-white/70">{verdict.description}</p>
+            <p className="mt-3 text-sm leading-6 text-white/70">{editingData?.viewPotential ?? verdict.description}</p>
             {formatProfile?.viewerIntent ? (
               <p className="mt-3 text-sm leading-6 text-white/55">
                 <span className="text-white/75">What this video is trying to do:</span> {formatProfile.viewerIntent}
@@ -506,51 +514,64 @@ function CreatorReportIntro({ results, profile }: { results: any; profile?: any 
 
       <div className="grid gap-4 lg:grid-cols-3">
         <PanelCardSoft className="border border-white/10 p-4">
-          <p className="text-[11px] uppercase tracking-[0.16em] text-white/40">Strongest part</p>
-          {strongest ? (
+          <p className="text-[11px] uppercase tracking-[0.16em] text-white/40">Will This Get Views?</p>
+          {editingData?.viewPotential ? (
             <>
-              <p className="mt-3 text-lg font-semibold text-white">{strongest.label}</p>
-              <p className="mt-2 text-sm text-white/60">{strongest.metric.assessment ?? "This is one of the cleanest parts of the current cut."}</p>
+              <p className="mt-3 text-lg font-semibold text-white">{editingData.topic ?? "Current cut outlook"}</p>
+              <p className="mt-2 text-sm text-white/60">{editingData.viewPotential}</p>
             </>
           ) : (
-            <p className="mt-3 text-sm text-white/55">Once more evidence is available, this section will call out the strongest signal in the video.</p>
+            <p className="mt-3 text-sm text-white/55">This section will tell you if the current structure has a real chance to pull views and why.</p>
           )}
         </PanelCardSoft>
 
         <PanelCardSoft className="border border-white/10 p-4">
-          <p className="text-[11px] uppercase tracking-[0.16em] text-white/40">Main retention risk</p>
-          {firstRisk ? (
+          <p className="text-[11px] uppercase tracking-[0.16em] text-white/40">Best Edit Style</p>
+          {editingData?.editingStyle ? (
             <>
-              <p className="mt-3 text-lg font-semibold text-white">{firstRisk.at}</p>
-              <p className="mt-2 text-sm text-white/60">{firstRisk.reason}</p>
+              <p className="mt-3 text-lg font-semibold text-white">{editingData.editingStyle}</p>
+              <p className="mt-2 text-sm text-white/60">{editingData.pacingGuidance ?? editingData.motionGuidance ?? "This tells the editor how aggressively or simply the video should be cut."}</p>
             </>
           ) : (
-            <p className="mt-3 text-sm text-white/55">No obvious early drop-off point was detected from the current report.</p>
+            <p className="mt-3 text-sm text-white/55">This section will explain what editing style this format actually wants.</p>
           )}
         </PanelCardSoft>
 
         <PanelCardSoft className="border border-white/10 p-4">
-          <p className="text-[11px] uppercase tracking-[0.16em] text-white/40">Best reusable moment</p>
-          {bestClip ? (
+          <p className="text-[11px] uppercase tracking-[0.16em] text-white/40">Packaging Should Sell</p>
+          {editingData?.packagingAngle || publishData?.audiencePromise ? (
             <>
-              <p className="mt-3 text-lg font-semibold text-white">{bestClip.start ?? "Clip"}</p>
-              <p className="mt-2 text-sm text-white/60">{bestClip.title ?? bestClip.text ?? bestClip.description ?? "This moment has the most repurposing potential in the current cut."}</p>
+              <p className="mt-3 text-lg font-semibold text-white">{publishData?.audiencePromise ?? "Core click promise"}</p>
+              <p className="mt-2 text-sm text-white/60">{editingData.packagingAngle ?? publishData?.packagingStrategy ?? "This section should tell you what promise the title and packaging need to make."}</p>
             </>
           ) : (
-            <p className="mt-3 text-sm text-white/55">No standout clip was extracted yet. Short clip ideas will appear here when available.</p>
+            <p className="mt-3 text-sm text-white/55">This section will tell you what the title, thumbnail, and description should actually promise.</p>
           )}
         </PanelCardSoft>
       </div>
 
       {topFixes.length ? (
         <PanelCardSoft className="border border-amber-400/20 bg-amber-400/5 p-5">
-          <p className="text-[11px] uppercase tracking-[0.16em] text-amber-200/70">Top 3 fixes</p>
+          <p className="text-[11px] uppercase tracking-[0.16em] text-amber-200/70">Fix First</p>
           <div className="mt-4 grid gap-3 md:grid-cols-3">
             {topFixes.map((fix, index) => (
               <div key={`${index}-${fix}`} className="rounded-xl border border-white/10 bg-black/10 p-4">
                 <p className="text-[10px] uppercase tracking-[0.16em] text-white/35">Fix {index + 1}</p>
                 <p className="mt-2 text-sm leading-6 text-white/75">{fix}</p>
               </div>
+            ))}
+          </div>
+        </PanelCardSoft>
+      ) : null}
+
+      {usefulTags.length ? (
+        <PanelCardSoft className="border border-white/10 p-4">
+          <p className="text-[11px] uppercase tracking-[0.16em] text-white/40">Best Tags To Use</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {usefulTags.map((tag) => (
+              <span key={tag} className="rounded-lg border border-primary/20 bg-primary/10 px-2.5 py-1 text-xs font-mono text-primary/80">
+                {tag}
+              </span>
             ))}
           </div>
         </PanelCardSoft>
@@ -641,6 +662,12 @@ function QualityMetricGrid({ data, profile }: { data: any; profile?: any }) {
       {data.stability && <MetricCard title="Stability" metric={data.stability} />}
     </>
   );
+}
+
+function shouldSurfaceMetric(metric: any) {
+  if (!metric) return false;
+  if (typeof metric.numeric === "number") return metric.numeric < 90;
+  return metric.severity ? metric.severity !== "excellent" : true;
 }
 
 function FillerCard({ metric }: { metric: any }) {
@@ -770,6 +797,30 @@ function QualityPanel({ data, isPaid, profile }: { data: any; isPaid: boolean; p
   const scoreColor = overallScore >= 85 ? "text-green-400" : overallScore >= 60 ? "text-yellow-400" : "text-red-400";
   const topFixGuidance = parseDualGuidance(data.topFix);
   const gradingGuidance = parseDualGuidance(data.colorGradingRecommendation);
+  const visualMetricDefs = [
+    { title: "Lighting", metric: data.lighting },
+    { title: "Brightness", metric: data.brightness },
+    { title: "Contrast", metric: data.contrast },
+    { title: "Color Temperature", metric: data.colorTemperature ? { numeric: 75, assessment: data.colorTemperature?.assessment, suggestions: data.colorTemperature?.suggestions, severity: data.colorTemperature?.severity } : null },
+    { title: metricDisplayLabel("Background", profile), metric: data.background },
+    { title: metricDisplayLabel("Framing", profile), metric: data.framing },
+    { title: "Sharpness", metric: data.sharpness },
+    { title: "Stability", metric: data.stability },
+  ].filter((item) => item.metric);
+  const surfacedVisualMetrics = visualMetricDefs.filter((item) => shouldSurfaceMetric(item.metric));
+  const visibleVisualMetrics = surfacedVisualMetrics.length > 0 ? surfacedVisualMetrics : visualMetricDefs.slice(0, Math.min(3, visualMetricDefs.length));
+  const hiddenVisualCount = Math.max(0, visualMetricDefs.length - visibleVisualMetrics.length);
+
+  const audioMetricDefs = [
+    { title: "Audio Clarity", metric: data.audioClarity, type: "metric" },
+    { title: "Audio Volume", metric: data.audioVolume, type: "metric" },
+    { title: "Background Noise", metric: data.backgroundNoise, type: "metric" },
+    { title: "Filler Words", metric: data.fillerWords, type: "filler" },
+    { title: "Pacing", metric: data.pacing, type: "metric" },
+  ].filter((item) => item.metric && (item.type !== "filler" || Number(item.metric?.numeric ?? 0) > 1));
+  const surfacedAudioMetrics = audioMetricDefs.filter((item) => shouldSurfaceMetric(item.metric));
+  const visibleAudioMetrics = surfacedAudioMetrics.length > 0 ? surfacedAudioMetrics : audioMetricDefs.slice(0, Math.min(3, audioMetricDefs.length));
+  const hiddenAudioCount = Math.max(0, audioMetricDefs.length - visibleAudioMetrics.length);
   const retentionPreview = data.retention ?? (!isPaid ? {
     estimatedRetentionPct: 43,
     retentionGrade: "C",
@@ -838,33 +889,28 @@ function QualityPanel({ data, isPaid, profile }: { data: any; isPaid: boolean; p
 
       <div className="space-y-5">
         <div className="space-y-3">
-          <p className="text-xs text-white/35 uppercase tracking-wider">Visual Quality</p>
-          {isPaid ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-              <QualityMetricGrid data={data} profile={profile} />
-            </div>
-          ) : (
-            <>
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                {data.lighting && <MetricCard title="Lighting" metric={data.lighting} />}
-              </div>
-              <BlurSection blur feature="visual-quality" label="Get detailed scores for contrast, color, framing, and background">
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                  <QualityMetricGrid data={data} profile={profile} />
-                </div>
-              </BlurSection>
-            </>
-          )}
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-xs text-white/35 uppercase tracking-wider">Visual Quality</p>
+            {hiddenVisualCount > 0 && <p className="text-xs text-white/30">{hiddenVisualCount} strong metrics hidden to keep this focused</p>}
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+            {visibleVisualMetrics.map((item) => (
+              <MetricCard key={item.title} title={item.title} metric={item.metric} />
+            ))}
+          </div>
         </div>
 
         <div className="space-y-3">
-          <p className="text-xs text-white/35 uppercase tracking-wider">Audio Quality</p>
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-xs text-white/35 uppercase tracking-wider">Audio Quality</p>
+            {hiddenAudioCount > 0 && <p className="text-xs text-white/30">{hiddenAudioCount} strong metrics hidden to keep this focused</p>}
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-            {data.audioClarity && <MetricCard title="Audio Clarity" metric={data.audioClarity} />}
-            {data.audioVolume && <MetricCard title="Audio Volume" metric={data.audioVolume} />}
-            {data.backgroundNoise && <MetricCard title="Background Noise" metric={data.backgroundNoise} />}
-            {data.fillerWords && <FillerCard metric={data.fillerWords} />}
-            {data.pacing && <MetricCard title="Pacing" metric={data.pacing} />}
+            {visibleAudioMetrics.map((item) =>
+              item.type === "filler"
+                ? <FillerCard key={item.title} metric={item.metric} />
+                : <MetricCard key={item.title} title={item.title} metric={item.metric} />
+            )}
           </div>
         </div>
       </div>
@@ -2236,7 +2282,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
   const resultModules = getResultModules(displayedResults);
   const resultPlatforms = getResultPlatforms(displayedResults);
   const availableResultTabs = RESULT_TABS.filter(t => {
-    if (t.id === "transcript") return !!(displayedResults as any)?.transcript && analysisProfile?.hasMeaningfulSpeech !== false;
+    if (t.id === "transcript") return resultModules.includes("transcript") && !!(displayedResults as any)?.transcript && analysisProfile?.hasMeaningfulSpeech !== false;
     return resultModules.includes(t.id) && !!(displayedResults as any)?.[t.id];
   });
   const hasHistory = analysisHistory.length > 0;
