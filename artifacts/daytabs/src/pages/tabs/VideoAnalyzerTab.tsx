@@ -282,6 +282,64 @@ function getAnalysisProfile(results: any) {
   return results?.analysisProfile ?? results?.quality?.speechProfile ?? null;
 }
 
+function getFormatProfile(profile?: any) {
+  return profile?.formatProfile ?? null;
+}
+
+function contentFormatLabel(format?: string) {
+  switch (format) {
+    case "talking_head": return "Talking head";
+    case "tutorial_howto": return "Tutorial / how-to";
+    case "art_process": return "Art process";
+    case "cooking_recipe": return "Cooking / recipe";
+    case "chill_ambience": return "Chill / ambience";
+    case "work_with_me": return "Work with me";
+    case "vlog_lifestyle": return "Vlog / lifestyle";
+    case "screen_demo": return "Screen demo";
+    case "product_demo": return "Product demo";
+    case "cinematic_montage": return "Cinematic montage";
+    case "gaming": return "Gaming";
+    case "performance_music": return "Performance / music";
+    case "diy_craft": return "DIY / craft";
+    case "transformation": return "Transformation";
+    case "reaction_commentary": return "Reaction / commentary";
+    default: return "General visual";
+  }
+}
+
+function usesPresenterRubric(format?: string) {
+  return ["talking_head", "reaction_commentary", "vlog_lifestyle"].includes(format ?? "");
+}
+
+function metricDisplayLabel(title: string, profile?: any) {
+  const format = getFormatProfile(profile)?.contentFormat;
+  if (title === "Framing" && !usesPresenterRubric(format)) return "Subject Framing";
+  if (title === "Background") return usesPresenterRubric(format) ? "Background" : "Environment Fit";
+  return title;
+}
+
+function qualityIntro(profile?: any) {
+  const formatProfile = getFormatProfile(profile);
+  if (!formatProfile) return "Quality checks tuned to how clearly the viewer can read the most important parts of this video.";
+  return `This ${contentFormatLabel(formatProfile.contentFormat).toLowerCase()} video is being judged mainly on ${formatProfile.successFactors?.slice(0, 3).join(", ") || "clarity, pacing, and payoff"}.`;
+}
+
+function editingIntro(profile?: any) {
+  const format = getFormatProfile(profile)?.contentFormat;
+  if (format === "art_process" || format === "diy_craft" || format === "cooking_recipe") return "Editing notes focus on process readability, visible progression, and where the visual payoff arrives too late.";
+  if (format === "work_with_me" || format === "chill_ambience") return "Editing notes focus on rhythm, atmosphere, and removing moments that quietly break the calm viewing experience.";
+  if (format === "screen_demo" || format === "tutorial_howto") return "Editing notes focus on clarity, dead time, and making each step easier to follow at a glance.";
+  return "Editing notes focus on the moments most likely to keep attention and the stretches most likely to lose it.";
+}
+
+function publishIntro(profile?: any) {
+  const format = getFormatProfile(profile)?.contentFormat;
+  if (format === "art_process" || format === "diy_craft") return "Packaging should sell the transformation, texture, or final reveal rather than pretending this is a speech-led explainer.";
+  if (format === "cooking_recipe") return "Packaging should sell the dish, the result, and the easiest-to-understand promise from the process.";
+  if (format === "work_with_me" || format === "chill_ambience") return "Packaging should set the mood and use case clearly so viewers know whether this fits study, focus, or relaxation.";
+  return "Packaging should match the actual viewing intent of this format instead of over-leaning on transcript summaries.";
+}
+
 function analysisModeLabel(mode?: string) {
   if (mode === "talking_first") return "Talking-first";
   if (mode === "visual_first") return "Visual-first";
@@ -299,6 +357,7 @@ function formatClock(seconds?: number | null) {
 function AnalysisModeCard({ profile }: { profile: any }) {
   if (!profile) return null;
   const speechPct = Math.round((Number(profile.speechRatio ?? 0) || 0) * 100);
+  const formatProfile = getFormatProfile(profile);
   return (
     <PanelCard className="p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -308,9 +367,19 @@ function AnalysisModeCard({ profile }: { profile: any }) {
             <span className="px-2.5 py-1 rounded-full text-xs font-semibold border border-primary/25 bg-primary/10 text-primary">
               {analysisModeLabel(profile.mode)}
             </span>
+            {formatProfile?.contentFormat ? (
+              <span className="px-2.5 py-1 rounded-full text-xs font-semibold border border-white/10 bg-white/5 text-white/75">
+                {contentFormatLabel(formatProfile.contentFormat)}
+              </span>
+            ) : null}
             <span className="text-xs text-white/35">{speechPct}% spoken coverage</span>
           </div>
           <p className="mt-3 text-sm leading-relaxed text-white/65">{profile.summary}</p>
+          {formatProfile?.primarySubject ? (
+            <p className="mt-3 text-sm text-white/55">
+              <span className="text-white/75">Primary subject:</span> {formatProfile.primarySubject}
+            </p>
+          ) : null}
         </div>
         <div className="grid gap-2 text-xs text-white/45 sm:text-right">
           <span>First speech: {formatClock(profile.firstSpeechAt)}</span>
@@ -318,6 +387,32 @@ function AnalysisModeCard({ profile }: { profile: any }) {
           <span>{profile.totalWords ?? 0} detected words</span>
         </div>
       </div>
+      {formatProfile?.successFactors?.length ? (
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+            <p className="text-[11px] uppercase tracking-[0.16em] text-white/40">What matters most</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {formatProfile.successFactors.map((factor: string) => (
+                <span key={factor} className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2.5 py-1 text-xs text-emerald-100">
+                  {factor}
+                </span>
+              ))}
+            </div>
+          </div>
+          {formatProfile.ignoredSignals?.length ? (
+            <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+              <p className="text-[11px] uppercase tracking-[0.16em] text-white/40">Signals we downplayed</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {formatProfile.ignoredSignals.map((signal: string) => (
+                  <span key={signal} className="rounded-full border border-white/10 bg-black/20 px-2.5 py-1 text-xs text-white/60">
+                    {signal}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </PanelCard>
   );
 }
@@ -372,6 +467,23 @@ function MetricCard({ title, metric }: { title: string; metric: any }) {
       {metric.assessment && <p className="text-xs text-white/50 mt-2">{metric.assessment}</p>}
       {metric.suggestions?.[0] && <p className="text-xs text-primary/80 mt-1">→ {metric.suggestions[0]}</p>}
     </div>
+  );
+}
+
+function QualityMetricGrid({ data, profile }: { data: any; profile?: any }) {
+  const framingLabel = metricDisplayLabel("Framing", profile);
+  const backgroundLabel = metricDisplayLabel("Background", profile);
+  return (
+    <>
+      {data.lighting && <MetricCard title="Lighting" metric={data.lighting} />}
+      {data.brightness && <MetricCard title="Brightness" metric={data.brightness} />}
+      {data.contrast && <MetricCard title="Contrast" metric={data.contrast} />}
+      {data.colorTemperature && <MetricCard title="Color Temperature" metric={{ numeric: 75, assessment: data.colorTemperature?.assessment, suggestions: data.colorTemperature?.suggestions, severity: data.colorTemperature?.severity }} />}
+      {data.background && <MetricCard title={backgroundLabel} metric={data.background} />}
+      {data.framing && <MetricCard title={framingLabel} metric={data.framing} />}
+      {data.sharpness && <MetricCard title="Sharpness" metric={data.sharpness} />}
+      {data.stability && <MetricCard title="Stability" metric={data.stability} />}
+    </>
   );
 }
 
@@ -498,6 +610,9 @@ function QualityPanel({ data, isPaid, profile }: { data: any; isPaid: boolean; p
 
   return (
     <div className="space-y-6">
+      <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+        <p className="text-sm text-white/70">{qualityIntro(profile)}</p>
+      </div>
       <LimitedSpeechNotice profile={profile}>
         Quality scoring focused on visual execution, audio cleanliness, and pacing proxies because this upload has little spoken content.
       </LimitedSpeechNotice>
@@ -536,14 +651,7 @@ function QualityPanel({ data, isPaid, profile }: { data: any; isPaid: boolean; p
           <p className="text-xs text-white/35 uppercase tracking-wider">Visual Quality</p>
           {isPaid ? (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-              {data.lighting && <MetricCard title="Lighting" metric={data.lighting} />}
-              {data.brightness    && <MetricCard title="Brightness"    metric={data.brightness} />}
-              {data.contrast      && <MetricCard title="Contrast"      metric={data.contrast} />}
-              {data.colorTemperature && <MetricCard title="Color Temperature" metric={{ numeric: 75, assessment: data.colorTemperature?.assessment, suggestions: data.colorTemperature?.suggestions, severity: data.colorTemperature?.severity }} />}
-              {data.background    && <MetricCard title="Background"    metric={data.background} />}
-              {data.framing       && <MetricCard title="Framing"       metric={data.framing} />}
-              {data.sharpness     && <MetricCard title="Sharpness"     metric={data.sharpness} />}
-              {data.stability     && <MetricCard title="Stability"     metric={data.stability} />}
+              <QualityMetricGrid data={data} profile={profile} />
             </div>
           ) : (
             <>
@@ -552,13 +660,7 @@ function QualityPanel({ data, isPaid, profile }: { data: any; isPaid: boolean; p
               </div>
               <BlurSection blur feature="visual-quality" label="Get detailed scores for contrast, color, framing, and background">
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                  {data.brightness    && <MetricCard title="Brightness"    metric={data.brightness} />}
-                  {data.contrast      && <MetricCard title="Contrast"      metric={data.contrast} />}
-                  {data.colorTemperature && <MetricCard title="Color Temperature" metric={{ numeric: 75, assessment: data.colorTemperature?.assessment, suggestions: data.colorTemperature?.suggestions, severity: data.colorTemperature?.severity }} />}
-                  {data.background    && <MetricCard title="Background"    metric={data.background} />}
-                  {data.framing       && <MetricCard title="Framing"       metric={data.framing} />}
-                  {data.sharpness     && <MetricCard title="Sharpness"     metric={data.sharpness} />}
-                  {data.stability     && <MetricCard title="Stability"     metric={data.stability} />}
+                  <QualityMetricGrid data={data} profile={profile} />
                 </div>
               </BlurSection>
             </>
@@ -602,6 +704,9 @@ function EditingPanel({ data, isPaid, profile }: { data: any; isPaid: boolean; p
 
   return (
     <div className="space-y-6">
+      <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+        <p className="text-sm text-white/70">{editingIntro(profile)}</p>
+      </div>
       <LimitedSpeechNotice profile={profile}>
         Editing notes are weighted toward pacing, visual clarity, and dead-air cleanup because there is not enough speech to power script-led hook analysis.
       </LimitedSpeechNotice>
@@ -714,6 +819,9 @@ function PublishPanel({ data, platforms, isPaid, subtitleFile, videoFileName, pr
 
   return (
     <div className="space-y-4">
+      <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+        <p className="text-sm text-white/70">{publishIntro(profile)}</p>
+      </div>
       <LimitedSpeechNotice profile={profile}>
         Publish copy was generated from the visual premise and any sparse speech that was detected, so treat these titles and descriptions as packaging drafts rather than transcript-driven summaries.
       </LimitedSpeechNotice>

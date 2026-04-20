@@ -399,6 +399,7 @@ async function runVideoAnalyzer(
         delete (audioAnalysis as Record<string, unknown>).fillerWords;
       }
 
+      const formatProfile = (visualAnalysis as { formatProfile?: Record<string, unknown> }).formatProfile ?? null;
       result.quality = {
         score: qualityScore,
         ...visualAnalysis,
@@ -420,9 +421,13 @@ async function runVideoAnalyzer(
         speechProfile: speechAnalysis,
         ...(retention ? { retention } : {}),
       };
+      result.analysisProfile = {
+        ...speechAnalysis,
+        ...(formatProfile ? { formatProfile } : {}),
+      };
       if (retention) result.retention = retention;
       result.totalScore = getTotalAnalysisScore(result);
-      await updateJob(jobId, { result: { quality: result.quality, ...(retention ? { retention } : {}), totalScore: result.totalScore } });
+      await updateJob(jobId, { result: { analysisProfile: result.analysisProfile, quality: result.quality, ...(retention ? { retention } : {}), totalScore: result.totalScore } });
       progress = 55;
     }
 

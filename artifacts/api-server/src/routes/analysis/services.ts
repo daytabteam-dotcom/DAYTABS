@@ -85,6 +85,24 @@ export interface SpeechAnalysis {
   summary: string;
 }
 
+type ContentFormat =
+  | "talking_head"
+  | "tutorial_howto"
+  | "art_process"
+  | "cooking_recipe"
+  | "chill_ambience"
+  | "work_with_me"
+  | "vlog_lifestyle"
+  | "screen_demo"
+  | "product_demo"
+  | "cinematic_montage"
+  | "gaming"
+  | "performance_music"
+  | "diy_craft"
+  | "transformation"
+  | "reaction_commentary"
+  | "general_visual";
+
 function scoreLighting(obs: VisualObservations): number {
   let score = 100;
   if (!obs.lightSourceVisible) score -= 10;
@@ -939,7 +957,25 @@ Return STRICT JSON only (no markdown). Do NOT include any numeric scores — onl
 
 CRITICAL for backgroundContextAppropriate: Judge whether the background matches the VIDEO'S TOPIC AND BRAND. A kitchen for a business software demo = "no". A home office for a productivity app = "yes". A cluttered living room for a luxury brand = "no". Be specific about WHY in backgroundContextIssue.
 
+CRITICAL for FORMAT DETECTION:
+- Detect what kind of video this actually is before judging it.
+- Choose one contentFormat from: talking_head, tutorial_howto, art_process, cooking_recipe, chill_ambience, work_with_me, vlog_lifestyle, screen_demo, product_demo, cinematic_montage, gaming, performance_music, diy_craft, transformation, reaction_commentary, general_visual
+- If the video is process-led, hands-on, overhead, screen-based, ambience-led, or subject-led, do NOT judge it like a presenter video.
+- For art/craft/cooking/process videos, framing means subject visibility and work-surface readability, not eye-line.
+- For chill/work-with-me/ambience videos, success is atmosphere, consistency, and low distraction, not presenter urgency.
+- For screen demos, success is readability, cursor focus, and task clarity.
+
 {
+  "formatProfile": {
+    "contentFormat": "one of the allowed values",
+    "formatConfidence": "high" | "medium" | "low",
+    "primarySubject": "what the viewer is mainly supposed to watch",
+    "viewerIntent": "why someone would choose to watch this type of video",
+    "successFactors": ["3 to 5 concrete things that matter most for this format"],
+    "ignoredSignals": ["signals that should NOT be emphasized for this format"],
+    "framingFocus": "how framing should be judged for this format",
+    "backgroundFocus": "how environment fit should be judged for this format"
+  },
   "observations": {
     "lightSourceVisible": true/false,
     "lightSourceSide": "front" | "side" | "back" | "overhead" | "unknown",
@@ -997,7 +1033,12 @@ CRITICAL for backgroundContextAppropriate: Judge whether the background matches 
   }
 }`;
 
-function buildVisualResult(obs: VisualObservations, assessments: Record<string, string>, plan: string) {
+function buildVisualResult(
+  obs: VisualObservations,
+  assessments: Record<string, string>,
+  plan: string,
+  formatProfile = getDefaultFormatProfile(),
+) {
   const lightingScore = scoreLighting(obs);
   const brightnessScore = scoreBrightness(obs);
   const contrastScore = scoreContrast(obs);
@@ -1026,6 +1067,7 @@ function buildVisualResult(obs: VisualObservations, assessments: Record<string, 
   };
 
   const base = {
+    formatProfile,
     overallVisualScore,
     topFix: assessments.overallTopFix ?? "",
     colorGradingRecommendation: assessments.colorGradingRecommendation ?? "",
@@ -1106,6 +1148,28 @@ function buildVisualResult(obs: VisualObservations, assessments: Record<string, 
   return base;
 }
 
+function getDefaultFormatProfile(): {
+  contentFormat: ContentFormat;
+  formatConfidence: "high" | "medium" | "low";
+  primarySubject: string;
+  viewerIntent: string;
+  successFactors: string[];
+  ignoredSignals: string[];
+  framingFocus: string;
+  backgroundFocus: string;
+} {
+  return {
+    contentFormat: "general_visual",
+    formatConfidence: "low",
+    primarySubject: "the main action on screen",
+    viewerIntent: "understand the visual idea quickly and stay for a clear payoff",
+    successFactors: ["clear subject visibility", "steady progression", "strong opening", "clear payoff"],
+    ignoredSignals: ["presenter eye-line scoring when the subject is not a face"],
+    framingFocus: "Judge framing by how easy it is to read the main subject, not by presenter eye-line unless a face is the clear focal point.",
+    backgroundFocus: "Judge the environment by whether it supports the actual video topic and keeps attention on the subject.",
+  };
+}
+
 export async function analyzeVisuals(
   frameBase64List: string[],
   platform: string,
@@ -1140,6 +1204,8 @@ CRITICAL RULE: Never reference frame numbers. Reference approximate time positio
 BACKGROUND CONTEXT RULE: Judge background against the VIDEO'S TOPIC. If the creator is discussing a business app but is standing in a kitchen with appliances visible — that is "no" for backgroundContextAppropriate, even if the shot is technically clean. Explain what is wrong and suggest a specific alternative that fits the topic.
 
 PRESENCE RULE: Assess eye contact, energy, and confidence. A slow, hesitant delivery is a retention risk. A confident, direct presenter retains viewers. Be specific.
+
+FORMAT RULE: If this is not mainly a face-to-camera presenter video, avoid presenter-specific language like eye-line, headroom, and on-camera presence unless it is genuinely relevant to what the viewer is watching.
 
 ${VISUAL_OBSERVATIONS_SCHEMA}`;
 
@@ -1200,6 +1266,7 @@ ${VISUAL_OBSERVATIONS_SCHEMA}`;
     hookStrength: "moderate",
     hookStrengthReason: "The opening needs to create more urgency in the first 5 seconds.",
   };
+  const defaultFormatProfile = getDefaultFormatProfile();
 
   try {
     const response = await callOpenAI({
@@ -1208,18 +1275,28 @@ ${VISUAL_OBSERVATIONS_SCHEMA}`;
       messages: [{ role: "user", content: [{ type: "text", text: prompt }, ...imageContent] }],
     }, userId);
 
-    const raw = parseJson<{ observations?: Partial<VisualObservations>; assessments?: Record<string, string> }>(
+    const raw = parseJson<{ formatProfile?: Partial<typeof defaultFormatProfile>; observations?: Partial<VisualObservations>; assessments?: Record<string, string> }>(
       response.choices[0]?.message?.content ?? "{}",
       {}
     );
 
     const obs: VisualObservations = { ...defaultObs, ...(raw.observations ?? {}) };
     const assessments = { ...defaultAssessments, ...(raw.assessments ?? {}) };
+    const formatProfile = {
+      ...defaultFormatProfile,
+      ...(raw.formatProfile ?? {}),
+      successFactors: Array.isArray(raw.formatProfile?.successFactors) && raw.formatProfile?.successFactors.length
+        ? raw.formatProfile.successFactors.slice(0, 5)
+        : defaultFormatProfile.successFactors,
+      ignoredSignals: Array.isArray(raw.formatProfile?.ignoredSignals) && raw.formatProfile?.ignoredSignals.length
+        ? raw.formatProfile.ignoredSignals.slice(0, 4)
+        : defaultFormatProfile.ignoredSignals,
+    };
 
-    return buildVisualResult(obs, assessments, plan);
+    return buildVisualResult(obs, assessments, plan, formatProfile);
   } catch (err) {
     logger.warn({ err }, "Visual analysis failed, using defaults");
-    return buildVisualResult(defaultObs, defaultAssessments, plan);
+    return buildVisualResult(defaultObs, defaultAssessments, plan, defaultFormatProfile);
   }
 }
 
