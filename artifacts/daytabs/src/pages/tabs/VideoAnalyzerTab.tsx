@@ -8,6 +8,7 @@ import {
   Volume2, Eye, Zap, Hash, FileText, Lock, Download,
   Copy, Check, AlignLeft, ChevronRight, FileDown, X, History,
   Lamp, Sun, Contrast, Image, Frame, Focus, Palette, Mic2, Waves, Gauge, ChevronDown,
+  Target, Clock3, Rocket, PenTool, Trophy,
 } from "lucide-react";
 import { useAnalysisPolling, useAnalysisResults } from "@/hooks/use-analysis";
 import { usePdfExport } from "@/hooks/use-pdf-export";
@@ -435,6 +436,47 @@ function scoreVerdict(score: number) {
   return { label: "Rework before publishing", tone: "border-red-400/25 bg-red-500/10 text-red-100", description: "The current cut is likely to underperform unless you fix the main clarity or pacing problems first." };
 }
 
+function scoreColorMeta(score: number) {
+  if (score >= 85) {
+    return {
+      ring: "#34d399",
+      bg: "from-emerald-500/20 via-emerald-400/8 to-transparent",
+      chip: "border-emerald-400/25 bg-emerald-500/10 text-emerald-100",
+      panel: "border-emerald-400/20 bg-emerald-500/6",
+    };
+  }
+  if (score >= 70) {
+    return {
+      ring: "#38bdf8",
+      bg: "from-sky-500/20 via-sky-400/8 to-transparent",
+      chip: "border-sky-400/25 bg-sky-500/10 text-sky-100",
+      panel: "border-sky-400/20 bg-sky-500/6",
+    };
+  }
+  if (score >= 55) {
+    return {
+      ring: "#f59e0b",
+      bg: "from-amber-500/20 via-amber-400/8 to-transparent",
+      chip: "border-amber-400/25 bg-amber-500/10 text-amber-100",
+      panel: "border-amber-400/20 bg-amber-500/6",
+    };
+  }
+  return {
+    ring: "#f87171",
+    bg: "from-red-500/20 via-red-400/8 to-transparent",
+    chip: "border-red-400/25 bg-red-500/10 text-red-100",
+    panel: "border-red-400/20 bg-red-500/6",
+  };
+}
+
+function metricToneMeta(numeric?: number) {
+  const value = Number(numeric ?? 0);
+  if (value >= 85) return { badge: "Excellent", card: "border-emerald-400/20 bg-emerald-500/8", text: "text-emerald-100", subtext: "text-emerald-100/75", icon: "text-emerald-300", bar: "bg-emerald-400" };
+  if (value >= 70) return { badge: "Good", card: "border-sky-400/20 bg-sky-500/8", text: "text-sky-100", subtext: "text-sky-100/75", icon: "text-sky-300", bar: "bg-sky-400" };
+  if (value >= 55) return { badge: "Watch", card: "border-amber-400/20 bg-amber-500/8", text: "text-amber-100", subtext: "text-amber-100/75", icon: "text-amber-300", bar: "bg-amber-400" };
+  return { badge: "Fix first", card: "border-red-400/20 bg-red-500/8", text: "text-red-100", subtext: "text-red-100/75", icon: "text-red-300", bar: "bg-red-400" };
+}
+
 function overallScoreFromResults(results: any) {
   return Number(
     results?.quality?.score
@@ -521,6 +563,39 @@ function scoreReasonSummary(results: any, profile?: any) {
   return `The score is mostly being held back by ${drivers[0]}, ${drivers[1]}, and ${drivers[2]}.`;
 }
 
+function sectionVisualMeta(label: string) {
+  const key = label.toLowerCase();
+  if (key.includes("fix")) return { Icon: AlertTriangle, className: "border-red-400/20 bg-red-500/10 text-red-100" };
+  if (key.includes("hook")) return { Icon: Zap, className: "border-amber-400/20 bg-amber-500/10 text-amber-100" };
+  if (key.includes("packaging") || key.includes("promise")) return { Icon: Rocket, className: "border-sky-400/20 bg-sky-500/10 text-sky-100" };
+  if (key.includes("timeline")) return { Icon: Clock3, className: "border-violet-400/20 bg-violet-500/10 text-violet-100" };
+  if (key.includes("score")) return { Icon: Target, className: "border-white/10 bg-white/[0.05] text-white" };
+  return { Icon: Sparkles, className: "border-white/10 bg-white/[0.05] text-white" };
+}
+
+function ScoreDonut({ score, label }: { score: number; label: string }) {
+  const meta = scoreColorMeta(score);
+  return (
+    <div className={`rounded-[28px] border bg-gradient-to-br p-5 ${meta.panel} ${meta.bg}`}>
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <p className="text-[11px] uppercase tracking-[0.16em] text-white/40">Readiness Score</p>
+          <p className="mt-2 text-sm text-white/60">{label}</p>
+        </div>
+        <div
+          className="relative flex h-32 w-32 items-center justify-center rounded-full"
+          style={{ background: `conic-gradient(${meta.ring} 0deg ${Math.round((Math.max(0, Math.min(100, score)) / 100) * 360)}deg, rgba(255,255,255,0.08) ${Math.round((Math.max(0, Math.min(100, score)) / 100) * 360)}deg 360deg)` }}
+        >
+          <div className="flex h-24 w-24 flex-col items-center justify-center rounded-full border border-white/10 bg-[#0f0f12]">
+            <span className="text-4xl font-bold font-mono text-white">{score}</span>
+            <span className="text-[11px] uppercase tracking-[0.14em] text-white/40">out of 100</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function buildTimelineMoments(results: any) {
   const hooks = Array.isArray(results?.editing?.hooks) ? results.editing.hooks : [];
   const dropOffs = Array.isArray(results?.quality?.retention?.dropOffMoments) ? results.quality.retention.dropOffMoments : [];
@@ -582,20 +657,24 @@ function ActionCard({
   tone?: "amber" | "blue" | "emerald";
 }) {
   const tones = {
-    amber: "border-amber-400/20 bg-amber-400/6 text-amber-100",
-    blue: "border-sky-400/20 bg-sky-400/6 text-sky-100",
-    emerald: "border-emerald-400/20 bg-emerald-400/6 text-emerald-100",
+    amber: "border-amber-400/20 bg-amber-400/8 text-amber-100",
+    blue: "border-sky-400/20 bg-sky-400/8 text-sky-100",
+    emerald: "border-emerald-400/20 bg-emerald-400/8 text-emerald-100",
   };
+  const Icon = tone === "emerald" ? CheckCircle2 : tone === "blue" ? Rocket : AlertTriangle;
 
   return (
     <div className={`rounded-2xl border p-4 ${tones[tone]}`}>
       <div className="flex items-start gap-3">
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-black/10 text-sm font-bold">
-          {index}
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-black/15">
+          <Icon className="h-4 w-4" />
         </div>
-        <div>
-          <p className="text-sm font-semibold text-white">{title}</p>
-          {detail ? <p className="mt-2 text-xs leading-relaxed text-white/60">{detail}</p> : null}
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] uppercase tracking-[0.14em] text-white/45">Step {index}</span>
+          </div>
+          <p className="mt-1 text-sm font-semibold text-white">{title}</p>
+          {detail ? <p className="mt-2 text-xs leading-relaxed text-white/70">{detail}</p> : null}
         </div>
       </div>
     </div>
@@ -606,16 +685,14 @@ function CreatorReportIntro({ results, profile, isPaid }: { results: any; profil
   if (!results) return null;
   const formatProfile = getFormatProfile(profile);
   const editingData = results?.editing ?? {};
-  const publishData = results?.publish ? Object.values(results.publish)[0] as any : null;
   const topFixes = collectTopFixes(results);
-  const usefulTags = compactTags(publishData?.hashtags ?? []);
   const strongest = strongestMetric(results?.quality, profile);
+  const publishData = results?.publish ? Object.values(results.publish)[0] as any : null;
   const primaryPromise = publishData?.audiencePromise ?? editingData?.packagingAngle ?? formatProfile?.viewerIntent ?? "Clear outcome-driven packaging";
   const score = overallScoreFromResults(results);
   const verdict = scoreVerdict(score);
   const scoreDrivers = weakestMetrics(results, profile);
   const timelineMoments = buildTimelineMoments(results);
-  const leadTitle = publishData?.titles?.[0] ?? null;
   const visibleFixes = isPaid ? topFixes : topFixes.slice(0, 1);
   const hiddenFixes = isPaid ? [] : topFixes.slice(1);
   const visibleTimelineMoments = isPaid ? timelineMoments : timelineMoments.slice(0, 1);
@@ -623,6 +700,7 @@ function CreatorReportIntro({ results, profile, isPaid }: { results: any; profil
   const visibleScoreDrivers = isPaid ? scoreDrivers : scoreDrivers.slice(0, 3);
   const hiddenScoreDrivers = isPaid ? [] : scoreDrivers.slice(3);
   const hookInsight = editingData?.hooks?.[0]?.text ?? editingData?.rewrittenHook ?? editingData?.hookApproach ?? null;
+  const scoreMeta = scoreColorMeta(score);
 
   return (
     <div className="space-y-6">
@@ -640,23 +718,39 @@ function CreatorReportIntro({ results, profile, isPaid }: { results: any; profil
               {editingData?.viewPotential ?? verdict.description}
             </p>
             <p className="mt-3 text-sm text-white/60">{scoreReasonSummary(results, profile)}</p>
-          </div>
-          <div className="rounded-2xl border border-white/10 bg-black/15 p-5">
-            <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Verdict</p>
-            <div className="mt-4 flex items-end gap-3">
-              <span className="text-5xl font-bold font-mono text-white">{score}</span>
-              <span className="pb-1 text-sm text-white/45">readiness score</span>
+            <div className="mt-5 grid gap-3 sm:grid-cols-3">
+              {[
+                { label: "Fix first", value: visibleFixes[0] ?? "Tighten the opening before publishing." },
+                { label: "Hook insight", value: hookInsight ?? "Lead with the strongest payoff or most unresolved question first." },
+                { label: "Packaging promise", value: primaryPromise },
+              ].map((item) => {
+                const meta = sectionVisualMeta(item.label);
+                const Icon = meta.Icon;
+                return (
+                  <div key={item.label} className={`rounded-2xl border p-4 ${meta.className}`}>
+                    <div className="flex items-center gap-2">
+                      <span className="flex h-8 w-8 items-center justify-center rounded-xl border border-white/10 bg-black/15">
+                        <Icon className="h-4 w-4" />
+                      </span>
+                      <p className="text-[11px] uppercase tracking-[0.16em] text-white/55">{item.label}</p>
+                    </div>
+                    <p className="mt-3 text-sm leading-relaxed text-white/85">{item.value}</p>
+                  </div>
+                );
+              })}
             </div>
-            <p className="mt-4 text-sm font-semibold text-white">Fix first</p>
-            <p className="mt-2 text-sm leading-relaxed text-white/68">{visibleFixes[0] ?? "Review the edit notes and tighten the opening before publishing."}</p>
-            {hookInsight ? (
-              <>
-                <p className="mt-4 text-sm font-semibold text-white">Hook insight</p>
-                <p className="mt-2 text-sm leading-relaxed text-white/68">{hookInsight}</p>
-              </>
-            ) : null}
-            <p className="mt-4 text-sm font-semibold text-white">What the packaging should promise</p>
-            <p className="mt-2 text-sm leading-relaxed text-white/68">{primaryPromise}</p>
+          </div>
+          <div className="space-y-4">
+            <ScoreDonut score={score} label={verdict.label} />
+            <div className={`rounded-2xl border p-4 ${scoreMeta.panel}`}>
+              <div className="flex items-center gap-2">
+                <span className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] ${scoreMeta.chip}`}>
+                  {verdict.label}
+                </span>
+                <p className="text-xs text-white/45">Current export status</p>
+              </div>
+              <p className="mt-3 text-sm leading-relaxed text-white/72">{verdict.description}</p>
+            </div>
           </div>
         </div>
       </PanelCard>
@@ -715,12 +809,22 @@ function CreatorReportIntro({ results, profile, isPaid }: { results: any; profil
                   : moment.tone === "sky"
                     ? "border-sky-400/20 bg-sky-400/10 text-sky-100"
                     : "border-amber-400/20 bg-amber-400/10 text-amber-100";
+              const Icon = moment.tone === "emerald" ? Zap : moment.tone === "red" ? AlertTriangle : moment.tone === "sky" ? Sparkles : Scissors;
               return (
-                <div key={`${moment.time}-${index}`} className="grid gap-3 sm:grid-cols-[88px,1fr]">
-                  <div className="text-sm font-mono text-primary/80">{moment.time}</div>
-                  <div className="rounded-xl border border-white/8 bg-background/50 p-4">
+                <div key={`${moment.time}-${index}`} className="grid gap-3 sm:grid-cols-[104px,1fr]">
+                  <div className="flex items-start gap-3">
+                    <div className="mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04]">
+                      <Icon className="h-4 w-4 text-white/75" />
+                    </div>
+                    <div>
+                      <div className="text-sm font-mono text-primary/80">{moment.time}</div>
+                      <div className="mt-1 h-full w-px bg-white/10" />
+                    </div>
+                  </div>
+                  <div className="rounded-2xl border border-white/8 bg-background/50 p-4">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${toneClass}`}>{moment.title}</span>
+                      <span className="text-[11px] uppercase tracking-[0.14em] text-white/35">Moment {index + 1}</span>
                     </div>
                     <p className="mt-3 text-sm leading-relaxed text-white/68">{moment.detail}</p>
                   </div>
@@ -748,15 +852,37 @@ function CreatorReportIntro({ results, profile, isPaid }: { results: any; profil
 
         <div className="space-y-6">
           <PanelCardSoft className="border border-white/10 p-5">
-            <p className="text-[11px] uppercase tracking-[0.16em] text-white/40">Why The Score Landed Here</p>
+            <div className="flex items-center gap-2">
+              <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04]">
+                <Target className="h-4 w-4 text-white/75" />
+              </span>
+              <div>
+                <p className="text-[11px] uppercase tracking-[0.16em] text-white/40">Why The Score Landed Here</p>
+                <p className="mt-1 text-sm text-white/55">Low metrics are pushed into warmer warning colors, stronger metrics stand out in cooler or positive tones.</p>
+              </div>
+            </div>
             <div className="mt-4 grid gap-3">
               {visibleScoreDrivers.length > 0 ? visibleScoreDrivers.map((item) => (
-                <div key={item.label} className="rounded-xl border border-white/8 bg-background/50 p-4">
+                <div key={item.label} className={`rounded-2xl border p-4 ${metricToneMeta(item.metric.numeric).card}`}>
                   <div className="flex items-center justify-between gap-3">
-                    <p className="text-sm font-semibold text-white">{item.label}</p>
-                    <span className="text-sm font-mono text-white/55">{item.metric.numeric}</span>
+                    <div className="flex items-center gap-3">
+                      <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-black/15">
+                        {(() => {
+                          const Icon = getMetricIcon(item.label);
+                          return <Icon className={`h-4 w-4 ${metricToneMeta(item.metric.numeric).icon}`} />;
+                        })()}
+                      </span>
+                      <div>
+                        <p className="text-sm font-semibold text-white">{item.label}</p>
+                        <p className={`mt-1 text-[11px] uppercase tracking-[0.14em] ${metricToneMeta(item.metric.numeric).subtext}`}>{metricToneMeta(item.metric.numeric).badge}</p>
+                      </div>
+                    </div>
+                    <span className={`text-sm font-mono ${metricToneMeta(item.metric.numeric).text}`}>{item.metric.numeric}</span>
                   </div>
-                  {item.metric?.assessment ? <p className="mt-2 text-xs leading-relaxed text-white/55">{item.metric.assessment}</p> : null}
+                  <div className="mt-3 h-2 overflow-hidden rounded-full bg-black/20">
+                    <div className={`h-full rounded-full ${metricToneMeta(item.metric.numeric).bar}`} style={{ width: `${Math.max(6, Math.min(100, Number(item.metric.numeric ?? 0)))}%` }} />
+                  </div>
+                  {item.metric?.assessment ? <p className="mt-3 text-xs leading-relaxed text-white/70">{item.metric.assessment}</p> : null}
                 </div>
               )) : (
                   <p className="text-sm text-white/45">No score drivers were surfaced.</p>
@@ -777,68 +903,20 @@ function CreatorReportIntro({ results, profile, isPaid }: { results: any; profil
               )}
               {strongest ? (
                 <div className="rounded-xl border border-emerald-400/20 bg-emerald-400/5 p-4">
-                  <p className="text-xs uppercase tracking-[0.16em] text-emerald-100/70">Working Well</p>
-                  <p className="mt-2 text-sm font-semibold text-white">{strongest.label}</p>
+                  <div className="flex items-center gap-2">
+                    <span className="flex h-8 w-8 items-center justify-center rounded-xl border border-emerald-400/20 bg-emerald-500/10">
+                      <Trophy className="h-4 w-4 text-emerald-300" />
+                    </span>
+                    <p className="text-xs uppercase tracking-[0.16em] text-emerald-100/70">Working Well</p>
+                  </div>
+                  <p className="mt-3 text-sm font-semibold text-white">{strongest.label}</p>
                   <p className="mt-2 text-xs leading-relaxed text-white/55">{strongest.metric.assessment ?? "This is one of the cleanest parts of the current cut."}</p>
                 </div>
               ) : null}
             </div>
           </PanelCardSoft>
-
-          <PanelCardSoft className="border border-white/10 p-5">
-            <p className="text-[11px] uppercase tracking-[0.16em] text-white/40">Publish Package</p>
-            {isPaid ? (
-              <div className="mt-4 space-y-4">
-                <div className="rounded-xl border border-white/8 bg-background/50 p-4">
-                  <p className="text-xs uppercase tracking-[0.16em] text-white/35">Title to test</p>
-                  <p className="mt-2 text-sm font-semibold leading-relaxed text-white">{leadTitle ?? "Open the publish package tab for title options."}</p>
-                </div>
-                <div className="rounded-xl border border-white/8 bg-background/50 p-4">
-                  <p className="text-xs uppercase tracking-[0.16em] text-white/35">Thumbnail angle</p>
-                  <p className="mt-2 text-sm leading-relaxed text-white/68">{publishData?.packagingStrategy ?? editingData?.packagingAngle ?? primaryPromise}</p>
-                </div>
-                {usefulTags.length > 0 && (
-                  <div className="rounded-xl border border-white/8 bg-background/50 p-4">
-                    <p className="text-xs uppercase tracking-[0.16em] text-white/35">Tags to paste</p>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {usefulTags.map((tag) => (
-                        <span key={tag} className="rounded-lg border border-primary/20 bg-primary/10 px-2.5 py-1 text-xs font-mono text-primary/80">
-                          {tag}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="mt-4">
-                <BlurSection blur feature="publish-package-preview" label="Unlock publishing package">
-                  <div className="space-y-4">
-                    <div className="rounded-xl border border-white/8 bg-background/50 p-4">
-                      <p className="text-xs uppercase tracking-[0.16em] text-white/35">Title to test</p>
-                      <p className="mt-2 text-sm font-semibold leading-relaxed text-white">{leadTitle ?? "Title options"}</p>
-                    </div>
-                    <div className="rounded-xl border border-white/8 bg-background/50 p-4">
-                      <p className="text-xs uppercase tracking-[0.16em] text-white/35">Tags to paste</p>
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        {usefulTags.map((tag) => (
-                          <span key={tag} className="rounded-lg border border-primary/20 bg-primary/10 px-2.5 py-1 text-xs font-mono text-primary/80">
-                            {tag}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </BlurSection>
-              </div>
-            )}
-          </PanelCardSoft>
         </div>
       </div>
-
-      <CollapsibleSection title="Analysis Details" subtitle="Format context, transcript weighting, and the signals this report emphasized." defaultOpen={false}>
-        <AnalysisModeCard profile={profile} />
-      </CollapsibleSection>
     </div>
   );
 }
@@ -968,19 +1046,26 @@ function MetricCard({ title, metric }: { title: string; metric: any }) {
   const numVal = metric.numeric ?? 0;
   const Icon = getMetricIcon(title);
   const guidance = parseDualGuidance(metric.suggestions?.[0]);
+  const tone = metricToneMeta(numVal);
   return (
-    <div className="h-full bg-background/60 rounded-xl p-4 border border-white/8 hover:border-primary/20 transition-all">
+    <div className={`h-full rounded-2xl border p-4 transition-all ${tone.card}`}>
       <div className="mb-3">
-        <p className="text-xs text-white/40 uppercase tracking-wider flex items-center gap-2">
-          <Icon className="w-4 h-4 text-white/35" />
+        <p className="text-xs uppercase tracking-wider flex items-center gap-2 text-white/55">
+          <Icon className={`w-4 h-4 ${tone.icon}`} />
           {title}
         </p>
       </div>
-      <SeverityBadge severity={metric.severity} numeric={numVal} />
-      {metric.assessment && <p className="text-xs text-white/50 mt-2">{metric.assessment}</p>}
-      {guidance.fixNow && <p className="text-xs text-primary/80 mt-2"><span className="text-white/35">Fix now:</span> {guidance.fixNow}</p>}
-      {guidance.nextVideo && <p className="text-xs text-white/55 mt-1"><span className="text-white/35">Next video:</span> {guidance.nextVideo}</p>}
-      {!guidance.fixNow && !guidance.nextVideo && guidance.plain && <p className="text-xs text-primary/80 mt-1">→ {guidance.plain}</p>}
+      <div className="flex items-center justify-between gap-3">
+        <SeverityBadge severity={metric.severity} numeric={numVal} />
+        <span className={`text-sm font-mono ${tone.text}`}>{numVal}</span>
+      </div>
+      <div className="mt-3 h-2 overflow-hidden rounded-full bg-black/20">
+        <div className={`h-full rounded-full ${tone.bar}`} style={{ width: `${Math.max(6, Math.min(100, Number(numVal)))}%` }} />
+      </div>
+      {metric.assessment && <p className="text-xs text-white/70 mt-3">{metric.assessment}</p>}
+      {guidance.fixNow && <p className={`text-xs mt-2 ${tone.subtext}`}><span className="text-white/35">Fix now:</span> {guidance.fixNow}</p>}
+      {guidance.nextVideo && <p className="text-xs text-white/60 mt-1"><span className="text-white/35">Next video:</span> {guidance.nextVideo}</p>}
+      {!guidance.fixNow && !guidance.nextVideo && guidance.plain && <p className={`text-xs mt-1 ${tone.subtext}`}>→ {guidance.plain}</p>}
     </div>
   );
 }
@@ -1012,20 +1097,24 @@ function FillerCard({ metric }: { metric: any }) {
   if (!metric) return null;
   const numVal = metric.numeric ?? 0;
   const words: string[] = metric.words ?? [];
+  const tone = metricToneMeta(metric.level === "high" ? 30 : metric.level === "medium" ? 60 : 85);
   return (
-    <div className="h-full bg-background/60 rounded-xl p-4 border border-white/8 hover:border-primary/20 transition-all md:col-span-2 xl:col-span-3">
+    <div className={`h-full rounded-2xl p-4 border transition-all md:col-span-2 xl:col-span-3 ${tone.card}`}>
       <div className="flex justify-between items-start mb-2">
         <div className="flex items-center gap-2">
-          <Mic2 className="w-4 h-4 text-white/40" />
-          <p className="text-xs text-white/40 uppercase tracking-wider">Filler Words</p>
+          <Mic2 className={`w-4 h-4 ${tone.icon}`} />
+          <p className="text-xs text-white/55 uppercase tracking-wider">Filler Words</p>
         </div>
         <SeverityBadge severity={metric.severity} numeric={metric.level === "high" ? 30 : metric.level === "medium" ? 60 : 85} />
       </div>
       <div className="flex items-end gap-3 mb-2">
-        <span className="text-3xl font-bold font-mono">{numVal}</span>
+        <span className={`text-3xl font-bold font-mono ${tone.text}`}>{numVal}</span>
         <span className="text-xs text-white/40 mb-1">instances</span>
       </div>
-      {metric.assessment && <p className="text-xs text-white/50 mt-2">{metric.assessment}</p>}
+      <div className="mt-3 h-2 overflow-hidden rounded-full bg-black/20">
+        <div className={`h-full rounded-full ${tone.bar}`} style={{ width: `${Math.max(6, Math.min(100, Number(metric.level === "high" ? 30 : metric.level === "medium" ? 60 : 85)))}%` }} />
+      </div>
+      {metric.assessment && <p className="text-xs text-white/70 mt-3">{metric.assessment}</p>}
       {words.length > 0 && (
         <div className="mt-3 flex flex-wrap gap-1.5">
           {words.map((w, i) => <span key={i} className="px-2.5 py-1 bg-red-400/10 border border-red-400/20 text-red-300 rounded-lg text-xs font-mono">"{w}"</span>)}
@@ -1306,14 +1395,14 @@ function EditingPanel({ data, isPaid, profile }: { data: any; isPaid: boolean; p
       </LimitedSpeechNotice>
       {(data.topic || data.viewPotential || data.editingStyle) && (
         <div className="grid gap-4 lg:grid-cols-[1.2fr,0.8fr]">
-          <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
-            <p className="text-xs text-white/35 uppercase tracking-wider">What The Edit Needs To Do</p>
+          <div className="rounded-2xl border border-amber-400/20 bg-amber-500/6 p-4">
+            <p className="text-xs text-amber-100/70 uppercase tracking-wider flex items-center gap-2"><Scissors className="h-4 w-4 text-amber-300" />What The Edit Needs To Do</p>
             {data.topic && <p className="mt-3 text-lg font-semibold text-white">{data.topic}</p>}
             {data.audienceGoal && <p className="mt-2 text-sm leading-relaxed text-white/65">{data.audienceGoal}</p>}
             {data.viewPotential && <p className="mt-3 text-sm leading-relaxed text-amber-100/85">{data.viewPotential}</p>}
           </div>
-          <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
-            <p className="text-xs text-white/35 uppercase tracking-wider">Best Editing Style</p>
+          <div className="rounded-2xl border border-sky-400/20 bg-sky-500/6 p-4">
+            <p className="text-xs text-sky-100/70 uppercase tracking-wider flex items-center gap-2"><PenTool className="h-4 w-4 text-sky-300" />Best Editing Style</p>
             {data.editingStyle && <p className="mt-3 text-sm leading-relaxed text-white/75">{data.editingStyle}</p>}
             {data.packagingAngle && <p className="mt-3 text-xs leading-relaxed text-white/50"><span className="text-white/35">What the packaging should sell:</span> {data.packagingAngle}</p>}
           </div>
@@ -1322,26 +1411,26 @@ function EditingPanel({ data, isPaid, profile }: { data: any; isPaid: boolean; p
       {(data.introGuidance || data.pacingGuidance || data.motionGuidance || data.hookApproach) && (
         <div className="grid gap-3 md:grid-cols-2">
           {data.introGuidance && (
-            <div className="rounded-xl border border-white/8 bg-background/60 p-4">
-              <p className="text-xs uppercase tracking-wider text-white/35">Intro</p>
+            <div className="rounded-2xl border border-amber-400/20 bg-amber-500/6 p-4">
+              <p className="text-xs uppercase tracking-wider text-amber-100/70 flex items-center gap-2"><Zap className="h-4 w-4 text-amber-300" />Intro</p>
               <p className="mt-2 text-sm text-white/70">{data.introGuidance}</p>
             </div>
           )}
           {data.pacingGuidance && (
-            <div className="rounded-xl border border-white/8 bg-background/60 p-4">
-              <p className="text-xs uppercase tracking-wider text-white/35">Pacing</p>
+            <div className="rounded-2xl border border-red-400/20 bg-red-500/6 p-4">
+              <p className="text-xs uppercase tracking-wider text-red-100/70 flex items-center gap-2"><Clock3 className="h-4 w-4 text-red-300" />Pacing</p>
               <p className="mt-2 text-sm text-white/70">{data.pacingGuidance}</p>
             </div>
           )}
           {data.motionGuidance && (
-            <div className="rounded-xl border border-white/8 bg-background/60 p-4">
-              <p className="text-xs uppercase tracking-wider text-white/35">Motion Level</p>
+            <div className="rounded-2xl border border-violet-400/20 bg-violet-500/6 p-4">
+              <p className="text-xs uppercase tracking-wider text-violet-100/70 flex items-center gap-2"><Film className="h-4 w-4 text-violet-300" />Motion Level</p>
               <p className="mt-2 text-sm text-white/70">{data.motionGuidance}</p>
             </div>
           )}
           {data.hookApproach && (
-            <div className="rounded-xl border border-white/8 bg-background/60 p-4">
-              <p className="text-xs uppercase tracking-wider text-white/35">Opening Strategy</p>
+            <div className="rounded-2xl border border-emerald-400/20 bg-emerald-500/6 p-4">
+              <p className="text-xs uppercase tracking-wider text-emerald-100/70 flex items-center gap-2"><Target className="h-4 w-4 text-emerald-300" />Opening Strategy</p>
               <p className="mt-2 text-sm text-white/70">{data.hookApproach}</p>
             </div>
           )}
@@ -1545,20 +1634,20 @@ function PublishPanel({ data, platforms, isPaid, subtitleFile, videoFileName, pr
       {(pData?.algorithmFit || pData?.packagingStrategy || pData?.audiencePromise) && (
         <div className="grid gap-3 md:grid-cols-3">
           {pData?.audiencePromise && (
-            <div className="rounded-xl border border-white/8 bg-background/60 p-4">
-              <p className="text-xs uppercase tracking-wider text-white/35">Promise The Viewer Buys</p>
+            <div className="rounded-2xl border border-emerald-400/20 bg-emerald-500/6 p-4">
+              <p className="text-xs uppercase tracking-wider text-emerald-100/70 flex items-center gap-2"><Target className="h-4 w-4 text-emerald-300" />Promise The Viewer Buys</p>
               <p className="mt-2 text-sm text-white/70">{pData.audiencePromise}</p>
             </div>
           )}
           {pData?.packagingStrategy && (
-            <div className="rounded-xl border border-white/8 bg-background/60 p-4">
-              <p className="text-xs uppercase tracking-wider text-white/35">Angle To Lean Into</p>
+            <div className="rounded-2xl border border-sky-400/20 bg-sky-500/6 p-4">
+              <p className="text-xs uppercase tracking-wider text-sky-100/70 flex items-center gap-2"><PenTool className="h-4 w-4 text-sky-300" />Angle To Lean Into</p>
               <p className="mt-2 text-sm text-white/70">{pData.packagingStrategy}</p>
             </div>
           )}
           {pData?.algorithmFit && (
-            <div className="rounded-xl border border-white/8 bg-background/60 p-4">
-              <p className="text-xs uppercase tracking-wider text-white/35">Why This Should Get Clicked</p>
+            <div className="rounded-2xl border border-amber-400/20 bg-amber-500/6 p-4">
+              <p className="text-xs uppercase tracking-wider text-amber-100/70 flex items-center gap-2"><Rocket className="h-4 w-4 text-amber-300" />Why This Should Get Clicked</p>
               <p className="mt-2 text-sm text-white/70">{pData.algorithmFit}</p>
             </div>
           )}
@@ -1581,7 +1670,7 @@ function PublishPanel({ data, platforms, isPaid, subtitleFile, videoFileName, pr
             <button
               key={pk}
               onClick={() => setActivePlatform(pk)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${activePlatform === pk ? "bg-primary/20 text-primary border border-primary/40" : "bg-white/5 text-white/50 border border-white/10 hover:text-white/80"}`}
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${activePlatform === pk ? "bg-emerald-500/15 text-emerald-200 border border-emerald-400/30 shadow-[0_10px_30px_rgba(16,185,129,0.12)]" : "bg-white/5 text-white/50 border border-white/10 hover:text-white/80"}`}
             >
               {pl?.label ?? pk}
             </button>
@@ -1614,9 +1703,9 @@ function PublishPanel({ data, platforms, isPaid, subtitleFile, videoFileName, pr
           ) : (
           <>
           {priorityTitles.length > 0 && (
-            <div className="p-4 rounded-xl bg-background/60 border border-white/8">
+            <div className="p-4 rounded-2xl bg-emerald-500/6 border border-emerald-400/20">
               <div className="flex items-center justify-between mb-3">
-                <p className="text-xs text-white/40 uppercase tracking-wider flex items-center gap-1.5"><FileText className="w-3.5 h-3.5" />Pick A Title For {platformLabel}</p>
+                <p className="text-xs text-emerald-100/70 uppercase tracking-wider flex items-center gap-1.5"><FileText className="w-3.5 h-3.5" />Pick A Title For {platformLabel}</p>
                 <button onClick={() => copyText(titles.join("\n"), "titles")} className="text-white/30 hover:text-white/60 transition-colors">
                   {copiedSection === "titles" ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
                 </button>
@@ -1627,7 +1716,7 @@ function PublishPanel({ data, platforms, isPaid, subtitleFile, videoFileName, pr
                     key={`${index}-${title}`}
                     type="button"
                     onClick={() => copyText(title, `title-${index}`)}
-                    className="rounded-xl border border-white/10 bg-black/10 p-4 text-left transition-all hover:border-primary/25 hover:bg-primary/5"
+                    className="rounded-xl border border-white/10 bg-black/10 p-4 text-left transition-all hover:border-emerald-400/25 hover:bg-emerald-500/8"
                   >
                     {titleStrategies[index] && (
                       <p className="text-[10px] text-primary/50 uppercase tracking-wider mb-1">{titleStrategies[index]}</p>
@@ -1654,9 +1743,9 @@ function PublishPanel({ data, platforms, isPaid, subtitleFile, videoFileName, pr
           )}
 
           {hashtags.length > 0 && (
-            <div className="p-4 rounded-xl bg-background/60 border border-white/8">
+            <div className="p-4 rounded-2xl bg-sky-500/6 border border-sky-400/20">
               <div className="flex items-center justify-between mb-3">
-                <p className="text-xs text-white/40 uppercase tracking-wider flex items-center gap-1.5"><Hash className="w-3.5 h-3.5" />Paste-Ready Tags</p>
+                <p className="text-xs text-sky-100/70 uppercase tracking-wider flex items-center gap-1.5"><Hash className="w-3.5 h-3.5" />Paste-Ready Tags</p>
                 {isPaid && (
                   <button onClick={() => copyText(hashtags.map(t => String(t.tag ?? "").replace(/^#+/, "")).join(", "), "tags")} className="text-white/30 hover:text-white/60 transition-colors">
                     {copiedSection === "tags" ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
@@ -1665,7 +1754,7 @@ function PublishPanel({ data, platforms, isPaid, subtitleFile, videoFileName, pr
               </div>
               <div className="flex flex-wrap gap-1.5">
                 {firstTags.map((tag: { tag: string; effect?: string }, i: number) => (
-                  <span key={i} title={tag.effect} className="px-2.5 py-1 bg-primary/10 border border-primary/20 text-primary/80 rounded-lg text-xs font-mono cursor-help">
+                  <span key={i} title={tag.effect} className="px-2.5 py-1 bg-sky-500/10 border border-sky-400/20 text-sky-200 rounded-lg text-xs font-mono cursor-help">
                     {String(tag.tag ?? "").replace(/^#+/, "")}
                   </span>
                 ))}
@@ -1687,9 +1776,9 @@ function PublishPanel({ data, platforms, isPaid, subtitleFile, videoFileName, pr
           {pData.description && (
             <CollapsibleSection title="Copy/Paste Publish Package" subtitle="Description, chapters, and platform copy you can lift straight into upload." defaultOpen={false}>
               <div className="space-y-4">
-                <div className="rounded-xl bg-background/60 border border-white/8 p-4">
+                <div className="rounded-2xl bg-amber-500/6 border border-amber-400/20 p-4">
                   <div className="flex items-center justify-between mb-2">
-                    <p className="text-xs text-white/40 uppercase tracking-wider flex items-center gap-1.5"><FileText className="w-3.5 h-3.5" />Description</p>
+                    <p className="text-xs text-amber-100/70 uppercase tracking-wider flex items-center gap-1.5"><FileText className="w-3.5 h-3.5" />Description</p>
                     {isPaid && (
                       <button onClick={() => copyText(pData.description, "desc")} className="text-white/30 hover:text-white/60 transition-colors">
                         {copiedSection === "desc" ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
@@ -1711,8 +1800,8 @@ function PublishPanel({ data, platforms, isPaid, subtitleFile, videoFileName, pr
                 </div>
 
                 {pData.timestamps?.length > 0 && (
-                  <div className="rounded-xl bg-background/60 border border-white/8 p-4">
-                    <p className="text-xs text-white/40 uppercase tracking-wider mb-3 flex items-center gap-1.5"><Eye className="w-3.5 h-3.5" />Chapter Timestamps</p>
+                  <div className="rounded-2xl bg-violet-500/6 border border-violet-400/20 p-4">
+                    <p className="text-xs text-violet-100/70 uppercase tracking-wider mb-3 flex items-center gap-1.5"><Clock3 className="w-3.5 h-3.5" />Chapter Timestamps</p>
                     <div className="space-y-1.5">
                       {pData.timestamps.map((ts: { time: string; label: string }, i: number) => (
                         <div key={i} className="flex items-center gap-3">
@@ -1728,8 +1817,8 @@ function PublishPanel({ data, platforms, isPaid, subtitleFile, videoFileName, pr
           )}
 
           {showSubtitleFile && (
-            <div className="p-4 rounded-xl bg-background/60 border border-white/8">
-              <p className="text-xs text-white/40 uppercase tracking-wider mb-3 flex items-center gap-1.5"><Download className="w-3.5 h-3.5" />Subtitle File (.srt)</p>
+            <div className="p-4 rounded-2xl bg-emerald-500/6 border border-emerald-400/20">
+              <p className="text-xs text-emerald-100/70 uppercase tracking-wider mb-3 flex items-center gap-1.5"><Download className="w-3.5 h-3.5" />Subtitle File (.srt)</p>
               {isPaid ? (
                 subtitleFile?.content ? (
                   <div className="flex items-center justify-between">
@@ -2966,8 +3055,6 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
               </button>
             </div>
           </div>
-
-          <DecisionBar results={displayedResults} profile={analysisProfile} />
 
           {availableResultTabs.length > 0 && (
             <>
