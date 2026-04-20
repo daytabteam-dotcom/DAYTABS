@@ -5,6 +5,7 @@ export interface VideoUploadOptions {
   platform?: string;
   platforms?: string[];
   modules?: string[];
+  durationSeconds?: number;
   translateSubtitles?: boolean;
   subtitleLanguage?: string;
   audioLanguage?: string;
@@ -247,6 +248,7 @@ export function useVideoUpload() {
           mimeType: file.type || "video/mp4",
           totalChunks,
           mode: options.mode,
+          durationSeconds: options.durationSeconds ?? null,
           platforms: JSON.stringify(
             options.platforms ?? (options.platform ? [options.platform] : ["youtube_long"])
           ),

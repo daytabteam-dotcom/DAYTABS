@@ -14,8 +14,16 @@ export interface PlanFeatures {
 export interface PlanInfo {
   plan: PlanName;
   normalizedPlan: "free" | "creator" | "pro" | "studio";
-  uploadCounts: Record<string, number>;
-  scriptPlannerChats: number;
+  videoUsage: {
+    used: number;
+    limit: number;
+    analysesUsed: number;
+    analysesLimit: number;
+  };
+  scriptGenerations: {
+    used: number;
+    limit: number;
+  };
   isPaid: boolean;
   isCreator: boolean;
   isPro: boolean;
@@ -24,15 +32,18 @@ export interface PlanInfo {
 }
 
 export interface PlanLimits {
-  uploadLimit: number;
-  uploadUsed: number;
-  uploadsRemaining: number;
+  usageLimit: number;
+  usageUsed: number;
+  usageRemaining: number;
+  analysesLimit: number;
+  analysesUsed: number;
+  analysesRemaining: number;
 }
 
 export interface ScriptPlannerLimits {
-  chatLimit: number;
-  chatsUsed: number;
-  chatsRemaining: number;
+  generationLimit: number;
+  generationsUsed: number;
+  generationsRemaining: number;
 }
 
 function getDefaultFeatures(norm: "free" | "creator" | "pro" | "studio"): PlanFeatures {
@@ -53,17 +64,24 @@ function normalizePlan(plan: string): "free" | "creator" | "pro" | "studio" {
 }
 
 const UPLOAD_LIMITS: Record<string, number> = {
-  free:    2,
-  creator: 15,
-  pro:     40,
-  studio:  -1,
+  free:    1,
+  creator: 10,
+  pro:     25,
+  studio:  80,
 };
 
-const SCRIPT_PLANNER_CHAT_LIMITS: Record<string, number> = {
+const SCRIPT_PLANNER_GENERATION_LIMITS: Record<string, number> = {
   free:    1,
-  creator: 15,
-  pro:     40,
-  studio:  -1,
+  creator: 20,
+  pro:     60,
+  studio:  200,
+};
+
+const VIDEO_USAGE_LIMITS: Record<string, number> = {
+  free:    1,
+  creator: 10,
+  pro:     25,
+  studio:  80,
 };
 
 export const FILE_SIZE_LIMITS: Record<string, number> = {
@@ -75,9 +93,9 @@ export const FILE_SIZE_LIMITS: Record<string, number> = {
 
 export const DURATION_LIMITS_SEC: Record<string, number> = {
   free:    5 * 60,
-  creator: 40 * 60,
-  pro:     2 * 60 * 60,
-  studio:  3 * 60 * 60,
+  creator: 25 * 60,
+  pro:     60 * 60,
+  studio:  90 * 60,
 };
 
 export const PLAN_DISPLAY_NAMES: Record<string, string> = {
@@ -133,8 +151,12 @@ export function getUploadLimit(plan: string): number {
   return UPLOAD_LIMITS[normalizePlan(plan)] ?? UPLOAD_LIMITS.free;
 }
 
+export function getVideoUsageLimit(plan: string): number {
+  return VIDEO_USAGE_LIMITS[normalizePlan(plan)] ?? VIDEO_USAGE_LIMITS.free;
+}
+
 export function getScriptPlannerChatLimit(plan: string): number {
-  return SCRIPT_PLANNER_CHAT_LIMITS[normalizePlan(plan)] ?? SCRIPT_PLANNER_CHAT_LIMITS.free;
+  return SCRIPT_PLANNER_GENERATION_LIMITS[normalizePlan(plan)] ?? SCRIPT_PLANNER_GENERATION_LIMITS.free;
 }
 
 export function usePlan() {
@@ -154,8 +176,8 @@ export function usePlan() {
         const data = await resp.json() as {
           plan: string;
           freshToken?: string | null;
-          uploadCounts: Record<string, number>;
-          scriptPlannerChats?: number;
+          videoUsage?: PlanInfo["videoUsage"];
+          scriptGenerations?: PlanInfo["scriptGenerations"];
           features?: PlanFeatures;
         };
         if (data.freshToken) {
@@ -167,8 +189,16 @@ export function usePlan() {
         setPlanInfo({
           plan: rawPlan,
           normalizedPlan: norm,
-          uploadCounts: data.uploadCounts || {},
-          scriptPlannerChats: data.scriptPlannerChats ?? 0,
+          videoUsage: data.videoUsage ?? {
+            used: 0,
+            limit: getVideoUsageLimit(rawPlan),
+            analysesUsed: 0,
+            analysesLimit: getUploadLimit(rawPlan),
+          },
+          scriptGenerations: data.scriptGenerations ?? {
+            used: 0,
+            limit: getScriptPlannerChatLimit(rawPlan),
+          },
           isPaid: norm !== "free",
           isCreator: norm === "creator",
           isPro: norm === "pro",
@@ -198,8 +228,16 @@ export function usePlan() {
   const effectiveInfo: PlanInfo = planInfo ?? {
     plan: rawPlan,
     normalizedPlan: norm,
-    uploadCounts: {},
-    scriptPlannerChats: 0,
+    videoUsage: {
+      used: 0,
+      limit: getVideoUsageLimit(rawPlan),
+      analysesUsed: 0,
+      analysesLimit: getUploadLimit(rawPlan),
+    },
+    scriptGenerations: {
+      used: 0,
+      limit: getScriptPlannerChatLimit(rawPlan),
+    },
     isPaid: norm !== "free",
     isCreator: norm === "creator",
     isPro: norm === "pro",
@@ -207,23 +245,28 @@ export function usePlan() {
     features: getDefaultFeatures(norm),
   };
 
-  function getModeLimits(mode: string): PlanLimits {
-    const limit = getUploadLimit(effectiveInfo.plan);
-    const used = effectiveInfo.uploadCounts[mode] ?? effectiveInfo.uploadCounts["video-analyzer"] ?? 0;
+  function getModeLimits(_mode: string): PlanLimits {
+    const usageLimit = effectiveInfo.videoUsage.limit;
+    const usageUsed = effectiveInfo.videoUsage.used;
+    const analysesLimit = effectiveInfo.videoUsage.analysesLimit || getUploadLimit(effectiveInfo.plan);
+    const analysesUsed = effectiveInfo.videoUsage.analysesUsed;
     return {
-      uploadLimit: limit,
-      uploadUsed: used,
-      uploadsRemaining: limit === -1 ? Infinity : Math.max(0, limit - used),
+      usageLimit,
+      usageUsed,
+      usageRemaining: Math.max(0, usageLimit - usageUsed),
+      analysesLimit,
+      analysesUsed,
+      analysesRemaining: Math.max(0, analysesLimit - analysesUsed),
     };
   }
 
   function getScriptPlannerLimits(): ScriptPlannerLimits {
-    const limit = getScriptPlannerChatLimit(effectiveInfo.plan);
-    const used = effectiveInfo.scriptPlannerChats;
+    const limit = effectiveInfo.scriptGenerations.limit || getScriptPlannerChatLimit(effectiveInfo.plan);
+    const used = effectiveInfo.scriptGenerations.used;
     return {
-      chatLimit: limit,
-      chatsUsed: used,
-      chatsRemaining: limit === -1 ? Infinity : Math.max(0, limit - used),
+      generationLimit: limit,
+      generationsUsed: used,
+      generationsRemaining: Math.max(0, limit - used),
     };
   }
 

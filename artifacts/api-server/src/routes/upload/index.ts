@@ -12,6 +12,7 @@ import {
   normalizePlan,
   getLimits,
   buildFileTooLargeError,
+  buildVideoTooLongError,
 } from "../../lib/planLimits";
 import {
   checkVideoAnalysisLimit,
@@ -51,6 +52,7 @@ interface UploadSession {
   audioLanguage: string | null;
   audioVoice: string;
   r2Key: string;
+  durationSeconds: number | null;
 }
 
 const sessions = new Map<string, UploadSession>();
@@ -92,6 +94,7 @@ router.post("/init", async (req, res) => {
       subtitleLanguage,
       audioLanguage,
       audioVoice,
+      durationSeconds,
     } = req.body;
 
     const rawPlan = (req as any).auth?.plan ?? "free";
@@ -128,8 +131,15 @@ router.post("/init", async (req, res) => {
       return;
     }
 
+    const parsedDurationSeconds = Number(durationSeconds);
+    const hasDuration = Number.isFinite(parsedDurationSeconds) && parsedDurationSeconds > 0;
+    if (hasDuration && parsedDurationSeconds > planLimits.max_video_duration_seconds) {
+      res.status(413).json(buildVideoTooLongError(normalizedPlan, parsedDurationSeconds));
+      return;
+    }
+
     if (userId) {
-      const limitCheck = await checkVideoAnalysisLimit(userId, rawPlan);
+      const limitCheck = await checkVideoAnalysisLimit(userId, rawPlan, hasDuration ? parsedDurationSeconds : null);
       if (!limitCheck.allowed) {
         res.status(429).json(limitCheck.error);
         return;
@@ -196,6 +206,7 @@ router.post("/init", async (req, res) => {
       audioLanguage: audioLanguage ?? null,
       audioVoice: audioVoice ?? "alloy",
       r2Key,
+      durationSeconds: hasDuration ? parsedDurationSeconds : null,
     });
 
     res.json({ uploadId, ...uploadTarget });
@@ -351,6 +362,7 @@ router.post("/complete", async (req, res) => {
           originalFileName: session.filename,
           plan: rawPlan,
           maxDurationSeconds,
+          durationSeconds: session.durationSeconds ?? undefined,
         },
       },
     });
@@ -375,8 +387,9 @@ router.post("/complete", async (req, res) => {
             originalFileName: session.filename,
             plan: rawPlan,
             maxDurationSeconds,
+            durationSeconds: session.durationSeconds ?? undefined,
           });
-          if (completed && userId) await incrementVideoAnalysis(userId);
+          if (completed && userId) await incrementVideoAnalysis(userId, session.durationSeconds);
         } finally {
           await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
         }

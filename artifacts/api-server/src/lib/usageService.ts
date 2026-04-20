@@ -1,6 +1,13 @@
 import { db, userUsageTable, analysisJobsTable, scriptPlannerChatsTable, usersTable } from "@workspace/db";
 import { eq, and, gte, count } from "drizzle-orm";
-import { normalizePlan, PLAN_LIMITS, buildMonthlyLimitError, buildChatLimitError, type NormalizedPlan } from "./planLimits";
+import {
+  normalizePlan,
+  PLAN_LIMITS,
+  buildMonthlyLimitError,
+  buildScriptGenerationLimitError,
+  buildVideoUsageLimitError,
+  getVideoUsageCost,
+} from "./planLimits";
 
 // ─── Per-user billing cycle helpers ────────────────────────────────────────────
 
@@ -62,9 +69,15 @@ function dateToISODate(d: Date): string {
  * Count existing successful analysis jobs and script chats since a given date.
  * Used to seed the counter on first access.
  */
-async function countUsageSince(userId: number, since: Date): Promise<{ videoAnalyses: number; scriptChats: number }> {
-  const [uploadRow] = await db
-    .select({ cnt: count() })
+async function countUsageSince(userId: number, since: Date): Promise<{
+  videoUsage: number;
+  videoRuns: number;
+  scriptGenerations: number;
+}> {
+  const analysisRows = await db
+    .select({
+      result: analysisJobsTable.result,
+    })
     .from(analysisJobsTable)
     .where(and(
       eq(analysisJobsTable.userId, userId),
@@ -81,9 +94,18 @@ async function countUsageSince(userId: number, since: Date): Promise<{ videoAnal
       gte(scriptPlannerChatsTable.createdAt, since),
     ));
 
+  const videoUsage = analysisRows.reduce((sum, row) => {
+    const analysisOptions = row.result && typeof row.result === "object"
+      ? (row.result as { analysisOptions?: { durationSeconds?: unknown } }).analysisOptions
+      : undefined;
+    const durationSeconds = Number(analysisOptions?.durationSeconds);
+    return sum + getVideoUsageCost(durationSeconds);
+  }, 0);
+
   return {
-    videoAnalyses: Number(uploadRow?.cnt ?? 0),
-    scriptChats: Number(chatRow?.cnt ?? 0),
+    videoUsage,
+    videoRuns: analysisRows.length,
+    scriptGenerations: Number(chatRow?.cnt ?? 0),
   };
 }
 
@@ -128,15 +150,18 @@ export async function getOrCreateUsage(userId: number) {
 
   if (!existing) {
     // First access — seed from completed jobs in this cycle
-    const { videoAnalyses, scriptChats } = await countUsageSince(userId, cycleStart);
+    const { videoUsage, videoRuns, scriptGenerations } = await countUsageSince(userId, cycleStart);
     const [row] = await db
       .insert(userUsageTable)
       .values({
         userId,
         periodStart: periodStartStr,
         periodEnd: dateToISODate(new Date(cycleStart.getFullYear(), cycleStart.getMonth() + 1, cycleStart.getDate())),
-        videoAnalysesUsed: videoAnalyses,
-        scriptPlannerChatsUsed: scriptChats,
+        videoAnalysesUsed: videoRuns,
+        scriptPlannerChatsUsed: scriptGenerations,
+        videoAnalysisRunsUsed: videoRuns,
+        videoAnalysisUsageUsed: videoUsage,
+        scriptGenerationsUsed: scriptGenerations,
         lastUpdated: new Date(),
       })
       .returning();
@@ -145,14 +170,17 @@ export async function getOrCreateUsage(userId: number) {
 
   if (isPeriodStale(existing.periodStart, cycleStart)) {
     // New cycle started — reset counters, seed from completed jobs this cycle
-    const { videoAnalyses, scriptChats } = await countUsageSince(userId, cycleStart);
+    const { videoUsage, videoRuns, scriptGenerations } = await countUsageSince(userId, cycleStart);
     const [row] = await db
       .update(userUsageTable)
       .set({
         periodStart: periodStartStr,
         periodEnd: dateToISODate(new Date(cycleStart.getFullYear(), cycleStart.getMonth() + 1, cycleStart.getDate())),
-        videoAnalysesUsed: videoAnalyses,
-        scriptPlannerChatsUsed: scriptChats,
+        videoAnalysesUsed: videoRuns,
+        scriptPlannerChatsUsed: scriptGenerations,
+        videoAnalysisRunsUsed: videoRuns,
+        videoAnalysisUsageUsed: videoUsage,
+        scriptGenerationsUsed: scriptGenerations,
         lastUpdated: new Date(),
       })
       .where(eq(userUsageTable.userId, userId))
@@ -169,27 +197,37 @@ export async function getOrCreateUsage(userId: number) {
  * Check whether the user is within their video analysis limit for the current cycle.
  * Does NOT increment the counter. Call incrementVideoAnalysis() after a successful pipeline.
  */
-export async function checkVideoAnalysisLimit(userId: number, rawPlan: string): Promise<{
+export async function checkVideoAnalysisLimit(userId: number, rawPlan: string, durationSeconds?: number | null): Promise<{
   allowed: boolean;
   used: number;
   limit: number;
+  required: number;
   error?: ReturnType<typeof buildMonthlyLimitError>;
 }> {
   const plan = normalizePlan(rawPlan);
-  const planLimit = PLAN_LIMITS[plan].video_analyses_per_month;
-
-  if (planLimit === Infinity) {
-    return { allowed: true, used: 0, limit: -1 };
-  }
+  const displayLimit = PLAN_LIMITS[plan].video_analyses_display_limit;
+  const usageLimit = PLAN_LIMITS[plan].video_usage_budget_per_month;
+  const required = getVideoUsageCost(Number(durationSeconds ?? 0));
 
   const usage = await getOrCreateUsage(userId);
-  const used = usage.videoAnalysesUsed;
+  const usedRuns = usage.videoAnalysisRunsUsed ?? usage.videoAnalysesUsed ?? 0;
+  const usedUsage = usage.videoAnalysisUsageUsed ?? usage.videoAnalysesUsed ?? 0;
 
-  if (used >= planLimit) {
-    return { allowed: false, used, limit: planLimit, error: buildMonthlyLimitError(plan, used, planLimit) };
+  if (usedRuns >= displayLimit) {
+    return { allowed: false, used: usedRuns, limit: displayLimit, required, error: buildMonthlyLimitError(plan, usedRuns, displayLimit) };
   }
 
-  return { allowed: true, used, limit: planLimit };
+  if (usedUsage + required > usageLimit) {
+    return {
+      allowed: false,
+      used: usedUsage,
+      limit: usageLimit,
+      required,
+      error: buildVideoUsageLimitError(plan, usedUsage, usageLimit, required),
+    };
+  }
+
+  return { allowed: true, used: usedUsage, limit: usageLimit, required };
 }
 
 // ─── Video Analysis — increment after successful pipeline ─────────────────────
@@ -198,7 +236,8 @@ export async function checkVideoAnalysisLimit(userId: number, rawPlan: string): 
  * Increment the video analysis counter. Call this only after the pipeline
  * completes successfully and the report is generated.
  */
-export async function incrementVideoAnalysis(userId: number): Promise<void> {
+export async function incrementVideoAnalysis(userId: number, durationSeconds?: number | null): Promise<void> {
+  const required = getVideoUsageCost(Number(durationSeconds ?? 0));
   const [existing] = await db
     .select()
     .from(userUsageTable)
@@ -210,41 +249,51 @@ export async function incrementVideoAnalysis(userId: number): Promise<void> {
     await getOrCreateUsage(userId);
     const [fresh] = await db.select().from(userUsageTable).where(eq(userUsageTable.userId, userId)).limit(1);
     if (!fresh) return;
-    await db.update(userUsageTable).set({ videoAnalysesUsed: 1, lastUpdated: new Date() }).where(eq(userUsageTable.userId, userId));
+    await db.update(userUsageTable).set({
+      videoAnalysesUsed: 1,
+      videoAnalysisRunsUsed: 1,
+      videoAnalysisUsageUsed: required,
+      lastUpdated: new Date(),
+    }).where(eq(userUsageTable.userId, userId));
     return;
   }
 
   await db
     .update(userUsageTable)
-    .set({ videoAnalysesUsed: existing.videoAnalysesUsed + 1, lastUpdated: new Date() })
+    .set({
+      videoAnalysesUsed: (existing.videoAnalysesUsed ?? 0) + 1,
+      videoAnalysisRunsUsed: (existing.videoAnalysisRunsUsed ?? existing.videoAnalysesUsed ?? 0) + 1,
+      videoAnalysisUsageUsed: (existing.videoAnalysisUsageUsed ?? existing.videoAnalysesUsed ?? 0) + required,
+      lastUpdated: new Date(),
+    })
     .where(eq(userUsageTable.userId, userId));
 }
 
-// ─── Script Chat limit check + increment ──────────────────────────────────────
+// ─── Script generation limit check + increment ───────────────────────────────
 
-export async function checkAndIncrementScriptChat(userId: number, rawPlan: string): Promise<{
+export async function checkAndIncrementScriptGeneration(userId: number, rawPlan: string): Promise<{
   allowed: boolean;
   used: number;
   limit: number;
-  error?: ReturnType<typeof buildChatLimitError>;
+  error?: ReturnType<typeof buildScriptGenerationLimitError>;
 }> {
   const plan = normalizePlan(rawPlan);
-  const planLimit = PLAN_LIMITS[plan].script_planner_chats_per_month;
-
-  if (planLimit === Infinity) {
-    return { allowed: true, used: 0, limit: -1 };
-  }
+  const planLimit = PLAN_LIMITS[plan].script_generations_per_month;
 
   const usage = await getOrCreateUsage(userId);
-  const used = usage.scriptPlannerChatsUsed;
+  const used = usage.scriptGenerationsUsed ?? usage.scriptPlannerChatsUsed ?? 0;
 
   if (used >= planLimit) {
-    return { allowed: false, used, limit: planLimit, error: buildChatLimitError(plan, used, planLimit) };
+    return { allowed: false, used, limit: planLimit, error: buildScriptGenerationLimitError(plan, used, planLimit) };
   }
 
   await db
     .update(userUsageTable)
-    .set({ scriptPlannerChatsUsed: used + 1, lastUpdated: new Date() })
+    .set({
+      scriptPlannerChatsUsed: used + 1,
+      scriptGenerationsUsed: used + 1,
+      lastUpdated: new Date(),
+    })
     .where(eq(userUsageTable.userId, userId));
 
   return { allowed: true, used: used + 1, limit: planLimit };

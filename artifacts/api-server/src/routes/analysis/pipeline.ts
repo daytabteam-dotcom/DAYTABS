@@ -156,6 +156,7 @@ export interface PipelineOptions {
   platforms?: string[];
   maxDurationSeconds?: number;
   originalFileName?: string;
+  durationSeconds?: number;
 }
 
 export async function runAnalysisPipeline(
@@ -271,8 +272,8 @@ async function runVideoAnalyzer(
     await stopIfMemoryHigh(jobId, "duration check");
     if (durationSec > maxDuration) {
       const planLabels: Record<string, string> = {
-        free: "Free (5 min)", creator: "Creator (40 min)", pro: "Pro (2 hr)", studio: "Studio (3 hr)",
-        premium: "Creator (40 min)", professional: "Studio (3 hr)",
+        free: "Free (5 min)", creator: "Creator (25 min)", pro: "Pro (60 min)", studio: "Studio (90 min)",
+        premium: "Creator (25 min)", professional: "Studio (90 min)",
       };
       const planLabel = planLabels[plan] ?? "your plan";
       await updateJob(jobId, {
@@ -344,6 +345,7 @@ async function runVideoAnalyzer(
         videoName,
         plan,
         maxDurationSeconds: maxDuration,
+        durationSeconds: durationSec,
         mediaMetadata,
         shortClipEligible,
       },

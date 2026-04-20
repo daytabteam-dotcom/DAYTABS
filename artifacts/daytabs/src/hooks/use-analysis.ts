@@ -17,6 +17,9 @@ export function useUploadVideoWithFile() {
       const formData = new FormData();
       formData.append("video", file);
       formData.append("platform", options.platform);
+      if ((options as UploadVideoBody & { durationSeconds?: number }).durationSeconds !== undefined) {
+        formData.append("durationSeconds", String((options as UploadVideoBody & { durationSeconds?: number }).durationSeconds));
+      }
       
       if (options.translateSubtitles !== undefined) {
         formData.append("translateSubtitles", String(options.translateSubtitles));

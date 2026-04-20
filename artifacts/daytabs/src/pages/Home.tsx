@@ -336,13 +336,11 @@ function Dashboard({
   const { plan, getModeLimits, getScriptPlannerLimits } = usePlan();
   const norm = plan.normalizedPlan;
   const limits = getModeLimits("video-analyzer");
-  const used = limits.uploadUsed;
-  const remaining = limits.uploadsRemaining;
-  const total = limits.uploadLimit;
-  const isUnlimited = total === -1;
+  const used = limits.usageUsed;
+  const remaining = limits.usageRemaining;
+  const total = limits.usageLimit;
   const spLimits = getScriptPlannerLimits();
   const spChatLimit = getScriptPlannerChatLimit(norm);
-  const isSpUnlimited = spChatLimit === -1;
   const badgeClass = getPlanBadgeColor(norm);
   const displayName = PLAN_DISPLAY_NAMES[norm] ?? "Free";
   const firstName =
@@ -363,26 +361,23 @@ function Dashboard({
           {displayName}
         </div>
         <div className="flex-1">
-          {isUnlimited ? (
-            <p className="text-sm text-white/60">
-              Unlimited video analyses, no restrictions.
-            </p>
-          ) : (
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <p className="text-xs text-white/40">
-                  {used} of {total} analyses used this month
-                </p>
-                <p className="text-xs text-white/40">{remaining} remaining</p>
-              </div>
-              <div className="h-1.5 bg-white/8 rounded-full overflow-hidden">
-                <div
-                  className={`h-full rounded-full transition-all ${remaining === 0 ? "bg-red-400" : remaining <= 3 ? "bg-amber-400" : "bg-primary"}`}
-                  style={{ width: `${Math.min(100, (used / total) * 100)}%` }}
-                />
-              </div>
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-xs text-white/40">
+                {used} of {total} monthly usage used
+              </p>
+              <p className="text-xs text-white/40">{remaining} remaining</p>
             </div>
-          )}
+            <div className="h-1.5 bg-white/8 rounded-full overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all ${remaining === 0 ? "bg-red-400" : remaining <= 3 ? "bg-amber-400" : "bg-primary"}`}
+                style={{ width: `${Math.min(100, (used / total) * 100)}%` }}
+              />
+            </div>
+            <p className="mt-2 text-xs text-white/35">
+              Up to {limits.analysesLimit} video analyses each month. Longer videos may use more of your monthly usage.
+            </p>
+          </div>
         </div>
         {!plan.isPaid && (
           <button
@@ -394,19 +389,17 @@ function Dashboard({
         )}
       </PanelCard>
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard label="Analyses used" value={used} sublabel="this month" />
+        <StatCard label="Usage used" value={used} sublabel="this month" />
         <StatCard
-          label="Analyses left"
-          value={isUnlimited ? "∞" : remaining}
+          label="Usage left"
+          value={remaining}
           sublabel="this month"
           color={remaining === 0 ? "text-red-400" : "text-primary"}
         />
         <StatCard
-          label="Script chats"
-          value={isSpUnlimited ? "∞" : spLimits.chatsUsed}
-          sublabel={
-            isSpUnlimited ? "unlimited" : `of ${spChatLimit} this month`
-          }
+          label="Script generations"
+          value={spLimits.generationsUsed}
+          sublabel={`of ${spChatLimit} this month`}
         />
         <StatCard
           label="Max duration"

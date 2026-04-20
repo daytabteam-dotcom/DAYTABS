@@ -602,7 +602,7 @@ function ActionCard({
   );
 }
 
-function CreatorReportIntro({ results, profile }: { results: any; profile?: any }) {
+function CreatorReportIntro({ results, profile, isPaid }: { results: any; profile?: any; isPaid: boolean }) {
   if (!results) return null;
   const formatProfile = getFormatProfile(profile);
   const editingData = results?.editing ?? {};
@@ -616,6 +616,13 @@ function CreatorReportIntro({ results, profile }: { results: any; profile?: any 
   const scoreDrivers = weakestMetrics(results, profile);
   const timelineMoments = buildTimelineMoments(results);
   const leadTitle = publishData?.titles?.[0] ?? null;
+  const visibleFixes = isPaid ? topFixes : topFixes.slice(0, 1);
+  const hiddenFixes = isPaid ? [] : topFixes.slice(1);
+  const visibleTimelineMoments = isPaid ? timelineMoments : timelineMoments.slice(0, 1);
+  const hiddenTimelineMoments = isPaid ? [] : timelineMoments.slice(1);
+  const visibleScoreDrivers = isPaid ? scoreDrivers : scoreDrivers.slice(0, 3);
+  const hiddenScoreDrivers = isPaid ? [] : scoreDrivers.slice(3);
+  const hookInsight = editingData?.hooks?.[0]?.text ?? editingData?.rewrittenHook ?? editingData?.hookApproach ?? null;
 
   return (
     <div className="space-y-6">
@@ -641,23 +648,29 @@ function CreatorReportIntro({ results, profile }: { results: any; profile?: any 
               <span className="pb-1 text-sm text-white/45">readiness score</span>
             </div>
             <p className="mt-4 text-sm font-semibold text-white">Fix first</p>
-            <p className="mt-2 text-sm leading-relaxed text-white/68">{topFixes[0] ?? "Review the edit notes and tighten the opening before publishing."}</p>
+            <p className="mt-2 text-sm leading-relaxed text-white/68">{visibleFixes[0] ?? "Review the edit notes and tighten the opening before publishing."}</p>
+            {hookInsight ? (
+              <>
+                <p className="mt-4 text-sm font-semibold text-white">Hook insight</p>
+                <p className="mt-2 text-sm leading-relaxed text-white/68">{hookInsight}</p>
+              </>
+            ) : null}
             <p className="mt-4 text-sm font-semibold text-white">What the packaging should promise</p>
             <p className="mt-2 text-sm leading-relaxed text-white/68">{primaryPromise}</p>
           </div>
         </div>
       </PanelCard>
 
-      {topFixes.length > 0 && (
+      {visibleFixes.length > 0 && (
         <PanelCardSoft className="border border-amber-400/20 bg-amber-400/5 p-5">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
               <p className="text-[11px] uppercase tracking-[0.16em] text-amber-200/70">Fix First</p>
-              <p className="mt-2 text-sm text-white/65">Three changes to make before you worry about anything else.</p>
+              <p className="mt-2 text-sm text-white/65">{isPaid ? "Three changes to make before you worry about anything else." : "The first improvement to make before anything else."}</p>
             </div>
           </div>
           <div className="mt-4 grid gap-3 md:grid-cols-3">
-            {topFixes.map((fix, index) => (
+            {visibleFixes.map((fix, index) => (
               <ActionCard
                 key={`${index}-${fix}`}
                 index={index + 1}
@@ -666,6 +679,22 @@ function CreatorReportIntro({ results, profile }: { results: any; profile?: any 
               />
             ))}
           </div>
+          {hiddenFixes.length > 0 && (
+            <div className="mt-3">
+              <BlurSection blur feature="full-fix-list" label="See all improvements">
+                <div className="grid gap-3 md:grid-cols-3">
+                  {hiddenFixes.map((fix, index) => (
+                    <ActionCard
+                      key={`hidden-${index}-${fix}`}
+                      index={index + 2}
+                      title={fix}
+                      detail="More of the full breakdown."
+                    />
+                  ))}
+                </div>
+              </BlurSection>
+            </div>
+          )}
         </PanelCardSoft>
       )}
 
@@ -678,7 +707,7 @@ function CreatorReportIntro({ results, profile }: { results: any; profile?: any 
             </div>
           </div>
           <div className="mt-5 space-y-4">
-            {timelineMoments.length > 0 ? timelineMoments.map((moment, index) => {
+            {visibleTimelineMoments.length > 0 ? visibleTimelineMoments.map((moment, index) => {
               const toneClass = moment.tone === "emerald"
                 ? "border-emerald-400/20 bg-emerald-400/10 text-emerald-100"
                 : moment.tone === "red"
@@ -700,6 +729,20 @@ function CreatorReportIntro({ results, profile }: { results: any; profile?: any 
             }) : (
               <p className="text-sm text-white/45">No timestamped moments were surfaced for this video.</p>
             )}
+            {hiddenTimelineMoments.length > 0 && (
+              <BlurSection blur feature="full-timeline" label="Unlock full breakdown">
+                <div className="space-y-4">
+                  {hiddenTimelineMoments.map((moment, index) => (
+                    <div key={`hidden-${moment.time}-${index}`} className="grid gap-3 sm:grid-cols-[88px,1fr]">
+                      <div className="text-sm font-mono text-primary/80">{moment.time}</div>
+                      <div className="rounded-xl border border-white/8 bg-background/50 p-4">
+                        <p className="text-sm leading-relaxed text-white/68">{moment.detail}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </BlurSection>
+            )}
           </div>
         </PanelCardSoft>
 
@@ -707,7 +750,7 @@ function CreatorReportIntro({ results, profile }: { results: any; profile?: any 
           <PanelCardSoft className="border border-white/10 p-5">
             <p className="text-[11px] uppercase tracking-[0.16em] text-white/40">Why The Score Landed Here</p>
             <div className="mt-4 grid gap-3">
-              {scoreDrivers.length > 0 ? scoreDrivers.map((item) => (
+              {visibleScoreDrivers.length > 0 ? visibleScoreDrivers.map((item) => (
                 <div key={item.label} className="rounded-xl border border-white/8 bg-background/50 p-4">
                   <div className="flex items-center justify-between gap-3">
                     <p className="text-sm font-semibold text-white">{item.label}</p>
@@ -716,7 +759,21 @@ function CreatorReportIntro({ results, profile }: { results: any; profile?: any 
                   {item.metric?.assessment ? <p className="mt-2 text-xs leading-relaxed text-white/55">{item.metric.assessment}</p> : null}
                 </div>
               )) : (
-                <p className="text-sm text-white/45">No score drivers were surfaced.</p>
+                  <p className="text-sm text-white/45">No score drivers were surfaced.</p>
+              )}
+              {hiddenScoreDrivers.length > 0 && (
+                <BlurSection blur feature="score-breakdown" label="Unlock full breakdown">
+                  <div className="grid gap-3">
+                    {hiddenScoreDrivers.map((item) => (
+                      <div key={`hidden-${item.label}`} className="rounded-xl border border-white/8 bg-background/50 p-4">
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="text-sm font-semibold text-white">{item.label}</p>
+                          <span className="text-sm font-mono text-white/55">{item.metric.numeric}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </BlurSection>
               )}
               {strongest ? (
                 <div className="rounded-xl border border-emerald-400/20 bg-emerald-400/5 p-4">
@@ -730,28 +787,51 @@ function CreatorReportIntro({ results, profile }: { results: any; profile?: any 
 
           <PanelCardSoft className="border border-white/10 p-5">
             <p className="text-[11px] uppercase tracking-[0.16em] text-white/40">Publish Package</p>
-            <div className="mt-4 space-y-4">
-              <div className="rounded-xl border border-white/8 bg-background/50 p-4">
-                <p className="text-xs uppercase tracking-[0.16em] text-white/35">Title to test</p>
-                <p className="mt-2 text-sm font-semibold leading-relaxed text-white">{leadTitle ?? "Open the publish package tab for title options."}</p>
-              </div>
-              <div className="rounded-xl border border-white/8 bg-background/50 p-4">
-                <p className="text-xs uppercase tracking-[0.16em] text-white/35">Thumbnail angle</p>
-                <p className="mt-2 text-sm leading-relaxed text-white/68">{publishData?.packagingStrategy ?? editingData?.packagingAngle ?? primaryPromise}</p>
-              </div>
-              {usefulTags.length > 0 && (
+            {isPaid ? (
+              <div className="mt-4 space-y-4">
                 <div className="rounded-xl border border-white/8 bg-background/50 p-4">
-                  <p className="text-xs uppercase tracking-[0.16em] text-white/35">Tags to paste</p>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {usefulTags.map((tag) => (
-                      <span key={tag} className="rounded-lg border border-primary/20 bg-primary/10 px-2.5 py-1 text-xs font-mono text-primary/80">
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
+                  <p className="text-xs uppercase tracking-[0.16em] text-white/35">Title to test</p>
+                  <p className="mt-2 text-sm font-semibold leading-relaxed text-white">{leadTitle ?? "Open the publish package tab for title options."}</p>
                 </div>
-              )}
-            </div>
+                <div className="rounded-xl border border-white/8 bg-background/50 p-4">
+                  <p className="text-xs uppercase tracking-[0.16em] text-white/35">Thumbnail angle</p>
+                  <p className="mt-2 text-sm leading-relaxed text-white/68">{publishData?.packagingStrategy ?? editingData?.packagingAngle ?? primaryPromise}</p>
+                </div>
+                {usefulTags.length > 0 && (
+                  <div className="rounded-xl border border-white/8 bg-background/50 p-4">
+                    <p className="text-xs uppercase tracking-[0.16em] text-white/35">Tags to paste</p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {usefulTags.map((tag) => (
+                        <span key={tag} className="rounded-lg border border-primary/20 bg-primary/10 px-2.5 py-1 text-xs font-mono text-primary/80">
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="mt-4">
+                <BlurSection blur feature="publish-package-preview" label="Unlock publishing package">
+                  <div className="space-y-4">
+                    <div className="rounded-xl border border-white/8 bg-background/50 p-4">
+                      <p className="text-xs uppercase tracking-[0.16em] text-white/35">Title to test</p>
+                      <p className="mt-2 text-sm font-semibold leading-relaxed text-white">{leadTitle ?? "Title options"}</p>
+                    </div>
+                    <div className="rounded-xl border border-white/8 bg-background/50 p-4">
+                      <p className="text-xs uppercase tracking-[0.16em] text-white/35">Tags to paste</p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {usefulTags.map((tag) => (
+                          <span key={tag} className="rounded-lg border border-primary/20 bg-primary/10 px-2.5 py-1 text-xs font-mono text-primary/80">
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </BlurSection>
+              </div>
+            )}
           </PanelCardSoft>
         </div>
       </div>
@@ -1064,7 +1144,8 @@ function QualityPanel({ data, isPaid, profile }: { data: any; isPaid: boolean; p
     { title: "Stability", metric: data.stability },
   ].filter((item) => item.metric);
   const surfacedVisualMetrics = visualMetricDefs.filter((item) => shouldSurfaceMetric(item.metric));
-  const visibleVisualMetrics = surfacedVisualMetrics.length > 0 ? surfacedVisualMetrics : visualMetricDefs.slice(0, Math.min(3, visualMetricDefs.length));
+  const visualCandidates = surfacedVisualMetrics.length > 0 ? surfacedVisualMetrics : visualMetricDefs.slice(0, Math.min(3, visualMetricDefs.length));
+  const visibleVisualMetrics = isPaid ? visualCandidates : visualCandidates.slice(0, 1);
   const hiddenVisualCount = Math.max(0, visualMetricDefs.length - visibleVisualMetrics.length);
 
   const audioMetricDefs = [
@@ -1075,7 +1156,8 @@ function QualityPanel({ data, isPaid, profile }: { data: any; isPaid: boolean; p
     { title: "Pacing", metric: data.pacing, type: "metric" },
   ].filter((item) => item.metric && (item.type !== "filler" || Number(item.metric?.numeric ?? 0) > 1));
   const surfacedAudioMetrics = audioMetricDefs.filter((item) => shouldSurfaceMetric(item.metric));
-  const visibleAudioMetrics = surfacedAudioMetrics.length > 0 ? surfacedAudioMetrics : audioMetricDefs.slice(0, Math.min(3, audioMetricDefs.length));
+  const audioCandidates = surfacedAudioMetrics.length > 0 ? surfacedAudioMetrics : audioMetricDefs.slice(0, Math.min(3, audioMetricDefs.length));
+  const visibleAudioMetrics = isPaid ? audioCandidates : audioCandidates.slice(0, 1);
   const hiddenAudioCount = Math.max(0, audioMetricDefs.length - visibleAudioMetrics.length);
   const workingWellVisual = visualMetricDefs.filter((item) => !visibleVisualMetrics.some((visible) => visible.title === item.title)).map((item) => item.title);
   const workingWellAudio = audioMetricDefs.filter((item) => !visibleAudioMetrics.some((visible) => visible.title === item.title)).map((item) => item.title);
@@ -1159,7 +1241,7 @@ function QualityPanel({ data, isPaid, profile }: { data: any; isPaid: boolean; p
         </div>
       </CollapsibleSection>
 
-      {(workingWellVisual.length > 0 || workingWellAudio.length > 0) && (
+      {isPaid && (workingWellVisual.length > 0 || workingWellAudio.length > 0) && (
         <PanelCardSoft className="border border-white/10 p-4">
           <p className="text-[11px] uppercase tracking-[0.16em] text-white/40">Working Well</p>
           <p className="mt-3 text-sm text-white/65">
@@ -1180,10 +1262,25 @@ function QualityPanel({ data, isPaid, profile }: { data: any; isPaid: boolean; p
 
       {retentionPreview && (
         <CollapsibleSection title="Where Viewers May Drop" subtitle="Projected retention dips and the fixes most likely to keep people watching." defaultOpen={false}>
-          <BlurSection blur={!isPaid} feature="retention-forecast" label="Unlock retention forecasting with estimated viewer drop-off points and timestamp-specific fixes">
+          <BlurSection blur={!isPaid} feature="retention-forecast" label="Unlock full breakdown">
             <RetentionForecastCard data={retentionPreview} />
           </BlurSection>
         </CollapsibleSection>
+      )}
+
+      {!isPaid && (hiddenVisualCount > 0 || hiddenAudioCount > 0) && (
+        <BlurSection blur feature="quality-breakdown" label="See all improvements">
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+              <p className="text-xs uppercase tracking-wider text-white/35">More visual checks</p>
+              <p className="mt-2 text-sm text-white/60">Exposure, framing, stability, and finish notes continue in the full breakdown.</p>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+              <p className="text-xs uppercase tracking-wider text-white/35">More audio checks</p>
+              <p className="mt-2 text-sm text-white/60">Clarity, pacing, filler words, and cleanup notes continue in the full breakdown.</p>
+            </div>
+          </div>
+        </BlurSection>
       )}
     </div>
   );
@@ -1250,7 +1347,7 @@ function EditingPanel({ data, isPaid, profile }: { data: any; isPaid: boolean; p
           )}
         </div>
       )}
-      {(nowFixes.length > 0 || nextVideoFixes.length > 0) && (
+      {isPaid && (nowFixes.length > 0 || nextVideoFixes.length > 0) && (
         <div className="grid gap-4 lg:grid-cols-2">
           {nowFixes.length > 0 && (
             <div className="rounded-xl border border-amber-400/20 bg-amber-400/5 p-4">
@@ -1274,6 +1371,20 @@ function EditingPanel({ data, isPaid, profile }: { data: any; isPaid: boolean; p
           )}
         </div>
       )}
+      {!isPaid && (nowFixes.length > 0 || nextVideoFixes.length > 0 || editorNotes.length > 0) && (
+        <BlurSection blur feature="editing-plan-preview" label="Get full editing plan">
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+              <p className="text-xs uppercase tracking-wider text-white/35">Current cut improvements</p>
+              <p className="mt-2 text-sm text-white/60">Scene trims, rewrite notes, and timestamped edit fixes continue in the full plan.</p>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+              <p className="text-xs uppercase tracking-wider text-white/35">Next shoot improvements</p>
+              <p className="mt-2 text-sm text-white/60">Setup notes, pacing changes, and format-specific direction continue in the full plan.</p>
+            </div>
+          </div>
+        </BlurSection>
+      )}
       {editorNotes.length > 0 && isPaid && (
         <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
           <p className="text-xs uppercase tracking-wider text-white/35">Format-specific Notes</p>
@@ -1285,6 +1396,31 @@ function EditingPanel({ data, isPaid, profile }: { data: any; isPaid: boolean; p
         </div>
       )}
       <CollapsibleSection title="What To Cut And Rewrite" subtitle="Hook options, cut list, and the extra edit notes for your next pass." defaultOpen={false}>
+        {!isPaid ? (
+          <div className="space-y-4">
+            {firstSuggestion ? (
+              <div>
+                <h3 className="text-sm font-semibold text-white/60 uppercase tracking-wider mb-3 flex items-center gap-2"><Scissors className="w-4 h-4 text-primary" />Editing Tip</h3>
+                <div className="flex items-start gap-2 p-3 rounded-xl bg-primary/5 border border-primary/15">
+                  <span className="text-primary/60 text-sm mt-0.5">→</span>
+                  <p className="text-sm text-white/70">{firstSuggestion}</p>
+                </div>
+              </div>
+            ) : null}
+            <BlurSection blur feature="editing-plan" label="Get full editing plan">
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+                  <p className="text-xs uppercase tracking-wider text-white/35">Opening rewrites</p>
+                  <p className="mt-2 text-sm text-white/60">Alternative hooks and stronger opening angles.</p>
+                </div>
+                <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+                  <p className="text-xs uppercase tracking-wider text-white/35">Cut list</p>
+                  <p className="mt-2 text-sm text-white/60">Timestamped trims, pacing fixes, and restructure notes.</p>
+                </div>
+              </div>
+            </BlurSection>
+          </div>
+        ) : (
         <div className="space-y-6">
           {data.rewrittenHook && isPaid && (
             <div className="p-4 rounded-xl bg-primary/8 border border-primary/20">
@@ -1359,6 +1495,7 @@ function EditingPanel({ data, isPaid, profile }: { data: any; isPaid: boolean; p
             </div>
           )}
         </div>
+        )}
       </CollapsibleSection>
     </div>
   );
@@ -1453,6 +1590,29 @@ function PublishPanel({ data, platforms, isPaid, subtitleFile, videoFileName, pr
       </div>
       {pData && (
         <div className="space-y-4">
+          {!isPaid ? (
+            <BlurSection blur feature="publish-package" label="Unlock publishing package">
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="rounded-xl border border-white/8 bg-background/60 p-4">
+                  <p className="text-xs uppercase tracking-wider text-white/35">Titles to test</p>
+                  <p className="mt-2 text-sm text-white/60">Platform-specific title options built around click tension and viewer intent.</p>
+                </div>
+                <div className="rounded-xl border border-white/8 bg-background/60 p-4">
+                  <p className="text-xs uppercase tracking-wider text-white/35">Description and tags</p>
+                  <p className="mt-2 text-sm text-white/60">Paste-ready metadata, hashtags, chapters, and upload copy.</p>
+                </div>
+                <div className="rounded-xl border border-white/8 bg-background/60 p-4">
+                  <p className="text-xs uppercase tracking-wider text-white/35">Packaging angle</p>
+                  <p className="mt-2 text-sm text-white/60">Clear thumbnail direction and audience promise for each platform.</p>
+                </div>
+                <div className="rounded-xl border border-white/8 bg-background/60 p-4">
+                  <p className="text-xs uppercase tracking-wider text-white/35">Subtitle export</p>
+                  <p className="mt-2 text-sm text-white/60">Downloadable subtitle file available on higher plans.</p>
+                </div>
+              </div>
+            </BlurSection>
+          ) : (
+          <>
           {priorityTitles.length > 0 && (
             <div className="p-4 rounded-xl bg-background/60 border border-white/8">
               <div className="flex items-center justify-between mb-3">
@@ -1606,6 +1766,8 @@ function PublishPanel({ data, platforms, isPaid, subtitleFile, videoFileName, pr
               )}
             </div>
           )}
+          </>
+          )}
         </div>
       )}
     </div>
@@ -1616,8 +1778,22 @@ function ShortClipsPanel({ data, isPaid }: { data: any; isPaid: boolean }) {
   const clips = data?.clips ?? data ?? [];
   if (!clips.length) return <p className="text-white/40 text-sm">No short clip ideas generated.</p>;
 
-  const firstClip = clips[0];
-  const extraClips = clips.slice(1);
+  if (!isPaid) {
+    return (
+      <BlurSection blur feature="short-clips" label="Unlock full breakdown">
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="rounded-xl border border-white/8 bg-background/60 p-4">
+            <p className="text-xs uppercase tracking-wider text-white/35">Clip ideas</p>
+            <p className="mt-2 text-sm text-white/60">Suggested moments for Shorts, Reels, and TikTok.</p>
+          </div>
+          <div className="rounded-xl border border-white/8 bg-background/60 p-4">
+            <p className="text-xs uppercase tracking-wider text-white/35">Tactical notes</p>
+            <p className="mt-2 text-sm text-white/60">Hooks, platform fit, and engagement potential for each clip.</p>
+          </div>
+        </div>
+      </BlurSection>
+    );
+  }
 
   function ClipCard({ clip, index }: { clip: any; index: number }) {
     return (
@@ -1666,16 +1842,9 @@ function ShortClipsPanel({ data, isPaid }: { data: any; isPaid: boolean }) {
 
   return (
     <div className="space-y-3">
-      {firstClip && <ClipCard clip={firstClip} index={0} />}
-      {extraClips.length > 0 && (
-        <BlurSection blur={!isPaid} feature="short-clips" label={`Unlock ${extraClips.length} more clip ideas with tactical notes and engagement potential ratings`}>
-          <div className="space-y-3">
-            {extraClips.map((clip: any, i: number) => (
-              <ClipCard key={i} clip={clip} index={i + 1} />
-            ))}
-          </div>
-        </BlurSection>
-      )}
+      {clips.map((clip: any, i: number) => (
+        <ClipCard key={i} clip={clip} index={i} />
+      ))}
     </div>
   );
 }
@@ -1686,14 +1855,12 @@ function TranscriptPanel({ data, isPaid, profile }: { data: any; isPaid: boolean
   const [copied, setCopied] = useState(false);
   const segments: Array<{ start: number; end: number; text: string }> = data?.segments ?? [];
   const fullText: string = data?.fullText ?? "";
-  const FREE_CUTOFF_SEC = 60;
 
   if (!segments.length && !fullText) {
     return <p className="text-white/40 text-sm">No transcript available.</p>;
   }
 
-  const visibleSegments = isPaid ? segments : segments.filter(s => s.start < FREE_CUTOFF_SEC);
-  const hasMoreContent = !isPaid && segments.some(s => s.start >= FREE_CUTOFF_SEC);
+  const visibleSegments = isPaid ? segments : [];
 
   function fmtSec(s: number): string {
     const m = Math.floor(s / 60);
@@ -1733,6 +1900,13 @@ function TranscriptPanel({ data, isPaid, profile }: { data: any; isPaid: boolean
         )}
       </div>
 
+      {!isPaid ? (
+        <BlurSection blur feature="full-transcript" label="Unlock full breakdown">
+          <div className="rounded-xl border border-white/8 bg-background/60 p-6 text-center">
+            <p className="text-sm text-white/60">Full transcript with time markers and copy support.</p>
+          </div>
+        </BlurSection>
+      ) : (
       <div className="p-4 rounded-xl bg-background/60 border border-white/8 space-y-3 max-h-[500px] overflow-y-auto">
         {visibleSegments.map((seg, i) => {
           const showStamp = seg.start - lastStampAt >= 30;
@@ -1746,17 +1920,8 @@ function TranscriptPanel({ data, isPaid, profile }: { data: any; isPaid: boolean
             </div>
           );
         })}
-        {hasMoreContent && (
-          <div className="relative">
-            <div className="absolute inset-x-0 top-0 h-12 bg-gradient-to-b from-transparent to-background/95 pointer-events-none" />
-            <BlurSection blur feature="full-transcript" label="Full transcript available on Creator plan, includes timestamps every 30 seconds">
-              <div className="py-8 text-center text-sm text-white/40">
-                [Transcript continues beyond 1 minute]
-              </div>
-            </BlurSection>
-          </div>
-        )}
       </div>
+      )}
 
       <p className="text-xs text-white/25 flex items-center gap-1.5">
         <span className="w-2.5 h-2.5 rounded-sm inline-block bg-amber-400/20 border border-amber-400/20" />
@@ -1941,15 +2106,15 @@ function LimitReachedModal({ limit, onClose, onUpgrade }: { limit: number; onClo
         <div className="w-14 h-14 rounded-lg bg-primary/15 border border-primary/25 flex items-center justify-center mx-auto mb-4">
           <Shield className="w-7 h-7 text-primary" />
         </div>
-        <h2 className="text-xl font-semibold text-white mb-2">Monthly limit reached</h2>
+        <h2 className="text-xl font-semibold text-white mb-2">You've reached your monthly usage limit</h2>
         <p className="text-sm text-white/50 mb-6">
-          You've used all {limit} free {limit === 1 ? "analysis" : "analyses"} this month. Upgrade to Creator for 15 analyses per month, or go Pro for 40.
+          You’ve used the monthly usage included in your plan. Upgrade to keep analyzing longer videos and more uploads this month.
         </p>
         <button
           onClick={onUpgrade}
           className="w-full py-3 rounded-lg text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors mb-3"
         >
-          View Plans, from $19/mo
+          View plans
         </button>
         <button onClick={onClose} className="text-xs text-white/30 hover:text-white/50 transition-colors">
           Maybe later
@@ -1969,6 +2134,17 @@ function getVideoDuration(file: File): Promise<number | null> {
     video.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
     video.src = url;
   });
+}
+
+function getAnalysisUsageHint(durationSeconds?: number | null) {
+  if (!durationSeconds || !Number.isFinite(durationSeconds)) return null;
+  if (durationSeconds <= 5 * 60) {
+    return { title: "Quick analysis", message: "Best for a shorter upload and light monthly usage." };
+  }
+  if (durationSeconds <= 30 * 60) {
+    return { title: "Standard analysis", message: "A balanced pass for a longer edit." };
+  }
+  return { title: "Heavy analysis", message: "This will use more of your monthly usage." };
 }
 
 /** Controlled upload zone, parent manages the accepted file state */
@@ -2192,6 +2368,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
   const [showUploadForm, setShowUploadForm] = useState(false);
   const [historyBootstrapped, setHistoryBootstrapped] = useState(false);
   const [recoveryBootstrapped, setRecoveryBootstrapped] = useState(false);
+  const [fileDurationSec, setFileDurationSec] = useState<number | null>(null);
 
   const { uploadAsync: uploadVideo, isPending: isUploading, uploadInfo, cancelUpload } = useVideoUpload();
   const { data: pollData } = useAnalysisPolling(jobId);
@@ -2200,7 +2377,9 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
 
   const limits = getModeLimits("video-analyzer");
   const isPaid = plan.isPaid;
-  const uploadsRemaining = limits.uploadsRemaining;
+  const usageRemaining = limits.usageRemaining;
+  const usageHint = getAnalysisUsageHint(fileDurationSec);
+  const isNearUsageLimit = usageRemaining > 0 && usageRemaining <= Math.max(2, Math.ceil(limits.usageLimit * 0.2));
 
   // Fix: check all non-terminal statuses, not just "processing"/"queued"
   const isAnalyzing = isUploading || isSubmitting || (!!jobId && !!statusData && !TERMINAL_STATUSES.has(statusData.status ?? ""));
@@ -2338,6 +2517,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
     setOpenedHistoryJobId(null);
     setJobId(null);
     setShowUploadForm(true);
+    setFileDurationSec(null);
 
     // If the plan hasn't loaded yet, accept the file optimistically, server will enforce limits
     if (planLoading) { setFile(f); return; }
@@ -2380,9 +2560,9 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
         const limitMin = Math.round(durationLimit / 60);
         const durMin = Math.round(duration / 60);
         const upgradeMap: Record<string, { action: string; route: string }> = {
-          free:    { action: "Upgrade to Creator for 40 min videos", route: "/pricing?highlight=creator" },
-          creator: { action: "Upgrade to Pro for 2 hour videos",     route: "/pricing?highlight=pro" },
-          pro:     { action: "Upgrade to Studio for 3 hour videos",  route: "/pricing?highlight=studio" },
+          free:    { action: "Upgrade to Creator for 25 min videos", route: "/pricing?highlight=creator" },
+          creator: { action: "Upgrade to Pro for 60 min videos",     route: "/pricing?highlight=pro" },
+          pro:     { action: "Upgrade to Studio for 90 min videos",  route: "/pricing?highlight=studio" },
           studio:  { action: "View Plans",                           route: "/pricing" },
         };
         const up = upgradeMap[norm] ?? upgradeMap.free;
@@ -2393,7 +2573,9 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
           action: { label: up.action, route: up.route },
           meta: { current_plan: norm },
         });
+        return;
       }
+      setFileDurationSec(duration);
     }
   }
 
@@ -2401,7 +2583,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
     if (!file) { toast({ title: "No video selected", description: "Please drop or select a video first.", variant: "destructive" }); return; }
 
     // Client-side pre-checks (informational, server is source of truth)
-    if (uploadsRemaining === 0) { setShowLimitModal(true); return; }
+    if (usageRemaining === 0) { setShowLimitModal(true); return; }
 
     setIsSubmitting(true);
     setShowUploadForm(true);
@@ -2420,6 +2602,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
         options: {
           mode: "video-analyzer",
           modules: selectedModules,
+          durationSeconds: fileDurationSec ?? undefined,
         },
       });
       writePendingUploadRecovery({ ...recovery, jobId: id });
@@ -2528,6 +2711,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
   function handleReset() {
     clearPendingUploadRecovery();
     setFile(null);
+    setFileDurationSec(null);
     setJobId(null);
     setHistoryResult(null);
     setOpenedHistoryJobId(null);
@@ -2567,7 +2751,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
       <UpgradeErrorModal error={limitError} onClose={() => setLimitError(null)} />
       {showLimitModal && (
         <LimitReachedModal
-          limit={limits.uploadLimit}
+          limit={limits.usageLimit}
           onClose={() => setShowLimitModal(false)}
           onUpgrade={() => navigateToPricing("monthly-limit")}
         />
@@ -2668,7 +2852,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="text-xs font-semibold text-white/80">{mod.label}</span>
-                          {locked && <span className="text-xs px-1.5 py-0.5 bg-amber-500/15 text-amber-400 rounded border border-amber-500/20">Creator+</span>}
+                          {locked && <span className="text-xs px-1.5 py-0.5 bg-amber-500/15 text-amber-400 rounded border border-amber-500/20">Unlock</span>}
                         </div>
                         <p className="text-xs text-white/35 mt-0.5">{mod.desc}</p>
                       </div>
@@ -2681,11 +2865,27 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
               </div>
 
               <div className="pt-2">
-                {limits.uploadLimit !== -1 && (
-                  <p className="text-xs text-white/30 mb-3 text-center">
-                    {uploadsRemaining === 0 ? "Monthly limit reached" : `${uploadsRemaining} of ${limits.uploadLimit} analyses remaining this month`}
+                <div className="mb-3 space-y-2">
+                  <p className="text-xs text-center text-white/35">
+                    {usageRemaining === 0
+                      ? "You've reached your monthly usage limit"
+                      : `${limits.usageUsed} of ${limits.usageLimit} monthly usage used`}
                   </p>
-                )}
+                  <p className="text-[11px] text-center text-white/25">
+                    Up to {limits.analysesLimit} video analyses this month, depending on video length.
+                  </p>
+                  {usageHint ? (
+                    <div className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-left">
+                      <p className="text-xs font-semibold text-white">{usageHint.title}</p>
+                      <p className="mt-1 text-[11px] text-white/45">{usageHint.message}</p>
+                    </div>
+                  ) : null}
+                  {isNearUsageLimit ? (
+                    <div className="rounded-lg border border-amber-400/20 bg-amber-400/10 px-3 py-2 text-[11px] text-amber-100">
+                      You’re getting close to your monthly usage limit.
+                    </div>
+                  ) : null}
+                </div>
                 <button
                   onClick={handleAnalyze}
                   disabled={!file || isSubmitting}
@@ -2694,9 +2894,9 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
                   <Wand2 className="w-4 h-4" />
                   {isSubmitting ? "Uploading..." : "Analyze Video"}
                 </button>
-                {uploadsRemaining === 0 && (
+                {usageRemaining === 0 && (
                   <button onClick={() => setShowLimitModal(true)} className="w-full mt-2 py-2.5 rounded-lg text-xs font-semibold text-primary border border-primary/30 hover:bg-primary/10 transition-all">
-                    Upgrade for more analyses
+                    Upgrade for more usage
                   </button>
                 )}
               </div>
@@ -2791,7 +2991,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
               <AnimatePresence mode="wait">
                 <motion.div key={activeResultTab} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
                   {activeResultTab === "overview"   && (
-                    <CreatorReportIntro results={displayedResults} profile={analysisProfile} />
+                    <CreatorReportIntro results={displayedResults} profile={analysisProfile} isPaid={isPaid} />
                   )}
                   {activeResultTab === "quality"    && <QualityPanel    data={(displayedResults as any).quality}    isPaid={isPaid} profile={analysisProfile} />}
                   {activeResultTab === "editing"    && <EditingPanel    data={(displayedResults as any).editing}    isPaid={isPaid} profile={analysisProfile} />}
@@ -2824,7 +3024,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
                   </div>
 
                   {tab.id === "overview" && (
-                    <CreatorReportIntro results={displayedResults} profile={analysisProfile} />
+                    <CreatorReportIntro results={displayedResults} profile={analysisProfile} isPaid={isPaid} />
                   )}
                   {tab.id === "quality" && <QualityPanel data={(displayedResults as any).quality} isPaid={isPaid} profile={analysisProfile} />}
                   {tab.id === "editing" && <EditingPanel data={(displayedResults as any).editing} isPaid={isPaid} profile={analysisProfile} />}

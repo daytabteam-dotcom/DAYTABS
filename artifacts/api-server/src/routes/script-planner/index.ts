@@ -4,7 +4,7 @@ import { openai } from "../../lib/openai";
 import { db, scriptPlannerChatsTable } from "@workspace/db";
 import { eq, and, desc } from "drizzle-orm";
 import { normalizePlan, PLAN_LIMITS } from "../../lib/planLimits";
-import { checkAndIncrementScriptChat } from "../../lib/usageService";
+import { checkAndIncrementScriptGeneration } from "../../lib/usageService";
 import { logTokenUsage, usageTokens } from "../../lib/logTokens";
 
 const router: IRouter = Router();
@@ -360,22 +360,9 @@ router.post("/generate", async (req, res) => {
   const isFree = plan === "free";
   const isCreator = plan === "creator";
 
-  const planMessageLimit = planConfig.script_planner_messages_per_session;
-  const userMessageCount = messages.filter(m => m.role === "user").length;
-
-  if (userMessageCount > planMessageLimit) {
-    const upgradeHint = isFree
-      ? "Upgrade to Creator for 10 messages per chat."
-      : "You've reached the 10 message limit for this chat.";
-    res.status(403).json({
-      code: "MESSAGE_LIMIT_REACHED",
-      error: `You've used all ${planMessageLimit} messages on this chat. ${upgradeHint}`,
-      title: isFree ? "Message limit reached" : "Chat limit reached",
-      message: upgradeHint,
-      action: isFree ? { label: "Upgrade to Creator — $19/mo", route: "/pricing?highlight=creator" } : undefined,
-      limitReached: true,
-      type: "message_limit",
-    });
+  const generationLimitCheck = await checkAndIncrementScriptGeneration(req.auth!.user_id, rawPlan);
+  if (!generationLimitCheck.allowed) {
+    res.status(429).json({ ...generationLimitCheck.error, limitReached: true, type: "script_limit" });
     return;
   }
 
@@ -590,12 +577,6 @@ router.post("/chats", async (req, res) => {
   const rawPlanForChat = req.auth!.plan ?? "free";
 
   try {
-    const chatLimitCheck = await checkAndIncrementScriptChat(userId, rawPlanForChat);
-    if (!chatLimitCheck.allowed) {
-      res.status(429).json({ ...chatLimitCheck.error, limitReached: true, type: "chat_limit" });
-      return;
-    }
-
     const [created] = await db
       .insert(scriptPlannerChatsTable)
       .values({

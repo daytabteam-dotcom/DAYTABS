@@ -13,6 +13,25 @@ interface PlanPickerModalProps {
 
 const PLAN_META = [
   {
+    key: "free" as const,
+    name: "Free",
+    icon: Check,
+    color: "from-white/30 to-white/10",
+    border: "border-white/10",
+    ring: "",
+    badge: null as string | null,
+    price: "$0",
+    features: [
+      "1 video analysis / month",
+      "Up to 5 min per video",
+      "Basic report with limited insights",
+      "Teleprompter",
+      "1 script generation",
+    ],
+    ctaClass:
+      "bg-white/10 hover:bg-white/10 shadow-none",
+  },
+  {
     key: "creator" as const,
     name: "Creator",
     icon: Zap,
@@ -22,13 +41,13 @@ const PLAN_META = [
     badge: null as string | null,
     price: "$19",
     features: [
-      "15 video analyses/month",
-      "Up to 40 min video length",
+      "Up to 10 video analyses / month*",
+      "Up to 25 min per video",
       "1 GB upload limit",
-      "Quality, Editing, Publish modules",
-      "Short Clip Ideas",
-      "Full transcript included",
-      "15 Script Planner chats/mo",
+      "Full analysis across quality, editing, SEO, and clips",
+      "Teleprompter",
+      "20 script generations",
+      "YouTube Growth tools (Coming Soon)",
     ],
     ctaClass:
       "bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 shadow-lg shadow-amber-500/20",
@@ -43,13 +62,13 @@ const PLAN_META = [
     badge: "Most Popular",
     price: "$39",
     features: [
-      "40 video analyses/month",
-      "Up to 2 hr video length",
+      "Up to 25 video analyses / month*",
+      "Up to 60 min per video",
       "5 GB upload limit",
-      "All modules unlocked",
-      "Advanced AI analysis",
-      "Subtitle file download",
-      "40 Script Planner chats/mo",
+      "All Creator features",
+      "Subtitle export",
+      "Priority processing",
+      "60 script generations",
     ],
     ctaClass:
       "bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-500 hover:to-purple-400 shadow-lg shadow-violet-500/20",
@@ -64,13 +83,12 @@ const PLAN_META = [
     badge: null as string | null,
     price: "$89",
     features: [
-      "Unlimited video analyses",
-      "Up to 3 hr video length",
+      "Up to 80 video analyses / month*",
+      "Up to 90 min per video",
       "100 GB upload limit",
-      "All modules unlocked",
-      "Priority processing",
-      "Advanced export tools",
-      "Unlimited Script Planner",
+      "All Pro features",
+      "200 script generations",
+      "Priority support",
     ],
     ctaClass:
       "bg-gradient-to-r from-pink-600 to-rose-500 hover:from-pink-500 hover:to-rose-400 shadow-lg shadow-pink-500/20",
@@ -107,11 +125,6 @@ export function PlanPickerModal({
   };
 
   const handleSelect = async (planKey: "creator" | "pro" | "studio") => {
-    if (planKey === "studio") {
-      onClose();
-      window.location.assign("/contact");
-      return;
-    }
     if (!user) {
       onClose();
       navigate("/login");
@@ -146,8 +159,8 @@ export function PlanPickerModal({
                 Upgrade your plan
               </h2>
               <p className="text-xs text-white/40 mt-0.5">
-                Unlock more analyses, longer videos, and advanced AI. Cancel
-                anytime.
+                More monthly usage, longer uploads, and fuller planning tools.
+                Cancel anytime.
               </p>
             </div>
             <button
@@ -158,10 +171,10 @@ export function PlanPickerModal({
             </button>
           </div>
 
-          <div className="p-6 grid sm:grid-cols-3 gap-4">
+          <div className="p-6 grid sm:grid-cols-2 xl:grid-cols-4 gap-4">
             {PLAN_META.map((plan) => {
               const isHighlighted = highlightPlan === plan.key;
-              const priceId = getPriceId(plan.key);
+              const priceId = plan.key === "free" ? "" : getPriceId(plan.key);
               const hasCheckout = !!priceId;
 
               return (
@@ -191,7 +204,7 @@ export function PlanPickerModal({
                         ) : (
                           <>
                             <span className="text-xl font-black text-white">
-                              {formatPrice(plan.key) || plan.price}
+                              {plan.key === "free" ? plan.price : formatPrice(plan.key) || plan.price}
                             </span>
                             <span className="text-xs text-white/40">/mo</span>
                           </>
@@ -212,29 +225,39 @@ export function PlanPickerModal({
                     ))}
                   </ul>
 
-                  <button
-                    onClick={() => handleSelect(plan.key)}
-                    disabled={
-                      selectedPlan !== null ||
-                      (plan.key !== "studio" && !hasCheckout)
-                    }
-                    className={`w-full py-2.5 text-sm font-semibold text-white rounded-lg transition-all cursor-pointer ${plan.ctaClass} disabled:opacity-40 disabled:cursor-not-allowed`}
-                    data-testid={`button-select-plan-${plan.key}`}
-                  >
-                    {selectedPlan === plan.key ? (
-                      <span className="inline-flex items-center justify-center gap-2">
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        Opening...
-                      </span>
-                    ) : plan.key === "studio" ? (
-                      "Contact us"
-                    ) : (
-                      "Upgrade"
-                    )}
-                  </button>
+                  {plan.key === "free" ? (
+                    <div className="w-full rounded-lg border border-white/10 bg-white/[0.04] py-2.5 text-center text-sm font-semibold text-white/60">
+                      Current base plan
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => handleSelect(plan.key)}
+                      disabled={
+                        selectedPlan !== null ||
+                        !hasCheckout
+                      }
+                      className={`w-full py-2.5 text-sm font-semibold text-white rounded-lg transition-all cursor-pointer ${plan.ctaClass} disabled:opacity-40 disabled:cursor-not-allowed`}
+                      data-testid={`button-select-plan-${plan.key}`}
+                    >
+                      {selectedPlan === plan.key ? (
+                        <span className="inline-flex items-center justify-center gap-2">
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Opening...
+                        </span>
+                      ) : (
+                        "Upgrade"
+                      )}
+                    </button>
+                  )}
                 </div>
               );
             })}
+          </div>
+
+          <div className="px-6 pb-4">
+            <div className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-xs text-white/45">
+              *Longer videos may use more of your monthly usage.
+            </div>
           </div>
 
           {checkoutError && (

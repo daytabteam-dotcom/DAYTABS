@@ -21,6 +21,7 @@ import {
 } from "@workspace/api-zod";
 import { optionalAuth } from "../../middlewares/auth";
 import { normalizePlan, getLimits, buildFileTooLargeError } from "../../lib/planLimits";
+import { buildVideoTooLongError } from "../../lib/planLimits";
 import { checkVideoAnalysisLimit, incrementVideoAnalysis, getOrCreateUsage } from "../../lib/usageService";
 import {
   buildR2ObjectKey,
@@ -212,6 +213,8 @@ router.post("/upload", (req, res, next) => {
     const normalizedPlan = normalizePlan(rawPlan);
     const userId = req.auth?.user_id ?? null;
     const planLimits = getLimits(rawPlan);
+    const durationSeconds = Number(req.body.durationSeconds);
+    const hasDuration = Number.isFinite(durationSeconds) && durationSeconds > 0;
 
     // Server-side plan size enforcement (client validated first, but server is authoritative)
     if (req.file.size > planLimits.max_video_size_bytes) {
@@ -220,9 +223,15 @@ router.post("/upload", (req, res, next) => {
       return;
     }
 
+    if (hasDuration && durationSeconds > planLimits.max_video_duration_seconds) {
+      await fs.unlink(req.file.path).catch(() => {});
+      res.status(413).json(buildVideoTooLongError(normalizedPlan, durationSeconds));
+      return;
+    }
+
     // Check analysis limit (does NOT increment — counter only moves on successful pipeline completion)
     if (userId) {
-      const limitCheck = await checkVideoAnalysisLimit(userId, rawPlan);
+      const limitCheck = await checkVideoAnalysisLimit(userId, rawPlan, hasDuration ? durationSeconds : null);
       if (!limitCheck.allowed) {
         await fs.unlink(req.file.path).catch(() => {});
         res.status(429).json(limitCheck.error);
@@ -273,6 +282,7 @@ router.post("/upload", (req, res, next) => {
           originalFileName,
           plan: rawPlan,
           maxDurationSeconds,
+          durationSeconds: hasDuration ? durationSeconds : undefined,
         },
       },
     } as any);
@@ -297,8 +307,9 @@ router.post("/upload", (req, res, next) => {
             originalFileName,
             plan: rawPlan,
             maxDurationSeconds,
+            durationSeconds: hasDuration ? durationSeconds : undefined,
           });
-          if (completed && userId) await incrementVideoAnalysis(userId);
+          if (completed && userId) await incrementVideoAnalysis(userId, hasDuration ? durationSeconds : null);
         } finally {
           await fs.unlink(uploadedVideoPath).catch(() => {});
         }

@@ -28,14 +28,16 @@ router.get("/usage", async (req, res) => {
     res.json({
       plan,
       usage: {
-        video_analyses: {
-          used: usage.videoAnalysesUsed,
-          limit: limits.video_analyses_per_month === Infinity ? -1 : limits.video_analyses_per_month,
+        video: {
+          used: usage.videoAnalysisUsageUsed ?? usage.videoAnalysesUsed,
+          limit: limits.video_usage_budget_per_month,
+          analyses_used: usage.videoAnalysisRunsUsed ?? usage.videoAnalysesUsed,
+          analyses_limit: limits.video_analyses_display_limit,
           resets_on: resetsOn,
         },
-        script_chats: {
-          used: usage.scriptPlannerChatsUsed,
-          limit: limits.script_planner_chats_per_month === Infinity ? -1 : limits.script_planner_chats_per_month,
+        scripts: {
+          used: usage.scriptGenerationsUsed ?? usage.scriptPlannerChatsUsed,
+          limit: limits.script_generations_per_month,
           resets_on: resetsOn,
         },
       },

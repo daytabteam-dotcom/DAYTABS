@@ -28,7 +28,7 @@ const PLAN_COMPARE: Record<string, {
       label: "Creator",
       color: "text-amber-400",
       price: "$19/mo",
-      perks: ["15 video analyses/month", "Publish package (titles, descriptions, tags)", "Short clip ideas for TikTok & Reels"],
+      perks: ["Up to 10 video analyses each month*", "Unlock publishing package and full editing plan", "20 script generations"],
     },
   },
   creator: {
@@ -37,7 +37,7 @@ const PLAN_COMPARE: Record<string, {
       label: "Pro",
       color: "text-emerald-400",
       price: "$39/mo",
-      perks: ["40 video analyses/month", "Subtitle (.srt) file download", "GPT-4o powered scripts (faster & smarter)"],
+      perks: ["Up to 25 video analyses each month*", "Subtitle export", "60 script generations"],
     },
   },
   pro: {
@@ -46,7 +46,7 @@ const PLAN_COMPARE: Record<string, {
       label: "Studio",
       color: "text-pink-400",
       price: "$89/mo",
-      perks: ["Unlimited video analyses", "Priority processing queue", "100 GB video file uploads"],
+      perks: ["Up to 80 video analyses each month*", "Priority processing", "Priority support"],
     },
   },
 };
@@ -147,7 +147,7 @@ export function UpgradeErrorModal({ error, onClose }: UpgradeErrorModalProps) {
                     <p className={`text-sm font-bold ${comparePlan.current.color}`}>{comparePlan.current.label}</p>
                     <p className="text-xs text-white/30 mt-1">
                       {error.meta?.limit !== undefined && error.meta.limit > 0
-                        ? `${error.meta.limit} analyses/month`
+                        ? `${error.meta.limit} monthly usage`
                         : "Limited"}
                     </p>
                   </div>
@@ -168,16 +168,16 @@ export function UpgradeErrorModal({ error, onClose }: UpgradeErrorModalProps) {
               </div>
             )}
 
-            {/* Feature locked preview */}
+            {/* Feature preview */}
             {isFeatureLocked && error.meta?.feature && (
               <div className="mx-6 mb-4 p-3 rounded-xl bg-primary/8 border border-primary/15">
                 <div className="flex items-center gap-2">
                   <Lock className="w-3.5 h-3.5 text-primary/60 shrink-0" />
                   <p className="text-xs text-primary/80">
-                    {error.meta.feature === "publish_package" && "Titles, descriptions, tags & chapters, optimized for each platform"}
-                    {error.meta.feature === "short_clip_ideas" && "Best clip moments for TikTok, Reels & YouTube Shorts"}
-                    {error.meta.feature === "subtitle_download" && "YouTube-compatible .srt subtitle file from your transcript"}
-                    {!["publish_package", "short_clip_ideas", "subtitle_download"].includes(error.meta.feature) && "Upgrade to unlock this feature"}
+                    {error.meta.feature === "publish_package" && "Unlock publishing package with titles, descriptions, tags, and chapters for each platform."}
+                    {error.meta.feature === "short_clip_ideas" && "See all clip opportunities for Shorts, Reels, and TikTok."}
+                    {error.meta.feature === "subtitle_download" && "Download a YouTube-ready subtitle file from your transcript."}
+                    {!["publish_package", "short_clip_ideas", "subtitle_download"].includes(error.meta.feature) && "Unlock the full breakdown for this part of the report."}
                   </p>
                 </div>
               </div>
@@ -221,6 +221,12 @@ export function UpgradeErrorModal({ error, onClose }: UpgradeErrorModalProps) {
               >
                 Dismiss
               </button>
+
+              {isMonthlyLimit && (
+                <p className="text-center text-[11px] text-white/25">
+                  *Longer videos may use more of your monthly usage.
+                </p>
+              )}
             </div>
           </motion.div>
         </motion.div>

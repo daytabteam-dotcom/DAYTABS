@@ -18,6 +18,24 @@ async function runStartupMigrations() {
     await db.execute(
       sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_past_due BOOLEAN DEFAULT FALSE`
     );
+    await db.execute(
+      sql`ALTER TABLE user_usage ADD COLUMN IF NOT EXISTS video_analysis_runs_used INTEGER NOT NULL DEFAULT 0`
+    );
+    await db.execute(
+      sql`ALTER TABLE user_usage ADD COLUMN IF NOT EXISTS video_analysis_usage_used INTEGER NOT NULL DEFAULT 0`
+    );
+    await db.execute(
+      sql`ALTER TABLE user_usage ADD COLUMN IF NOT EXISTS script_generations_used INTEGER NOT NULL DEFAULT 0`
+    );
+    await db.execute(
+      sql`UPDATE user_usage SET video_analysis_runs_used = COALESCE(video_analysis_runs_used, video_analyses_used, 0)`
+    );
+    await db.execute(
+      sql`UPDATE user_usage SET video_analysis_usage_used = COALESCE(video_analysis_usage_used, video_analyses_used, 0)`
+    );
+    await db.execute(
+      sql`UPDATE user_usage SET script_generations_used = COALESCE(script_generations_used, script_planner_chats_used, 0)`
+    );
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS youtube_connections (
         id SERIAL PRIMARY KEY,
@@ -179,8 +197,8 @@ async function recoverInterruptedAnalysisJobs() {
             plan: plan ?? "free",
             maxDurationSeconds: storedOptions.maxDurationSeconds,
           });
-          if (completed && job.userId) await incrementVideoAnalysis(job.userId);
-        })
+          if (completed && job.userId) await incrementVideoAnalysis(job.userId, storedOptions.durationSeconds);
+        }) 
         .catch((err) => {
           logger.error({ err, jobId: job.id }, "Recovered pipeline error");
         });
