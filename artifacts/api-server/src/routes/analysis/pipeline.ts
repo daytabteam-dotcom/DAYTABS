@@ -9,7 +9,7 @@ import {
   updateJob, transcribeAudio, extractAudio, extractFrames,
   analyzeVisuals, analyzeAudio, analyzeEditingPoints,
   generateSeo, generateShortClipIdeas, generateSrt, translateSegments,
-  computeQualityScore, getMediaDuration, logger, generateVideoName, getTotalAnalysisScore,
+  computeQualityScore, getMediaDuration, getMediaMetadata, logger, generateVideoName, getTotalAnalysisScore,
   analyzePacing, analyzeSpeechPattern, buildRetentionForecast, scorePacing,
 } from "./services";
 
@@ -124,6 +124,10 @@ function getAdaptiveFrameCount(plan: string, mode: "talking_first" | "visual_fir
   return base;
 }
 
+function inferPlatformsFromMedia(media: { isVertical: boolean; isShortForm: boolean }) {
+  return [media.isVertical || media.isShortForm ? "youtube_shorts" : "youtube_long"];
+}
+
 async function stopIfMemoryHigh(jobId: string, label: string) {
   const limitMb = getMemorySoftLimitMb();
   const rssMb = Math.round(process.memoryUsage().rss / 1024 / 1024);
@@ -226,13 +230,11 @@ async function runVideoAnalyzer(
 
   const plan = options.plan ?? "free";
   const modules = options.modules ?? ["quality", "editing"];
-  const platforms = options.platforms ?? ["youtube_long"];
   const maxDuration = options.maxDurationSeconds ?? 300;
 
   const runQuality = modules.includes("quality");
   const runEditing = modules.includes("editing");
   const runPublish = modules.includes("publish");
-  const runShortClips = modules.includes("shortClips");
   const [jobOwner] = await db
     .select({ userId: analysisJobsTable.userId })
     .from(analysisJobsTable)
@@ -254,9 +256,13 @@ async function runVideoAnalyzer(
     await stopIfMemoryHigh(jobId, "audio extraction");
     logger.info({ jobId, audioPath }, "Audio extraction complete");
 
-    // Step 2: Duration check
+    // Step 2: Duration and media check
     await updateJob(jobId, { status: "extracting_audio", progress: 18, currentStep: "Checking video duration" });
-    const durationSec = await getMediaDuration(audioPath);
+    const mediaMetadata = await getMediaMetadata(videoPath);
+    const durationSec = mediaMetadata.durationSec || await getMediaDuration(audioPath);
+    const platforms = inferPlatformsFromMedia(mediaMetadata);
+    const shortClipEligible = !mediaMetadata.isShortForm && !mediaMetadata.isVertical;
+    const runShortClips = modules.includes("shortClips") && shortClipEligible;
     await stopIfCancelled(jobId);
     await stopIfMemoryHigh(jobId, "duration check");
     if (durationSec > maxDuration) {
@@ -334,11 +340,14 @@ async function runVideoAnalyzer(
         videoName,
         plan,
         maxDurationSeconds: maxDuration,
+        mediaMetadata,
+        shortClipEligible,
       },
     };
     await updateJob(jobId, { result: { videoName, analysisProfile: speechAnalysis, analysisOptions: result.analysisOptions } });
 
     const isFree = plan === "free";
+    let formatProfile: Record<string, unknown> | null = null;
 
     // Step 5: Quality module
     if (runQuality) {
@@ -392,6 +401,7 @@ async function runVideoAnalyzer(
         ((visualAnalysis as { hookStrength?: "strong" | "moderate" | "weak" }).hookStrength ?? "moderate"),
         ((visualAnalysis as { background?: { contextAppropriate?: "yes" | "neutral" | "no" } }).background?.contextAppropriate ?? "neutral"),
         transcriptSegments[transcriptSegments.length - 1]?.end ?? await getMediaDuration(videoPath),
+        (visualAnalysis as { formatProfile?: Record<string, unknown> }).formatProfile ?? null,
       ) : undefined;
       const pacingScore = pacing ? scorePacing(pacing) : null;
 
@@ -399,7 +409,7 @@ async function runVideoAnalyzer(
         delete (audioAnalysis as Record<string, unknown>).fillerWords;
       }
 
-      const formatProfile = (visualAnalysis as { formatProfile?: Record<string, unknown> }).formatProfile ?? null;
+      formatProfile = (visualAnalysis as { formatProfile?: Record<string, unknown> }).formatProfile ?? null;
       result.quality = {
         score: qualityScore,
         ...visualAnalysis,
@@ -454,7 +464,16 @@ async function runVideoAnalyzer(
       for (const platform of platforms) {
         try {
           const seoResult = await withTimeout(
-            generateSeo(transcriptText, platform, transcriptSegments, plan, speechAnalysis, videoName, userId),
+            generateSeo(
+              transcriptText,
+              platform,
+              transcriptSegments,
+              plan,
+              speechAnalysis,
+              videoName,
+              formatProfile,
+              userId,
+            ),
             90000,
             `SEO generation for ${platform}`,
             jobId,
@@ -502,7 +521,7 @@ async function runVideoAnalyzer(
     if (runShortClips) {
       await updateJob(jobId, { status: "analyzing_content", progress, currentStep: "Finding best short clip moments" });
       const shortClipsData = await withTimeout(
-        generateShortClipIdeas(transcriptText, transcriptSegments, platforms, plan, speechAnalysis, userId),
+        generateShortClipIdeas(transcriptText, transcriptSegments, platforms, plan, speechAnalysis, formatProfile, userId),
         90000,
         "short clip generation",
         jobId,

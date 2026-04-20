@@ -335,6 +335,27 @@ export interface RetentionForecast {
   retentionCurvePoints: Array<{ sec: number; pct: number }>; // estimated curve for charting
 }
 
+export interface MediaMetadata {
+  durationSec: number;
+  width: number | null;
+  height: number | null;
+  aspectRatio: number | null;
+  orientation: "vertical" | "horizontal" | "square" | "unknown";
+  isVertical: boolean;
+  isShortForm: boolean;
+}
+
+export interface FormatProfile {
+  contentFormat: ContentFormat;
+  formatConfidence: "high" | "medium" | "low";
+  primarySubject: string;
+  viewerIntent: string;
+  successFactors: string[];
+  ignoredSignals: string[];
+  framingFocus: string;
+  backgroundFocus: string;
+}
+
 function fmtSecs(s: number): string {
   const m = Math.floor(s / 60);
   const sec = Math.floor(s % 60);
@@ -353,7 +374,8 @@ export function buildRetentionForecast(
   segments: Array<{ start: number; end: number; text: string }>,
   hookStrength: "strong" | "moderate" | "weak", // determined by AI
   topicRelevanceOfBackground: "yes" | "neutral" | "no",
-  totalDurationSec: number
+  totalDurationSec: number,
+  formatProfile?: Partial<FormatProfile> | null,
 ): RetentionForecast {
   // Start from a conservative creator-content baseline. This is a professional
   // forecast, not a motivational score, so "average" should feel average.
@@ -432,21 +454,46 @@ export function buildRetentionForecast(
   const dropOffMoments: RetentionForecast["dropOffMoments"] = [];
 
   // Always add hook as the first drop-off point with context
+  const contentFormat = formatProfile?.contentFormat ?? "general_visual";
+  const viewerIntent = formatProfile?.viewerIntent ?? "understand the video quickly and stay for the payoff";
+  const isProcessLedFormat = [
+    "art_process",
+    "cooking_recipe",
+    "diy_craft",
+    "transformation",
+    "work_with_me",
+    "chill_ambience",
+    "cinematic_montage",
+    "general_visual",
+  ].includes(contentFormat);
+  const hookRiskReason = isProcessLedFormat
+    ? "The opening does not show enough meaningful visual change early, so viewers may not understand the payoff fast enough."
+    : "Weak hook — the opening doesn't give the viewer a compelling reason to keep watching. Value is revealed too late.";
+  const hookRiskFix = isProcessLedFormat
+    ? "Open on the clearest visual transformation, strongest texture/detail moment, or the finished result before any slow setup."
+    : "Open with your most surprising result or a specific problem your viewer already feels. The first sentence must answer 'why should I keep watching?'";
+  const moderateHookReason = isProcessLedFormat
+    ? "The opening communicates the topic, but the strongest visual payoff arrives too late to stop a fast scroll."
+    : "Hook is present but not sharp enough to stop a scroll — it describes what the video is about rather than creating urgency.";
+  const moderateHookFix = isProcessLedFormat
+    ? "Replace the opening with a faster reveal of visible progress, a stronger before/after contrast, or a more satisfying first action."
+    : "Replace the opening with a specific failure, surprising outcome, or bold claim that happens before any context-setting.";
+
   if (hookStrength === "weak") {
     dropOffMoments.push({
       at: "00:05",
       atSec: 5,
       severity: "high",
-      reason: "Weak hook — the opening doesn't give the viewer a compelling reason to keep watching. Value is revealed too late.",
-      fix: "Open with your most surprising result or a specific problem your viewer already feels. The first sentence must answer 'why should I keep watching?'",
+      reason: hookRiskReason,
+      fix: hookRiskFix,
     });
   } else if (hookStrength === "moderate") {
     dropOffMoments.push({
       at: "00:05",
       atSec: 5,
       severity: "medium",
-      reason: "Hook is present but not sharp enough to stop a scroll — it describes what the video is about rather than creating urgency.",
-      fix: "Replace the opening with a specific failure, surprising outcome, or bold claim that happens before any context-setting.",
+      reason: moderateHookReason,
+      fix: moderateHookFix,
     });
   }
 
@@ -470,9 +517,13 @@ export function buildRetentionForecast(
   const summaryLines = [
     `Estimated ${estimatedRetentionPct}% average retention (${retentionGrade} grade).`,
     hookStrength === "weak"
-      ? "The hook is the primary risk — most viewers will leave in the first 8 seconds before the value is clear."
+      ? isProcessLedFormat
+        ? "The opening visual payoff is the primary risk — viewers may leave before the transformation or satisfying moment becomes obvious."
+        : "The hook is the primary risk — most viewers will leave in the first 8 seconds before the value is clear."
       : pacingObs.pacingRating === "very_slow" || pacingObs.pacingRating === "slow"
       ? `Pacing is the main retention killer — ${pacingObs.longPauseCount} silence gaps and ${Math.round(pacingObs.wordsPerMinute)} wpm delivery will cause mid-video drop-offs.`
+      : isProcessLedFormat
+      ? `Retention depends on how quickly you deliver visible progress toward the viewer's goal: ${viewerIntent}.`
       : "Retention is limited by a combination of pacing gaps and presentation energy. Fix the drop-off points before publishing.",
   ];
 
@@ -589,6 +640,58 @@ export async function getMediaDuration(filePath: string): Promise<number> {
       throw new Error('ffmpeg is not installed on this server. Please install ffmpeg to process videos.');
     }
     throw err;
+  }
+}
+
+export async function getMediaMetadata(filePath: string): Promise<MediaMetadata> {
+  try {
+    const { stdout } = await execAsync(
+      `ffprobe -v error -show_entries stream=width,height -show_entries format=duration -of json "${filePath}" 2>&1`
+    );
+    const parsed = JSON.parse(stdout || "{}") as {
+      format?: { duration?: string };
+      streams?: Array<{ width?: number; height?: number }>;
+    };
+    const stream = parsed.streams?.find((entry) => Number(entry.width) > 0 && Number(entry.height) > 0);
+    const width = stream?.width ?? null;
+    const height = stream?.height ?? null;
+    const durationSec = Number.parseFloat(parsed.format?.duration ?? "0");
+    const aspectRatio = width && height ? width / height : null;
+    const orientation =
+      width && height
+        ? height > width
+          ? "vertical"
+          : width > height
+          ? "horizontal"
+          : "square"
+        : "unknown";
+    const isVertical = orientation === "vertical";
+    const isShortForm = isVertical || (Number.isFinite(durationSec) && durationSec > 0 && durationSec <= 60);
+
+    return {
+      durationSec: Number.isFinite(durationSec) ? durationSec : 0,
+      width,
+      height,
+      aspectRatio,
+      orientation,
+      isVertical,
+      isShortForm,
+    };
+  } catch (err: any) {
+    if (err.message?.includes("ENOENT") || err.code === "ENOENT") {
+      throw new Error("ffmpeg is not installed on this server. Please install ffmpeg to process videos.");
+    }
+    logger.warn({ err, filePath }, "Failed to read media metadata, falling back to duration only");
+    const durationSec = await getMediaDuration(filePath);
+    return {
+      durationSec,
+      width: null,
+      height: null,
+      aspectRatio: null,
+      orientation: "unknown",
+      isVertical: false,
+      isShortForm: durationSec > 0 && durationSec <= 60,
+    };
   }
 }
 
@@ -1173,16 +1276,7 @@ function buildVisualResult(
   return base;
 }
 
-function getDefaultFormatProfile(): {
-  contentFormat: ContentFormat;
-  formatConfidence: "high" | "medium" | "low";
-  primarySubject: string;
-  viewerIntent: string;
-  successFactors: string[];
-  ignoredSignals: string[];
-  framingFocus: string;
-  backgroundFocus: string;
-} {
+function getDefaultFormatProfile(): FormatProfile {
   return {
     contentFormat: "general_visual",
     formatConfidence: "low",
@@ -1935,14 +2029,22 @@ export async function generateSeo(
   plan = "free",
   speechAnalysis?: SpeechAnalysis,
   videoName?: string,
+  formatProfile?: Partial<FormatProfile> | null,
   userId?: number,
 ): Promise<object> {
   const isFree = plan === "free";
   const chapterPoints = buildChapterPoints(segments, 10);
   const isVisualFirst = speechAnalysis?.mode === "visual_first" || !speechAnalysis?.hasMeaningfulSpeech;
   const languageInstruction = buildOutputLanguageInstruction(transcript, speechAnalysis);
+  const formatHint = formatProfile
+    ? `Detected format: ${formatProfile.contentFormat ?? "general_visual"}.
+Primary subject: ${formatProfile.primarySubject ?? "the main subject on screen"}.
+Viewer intent: ${formatProfile.viewerIntent ?? "stay for the core payoff"}.
+Success factors: ${(formatProfile.successFactors ?? []).join(", ") || "clear subject visibility, strong payoff"}.
+Ignored signals: ${(formatProfile.ignoredSignals ?? []).join(", ") || "none"}.`
+    : "";
 
-  const chapterHint = chapterPoints.length
+  const chapterHint = !isVisualFirst && chapterPoints.length
     ? `\n\nReal chapter timestamps:\n${chapterPoints.map(c => `${c.time} - context: "${c.text}"`).join("\n")}`
     : "";
 
@@ -1957,7 +2059,7 @@ export async function generateSeo(
 
   const guide = platformGuide[platform] ?? "";
   const contentHint = isVisualFirst
-    ? `Transcript signal is limited for this upload. Build packaging from the visual premise, pacing, and any sparse spoken context. Video name: "${videoName ?? "Video analysis"}". ${speechAnalysis?.summary ?? ""}`
+    ? `Transcript signal is limited for this upload. Build packaging from the visual premise and detected format, not from sparse transcript fragments. Video name: "${videoName ?? "Video analysis"}". ${speechAnalysis?.summary ?? ""} ${formatHint}`
     : `Transcript signal is strong enough to drive platform packaging. ${speechAnalysis?.summary ?? ""}`;
 
   if (isFree) {
@@ -1972,6 +2074,7 @@ Generate ONE strong title, TWO description sentences, and 3 tags.
 Platform: ${guide}
 Context: ${contentHint}
 Transcript: "${transcript.substring(0, 800)}"
+Hard rule: never infer cooking, food, dessert, recipe, or kitchen themes unless the detected format or transcript clearly supports that topic.
 TAGS: No # symbol.
 
 Return STRICT JSON:
@@ -1997,6 +2100,8 @@ ${languageInstruction}
 You are a ${platform} SEO expert. Platform rules: ${guide}
 Context: ${contentHint}
 Transcript: "${transcript.substring(0, 2000)}"${chapterHint}
+Hard rule: never infer cooking, food, dessert, recipe, or kitchen themes unless the detected format or transcript clearly supports that topic.
+If transcript signal is limited, prefer accurate format-aware packaging over specific nouns from sparse or noisy transcript fragments.
 
 ${isYouTube ? `Generate exactly 5 title options (curiosity gap, how-to, number-based, problem/solution, bold claim). Under 70 chars each.` : `Generate 3 title options.`}
 
@@ -2027,12 +2132,14 @@ export async function generateShortClipIdeas(
   platforms: string[],
   plan = "free",
   speechAnalysis?: SpeechAnalysis,
+  formatProfile?: Partial<FormatProfile> | null,
   userId?: number,
 ): Promise<object> {
   if (!segments.length) return { clips: [] };
   const isFree = plan === "free";
   const totalDuration = segments[segments.length - 1]!.end;
   const languageInstruction = buildOutputLanguageInstruction(transcript, speechAnalysis);
+  const isVisualFirst = speechAnalysis?.mode === "visual_first" || !speechAnalysis?.hasMeaningfulSpeech;
 
   const platformLabels: Record<string, string> = {
     youtube_long: "YouTube Long", youtube_shorts: "YouTube Shorts",
@@ -2062,8 +2169,15 @@ export async function generateShortClipIdeas(
     startSec: Math.round(c.start),
     endSec: Math.round(c.end),
     durationSec: Math.round(c.end - c.start),
-    preview: c.text.trim().substring(0, 250),
+    preview: isVisualFirst ? "" : c.text.trim().substring(0, 250),
   }));
+
+  const formatHint = formatProfile
+    ? `Detected format: ${formatProfile.contentFormat ?? "general_visual"}.
+Primary subject: ${formatProfile.primarySubject ?? "the main subject on screen"}.
+Viewer intent: ${formatProfile.viewerIntent ?? "stay for the payoff"}.
+Success factors: ${(formatProfile.successFactors ?? []).join(", ") || "clear payoff"}.`
+    : "";
 
   const clipCount = isFree ? 1 : 3;
   const response = await callOpenAI({
@@ -2077,6 +2191,9 @@ ${languageInstruction}
 
 Identify the best ${clipCount} clip(s) for: ${targetPlatformList}
 Total duration: ${Math.round(totalDuration)}s
+${formatHint}
+${isVisualFirst ? "Transcript signal is limited. Do not rely on sparse transcript nouns when naming the clip. Base clips on the detected format and likely visual payoff moments." : ""}
+Hard rule: never infer cooking, food, dessert, recipe, or kitchen themes unless the detected format or transcript clearly supports that topic.
 
 Chunks: ${JSON.stringify(chunkSummaries)}
 

@@ -230,6 +230,16 @@ function getHistoryTotalScore(item: AnalysisHistoryItem) {
   return Number.isFinite(score) ? Math.max(0, Math.min(100, Math.round(score))) : null;
 }
 
+function getResultPlatforms(result: any): string[] {
+  const platforms = result?.analysisOptions?.platforms;
+  return Array.isArray(platforms) && platforms.length ? platforms : ["youtube_long"];
+}
+
+function getResultModules(result: any): string[] {
+  const modules = result?.analysisOptions?.modules;
+  return Array.isArray(modules) && modules.length ? modules : ["quality", "editing"];
+}
+
 function navigateToPricing(feature?: string) {
   const params = new URLSearchParams({ highlight: "creator" });
   if (feature) params.set("feature", feature);
@@ -656,6 +666,12 @@ function RetentionForecastCard({ data }: { data: any }) {
     : grade === "B" ? "text-blue-400 border-blue-400/20 bg-blue-400/5"
     : grade === "C" ? "text-yellow-400 border-yellow-400/20 bg-yellow-400/5"
     : "text-red-400 border-red-400/20 bg-red-400/5";
+  const maxSec = points.length > 0 ? Math.max(...points.map((point: any) => Number(point?.sec ?? 0)), 1) : 1;
+  const linePoints = points.map((point: any, index: number) => {
+    const x = maxSec === 0 ? 0 : (Number(point?.sec ?? 0) / maxSec) * 100;
+    const y = 100 - Math.max(0, Math.min(100, Number(point?.pct ?? 0)));
+    return `${index === 0 ? "M" : "L"} ${x} ${y}`;
+  }).join(" ");
 
   return (
     <div className="space-y-4">
@@ -678,10 +694,35 @@ function RetentionForecastCard({ data }: { data: any }) {
         </div>
 
         {points.length > 1 && (
-          <div className="flex items-end gap-1 h-20 border-l border-b border-white/10 pl-2 pb-2">
-            {points.slice(0, 24).map((p: any, i: number) => (
-              <div key={`${p.sec}-${i}`} className="flex-1 min-w-1 bg-primary/70 rounded-t" style={{ height: `${Math.max(6, Math.min(100, p.pct ?? 0))}%` }} title={`${p.sec}s: ${p.pct}%`} />
-            ))}
+          <div className="rounded-xl border border-white/8 bg-black/15 p-3">
+            <div className="relative h-32">
+              <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full overflow-visible">
+                <path d="M 0 100 L 100 100" stroke="rgba(255,255,255,0.08)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+                <path d="M 0 0 L 0 100" stroke="rgba(255,255,255,0.08)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+                <path d={linePoints} fill="none" stroke="rgba(244,114,182,0.95)" strokeWidth="2" vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
+                {points.map((point: any, index: number) => {
+                  const cx = maxSec === 0 ? 0 : (Number(point?.sec ?? 0) / maxSec) * 100;
+                  const cy = 100 - Math.max(0, Math.min(100, Number(point?.pct ?? 0)));
+                  return (
+                    <circle
+                      key={`${point.sec}-${index}`}
+                      cx={cx}
+                      cy={cy}
+                      r="1.8"
+                      fill="rgb(244,114,182)"
+                    >
+                      <title>{`${point.sec}s: ${point.pct}%`}</title>
+                    </circle>
+                  );
+                })}
+              </svg>
+              <div className="absolute inset-x-0 bottom-0 flex justify-between text-[11px] text-white/30">
+                <span>0s</span>
+                <span>{`${Math.round(maxSec)}s`}</span>
+              </div>
+              <div className="absolute left-0 top-0 text-[11px] text-white/30">100%</div>
+              <div className="absolute left-0 bottom-5 text-[11px] text-white/30">0%</div>
+            </div>
           </div>
         )}
       </div>
@@ -1688,7 +1729,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
   const { toast } = useToast();
 
   const [file, setFile] = useState<File | null>(null);
-  const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>(["youtube_long"]);
+  const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>([]);
   const [selectedModules, setSelectedModules] = useState<string[]>(["quality", "editing"]);
   const [activeResultTab, setActiveResultTab] = useState<string>("quality");
   const [showPlanModal, setShowPlanModal] = useState(false);
@@ -1817,7 +1858,8 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
     if (hasResults) {
       clearPendingUploadRecovery();
       onDataReady();
-      const firstModule = selectedModules.find(m => (displayedResults as any)?.[m]);
+      const resultModules = getResultModules(displayedResults);
+      const firstModule = resultModules.find(m => (displayedResults as any)?.[m]);
       setActiveResultTab(firstModule ?? "quality");
 
       // Refresh plan usage so the Home page counter updates immediately
@@ -1843,10 +1885,6 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
 
   // Show the processing screen as soon as a jobId exists, even before first poll
   const showAnalyzing = isAnalyzing || (!!jobId && !isDone && !isError);
-
-  function togglePlatform(id: string) {
-    setSelectedPlatforms([id]);
-  }
 
   function toggleModule(id: string, locked: boolean) {
     if (locked) { setShowPlanModal(true); return; }
@@ -1933,7 +1971,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
     const recovery: PendingUploadRecovery = {
       startedAt: Date.now(),
       fileName: file.name,
-      platforms: selectedPlatforms,
+      platforms: [],
       modules: selectedModules,
     };
     writePendingUploadRecovery(recovery);
@@ -1942,7 +1980,6 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
         file,
         options: {
           mode: "video-analyzer",
-          platforms: selectedPlatforms,
           modules: selectedModules,
         },
       });
@@ -2070,10 +2107,12 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
   const currentStepLabel = statusData?.currentStep ?? (isSubmitting ? "Uploading video..." : "");
   const errorMessage = (pollData as any)?.error ?? "An unexpected error occurred during analysis.";
   const analysisProfile = getAnalysisProfile(displayedResults);
+  const resultModules = getResultModules(displayedResults);
+  const resultPlatforms = getResultPlatforms(displayedResults);
 
   const availableResultTabs = RESULT_TABS.filter(t => {
     if (t.id === "transcript") return !!(displayedResults as any)?.transcript && analysisProfile?.hasMeaningfulSpeech !== false;
-    return selectedModules.includes(t.id) && !!(displayedResults as any)?.[t.id];
+    return resultModules.includes(t.id) && !!(displayedResults as any)?.[t.id];
   });
   const hasHistory = analysisHistory.length > 0;
   const showHistoryLanding = !hasResults && !showAnalyzing && !isError && hasHistory && !showUploadForm;
@@ -2162,29 +2201,9 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
               <div className="flex gap-3 rounded-lg border border-amber-500/20 bg-amber-500/8 px-4 py-3 text-left">
                 <AlertTriangle className="w-4 h-4 text-amber-300 mt-0.5 shrink-0" />
                 <p className="text-xs leading-relaxed text-white/55">
-                  DayTabs now detects where speech actually appears in the timeline. Talking videos still get transcript-led notes, while low-dialogue uploads shift toward visual pacing, hook, and packaging guidance.
+                  DayTabs now auto-detects where speech appears, whether the upload is long or short, and whether the frame is horizontal or vertical. Vertical or already-short videos skip short-clip ideation automatically.
                 </p>
               </div>
-
-              <PanelCard className="p-4">
-                <p className="text-xs text-white/40 uppercase tracking-wider mb-3 flex items-center gap-2">
-                  <TrendingUp className="w-3.5 h-3.5" />Target platform
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {PLATFORMS.map(pl => {
-                    const active = selectedPlatforms.includes(pl.id);
-                    return (
-                      <button
-                        key={pl.id}
-                        onClick={() => togglePlatform(pl.id)}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border ${active ? "bg-primary/20 text-primary border-primary/40" : "bg-white/5 text-white/50 border-white/10 hover:text-white/80 hover:border-white/20"}`}
-                      >
-                        {pl.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </PanelCard>
             </div>
 
             <PanelCard className="space-y-4 self-start p-4">
@@ -2339,7 +2358,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
                 <motion.div key={activeResultTab} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
                   {activeResultTab === "quality"    && <QualityPanel    data={(displayedResults as any).quality}    isPaid={isPaid} profile={analysisProfile} />}
                   {activeResultTab === "editing"    && <EditingPanel    data={(displayedResults as any).editing}    isPaid={isPaid} profile={analysisProfile} />}
-                  {activeResultTab === "publish"    && <PublishPanel    data={(displayedResults as any).publish}    platforms={selectedPlatforms} isPaid={isPaid} subtitleFile={(displayedResults as any).subtitleFile} videoFileName={file?.name} profile={analysisProfile} />}
+                  {activeResultTab === "publish"    && <PublishPanel    data={(displayedResults as any).publish}    platforms={resultPlatforms} isPaid={isPaid} subtitleFile={(displayedResults as any).subtitleFile} videoFileName={file?.name} profile={analysisProfile} />}
                   {activeResultTab === "shortClips" && <ShortClipsPanel data={(displayedResults as any).shortClips} isPaid={isPaid} />}
                   {activeResultTab === "transcript" && <TranscriptPanel data={(displayedResults as any).transcript} isPaid={isPaid} profile={analysisProfile} />}
                 </motion.div>
