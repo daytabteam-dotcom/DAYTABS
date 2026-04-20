@@ -10,11 +10,11 @@ import {
   Lamp, Sun, Contrast, Image, Frame, Focus, Palette, Mic2, Waves, Gauge,
 } from "lucide-react";
 import { useAnalysisPolling, useAnalysisResults } from "@/hooks/use-analysis";
+import { usePdfExport } from "@/hooks/use-pdf-export";
 import { useVideoUpload, type UploadProgressInfo } from "@/hooks/use-video-upload";
 import { useToast } from "@/hooks/use-toast";
 import { usePlan, getFileSizeLimitLabel, getDurationLimitLabel, FILE_SIZE_LIMITS, DURATION_LIMITS_SEC } from "@/hooks/use-plan";
 import { PlanPickerModal } from "@/components/PlanPickerModal";
-import { generateAnalysisPDF } from "@/lib/generateAnalysisPDF";
 import { UpgradeErrorModal, type LimitError } from "@/components/UpgradeErrorModal";
 import { PanelPage, PanelHeader, PanelTitle, PanelSubtitle, PanelCard, PanelCardSoft } from "@/components/panel-system";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -974,6 +974,7 @@ function PublishPanel({ data, platforms, isPaid, subtitleFile, videoFileName, pr
   const pData = data[activePlatform];
   const platformLabel = PLATFORMS.find(p => p.id === activePlatform)?.label ?? activePlatform;
   const isYouTube = activePlatform === "youtube_long" || activePlatform === "youtube_shorts";
+  const showSubtitleFile = isYouTube && profile?.hasMeaningfulSpeech !== false;
 
   function copyText(text: string, key: string) {
     navigator.clipboard.writeText(text).then(() => {
@@ -1106,7 +1107,7 @@ function PublishPanel({ data, platforms, isPaid, subtitleFile, videoFileName, pr
             </div>
           )}
 
-          {isYouTube && (
+          {showSubtitleFile && (
             <div className="p-4 rounded-xl bg-background/60 border border-white/8">
               <p className="text-xs text-white/40 uppercase tracking-wider mb-3 flex items-center gap-1.5"><Download className="w-3.5 h-3.5" />Subtitle File (.srt)</p>
               {isPaid ? (
@@ -1762,12 +1763,11 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
   const displayedResults = historyResult ?? results;
   const hasResults = !!historyResult || (isDone && !!results);
 
-  // Keep refs so the PDF export closure always has the latest values
-  const resultsRef = useRef<any>(null);
+  // Keep the latest filename around so history/recovered reports export with a stable name.
   const fileNameRef = useRef<string>("analysis");
-  const [isPdfExporting, setIsPdfExporting] = useState(false);
+  const exportBaseName = (file?.name ?? fileNameRef.current ?? "analysis").replace(/\.[^.]+$/, "") || "analysis";
+  const { ref: pdfExportRef, exportPdf, isExporting: isPdfExporting } = usePdfExport(`${exportBaseName}-daytabs-report.pdf`);
 
-  useEffect(() => { resultsRef.current = displayedResults ?? null; }, [displayedResults]);
   useEffect(() => { if (file?.name) fileNameRef.current = file.name; }, [file]);
 
   const loadAnalysisHistory = useCallback(async () => {
@@ -1866,16 +1866,11 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
       window.dispatchEvent(new CustomEvent("daytabs:plan-updated"));
       loadAnalysisHistory();
 
-      // Register real PDF export so parent-level actions can trigger it.
-      const exportFn = async () => {
-        if (!resultsRef.current) return;
-        await generateAnalysisPDF(resultsRef.current, fileNameRef.current);
-      };
-      onRegisterExport(exportFn);
+      onRegisterExport(exportPdf);
     } else {
       onRegisterExport(null);
     }
-  }, [hasResults, displayedResults, selectedModules, onDataReady, onRegisterExport, loadAnalysisHistory]);
+  }, [hasResults, displayedResults, selectedModules, onDataReady, onRegisterExport, loadAnalysisHistory, exportPdf]);
 
   useEffect(() => {
     if (statusData?.status === "error") {
@@ -2023,8 +2018,10 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
 
   function handleOpenHistoryItem(item: AnalysisHistoryItem) {
     const options = item.result?.analysisOptions;
+    const openedFileName = options?.originalFileName ?? options?.fileName ?? options?.videoName ?? item.result?.videoName;
     if (options?.platforms?.length) setSelectedPlatforms(options.platforms);
     if (options?.modules?.length) setSelectedModules(options.modules);
+    if (openedFileName) fileNameRef.current = openedFileName;
     setFile(null);
     setShowUploadForm(true);
 
@@ -2109,7 +2106,6 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
   const analysisProfile = getAnalysisProfile(displayedResults);
   const resultModules = getResultModules(displayedResults);
   const resultPlatforms = getResultPlatforms(displayedResults);
-
   const availableResultTabs = RESULT_TABS.filter(t => {
     if (t.id === "transcript") return !!(displayedResults as any)?.transcript && analysisProfile?.hasMeaningfulSpeech !== false;
     return resultModules.includes(t.id) && !!(displayedResults as any)?.[t.id];
@@ -2304,15 +2300,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
             </div>
             <div className="flex items-center gap-2">
               <button
-                onClick={async () => {
-                  if (!displayedResults) return;
-                  setIsPdfExporting(true);
-                  try {
-                    await generateAnalysisPDF(displayedResults as any, file?.name ?? fileNameRef.current);
-                  } finally {
-                    setIsPdfExporting(false);
-                  }
-                }}
+                onClick={() => void exportPdf()}
                 disabled={isPdfExporting}
                 className="px-4 py-2 rounded-xl text-xs font-semibold text-primary border border-primary/30 bg-primary/10 hover:bg-primary/20 transition-all flex items-center gap-1.5 disabled:opacity-60 disabled:cursor-not-allowed"
               >
@@ -2365,6 +2353,39 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
               </AnimatePresence>
             </>
           )}
+
+          <div
+            ref={pdfExportRef}
+            data-pdf-export-root="true"
+            className="fixed left-[-10000px] top-0 w-[1120px] opacity-0 pointer-events-none"
+            aria-hidden="true"
+          >
+            <div className="space-y-6">
+              <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-6">
+                <p className="text-xs uppercase tracking-[0.16em] text-white/40">DayTabs Video Analyzer Report</p>
+                <h1 className="mt-2 text-3xl font-semibold text-white">{exportBaseName}</h1>
+                <p className="mt-2 text-sm text-white/55">Full report export with every available section from the live analysis view.</p>
+              </div>
+
+              <AnalysisModeCard profile={analysisProfile} />
+              <CreatorReportIntro results={displayedResults} profile={analysisProfile} />
+
+              {availableResultTabs.map((tab) => (
+                <section key={`pdf-${tab.id}`} data-pdf-tab-section="true" className="space-y-4 pt-2">
+                  <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
+                    <p className="text-xs uppercase tracking-[0.16em] text-white/40">Report Section</p>
+                    <h2 className="mt-2 text-2xl font-semibold text-white">{tab.label}</h2>
+                  </div>
+
+                  {tab.id === "quality" && <QualityPanel data={(displayedResults as any).quality} isPaid={isPaid} profile={analysisProfile} />}
+                  {tab.id === "editing" && <EditingPanel data={(displayedResults as any).editing} isPaid={isPaid} profile={analysisProfile} />}
+                  {tab.id === "publish" && <PublishPanel data={(displayedResults as any).publish} platforms={resultPlatforms} isPaid={isPaid} subtitleFile={(displayedResults as any).subtitleFile} videoFileName={file?.name ?? fileNameRef.current} profile={analysisProfile} />}
+                  {tab.id === "shortClips" && <ShortClipsPanel data={(displayedResults as any).shortClips} isPaid={isPaid} />}
+                  {tab.id === "transcript" && <TranscriptPanel data={(displayedResults as any).transcript} isPaid={isPaid} profile={analysisProfile} />}
+                </section>
+              ))}
+            </div>
+          </div>
         </div>
       ) : null}
     </PanelPage>

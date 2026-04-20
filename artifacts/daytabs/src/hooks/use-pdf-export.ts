@@ -47,6 +47,21 @@ export function usePdfExport(filename: string) {
       backdrop-filter: none !important;
       -webkit-backdrop-filter: none !important;
     }
+    [data-pdf-export-root="true"] {
+      position: static !important;
+      inset: auto !important;
+      width: auto !important;
+      max-width: none !important;
+      opacity: 1 !important;
+      pointer-events: auto !important;
+      overflow: visible !important;
+      padding: 0 !important;
+      margin: 0 !important;
+    }
+    [data-pdf-tab-section="true"] {
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
     @media print {
       html, body { padding: 0; }
     }
