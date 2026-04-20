@@ -121,13 +121,16 @@ app.use("/api", router);
 const projectRoot = path.resolve('/app');
 const adminDist = path.join(projectRoot, 'artifacts/admin/dist/public');
 
-app.get('/login', adminHostOnly, (_req, res) => {
+app.get('/', adminHostOnly, (_req, res) => {
   res.sendFile(path.join(adminDist, 'index.html'));
 });
 
-app.use('/login', adminHostOnly, express.static(adminDist));
-app.get('/{*adminPath}', adminHostOnly, (_req, res) => {
+app.use('/', adminHostOnly, express.static(adminDist));
+app.get('/app/{*adminPath}', adminHostOnly, (_req, res) => {
   res.sendFile(path.join(adminDist, 'index.html'));
+});
+app.get('/{*adminPath}', adminHostOnly, (_req, res) => {
+  res.redirect(302, '/');
 });
 
 app.use('/', express.static(path.join(projectRoot, 'artifacts/landing/dist/public')));

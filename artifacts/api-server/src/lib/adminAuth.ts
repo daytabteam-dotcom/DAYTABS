@@ -37,7 +37,7 @@ export function getAdminHostname(req: Request) {
 }
 
 function isAdminAuthPath(path: string) {
-  return path.startsWith("/login") || path === "/api/auth/admin-login";
+  return path === "/" || path.startsWith("/assets/") || path === "/api/auth/admin-login";
 }
 
 export async function adminHostMiddleware(req: Request, res: Response, next: NextFunction) {
@@ -70,7 +70,7 @@ export async function adminHostMiddleware(req: Request, res: Response, next: Nex
 
   const token = req.cookies?.[ADMIN_SESSION_COOKIE];
   if (!token || !(await verifySession(token))) {
-    res.redirect(302, "/login");
+    res.redirect(302, "/");
     return;
   }
 

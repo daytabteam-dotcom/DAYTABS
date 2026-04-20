@@ -117,7 +117,7 @@ function formatDate(value: string) {
 async function apiFetch<T>(path: string): Promise<T> {
   const response = await fetch(path, { credentials: "include" });
   if (response.status === 401) {
-    window.location.assign("/login");
+    window.location.assign("/");
     throw new Error("Unauthorized");
   }
   if (!response.ok) throw new Error(`Request failed: ${response.status}`);
@@ -146,7 +146,7 @@ function LoginView() {
         setError(body.error || "Login failed");
         return;
       }
-      window.location.assign("/");
+      window.location.assign("/app");
     } catch {
       setError("Could not reach the admin gateway");
     } finally {
@@ -277,7 +277,7 @@ function DashboardView() {
 
   async function logout() {
     await fetch("/api/auth/admin-logout", { method: "POST", credentials: "include" }).catch(() => null);
-    window.location.assign("/login");
+    window.location.assign("/");
   }
 
   return (
@@ -528,6 +528,6 @@ function DashboardView() {
 }
 
 export default function App() {
-  const isLogin = window.location.pathname.startsWith("/login");
+  const isLogin = window.location.pathname === "/";
   return isLogin ? <LoginView /> : <DashboardView />;
 }
