@@ -129,6 +129,43 @@ function clearPendingUploadRecovery() {
   localStorage.removeItem(RECOVERY_STORAGE_KEY);
 }
 
+function playAnalysisCompleteSound() {
+  if (typeof window === "undefined") return;
+  const AudioContextConstructor = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!AudioContextConstructor) return;
+
+  const context = new AudioContextConstructor();
+  const startAt = context.currentTime + 0.02;
+  const notes = [
+    { frequency: 659.25, duration: 0.12 },
+    { frequency: 783.99, duration: 0.16 },
+    { frequency: 987.77, duration: 0.24 },
+  ];
+
+  notes.forEach((note, index) => {
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    const noteStart = startAt + index * 0.12;
+    const noteEnd = noteStart + note.duration;
+
+    oscillator.type = "sine";
+    oscillator.frequency.setValueAtTime(note.frequency, noteStart);
+
+    gain.gain.setValueAtTime(0.0001, noteStart);
+    gain.gain.exponentialRampToValueAtTime(0.14, noteStart + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, noteEnd);
+
+    oscillator.connect(gain);
+    gain.connect(context.destination);
+    oscillator.start(noteStart);
+    oscillator.stop(noteEnd + 0.02);
+  });
+
+  window.setTimeout(() => {
+    void context.close().catch(() => {});
+  }, 900);
+}
+
 function getStoredAuthToken() {
   return localStorage.getItem("daytabs_token");
 }
@@ -2479,10 +2516,18 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
 
   // Keep the latest filename around so history/recovered reports export with a stable name.
   const fileNameRef = useRef<string>("analysis");
+  const completedJobSoundRef = useRef<string | null>(null);
   const exportBaseName = (file?.name ?? fileNameRef.current ?? "analysis").replace(/\.[^.]+$/, "") || "analysis";
   const { ref: pdfExportRef, exportPdf, isExporting: isPdfExporting } = usePdfExport(`${exportBaseName}-daytabs-report.pdf`);
 
   useEffect(() => { if (file?.name) fileNameRef.current = file.name; }, [file]);
+
+  useEffect(() => {
+    if (!jobId || !isDone || !results) return;
+    if (completedJobSoundRef.current === jobId) return;
+    completedJobSoundRef.current = jobId;
+    playAnalysisCompleteSound();
+  }, [jobId, isDone, results]);
 
   const loadAnalysisHistory = useCallback(async () => {
     const token = getStoredAuthToken();

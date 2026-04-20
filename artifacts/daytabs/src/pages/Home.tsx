@@ -354,39 +354,58 @@ function Dashboard({
           <PanelSubtitle>Here's what's ready for you today.</PanelSubtitle>
         </div>
       </PanelHeader>
-      <PanelCard className="flex items-center gap-3 p-4 sm:p-5">
-        <div
-          className={`px-3 py-1 rounded-full text-xs font-bold border ${badgeClass}`}
-        >
-          {displayName}
-        </div>
-        <div className="flex-1">
-          <div>
-            <div className="flex items-center justify-between mb-1">
+      <PanelCard className="p-4 sm:p-5">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="space-y-3">
+            <div
+              className={`inline-flex w-fit rounded-full border px-3 py-1 text-xs font-bold ${badgeClass}`}
+            >
+              {displayName}
+            </div>
+            <div className="grid grid-cols-2 gap-3 sm:hidden">
+              <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
+                <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">Used</p>
+                <p className="mt-2 text-2xl font-semibold text-white">{used}</p>
+                <p className="mt-1 text-xs text-white/35">of {total} this month</p>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
+                <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">Remaining</p>
+                <p className={`mt-2 text-2xl font-semibold ${remaining === 0 ? "text-red-400" : remaining <= 3 ? "text-amber-300" : "text-primary"}`}>{remaining}</p>
+                <p className="mt-1 text-xs text-white/35">analyses left</p>
+              </div>
+            </div>
+            <div className="hidden items-center gap-3 sm:flex">
               <p className="text-xs text-white/40">
                 {used} of {total} monthly usage used
               </p>
+              <span className="text-white/20">•</span>
               <p className="text-xs text-white/40">{remaining} remaining</p>
             </div>
-            <div className="h-1.5 bg-white/8 rounded-full overflow-hidden">
-              <div
-                className={`h-full rounded-full transition-all ${remaining === 0 ? "bg-red-400" : remaining <= 3 ? "bg-amber-400" : "bg-primary"}`}
-                style={{ width: `${Math.min(100, (used / total) * 100)}%` }}
-              />
-            </div>
-            <p className="mt-2 text-xs text-white/35">
-              Up to {limits.analysesLimit} video analyses each month. Longer videos may use more of your monthly usage.
-            </p>
           </div>
+          {!plan.isPaid && (
+            <button
+              onClick={onUpgrade}
+              className="w-full rounded-xl border border-primary/30 bg-primary/14 px-3 py-2 text-sm font-semibold text-primary transition-all hover:bg-primary/20 sm:w-auto sm:rounded-lg sm:px-3 sm:py-1.5 sm:text-xs"
+            >
+              Upgrade
+            </button>
+          )}
         </div>
-        {!plan.isPaid && (
-          <button
-            onClick={onUpgrade}
-            className="rounded-lg border border-primary/30 bg-primary/14 px-3 py-1.5 text-xs font-semibold whitespace-nowrap text-primary transition-all hover:bg-primary/20"
-          >
-            Upgrade
-          </button>
-        )}
+        <div className="mt-4">
+          <div className="flex items-center justify-between gap-3 text-xs text-white/40">
+            <p>Monthly usage progress</p>
+            <p>{Math.max(0, Math.min(100, Math.round((used / total) * 100)))}%</p>
+          </div>
+          <div className="mt-2 h-2.5 overflow-hidden rounded-full bg-white/8">
+            <div
+              className={`h-full rounded-full transition-all ${remaining === 0 ? "bg-red-400" : remaining <= 3 ? "bg-amber-400" : "bg-primary"}`}
+              style={{ width: `${Math.min(100, (used / total) * 100)}%` }}
+            />
+          </div>
+          <p className="mt-3 text-xs leading-5 text-white/35">
+            Up to {limits.analysesLimit} video analyses each month. Longer videos may use more of your monthly usage.
+          </p>
+        </div>
       </PanelCard>
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard label="Usage used" value={used} sublabel="this month" />
