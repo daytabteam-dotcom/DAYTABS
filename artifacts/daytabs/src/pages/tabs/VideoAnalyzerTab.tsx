@@ -483,6 +483,56 @@ function SignalChip({ label, value }: { label: string; value: string }) {
   );
 }
 
+function ActionCard({
+  index,
+  title,
+  detail,
+  tone = "amber",
+}: {
+  index: number;
+  title: string;
+  detail?: string;
+  tone?: "amber" | "blue" | "emerald";
+}) {
+  const tones = {
+    amber: "border-amber-400/20 bg-amber-400/6 text-amber-100",
+    blue: "border-sky-400/20 bg-sky-400/6 text-sky-100",
+    emerald: "border-emerald-400/20 bg-emerald-400/6 text-emerald-100",
+  };
+
+  return (
+    <div className={`rounded-2xl border p-4 ${tones[tone]}`}>
+      <div className="flex items-start gap-3">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-black/10 text-sm font-bold">
+          {index}
+        </div>
+        <div>
+          <p className="text-sm font-semibold text-white">{title}</p>
+          {detail ? <p className="mt-2 text-xs leading-relaxed text-white/60">{detail}</p> : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ResultStat({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
+      <p className="text-[10px] uppercase tracking-[0.18em] text-white/35">{label}</p>
+      <p className="mt-2 text-lg font-semibold text-white">{value}</p>
+      {hint ? <p className="mt-1 text-xs text-white/45">{hint}</p> : null}
+    </div>
+  );
+}
+
 function ProofMomentCard({
   title,
   eyebrow,
@@ -515,6 +565,7 @@ function CreatorReportIntro({ results, profile }: { results: any; profile?: any 
   const firstHook = results?.editing?.hooks?.[0] ?? null;
   const firstRisk = results?.quality?.retention?.dropOffMoments?.[0] ?? null;
   const primaryPromise = publishData?.audiencePromise ?? editingData?.packagingAngle ?? formatProfile?.viewerIntent ?? "Clear outcome-driven packaging";
+  const score = Number(results?.quality?.score ?? results?.quality?.overallScore ?? results?.quality?.overallVisualScore ?? 0);
 
   return (
     <div className="space-y-5">
@@ -541,6 +592,13 @@ function CreatorReportIntro({ results, profile }: { results: any; profile?: any 
           {editingData?.editingStyle ? <SignalChip label="Edit Style" value={editingData.editingStyle} /> : null}
         </div>
       </PanelCard>
+
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <ResultStat label="Publish Call" value={score >= 85 ? "Almost there" : score >= 60 ? "Needs one pass" : "Rework first"} hint="Fast decision before you read the details" />
+        <ResultStat label="Biggest Win" value={primaryPromise} hint="The angle worth amplifying" />
+        <ResultStat label="Main Fix" value={topFixes[0] ?? "Open the detailed notes"} hint="Highest-impact change to make next" />
+        <ResultStat label="Best Hook" value={firstHook?.start ?? "No hook found"} hint={firstHook?.text ?? "The strongest grab point will appear here"} />
+      </div>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {firstHook ? (
@@ -625,10 +683,12 @@ function CreatorReportIntro({ results, profile }: { results: any; profile?: any 
           <p className="text-[11px] uppercase tracking-[0.16em] text-amber-200/70">Fix First</p>
           <div className="mt-4 grid gap-3 md:grid-cols-3">
             {topFixes.map((fix, index) => (
-              <div key={`${index}-${fix}`} className="rounded-xl border border-white/10 bg-black/10 p-4">
-                <p className="text-[10px] uppercase tracking-[0.16em] text-white/35">Fix {index + 1}</p>
-                <p className="mt-2 text-sm leading-6 text-white/75">{fix}</p>
-              </div>
+              <ActionCard
+                key={`${index}-${fix}`}
+                index={index + 1}
+                title={fix}
+                detail={index === 0 ? "Do this before you touch anything else." : index === 1 ? "This is the next most valuable improvement." : "Worth doing if you want a stronger final cut."}
+              />
             ))}
           </div>
         </PanelCardSoft>
@@ -706,10 +766,10 @@ function DecisionBar({ results, profile }: { results: any; profile?: any }) {
   const actionLabel = score >= 85 ? "Publish after a quick pass" : score >= 60 ? "Fix the opening, then publish" : "Rework before publishing";
 
   return (
-    <div className="sticky top-3 z-20 rounded-2xl border border-white/10 bg-background/90 p-4 backdrop-blur">
+    <div className="sticky top-3 z-20 rounded-2xl border border-white/10 bg-background/90 p-4 backdrop-blur shadow-[0_20px_60px_rgba(0,0,0,0.25)]">
       <div className="grid gap-4 lg:grid-cols-[1.15fr,1fr,1fr,auto] lg:items-center">
         <div>
-          <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Decision</p>
+          <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Publish Decision</p>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${verdict.tone}`}>{verdict.label}</span>
             {getFormatProfile(profile)?.contentFormat ? (
@@ -721,16 +781,16 @@ function DecisionBar({ results, profile }: { results: any; profile?: any }) {
           <p className="mt-3 text-sm text-white/70">{editingData?.viewPotential ?? verdict.description}</p>
         </div>
         <div>
-          <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Top Blocker</p>
+          <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">What Is Hurting It</p>
           <p className="mt-2 text-sm text-white/75">{topBlocker}</p>
         </div>
         <div>
-          <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Top Opportunity</p>
+          <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">What Could Win More Clicks</p>
           <p className="mt-2 text-sm text-white/75">{topOpportunity}</p>
         </div>
         <div className="rounded-xl border border-primary/20 bg-primary/10 px-4 py-3 text-center">
           <p className="text-3xl font-bold font-mono text-white">{score}</p>
-          <p className="mt-1 text-xs text-white/45">overall score</p>
+          <p className="mt-1 text-xs text-white/45">confidence score</p>
           <p className="mt-2 text-xs font-semibold text-primary">{actionLabel}</p>
         </div>
       </div>
@@ -1007,7 +1067,7 @@ function QualityPanel({ data, isPaid, profile }: { data: any; isPaid: boolean; p
         <div className="flex items-start gap-3 p-4 rounded-xl bg-amber-400/8 border border-amber-400/20">
           <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
           <div>
-            <p className="text-xs text-amber-400/70 uppercase tracking-wider mb-0.5 font-semibold">Most Important Fix</p>
+            <p className="text-xs text-amber-400/70 uppercase tracking-wider mb-0.5 font-semibold">Fix This Before Exporting</p>
             <p className="text-sm text-white/80">{topFixGuidance.fixNow || topFixGuidance.plain}</p>
             {topFixGuidance.nextVideo && <p className="mt-2 text-xs text-white/55"><span className="text-white/35">Next video:</span> {topFixGuidance.nextVideo}</p>}
           </div>
@@ -1017,7 +1077,7 @@ function QualityPanel({ data, isPaid, profile }: { data: any; isPaid: boolean; p
       <div className="flex items-center gap-4 p-5 rounded-2xl border border-white/8 bg-background/40">
         <div className="text-center min-w-[80px]">
           <span className={`text-5xl font-bold font-mono ${scoreColor}`}>{overallScore}</span>
-          <p className="text-xs text-white/40 mt-1">Overall Score</p>
+          <p className="text-xs text-white/40 mt-1">quality score</p>
         </div>
         <div className="flex-1">
           <div className="h-3 bg-white/8 rounded-full overflow-hidden">
@@ -1029,7 +1089,7 @@ function QualityPanel({ data, isPaid, profile }: { data: any; isPaid: boolean; p
             />
           </div>
           <p className="text-xs text-white/40 mt-2">
-            {overallScore >= 85 ? "Strong video, close to publish-ready." : overallScore >= 60 ? "Usable foundation, but fix the flagged issues before publishing." : "Needs attention before publishing."}
+            {overallScore >= 85 ? "Most of the craft is already working. Fix the highlighted weak spots and ship." : overallScore >= 60 ? "The foundation is usable, but the highlighted issues are costing trust and retention." : "This cut needs a stronger craft pass before it is ready to represent the idea well."}
           </p>
         </div>
       </div>
@@ -1119,7 +1179,7 @@ function EditingPanel({ data, isPaid, profile }: { data: any; isPaid: boolean; p
       {(data.topic || data.viewPotential || data.editingStyle) && (
         <div className="grid gap-4 lg:grid-cols-[1.2fr,0.8fr]">
           <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
-            <p className="text-xs text-white/35 uppercase tracking-wider">Editor Blueprint</p>
+            <p className="text-xs text-white/35 uppercase tracking-wider">What The Edit Needs To Do</p>
             {data.topic && <p className="mt-3 text-lg font-semibold text-white">{data.topic}</p>}
             {data.audienceGoal && <p className="mt-2 text-sm leading-relaxed text-white/65">{data.audienceGoal}</p>}
             {data.viewPotential && <p className="mt-3 text-sm leading-relaxed text-amber-100/85">{data.viewPotential}</p>}
@@ -1163,20 +1223,20 @@ function EditingPanel({ data, isPaid, profile }: { data: any; isPaid: boolean; p
         <div className="grid gap-4 lg:grid-cols-2">
           {nowFixes.length > 0 && (
             <div className="rounded-xl border border-amber-400/20 bg-amber-400/5 p-4">
-              <p className="text-xs uppercase tracking-wider text-amber-200/70">Fix this cut now</p>
-              <div className="mt-3 space-y-2">
+              <p className="text-xs uppercase tracking-wider text-amber-200/70">Fix This Cut Now</p>
+              <div className="mt-3 grid gap-3">
                 {nowFixes.map((fix, index) => (
-                  <p key={`${index}-${fix}`} className="text-sm text-white/75">{index + 1}. {fix}</p>
+                  <ActionCard key={`${index}-${fix}`} index={index + 1} title={fix} detail="This improves the current edit immediately." />
                 ))}
               </div>
             </div>
           )}
           {nextVideoFixes.length > 0 && (
             <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
-              <p className="text-xs uppercase tracking-wider text-white/35">Improve the next shoot</p>
-              <div className="mt-3 space-y-2">
+              <p className="text-xs uppercase tracking-wider text-white/35">Make The Next Shoot Better</p>
+              <div className="mt-3 grid gap-3">
                 {nextVideoFixes.map((fix, index) => (
-                  <p key={`${index}-${fix}`} className="text-sm text-white/70">{index + 1}. {fix}</p>
+                  <ActionCard key={`${index}-${fix}`} index={index + 1} title={fix} detail="This prevents the problem instead of patching it later." tone="blue" />
                 ))}
               </div>
             </div>
@@ -1318,19 +1378,19 @@ function PublishPanel({ data, platforms, isPaid, subtitleFile, videoFileName, pr
         <div className="grid gap-3 md:grid-cols-3">
           {pData?.audiencePromise && (
             <div className="rounded-xl border border-white/8 bg-background/60 p-4">
-              <p className="text-xs uppercase tracking-wider text-white/35">Viewer Promise</p>
+              <p className="text-xs uppercase tracking-wider text-white/35">Promise The Viewer Buys</p>
               <p className="mt-2 text-sm text-white/70">{pData.audiencePromise}</p>
             </div>
           )}
           {pData?.packagingStrategy && (
             <div className="rounded-xl border border-white/8 bg-background/60 p-4">
-              <p className="text-xs uppercase tracking-wider text-white/35">Packaging Angle</p>
+              <p className="text-xs uppercase tracking-wider text-white/35">Angle To Lean Into</p>
               <p className="mt-2 text-sm text-white/70">{pData.packagingStrategy}</p>
             </div>
           )}
           {pData?.algorithmFit && (
             <div className="rounded-xl border border-white/8 bg-background/60 p-4">
-              <p className="text-xs uppercase tracking-wider text-white/35">Algorithm Fit</p>
+              <p className="text-xs uppercase tracking-wider text-white/35">Why This Should Get Clicked</p>
               <p className="mt-2 text-sm text-white/70">{pData.algorithmFit}</p>
             </div>
           )}
@@ -1338,7 +1398,7 @@ function PublishPanel({ data, platforms, isPaid, subtitleFile, videoFileName, pr
       )}
       {Array.isArray(pData?.nicheReferences) && pData.nicheReferences.length > 0 && (
         <div className="rounded-xl border border-white/8 bg-background/60 p-4">
-          <p className="text-xs uppercase tracking-wider text-white/35">Viral Packaging Patterns In This Niche</p>
+          <p className="text-xs uppercase tracking-wider text-white/35">Patterns Winning In This Niche</p>
           <div className="mt-3 space-y-2">
             {pData.nicheReferences.map((item: string, index: number) => (
               <p key={`${index}-${item}`} className="text-sm text-white/65">{item}</p>
@@ -1365,7 +1425,7 @@ function PublishPanel({ data, platforms, isPaid, subtitleFile, videoFileName, pr
           {priorityTitles.length > 0 && (
             <div className="p-4 rounded-xl bg-background/60 border border-white/8">
               <div className="flex items-center justify-between mb-3">
-                <p className="text-xs text-white/40 uppercase tracking-wider flex items-center gap-1.5"><FileText className="w-3.5 h-3.5" />Titles for {platformLabel}</p>
+                <p className="text-xs text-white/40 uppercase tracking-wider flex items-center gap-1.5"><FileText className="w-3.5 h-3.5" />Pick A Title For {platformLabel}</p>
                 <button onClick={() => copyText(titles.join("\n"), "titles")} className="text-white/30 hover:text-white/60 transition-colors">
                   {copiedSection === "titles" ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
                 </button>
@@ -1405,7 +1465,7 @@ function PublishPanel({ data, platforms, isPaid, subtitleFile, videoFileName, pr
           {hashtags.length > 0 && (
             <div className="p-4 rounded-xl bg-background/60 border border-white/8">
               <div className="flex items-center justify-between mb-3">
-                <p className="text-xs text-white/40 uppercase tracking-wider flex items-center gap-1.5"><Hash className="w-3.5 h-3.5" />Tags</p>
+                <p className="text-xs text-white/40 uppercase tracking-wider flex items-center gap-1.5"><Hash className="w-3.5 h-3.5" />Paste-Ready Tags</p>
                 {isPaid && (
                   <button onClick={() => copyText(hashtags.map(t => String(t.tag ?? "").replace(/^#+/, "")).join(", "), "tags")} className="text-white/30 hover:text-white/60 transition-colors">
                     {copiedSection === "tags" ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
