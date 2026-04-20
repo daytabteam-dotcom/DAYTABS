@@ -5,6 +5,7 @@ import { fetchTrendingTopics, findCompetitors, scrapePublicProfile, type PublicP
 import { GROWTH_PLANNER_JSON_SHAPE, GROWTH_PLANNER_SYSTEM_PROMPT } from "../../lib/growthPlannerPrompts";
 import { openai } from "../../lib/openai";
 import { normalizePlan } from "../../lib/planLimits";
+import { logTokenUsage, usageTokens } from "../../lib/logTokens";
 
 const router = Router();
 
@@ -373,6 +374,12 @@ router.post("/generate", requireAuth, async (req, res) => {
       ],
       max_completion_tokens: mode === "custom-idea" ? 2500 : 9000,
       response_format: { type: "json_object" },
+    });
+    await logTokenUsage({
+      userId: req.auth!.user_id,
+      feature: "contentCreation",
+      model: "gpt-4o",
+      ...usageTokens(completion.usage),
     });
 
     const raw = completion.choices[0]?.message?.content ?? "{}";

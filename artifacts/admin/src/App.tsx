@@ -22,6 +22,21 @@ interface AdminUser {
   usage: {
     totalTokens: number;
     tokensByFeature: Record<string, number>;
+    tokensByProduct: {
+      videoAnalysis: number;
+      contentCreation: number;
+      youtubeGrowth: number;
+    };
+    tokensByModel: Record<string, {
+      inputTokens: number;
+      outputTokens: number;
+      totalTokens: number;
+      estimatedCostUsd: number;
+    }>;
+    videoAnalysesTotal: number;
+    videoAnalysesFailed: number;
+    videoAnalysisFailureReasons: Array<{ reason: string; count: number }>;
+    contentCreatorChatsCount: number;
     videoAnalysesCount: number;
     ytPlansGeneratedCount: number;
     ytIdeasRegeneratedCount: number;
@@ -50,6 +65,14 @@ interface TokensResponse {
     callCount: number;
     avgTokensPerCall: number;
   }>;
+  byModel: Array<{
+    model: string;
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    estimatedCostUsd: number;
+    callCount: number;
+  }>;
   period: Period;
 }
 
@@ -61,6 +84,14 @@ const featureLabels: Record<string, string> = {
   improveIdea: "Idea improves",
   perfSummary: "Performance summaries",
   chartGeneration: "Charts",
+  contentCreation: "Content creation",
+  growthPlanner: "Growth planner",
+};
+
+const productLabels: Record<keyof AdminUser["usage"]["tokensByProduct"], string> = {
+  videoAnalysis: "Video analysis",
+  contentCreation: "Content Creation",
+  youtubeGrowth: "YouTube Growth",
 };
 
 function formatNumber(value: number) {
@@ -68,7 +99,12 @@ function formatNumber(value: number) {
 }
 
 function formatCurrency(value: number) {
-  return new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 2 }).format(value || 0);
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: value > 0 && value < 0.01 ? 4 : 2,
+    maximumFractionDigits: value > 0 && value < 0.01 ? 6 : 2,
+  }).format(value || 0);
 }
 
 function formatDate(value: string) {
@@ -215,7 +251,16 @@ function DashboardView() {
   }, [search, users]);
 
   const maxFeatureTokens = Math.max(1, ...(tokens?.byFeature.map((feature) => feature.totalTokens) ?? [1]));
+  const maxModelCost = Math.max(0.000001, ...(tokens?.byModel.map((model) => model.estimatedCostUsd) ?? [0.000001]));
   const topUsers = [...users].sort((a, b) => b.usage.totalTokens - a.usage.totalTokens).slice(0, 5);
+  const productTotals = users.reduce(
+    (totals, user) => ({
+      videoAnalysis: totals.videoAnalysis + user.usage.tokensByProduct.videoAnalysis,
+      contentCreation: totals.contentCreation + user.usage.tokensByProduct.contentCreation,
+      youtubeGrowth: totals.youtubeGrowth + user.usage.tokensByProduct.youtubeGrowth,
+    }),
+    { videoAnalysis: 0, contentCreation: 0, youtubeGrowth: 0 },
+  );
 
   async function logout() {
     await fetch("/api/auth/admin-logout", { method: "POST", credentials: "include" }).catch(() => null);
@@ -227,7 +272,7 @@ function DashboardView() {
       <header className="topbar">
         <div>
           <p className="eyebrow">DayTabs control</p>
-          <h1>Usage command center</h1>
+          <h1>Admin Console</h1>
         </div>
         <button className="ghost-button" type="button" onClick={logout}>Log out</button>
       </header>
@@ -237,7 +282,7 @@ function DashboardView() {
       <section className="hero-panel">
         <div>
           <p className="eyebrow">Secure overview</p>
-          <h2>Revenue-adjacent product telemetry without public surface area.</h2>
+          <h2>Product usage, model cost, and account health in one private view.</h2>
         </div>
         <div className="period-switcher" aria-label="Token period">
           {(["week", "month", "all"] as Period[]).map((item) => (
@@ -253,6 +298,16 @@ function DashboardView() {
         <StatCard label="Active 30d" value={loading || !stats ? "..." : formatNumber(stats.activeUsers30d)} hint="Users with token activity" />
         <StatCard label="Tokens this month" value={loading || !stats ? "..." : formatNumber(stats.totalTokensThisMonth)} hint={`${stats ? formatNumber(stats.totalTokensAllTime) : "..."} all time`} />
         <StatCard label="Cost this month" value={loading || !stats ? "..." : formatCurrency(stats.estimatedCostThisMonth)} hint={`${stats ? formatCurrency(stats.estimatedCostLastMonth) : "..."} last month`} />
+      </section>
+
+      <section className="product-grid">
+        {(Object.keys(productTotals) as Array<keyof typeof productTotals>).map((key) => (
+          <article key={key} className="product-card">
+            <p>{productLabels[key]}</p>
+            <strong>{formatNumber(productTotals[key])}</strong>
+            <span>total tokens</span>
+          </article>
+        ))}
       </section>
 
       <section className="dashboard-grid">
@@ -284,23 +339,47 @@ function DashboardView() {
         <article className="panel">
           <div className="panel-heading">
             <div>
-              <p className="eyebrow">Highest usage</p>
-              <h2>Top accounts</h2>
+              <p className="eyebrow">Model cost</p>
+              <h2>Usage by model</h2>
             </div>
           </div>
-          <div className="top-users">
-            {topUsers.map((user, index) => (
-              <button key={user.id} type="button" onClick={() => setSelectedUserId(user.id)}>
-                <span>{index + 1}</span>
+          <div className="model-list">
+            {(tokens?.byModel ?? []).map((model) => (
+              <div key={model.model} className="model-row">
                 <div>
-                  <strong>{user.name || user.email}</strong>
-                  <small>{formatNumber(user.usage.totalTokens)} tokens · {formatCurrency(user.usage.estimatedCostUsd)}</small>
+                  <strong>{model.model}</strong>
+                  <span>{formatNumber(model.inputTokens)} in · {formatNumber(model.outputTokens)} out · {formatNumber(model.callCount)} calls</span>
                 </div>
-              </button>
+                <div className="bar-track">
+                  <div style={{ width: `${Math.max(4, (model.estimatedCostUsd / maxModelCost) * 100)}%` }} />
+                </div>
+                <b>{formatCurrency(model.estimatedCostUsd)}</b>
+              </div>
             ))}
-            {!topUsers.length ? <p className="empty">No users loaded yet.</p> : null}
+            {!tokens?.byModel.length ? <p className="empty">No model usage for this period yet.</p> : null}
           </div>
         </article>
+      </section>
+
+      <section className="panel top-users-panel">
+        <div className="panel-heading">
+          <div>
+            <p className="eyebrow">Highest usage</p>
+            <h2>Top accounts</h2>
+          </div>
+        </div>
+        <div className="top-users">
+          {topUsers.map((user, index) => (
+            <button key={user.id} type="button" onClick={() => setSelectedUserId(user.id)}>
+              <span>{index + 1}</span>
+              <div>
+                <strong>{user.name || user.email}</strong>
+                <small>{formatNumber(user.usage.totalTokens)} tokens · {formatCurrency(user.usage.estimatedCostUsd)} · {formatNumber(user.usage.videoAnalysesTotal)} videos</small>
+              </div>
+            </button>
+          ))}
+          {!topUsers.length ? <p className="empty">No users loaded yet.</p> : null}
+        </div>
       </section>
 
       <section className="panel users-panel">
@@ -318,6 +397,9 @@ function DashboardView() {
                 <th>User</th>
                 <th>Plan</th>
                 <th>Last active</th>
+                <th>Videos</th>
+                <th>Failed</th>
+                <th>Creator chats</th>
                 <th>Tokens</th>
                 <th>Cost</th>
                 <th>Quota</th>
@@ -332,6 +414,9 @@ function DashboardView() {
                   </td>
                   <td>{user.plan}</td>
                   <td>{formatDate(user.lastActiveAt)}</td>
+                  <td>{formatNumber(user.usage.videoAnalysesTotal)}</td>
+                  <td>{formatNumber(user.usage.videoAnalysesFailed)}</td>
+                  <td>{formatNumber(user.usage.contentCreatorChatsCount)}</td>
                   <td>{formatNumber(user.usage.totalTokens)}</td>
                   <td>{formatCurrency(user.usage.estimatedCostUsd)}</td>
                   <td>
@@ -362,6 +447,43 @@ function DashboardView() {
                 <div className="drawer-stats">
                   <StatCard label="Tokens" value={formatNumber(selectedUser.usage.totalTokens)} hint={`${Math.round(selectedUser.usage.quotaUsedPct)}% quota`} />
                   <StatCard label="Cost" value={formatCurrency(selectedUser.usage.estimatedCostUsd)} hint={selectedUser.plan} />
+                  <StatCard label="Videos analyzed" value={formatNumber(selectedUser.usage.videoAnalysesTotal)} hint={`${formatNumber(selectedUser.usage.videoAnalysesFailed)} failed`} />
+                  <StatCard label="Creator chats" value={formatNumber(selectedUser.usage.contentCreatorChatsCount)} hint="Script planner chats" />
+                </div>
+                <h3>Product token usage</h3>
+                <div className="product-breakdown">
+                  {(Object.keys(selectedUser.usage.tokensByProduct) as Array<keyof AdminUser["usage"]["tokensByProduct"]>).map((key) => (
+                    <div key={key}>
+                      <span>{productLabels[key]}</span>
+                      <strong>{formatNumber(selectedUser.usage.tokensByProduct[key])}</strong>
+                    </div>
+                  ))}
+                </div>
+                <h3>Model cost</h3>
+                <div className="activity-list">
+                  {Object.entries(selectedUser.usage.tokensByModel).map(([model, usage]) => (
+                    <div key={model} className="activity-row">
+                      <div>
+                        <strong>{model}</strong>
+                        <span>{formatNumber(usage.inputTokens)} input · {formatNumber(usage.outputTokens)} output</span>
+                      </div>
+                      <b>{formatCurrency(usage.estimatedCostUsd)}</b>
+                    </div>
+                  ))}
+                  {!Object.keys(selectedUser.usage.tokensByModel).length ? <p className="empty">No model token usage logged for this user.</p> : null}
+                </div>
+                <h3>Video analysis failures</h3>
+                <div className="activity-list">
+                  {selectedUser.usage.videoAnalysisFailureReasons.map((failure) => (
+                    <div key={failure.reason} className="activity-row">
+                      <div>
+                        <strong>{failure.reason}</strong>
+                        <span>Failure reason</span>
+                      </div>
+                      <b>{formatNumber(failure.count)}</b>
+                    </div>
+                  ))}
+                  {!selectedUser.usage.videoAnalysisFailureReasons.length ? <p className="empty">No video analysis failures recorded.</p> : null}
                 </div>
                 <h3>Recent activity</h3>
                 <div className="activity-list">

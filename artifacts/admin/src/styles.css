@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Space+Grotesk:wght@400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&family=Manrope:wght@400;500;600;700;800&display=swap");
 
 :root {
   color-scheme: dark;
@@ -14,6 +14,8 @@
   --clay: #ff9f68;
   --red: #ff6e6e;
   --shadow: rgba(0, 0, 0, 0.42);
+  --font-body: "Manrope", sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
 }
 
 * {
@@ -29,7 +31,7 @@ body {
     radial-gradient(circle at 88% 6%, rgba(138, 245, 194, 0.12), transparent 24rem),
     linear-gradient(135deg, #08110d 0%, #0a1411 44%, #15100a 100%);
   color: var(--ink);
-  font-family: "Space Grotesk", sans-serif;
+  font-family: var(--font-body);
 }
 
 button,
@@ -98,14 +100,13 @@ h1,
 h2,
 h3 {
   margin: 0;
-  letter-spacing: -0.04em;
+  letter-spacing: -0.055em;
 }
 
 h1 {
-  font-family: "Instrument Serif", serif;
-  font-size: clamp(3rem, 9vw, 5.8rem);
-  font-weight: 400;
-  line-height: 0.82;
+  font-size: clamp(2.5rem, 8vw, 4.8rem);
+  font-weight: 800;
+  line-height: 0.9;
 }
 
 .login-copy {
@@ -200,10 +201,9 @@ input:focus {
 
 .topbar h1,
 .hero-panel h2 {
-  font-family: "Instrument Serif", serif;
-  font-size: clamp(2.5rem, 6vw, 5.5rem);
-  font-weight: 400;
-  line-height: 0.9;
+  font-size: clamp(2.2rem, 5vw, 4.8rem);
+  font-weight: 800;
+  line-height: 0.92;
 }
 
 .ghost-button {
@@ -249,28 +249,59 @@ input:focus {
   color: #0d150f;
 }
 
-.stats-grid {
+.stats-grid,
+.product-grid {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   margin-top: 1rem;
 }
 
-.stat-card {
+.product-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.stat-card,
+.product-card {
   border-radius: 1.5rem;
   padding: 1.1rem;
 }
 
 .stat-card p,
-.stat-card span {
+.stat-card span,
+.product-card p,
+.product-card span {
   margin: 0;
   color: var(--quiet);
   font-size: 0.8rem;
 }
 
-.stat-card strong {
+.stat-card strong,
+.product-card strong {
   display: block;
   margin: 0.6rem 0;
   font-size: clamp(1.6rem, 4vw, 2.35rem);
   letter-spacing: -0.06em;
+}
+
+.product-card {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(138, 245, 194, 0.18);
+  background:
+    linear-gradient(135deg, rgba(138, 245, 194, 0.1), transparent 55%),
+    rgba(255, 255, 255, 0.035);
+}
+
+.product-card strong,
+.stat-card strong,
+.feature-row b,
+.model-row b,
+.activity-row b,
+td:nth-child(4),
+td:nth-child(5),
+td:nth-child(6),
+td:nth-child(7),
+td:nth-child(8) {
+  font-family: var(--font-mono);
 }
 
 .dashboard-grid {
@@ -299,13 +330,15 @@ input:focus {
 }
 
 .feature-list,
+.model-list,
 .top-users,
 .activity-list {
   display: grid;
   gap: 0.75rem;
 }
 
-.feature-row {
+.feature-row,
+.model-row {
   display: grid;
   grid-template-columns: minmax(12rem, 1fr) minmax(8rem, 1fr) auto;
   gap: 1rem;
@@ -317,6 +350,7 @@ input:focus {
 }
 
 .feature-row span,
+.model-row span,
 .top-users small,
 .activity-row span,
 td span {
@@ -367,6 +401,10 @@ td span {
   margin-top: 1rem;
 }
 
+.top-users-panel {
+  margin-top: 1rem;
+}
+
 .search {
   width: min(22rem, 100%);
 }
@@ -378,7 +416,7 @@ td span {
 table {
   width: 100%;
   border-collapse: collapse;
-  min-width: 58rem;
+  min-width: 72rem;
 }
 
 th,
@@ -434,7 +472,7 @@ tbody tr:hover {
 }
 
 .drawer {
-  width: min(100%, 34rem);
+  width: min(100%, 38rem);
   min-height: 100%;
   overflow-y: auto;
   border-left: 1px solid var(--line);
@@ -454,10 +492,9 @@ tbody tr:hover {
 
 .drawer h2 {
   margin-top: 1.5rem;
-  font-family: "Instrument Serif", serif;
-  font-size: 3rem;
-  font-weight: 400;
-  line-height: 0.95;
+  font-size: 2.6rem;
+  font-weight: 800;
+  line-height: 0.98;
 }
 
 .drawer-email {
@@ -469,6 +506,31 @@ tbody tr:hover {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.75rem;
   margin: 1.2rem 0;
+}
+
+.product-breakdown {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.product-breakdown div {
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 1rem;
+  padding: 0.85rem;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.product-breakdown span {
+  display: block;
+  color: var(--quiet);
+  font-size: 0.74rem;
+}
+
+.product-breakdown strong {
+  display: block;
+  margin-top: 0.35rem;
+  font-family: var(--font-mono);
 }
 
 .drawer h3 {
@@ -495,7 +557,8 @@ tbody tr:hover {
   .hero-panel,
   .panel-heading,
   .dashboard-grid,
-  .stats-grid {
+  .stats-grid,
+  .product-grid {
     grid-template-columns: 1fr;
   }
 
@@ -503,14 +566,17 @@ tbody tr:hover {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .feature-row {
+  .product-grid,
+  .feature-row,
+  .model-row {
     grid-template-columns: 1fr;
   }
 }
 
 @media (max-width: 560px) {
   .stats-grid,
-  .drawer-stats {
+  .drawer-stats,
+  .product-breakdown {
     grid-template-columns: 1fr;
   }
 

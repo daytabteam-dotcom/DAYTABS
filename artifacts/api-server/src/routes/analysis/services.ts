@@ -7,6 +7,7 @@ import { analysisJobsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { logger } from "../../lib/logger";
 import { openai } from "../../lib/openai";
+import { logTokenUsage, usageTokens } from "../../lib/logTokens";
 import { toFile } from "openai";
 
 export const execAsync = promisify(exec);
@@ -891,8 +892,18 @@ export function generateSrt(segments: Array<{ start: number; end: number; text: 
   ).join("\n\n");
 }
 
-async function callOpenAI(body: object): Promise<{ choices: Array<{ message: { content: string } }> }> {
-  return openai.chat.completions.create(body as Parameters<typeof openai.chat.completions.create>[0]) as Promise<{ choices: Array<{ message: { content: string } }> }>;
+async function callOpenAI(body: object, userId?: number): Promise<{ choices: Array<{ message: { content: string } }>; usage?: { prompt_tokens?: number | null; completion_tokens?: number | null } | null }> {
+  const response = await openai.chat.completions.create(body as Parameters<typeof openai.chat.completions.create>[0]) as { choices: Array<{ message: { content: string } }>; usage?: { prompt_tokens?: number | null; completion_tokens?: number | null } | null };
+  const model = typeof (body as { model?: unknown }).model === "string" ? (body as { model: string }).model : "gpt-4o";
+  if (userId) {
+    await logTokenUsage({
+      userId,
+      feature: "videoAnalysis",
+      model,
+      ...usageTokens(response.usage),
+    }).catch((err) => logger.warn({ err, userId, model }, "Failed to log video analysis token usage"));
+  }
+  return response;
 }
 
 function parseJson<T>(raw: string, fallback: T): T {
@@ -1084,7 +1095,8 @@ export async function analyzeVisuals(
   frameBase64List: string[],
   platform: string,
   plan = "free",
-  transcript?: string  // NEW: pass transcript so AI can judge background context against topic
+  transcript?: string,  // NEW: pass transcript so AI can judge background context against topic
+  userId?: number,
 ): Promise<object> {
   const imageContent = frameBase64List.map(b64 => ({
     type: "image_url",
@@ -1179,7 +1191,7 @@ ${VISUAL_OBSERVATIONS_SCHEMA}`;
       model: "gpt-4o",
       max_completion_tokens: isFree ? 1200 : 2500,
       messages: [{ role: "user", content: [{ type: "text", text: prompt }, ...imageContent] }],
-    });
+    }, userId);
 
     const raw = parseJson<{ observations?: Partial<VisualObservations>; assessments?: Record<string, string> }>(
       response.choices[0]?.message?.content ?? "{}",
@@ -1199,7 +1211,8 @@ ${VISUAL_OBSERVATIONS_SCHEMA}`;
 export async function analyzeAudio(
   transcript: string,
   whisperConfidence: number,
-  audioPath?: string
+  audioPath?: string,
+  userId?: number,
 ): Promise<object> {
   // Expanded filler word list
   const fillerWordPattern = /\b(um+|uh+|er+|ah+|like|you know|basically|literally|actually|so|right\?|kind of|sort of|I mean|you see|hmm+|well|anyway)\b/gi;
@@ -1265,7 +1278,7 @@ Return STRICT JSON only — assessment strings, NO numbers:
   "fillerSuggestion": "...",
   "fillerEffect": "..."
 }` }],
-  });
+  }, userId);
 
   const txt = parseJson<Record<string, string>>(response.choices[0]?.message?.content ?? "{}", {});
 
@@ -1327,7 +1340,7 @@ Return STRICT JSON only — assessment strings, NO numbers:
   };
 }
 
-export async function generateVideoName(transcript: string, fallbackName?: string): Promise<string> {
+export async function generateVideoName(transcript: string, fallbackName?: string, userId?: number): Promise<string> {
   const cleanFallback = (fallbackName ?? "Video analysis").replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim();
   const fallback = cleanFallback || "Video analysis";
 
@@ -1349,7 +1362,7 @@ Script: "${transcript.substring(0, 1800)}"
 
 Return: {"videoName":"specific video name"}`,
       }],
-    });
+    }, userId);
 
     const parsed = parseJson<{ videoName?: string }>(response.choices[0]?.message?.content ?? "{}", {});
     const name = parsed.videoName?.trim();
@@ -1368,7 +1381,8 @@ export function getTotalAnalysisScore(result: Record<string, unknown>): number |
 
 export async function analyzeScriptFeedback(
   transcript: string,
-  segments: Array<{ start: number; end: number; text: string }>
+  segments: Array<{ start: number; end: number; text: string }>,
+  userId?: number,
 ): Promise<object> {
   const first15sec = segments.filter(s => s.start <= 15).map(s => s.text).join(" ");
   const response = await callOpenAI({
@@ -1395,7 +1409,7 @@ Return STRICT JSON only:
   "improvedScript": "full rewritten script"
 }`,
     }],
-  });
+  }, userId);
   return parseJson(response.choices[0]?.message?.content ?? "{}", {
     hookSuggestions: [],
     weakSections: [],
@@ -1464,7 +1478,8 @@ export async function analyzeEditingPoints(
   transcript: string,
   segments: Array<{ start: number; end: number; text: string }>,
   audioPath?: string,
-  plan = "free"
+  plan = "free",
+  userId?: number,
 ): Promise<object> {
   const lastSeg = segments[segments.length - 1];
   const totalDuration = lastSeg?.end ?? 0;
@@ -1503,7 +1518,7 @@ Return STRICT JSON only:
   "editingSuggestions": ["specific tip referencing actual content"]
 }`,
     }],
-  });
+  }, userId);
 
   const hookData = parseJson<{ hookTexts: string[]; editingSuggestions: string[] }>(
     hookResponse.choices[0]?.message?.content ?? "{}",
@@ -1594,7 +1609,7 @@ Chunks: ${JSON.stringify(chunkSummaries)}
 Return STRICT JSON using ONLY the provided index numbers:
 {"goodChunks":[{"index":0,"title":"short punchy title","reason":"why this works standalone"}]}`,
         }],
-      });
+      }, userId);
 
       const shortData = parseJson<{ goodChunks: Array<{ index: number; title?: string; reason: string }> }>(
         shortVideoResponse.choices[0]?.message?.content ?? "{}",
@@ -1671,7 +1686,7 @@ Original: "${hookText}"
 
 Return STRICT JSON only: {"rewrittenHook": "your complete rewritten opening here"}`,
         }],
-      });
+      }, userId);
       const parsed = parseJson<{ rewrittenHook: string }>(hookRewriteResponse.choices[0]?.message?.content ?? "{}", { rewrittenHook: "" });
       rewrittenHook = parsed.rewrittenHook || undefined;
     } catch (err) {
@@ -1720,7 +1735,8 @@ export async function generateSeo(
   transcript: string,
   platform: string,
   segments: Array<{ start: number; end: number; text: string }> = [],
-  plan = "free"
+  plan = "free",
+  userId?: number,
 ): Promise<object> {
   const isFree = plan === "free";
   const chapterPoints = buildChapterPoints(segments, 10);
@@ -1753,7 +1769,7 @@ TAGS: No # symbol.
 
 Return STRICT JSON:
 {"titles":["one title"],"description":"Two sentences.","hashtags":[{"tag":"Tag","effect":"why"},{"tag":"Tag2","effect":"..."},{"tag":"Tag3","effect":"..."}],"timestamps":[{"time":"0:00","label":"Intro"}]}` }],
-    });
+    }, userId);
 
     const parsed = parseJson<{ titles: string[]; description: string; hashtags: Array<{ tag: string; effect?: string }>; timestamps: Array<{ time: string; label: string }> }>(
       response.choices[0]?.message?.content ?? "{}",
@@ -1780,7 +1796,7 @@ TAGS: No # symbols. 25-30 tags.
 
 Return STRICT JSON:
 {"titles":["t1","t2","t3","t4","t5"],"description":"full description","hashtags":[{"tag":"Tag","effect":"audience"}],"timestamps":[{"time":"0:00","label":"complete label"}],"titleStrategies":["curiosity gap","how-to","number-based","problem/solution","bold claim"]}` }],
-  });
+  }, userId);
 
   const parsed = parseJson<{ titles: string[]; description: string; hashtags: object[]; timestamps: Array<{ time: string; label: string }>; titleStrategies?: string[] }>(
     response.choices[0]?.message?.content ?? "{}",
@@ -1799,7 +1815,8 @@ export async function generateShortClipIdeas(
   transcript: string,
   segments: Array<{ start: number; end: number; text: string }>,
   platforms: string[],
-  plan = "free"
+  plan = "free",
+  userId?: number,
 ): Promise<object> {
   if (!segments.length) return { clips: [] };
   const isFree = plan === "free";
@@ -1852,7 +1869,7 @@ Chunks: ${JSON.stringify(chunkSummaries)}
 Return STRICT JSON using ONLY the provided index numbers:
 {"clips":[{"chunkIndex":0,"startSec":45,"endSec":105,"title":"punchy title","hook":"exact opening words","whyItWorks":"one sentence","platforms":["TikTok"],"platformReason":"why"${!isFree ? `,"tacticalNote":"one tip","engagementPotential":"High/Medium/Low","engagementReason":"why"` : ""}}]}`,
     }],
-  });
+  }, userId);
 
   const raw = parseJson<{ clips: Array<Record<string, unknown>> }>(response.choices[0]?.message?.content ?? "{}", { clips: [] });
 
@@ -1882,14 +1899,15 @@ Return STRICT JSON using ONLY the provided index numbers:
 
 export async function translateSegments(
   segments: Array<{ start: number; end: number; text: string }>,
-  targetLanguage: string
+  targetLanguage: string,
+  userId?: number,
 ): Promise<Array<{ start: number; end: number; text: string }>> {
   const texts = segments.map(s => s.text).join("\n---\n");
   const response = await callOpenAI({
     model: "gpt-4o-mini",
     max_completion_tokens: 4000,
     messages: [{ role: "user", content: `Translate to ${targetLanguage}. Keep segments separated by ---. Return ONLY translated text:\n\n${texts}` }],
-  });
+  }, userId);
   const content = response.choices[0]?.message?.content ?? "";
   const translated = content.split("---").map(t => t.trim()).filter(Boolean);
   return segments.map((seg, i) => ({ start: seg.start, end: seg.end, text: translated[i] || seg.text }));

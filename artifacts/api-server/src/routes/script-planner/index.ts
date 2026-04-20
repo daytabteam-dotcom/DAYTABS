@@ -5,6 +5,7 @@ import { db, scriptPlannerChatsTable } from "@workspace/db";
 import { eq, and, desc } from "drizzle-orm";
 import { normalizePlan, PLAN_LIMITS } from "../../lib/planLimits";
 import { checkAndIncrementScriptChat } from "../../lib/usageService";
+import { logTokenUsage, usageTokens } from "../../lib/logTokens";
 
 const router: IRouter = Router();
 
@@ -397,6 +398,12 @@ router.post("/generate", async (req, res) => {
       max_completion_tokens: maxTokens,
       response_format: { type: "json_object" },
     });
+    await logTokenUsage({
+      userId: req.auth!.user_id,
+      feature: "contentCreation",
+      model,
+      ...usageTokens(completion.usage),
+    });
 
     const raw = completion.choices[0]?.message?.content ?? "{}";
 
@@ -451,6 +458,12 @@ router.post("/generate", async (req, res) => {
           ],
           max_completion_tokens: maxTokens,
           response_format: { type: "json_object" },
+        });
+        await logTokenUsage({
+          userId: req.auth!.user_id,
+          feature: "contentCreation",
+          model,
+          ...usageTokens(retryCompletion.usage),
         });
 
         const retryRaw = retryCompletion.choices[0]?.message?.content ?? "{}";

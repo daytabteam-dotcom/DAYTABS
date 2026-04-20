@@ -226,6 +226,12 @@ async function runVideoAnalyzer(
   const runEditing = modules.includes("editing");
   const runPublish = modules.includes("publish");
   const runShortClips = modules.includes("shortClips");
+  const [jobOwner] = await db
+    .select({ userId: analysisJobsTable.userId })
+    .from(analysisJobsTable)
+    .where(eq(analysisJobsTable.id, jobId))
+    .limit(1);
+  const userId = jobOwner?.userId ?? undefined;
 
   try {
     await fs.mkdir(workDir, { recursive: true });
@@ -287,7 +293,7 @@ async function runVideoAnalyzer(
     await updateJob(jobId, { result: { transcript: { segments: transcriptSegments, fullText: transcriptText } } });
 
     const videoName = await withTimeout(
-      generateVideoName(transcriptText, options.originalFileName),
+      generateVideoName(transcriptText, options.originalFileName, userId),
       30000,
       "video name generation",
       jobId,
@@ -343,7 +349,7 @@ async function runVideoAnalyzer(
       await updateJob(jobId, { status: "analyzing_visual", progress, currentStep: "Analyzing video quality" });
       const primaryPlatform = platforms[0] ?? "youtube_long";
       const visualAnalysis = await withTimeout(
-        analyzeVisuals(frameBase64List, primaryPlatform, plan, transcriptText),
+        analyzeVisuals(frameBase64List, primaryPlatform, plan, transcriptText, userId),
         90000,
         "visual analysis",
         jobId,
@@ -354,7 +360,7 @@ async function runVideoAnalyzer(
       await fs.mkdir(framesDir, { recursive: true }).catch(() => {});
       await stopIfMemoryHigh(jobId, "visual analysis");
       const audioAnalysis = await withTimeout(
-        analyzeAudio(transcriptText, whisperConfidence, audioPath),
+        analyzeAudio(transcriptText, whisperConfidence, audioPath, userId),
         90000,
         "audio analysis",
         jobId,
@@ -407,7 +413,7 @@ async function runVideoAnalyzer(
     if (runEditing) {
       await updateJob(jobId, { status: "analyzing_content", progress, currentStep: "Analyzing editing points" });
       const editingData = await withTimeout(
-        analyzeEditingPoints(transcriptText, transcriptSegments, audioPath, plan),
+        analyzeEditingPoints(transcriptText, transcriptSegments, audioPath, plan, userId),
         90000,
         "editing analysis",
         jobId,
@@ -426,7 +432,7 @@ async function runVideoAnalyzer(
       for (const platform of platforms) {
         try {
           const seoResult = await withTimeout(
-            generateSeo(transcriptText, platform, transcriptSegments, plan),
+            generateSeo(transcriptText, platform, transcriptSegments, plan, userId),
             90000,
             `SEO generation for ${platform}`,
             jobId,
@@ -449,7 +455,7 @@ async function runVideoAnalyzer(
         if (options.translateSubtitles && options.subtitleLanguage) {
           try {
             subtitleSegments = await withTimeout(
-              translateSegments(transcriptSegments, options.subtitleLanguage),
+              translateSegments(transcriptSegments, options.subtitleLanguage, userId),
               90000,
               "subtitle translation",
               jobId,
@@ -474,7 +480,7 @@ async function runVideoAnalyzer(
     if (runShortClips) {
       await updateJob(jobId, { status: "analyzing_content", progress, currentStep: "Finding best short clip moments" });
       const shortClipsData = await withTimeout(
-        generateShortClipIdeas(transcriptText, transcriptSegments, platforms, plan),
+        generateShortClipIdeas(transcriptText, transcriptSegments, platforms, plan, userId),
         90000,
         "short clip generation",
         jobId,
