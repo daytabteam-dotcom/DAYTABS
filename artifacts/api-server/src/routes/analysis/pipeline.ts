@@ -7,10 +7,12 @@ import { eq } from "drizzle-orm";
 import { deleteFromB2, downloadFromB2 } from "../../lib/b2";
 import {
   updateJob, transcribeAudio, extractAudio, extractFrames,
+  extractFramesAtTimestamps,
   analyzeVisuals, analyzeVisualsHybrid, analyzeAudio, analyzeEditingPoints,
   generateSeo, generateShortClipIdeas, generateSrt, translateSegments,
   computeQualityScore, getMediaDuration, getMediaMetadata, logger, generateVideoName, getTotalAnalysisScore,
   analyzePacing, analyzeSpeechPattern, buildRetentionForecast, scorePacing,
+  analyzeVideoStage1, getSamplingStrategy, generateEvaluationQuestions, analyzeDynamicFindings,
 } from "./services";
 
 async function withTimeout<T>(promise: Promise<T>, ms: number, label: string, jobId: string): Promise<T> {
@@ -126,6 +128,48 @@ function getAdaptiveFrameCount(plan: string, mode: "talking_first" | "visual_fir
 
 function inferPlatformsFromMedia(media: { isVertical: boolean; isShortForm: boolean }) {
   return [media.isVertical || media.isShortForm ? "youtube_shorts" : "youtube_long"];
+}
+
+function transcriptExcerptForWindow(
+  segments: Array<{ start: number; end: number; text: string }>,
+  maxSeconds: number,
+) {
+  return segments
+    .filter((segment) => segment.start < maxSeconds)
+    .map((segment) => segment.text.trim())
+    .join(" ")
+    .trim();
+}
+
+function buildStage2SamplingTimestamps(
+  durationSec: number,
+  count: number,
+  strategy: { prioritizeEnds?: boolean; denseMiddle?: boolean },
+) {
+  if (count <= 0) return [];
+  if (durationSec <= 0) return Array.from({ length: count }, (_, index) => index + 1);
+
+  const clamp = (value: number) => Math.min(Math.max(value, 0.1), Math.max(durationSec - 0.1, 0.1));
+
+  if (strategy.prioritizeEnds) {
+    const earlyCount = Math.max(2, Math.round(count * 0.35));
+    const endCount = Math.max(2, Math.round(count * 0.35));
+    const midCount = Math.max(0, count - earlyCount - endCount);
+    return [
+      ...Array.from({ length: earlyCount }, (_, index) => clamp(durationSec * 0.1 * ((index + 1) / (earlyCount + 1)))),
+      ...Array.from({ length: midCount }, (_, index) => clamp(durationSec * (0.15 + ((index + 1) / (midCount + 1)) * 0.7))),
+      ...Array.from({ length: endCount }, (_, index) => clamp(durationSec * (0.9 + ((index + 1) / (endCount + 1)) * 0.1))),
+    ];
+  }
+
+  if (strategy.denseMiddle) {
+    return Array.from({ length: count }, (_, index) => {
+      const ratio = (index + 1) / (count + 1);
+      return clamp(durationSec * (0.15 + ratio * 0.7));
+    });
+  }
+
+  return Array.from({ length: count }, (_, index) => clamp((durationSec / (count + 1)) * (index + 1)));
 }
 
 async function stopIfMemoryHigh(jobId: string, label: string) {
@@ -309,7 +353,12 @@ async function runVideoAnalyzer(
 
     await updateJob(jobId, { status: "detecting_speech", progress: 32, currentStep: "Detecting speech pattern" });
     const speechAnalysis = analyzeSpeechPattern(durationSec, transcriptSegments, whisperConfidence);
-    await updateJob(jobId, { result: { transcript: { segments: transcriptSegments, fullText: transcriptText } } });
+
+    await updateJob(jobId, {
+      result: speechAnalysis.hasMeaningfulSpeech
+        ? { transcript: { segments: transcriptSegments, fullText: transcriptText } }
+        : {},
+    });
 
     const videoName = await withTimeout(
       generateVideoName(transcriptText, options.originalFileName, userId),
@@ -321,6 +370,58 @@ async function runVideoAnalyzer(
       return options.originalFileName?.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim() || "Video analysis";
     });
 
+    const probeFrames = await withTimeout(
+      extractFrames(videoPath, framesDir, 4, 960),
+      getFrameExtractionTimeoutMs(),
+      "stage 1 probe frame extraction",
+      jobId,
+    );
+    const stage1 = await withTimeout(
+      analyzeVideoStage1(
+        probeFrames,
+        transcriptExcerptForWindow(transcriptSegments, 30) || transcriptText.substring(0, 900),
+        speechAnalysis,
+        null,
+        userId,
+      ),
+      90000,
+      "stage 1 understanding analysis",
+      jobId,
+    );
+    const samplingStrategy = getSamplingStrategy(stage1);
+    const stage2FrameCount = samplingStrategy.qualityFrames + samplingStrategy.storyFrames;
+    const stage2Frames = stage2FrameCount > 0
+      ? await withTimeout(
+          extractFramesAtTimestamps(
+            videoPath,
+            highFramesDir,
+            buildStage2SamplingTimestamps(durationSec, stage2FrameCount, samplingStrategy),
+            samplingStrategy.highResFrames ? 1600 : 1280,
+          ),
+          getFrameExtractionTimeoutMs(),
+          "stage 2 frame extraction",
+          jobId,
+        )
+      : [];
+    const evaluationQuestions = await withTimeout(
+      generateEvaluationQuestions(stage1, userId),
+      60000,
+      "stage 2 question generation",
+      jobId,
+    );
+    const dynamicAnalysis = await withTimeout(
+      analyzeDynamicFindings(
+        stage1,
+        evaluationQuestions,
+        stage2Frames.length ? stage2Frames : probeFrames,
+        transcriptText.substring(0, 2000),
+        userId,
+      ),
+      120000,
+      "stage 2 findings analysis",
+      jobId,
+    );
+
     let progress = 35;
     const result: Record<string, unknown> = {
       mode: "video-analyzer",
@@ -329,8 +430,12 @@ async function runVideoAnalyzer(
       plan,
       platforms,
       modules,
-      transcript: { segments: transcriptSegments, fullText: transcriptText },
+      ...(stage1.speechPercentage > 20 ? { transcript: { segments: transcriptSegments, fullText: transcriptText } } : {}),
       analysisProfile: speechAnalysis,
+      stage1,
+      findings: dynamicAnalysis.findings,
+      summary: dynamicAnalysis.summary,
+      totalScore: dynamicAnalysis.summary.score,
       analysisOptions: {
         mode: "video-analyzer",
         platform: platforms[0] ?? "youtube_long",
@@ -348,7 +453,26 @@ async function runVideoAnalyzer(
         shortClipEligible,
       },
     };
-    await updateJob(jobId, { result: { videoName, analysisProfile: speechAnalysis, analysisOptions: result.analysisOptions } });
+    result.analysisProfile = {
+      ...speechAnalysis,
+      literalDescription: stage1.literalDescription,
+      viewerGoal: stage1.viewerGoal,
+      mostImportantFactor: stage1.mostImportantFactor,
+      ignoredSignals: stage1.ignoredSignals,
+      speechPercentage: stage1.speechPercentage,
+    };
+    await updateJob(jobId, {
+      result: {
+        videoName,
+        analysisProfile: result.analysisProfile,
+        stage1,
+        findings: dynamicAnalysis.findings,
+        summary: dynamicAnalysis.summary,
+        ...(stage1.speechPercentage > 20 ? { transcript: { segments: transcriptSegments, fullText: transcriptText } } : {}),
+        analysisOptions: result.analysisOptions,
+        totalScore: dynamicAnalysis.summary.score,
+      },
+    });
 
     const isFree = plan === "free";
     let formatProfile: Record<string, unknown> | null = null;
@@ -412,6 +536,14 @@ async function runVideoAnalyzer(
       );
       await stopIfCancelled(jobId);
       await stopIfMemoryHigh(jobId, "audio analysis");
+      if (samplingStrategy.suppressMetrics.includes("fillerWords")) {
+        delete (audioAnalysis as Record<string, unknown>).fillerWords;
+      }
+      if (["ambient_only", "texture_only"].includes(samplingStrategy.audioAnalysis)) {
+        delete (audioAnalysis as Record<string, unknown>).audioClarity;
+        delete (audioAnalysis as Record<string, unknown>).audioVolume;
+        delete (audioAnalysis as Record<string, unknown>).backgroundNoise;
+      }
       const qualityScore = computeQualityScore(visualAnalysis, audioAnalysis);
       const pacing = speechAnalysis.hasMeaningfulSpeech ? analyzePacing(transcriptSegments, wordTimings) : null;
       const retention = !isFree ? buildRetentionForecast(
@@ -459,10 +591,15 @@ async function runVideoAnalyzer(
       };
       result.analysisProfile = {
         ...speechAnalysis,
+        literalDescription: stage1.literalDescription,
+        viewerGoal: stage1.viewerGoal,
+        mostImportantFactor: stage1.mostImportantFactor,
+        ignoredSignals: stage1.ignoredSignals,
+        speechPercentage: stage1.speechPercentage,
         ...(formatProfile ? { formatProfile } : {}),
       };
       if (retention) result.retention = retention;
-      result.totalScore = getTotalAnalysisScore(result);
+      result.totalScore = dynamicAnalysis.summary.score;
       await updateJob(jobId, { result: { analysisProfile: result.analysisProfile, quality: result.quality, ...(retention ? { retention } : {}), totalScore: result.totalScore } });
       progress = 55;
     }
@@ -498,6 +635,7 @@ async function runVideoAnalyzer(
               speechAnalysis,
               videoName,
               formatProfile,
+              stage1,
               userId,
             ),
             90000,
@@ -517,7 +655,7 @@ async function runVideoAnalyzer(
       await updateJob(jobId, { result: { publish: publishResults } });
 
       // SRT only for paid users
-      if (!isFree) {
+      if (!isFree && stage1.speechPercentage > 0) {
         let subtitleSegments = transcriptSegments;
         if (options.translateSubtitles && options.subtitleLanguage) {
           try {

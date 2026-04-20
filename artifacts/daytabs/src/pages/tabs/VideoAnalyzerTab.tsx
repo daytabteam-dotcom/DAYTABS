@@ -45,10 +45,8 @@ const MODULE_COLORS: Record<string, string> = {
 };
 
 const RESULT_TABS = [
-  { id: "quality",    label: "Quality",      icon: Shield },
-  { id: "editing",    label: "Editing",      icon: Scissors },
+  { id: "findings",   label: "Analysis",     icon: Shield },
   { id: "publish",    label: "Publish",      icon: TrendingUp },
-  { id: "shortClips", label: "Short Clips",  icon: Sparkles },
   { id: "transcript", label: "Transcript",   icon: AlignLeft },
 ];
 
@@ -101,6 +99,37 @@ interface AnalysisHistoryItem {
   error?: string;
   createdAt: string | null;
   updatedAt: string | null;
+}
+
+interface Stage1Result {
+  contentType: string;
+  literalDescription: string;
+  viewerGoal: string;
+  mostImportantFactor: string;
+  successFactors: string[];
+  ignoredSignals: string[];
+  speechPercentage: number;
+  hasNarrativeStructure: boolean;
+}
+
+interface AnalysisFinding {
+  questionId: string;
+  question: string;
+  whyItMatters: string;
+  category: string;
+  finding: string;
+  verdict: "good" | "fixable" | "critical";
+  specificFix: string | null;
+  timestampHint: string | null;
+  cannotEvaluate: boolean;
+}
+
+interface AnalysisSummary {
+  overallVerdict: string;
+  readyToPublish: boolean;
+  topThreeFixes: string[];
+  score: number;
+  scoreContext: string;
 }
 
 function readPendingUploadRecovery(): PendingUploadRecovery | null {
@@ -292,6 +321,25 @@ function getAnalysisProfile(results: any) {
   return results?.analysisProfile ?? results?.quality?.speechProfile ?? null;
 }
 
+function getStage1Result(results: any): Stage1Result | null {
+  return results?.stage1 ?? null;
+}
+
+function getAnalysisFindings(results: any): AnalysisFinding[] {
+  return Array.isArray(results?.findings) ? results.findings : [];
+}
+
+function getAnalysisSummary(results: any): AnalysisSummary | null {
+  return results?.summary ?? null;
+}
+
+function getSpeechCoveragePct(profile?: any, stage1?: Stage1Result | null) {
+  if (typeof stage1?.speechPercentage === "number") return stage1.speechPercentage;
+  if (typeof profile?.speechPercentage === "number") return profile.speechPercentage;
+  if (typeof profile?.speechRatio === "number") return Math.round(profile.speechRatio * 100);
+  return 0;
+}
+
 function getFormatProfile(profile?: any) {
   return profile?.formatProfile ?? null;
 }
@@ -385,6 +433,12 @@ function AnalysisModeCard({ profile }: { profile: any }) {
             <span className="text-xs text-white/35">{speechPct}% spoken coverage</span>
           </div>
           <p className="mt-3 text-sm leading-relaxed text-white/65">{profile.summary}</p>
+          {profile.literalDescription ? (
+            <p className="mt-3 border-t border-white/8 pt-3 text-sm leading-relaxed text-white/55">
+              <span className="mb-1 block text-xs uppercase tracking-wider text-white/30">What we saw</span>
+              {profile.literalDescription}
+            </p>
+          ) : null}
           {formatProfile?.primarySubject ? (
             <p className="mt-3 text-sm text-white/55">
               <span className="text-white/75">Primary subject:</span> {formatProfile.primarySubject}
@@ -469,13 +523,18 @@ function collectTopFixes(results: any) {
 
 function CreatorReportIntro({ results, profile }: { results: any; profile?: any }) {
   if (!results) return null;
+  const stage1 = getStage1Result(results);
+  const summary = getAnalysisSummary(results);
   const formatProfile = getFormatProfile(profile);
-  const overallScore = Number(results?.quality?.score ?? results?.quality?.overallScore ?? results?.quality?.overallVisualScore ?? 0);
+  const overallScore = Number(summary?.score ?? results?.quality?.score ?? results?.quality?.overallScore ?? results?.quality?.overallVisualScore ?? 0);
   const verdict = scoreVerdict(overallScore);
-  const strongest = strongestMetric(results?.quality, profile);
-  const topFixes = collectTopFixes(results);
-  const firstRisk = results?.quality?.retention?.dropOffMoments?.[0] ?? null;
-  const bestClip = results?.shortClips?.clips?.[0] ?? results?.editing?.hooks?.[0] ?? null;
+  const topFixes = summary?.topThreeFixes?.length ? summary.topThreeFixes : collectTopFixes(results);
+  const findings = getAnalysisFindings(results);
+  const firstRisk = findings.find((finding) => finding.verdict === "critical") ?? findings.find((finding) => finding.verdict === "fixable") ?? null;
+  const visualRevealFallback = ["pure_visual", "before_after_transformation"].includes(stage1?.contentType ?? "")
+    ? { start: "Last 15%", title: "Final reveal", description: "The payoff should land on the clearest end-state or transformation frame." }
+    : null;
+  const bestClip = results?.shortClips?.clips?.[0] ?? results?.editing?.hooks?.[0] ?? visualRevealFallback ?? null;
 
   return (
     <div className="space-y-5">
@@ -491,7 +550,7 @@ function CreatorReportIntro({ results, profile }: { results: any; profile?: any 
                 </span>
               ) : null}
             </div>
-            <p className="mt-3 text-sm leading-6 text-white/70">{verdict.description}</p>
+            <p className="mt-3 text-sm leading-6 text-white/70">{summary?.overallVerdict ?? verdict.description}</p>
             {formatProfile?.viewerIntent ? (
               <p className="mt-3 text-sm leading-6 text-white/55">
                 <span className="text-white/75">What this video is trying to do:</span> {formatProfile.viewerIntent}
@@ -508,10 +567,10 @@ function CreatorReportIntro({ results, profile }: { results: any; profile?: any 
       <div className="grid gap-4 lg:grid-cols-3">
         <PanelCardSoft className="border border-white/10 p-4">
           <p className="text-[11px] uppercase tracking-[0.16em] text-white/40">Strongest part</p>
-          {strongest ? (
+          {stage1?.mostImportantFactor ? (
             <>
-              <p className="mt-3 text-lg font-semibold text-white">{strongest.label}</p>
-              <p className="mt-2 text-sm text-white/60">{strongest.metric.assessment ?? "This is one of the cleanest parts of the current cut."}</p>
+              <p className="mt-3 text-lg font-semibold text-white">{stage1.mostImportantFactor}</p>
+              <p className="mt-2 text-sm text-white/60">{summary?.scoreContext ?? "This report is centered on the factors that matter most for this format."}</p>
             </>
           ) : (
             <p className="mt-3 text-sm text-white/55">Once more evidence is available, this section will call out the strongest signal in the video.</p>
@@ -522,8 +581,8 @@ function CreatorReportIntro({ results, profile }: { results: any; profile?: any 
           <p className="text-[11px] uppercase tracking-[0.16em] text-white/40">Main retention risk</p>
           {firstRisk ? (
             <>
-              <p className="mt-3 text-lg font-semibold text-white">{firstRisk.at}</p>
-              <p className="mt-2 text-sm text-white/60">{firstRisk.reason}</p>
+              <p className="mt-3 text-lg font-semibold text-white">{firstRisk.timestampHint ?? "Priority fix"}</p>
+              <p className="mt-2 text-sm text-white/60">{firstRisk.finding}</p>
             </>
           ) : (
             <p className="mt-3 text-sm text-white/55">No obvious early drop-off point was detected from the current report.</p>
@@ -569,6 +628,123 @@ function LimitedSpeechNotice({ profile, children }: { profile?: any; children: R
         <p className="text-xs text-white/40 uppercase tracking-wider mb-1">Limited transcript signal</p>
         <p className="text-sm text-white/70 leading-relaxed">{children}</p>
       </div>
+    </div>
+  );
+}
+
+function FindingCard({ finding }: { finding: AnalysisFinding }) {
+  const borderColor =
+    finding.verdict === "good"
+      ? "border-emerald-500/20 bg-emerald-500/5"
+      : finding.verdict === "critical"
+      ? "border-red-500/20 bg-red-500/5"
+      : "border-amber-500/20 bg-amber-500/5";
+
+  const verdictLabel =
+    finding.verdict === "good" ? "Good"
+    : finding.verdict === "critical" ? "Fix before publishing"
+    : "Fixable";
+
+  const verdictColor =
+    finding.verdict === "good" ? "text-emerald-400"
+    : finding.verdict === "critical" ? "text-red-400"
+    : "text-amber-400";
+
+  if (finding.cannotEvaluate) return null;
+
+  return (
+    <div className={`rounded-xl border p-4 ${borderColor}`}>
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <p className="flex-1 text-xs leading-relaxed text-white/35">{finding.question}</p>
+        <span className={`whitespace-nowrap text-xs font-semibold ${verdictColor}`}>{verdictLabel}</span>
+      </div>
+      <p className="text-sm leading-relaxed text-white/85">{finding.finding}</p>
+      <p className="mt-2 text-xs italic text-white/40">{finding.whyItMatters}</p>
+      {finding.specificFix && (
+        <p className="mt-3 border-t border-white/8 pt-3 text-sm font-medium text-primary">→ {finding.specificFix}</p>
+      )}
+      {finding.timestampHint && (
+        <span className="mt-2 block text-xs font-mono text-white/25">{finding.timestampHint}</span>
+      )}
+    </div>
+  );
+}
+
+function DynamicFindingsPanel({
+  findings,
+  summary,
+  stage1,
+}: {
+  findings: AnalysisFinding[];
+  summary: AnalysisSummary | null;
+  stage1: Stage1Result | null;
+}) {
+  const critical = findings.filter((finding) => finding.verdict === "critical" && !finding.cannotEvaluate);
+  const fixable = findings.filter((finding) => finding.verdict === "fixable" && !finding.cannotEvaluate);
+  const good = findings.filter((finding) => finding.verdict === "good" && !finding.cannotEvaluate);
+
+  if (!summary && findings.length === 0) {
+    return <p className="text-sm text-white/40">No analysis findings available.</p>;
+  }
+
+  return (
+    <div className="space-y-8">
+      {summary && (
+        <div className="flex items-start gap-6 rounded-2xl border border-white/10 p-5">
+          <div className="min-w-[100px] text-center">
+            <span className="text-5xl font-bold font-mono text-white">{summary.score}</span>
+            <p className="mt-1 text-xs text-white/40">overall score</p>
+          </div>
+          <div>
+            <p className="text-sm leading-relaxed text-white/70">{summary.overallVerdict}</p>
+            <p className="mt-2 text-xs italic text-white/35">{summary.scoreContext}</p>
+          </div>
+        </div>
+      )}
+
+      {summary?.topThreeFixes?.length ? (
+        <div className="rounded-2xl border border-amber-400/20 bg-amber-400/5 p-5">
+          <p className="mb-4 text-xs uppercase tracking-wider text-amber-300/60">Most important changes</p>
+          <div className="space-y-3">
+            {summary.topThreeFixes.map((fix, index) => (
+              <div key={`${index}-${fix}`} className="flex gap-3">
+                <span className="shrink-0 font-mono text-sm text-amber-400">{index + 1}.</span>
+                <p className="text-sm text-white/80">{fix}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {critical.length > 0 && (
+        <section className="space-y-3">
+          <p className="text-xs uppercase tracking-wider text-red-400/60">Fix before publishing ({critical.length})</p>
+          {critical.map((finding) => <FindingCard key={finding.questionId} finding={finding} />)}
+        </section>
+      )}
+
+      {fixable.length > 0 && (
+        <section className="space-y-3">
+          <p className="text-xs uppercase tracking-wider text-amber-400/60">Worth fixing ({fixable.length})</p>
+          {fixable.map((finding) => <FindingCard key={finding.questionId} finding={finding} />)}
+        </section>
+      )}
+
+      {good.length > 0 && (
+        <section className="space-y-3">
+          <p className="text-xs uppercase tracking-wider text-emerald-400/60">Working well ({good.length})</p>
+          {good.map((finding) => <FindingCard key={finding.questionId} finding={finding} />)}
+        </section>
+      )}
+
+      {stage1?.ignoredSignals?.length ? (
+        <div className="rounded-xl border border-white/8 bg-white/[0.02] p-4">
+          <p className="mb-2 text-xs uppercase tracking-wider text-white/25">Not evaluated for this content type</p>
+          <p className="text-xs text-white/35">
+            {stage1.ignoredSignals.join(", ")} — these metrics do not apply to {stage1.contentType.replace(/_/g, " ")} content and were excluded from scoring.
+          </p>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -974,7 +1150,8 @@ function PublishPanel({ data, platforms, isPaid, subtitleFile, videoFileName, pr
   const pData = data[activePlatform];
   const platformLabel = PLATFORMS.find(p => p.id === activePlatform)?.label ?? activePlatform;
   const isYouTube = activePlatform === "youtube_long" || activePlatform === "youtube_shorts";
-  const showSubtitleFile = isYouTube && profile?.hasMeaningfulSpeech !== false;
+  const speechCoveragePct = getSpeechCoveragePct(profile);
+  const showSubtitleFile = isYouTube && speechCoveragePct > 0;
 
   function copyText(text: string, key: string) {
     navigator.clipboard.writeText(text).then(() => {
@@ -1241,6 +1418,7 @@ function TranscriptPanel({ data, isPaid, profile }: { data: any; isPaid: boolean
   const segments: Array<{ start: number; end: number; text: string }> = data?.segments ?? [];
   const fullText: string = data?.fullText ?? "";
   const FREE_CUTOFF_SEC = 60;
+  const speechCoveragePct = getSpeechCoveragePct(profile);
 
   if (!segments.length && !fullText) {
     return <p className="text-white/40 text-sm">No transcript available.</p>;
@@ -1271,6 +1449,13 @@ function TranscriptPanel({ data, isPaid, profile }: { data: any; isPaid: boolean
 
   return (
     <div className="space-y-4">
+      {speechCoveragePct > 0 && speechCoveragePct <= 20 ? (
+        <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+          <p className="text-sm text-white/65">
+            This video has minimal speech ({speechCoveragePct}% coverage). The transcript reflects the few spoken words detected but is not the basis for this analysis.
+          </p>
+        </div>
+      ) : null}
       <LimitedSpeechNotice profile={profile}>
         The transcript is intentionally downplayed here because speech is sparse or arrives late in the video. Use it as supplemental context, not the main source of truth.
       </LimitedSpeechNotice>
@@ -1732,7 +1917,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
   const [file, setFile] = useState<File | null>(null);
   const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>([]);
   const [selectedModules, setSelectedModules] = useState<string[]>(["quality", "editing"]);
-  const [activeResultTab, setActiveResultTab] = useState<string>("quality");
+  const [activeResultTab, setActiveResultTab] = useState<string>("findings");
   const [showPlanModal, setShowPlanModal] = useState(false);
   const [showLimitModal, setShowLimitModal] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
@@ -1858,9 +2043,12 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
     if (hasResults) {
       clearPendingUploadRecovery();
       onDataReady();
-      const resultModules = getResultModules(displayedResults);
-      const firstModule = resultModules.find(m => (displayedResults as any)?.[m]);
-      setActiveResultTab(firstModule ?? "quality");
+      const firstTab =
+        (getAnalysisFindings(displayedResults).length || getAnalysisSummary(displayedResults)) ? "findings"
+        : (displayedResults as any)?.publish ? "publish"
+        : (displayedResults as any)?.transcript ? "transcript"
+        : "findings";
+      setActiveResultTab(firstTab);
 
       // Refresh plan usage so the Home page counter updates immediately
       window.dispatchEvent(new CustomEvent("daytabs:plan-updated"));
@@ -2104,11 +2292,15 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
   const currentStepLabel = statusData?.currentStep ?? (isSubmitting ? "Uploading video..." : "");
   const errorMessage = (pollData as any)?.error ?? "An unexpected error occurred during analysis.";
   const analysisProfile = getAnalysisProfile(displayedResults);
-  const resultModules = getResultModules(displayedResults);
+  const stage1 = getStage1Result(displayedResults);
+  const findings = getAnalysisFindings(displayedResults);
+  const analysisSummary = getAnalysisSummary(displayedResults);
   const resultPlatforms = getResultPlatforms(displayedResults);
   const availableResultTabs = RESULT_TABS.filter(t => {
-    if (t.id === "transcript") return !!(displayedResults as any)?.transcript && analysisProfile?.hasMeaningfulSpeech !== false;
-    return resultModules.includes(t.id) && !!(displayedResults as any)?.[t.id];
+    if (t.id === "findings") return findings.length > 0 || !!analysisSummary;
+    if (t.id === "publish") return !!(displayedResults as any)?.publish;
+    if (t.id === "transcript") return !!(displayedResults as any)?.transcript && getSpeechCoveragePct(analysisProfile, stage1) > 20;
+    return false;
   });
   const hasHistory = analysisHistory.length > 0;
   const showHistoryLanding = !hasResults && !showAnalyzing && !isError && hasHistory && !showUploadForm;
@@ -2344,10 +2536,8 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
               </div>
               <AnimatePresence mode="wait">
                 <motion.div key={activeResultTab} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
-                  {activeResultTab === "quality"    && <QualityPanel    data={(displayedResults as any).quality}    isPaid={isPaid} profile={analysisProfile} />}
-                  {activeResultTab === "editing"    && <EditingPanel    data={(displayedResults as any).editing}    isPaid={isPaid} profile={analysisProfile} />}
-                  {activeResultTab === "publish"    && <PublishPanel    data={(displayedResults as any).publish}    platforms={resultPlatforms} isPaid={isPaid} subtitleFile={(displayedResults as any).subtitleFile} videoFileName={file?.name} profile={analysisProfile} />}
-                  {activeResultTab === "shortClips" && <ShortClipsPanel data={(displayedResults as any).shortClips} isPaid={isPaid} />}
+                  {activeResultTab === "findings"   && <DynamicFindingsPanel findings={findings} summary={analysisSummary} stage1={stage1} />}
+                  {activeResultTab === "publish"    && <PublishPanel data={(displayedResults as any).publish} platforms={resultPlatforms} isPaid={isPaid} subtitleFile={(displayedResults as any).subtitleFile} videoFileName={file?.name} profile={analysisProfile} />}
                   {activeResultTab === "transcript" && <TranscriptPanel data={(displayedResults as any).transcript} isPaid={isPaid} profile={analysisProfile} />}
                 </motion.div>
               </AnimatePresence>
@@ -2377,10 +2567,8 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
                     <h2 className="mt-2 text-2xl font-semibold text-white">{tab.label}</h2>
                   </div>
 
-                  {tab.id === "quality" && <QualityPanel data={(displayedResults as any).quality} isPaid={isPaid} profile={analysisProfile} />}
-                  {tab.id === "editing" && <EditingPanel data={(displayedResults as any).editing} isPaid={isPaid} profile={analysisProfile} />}
+                  {tab.id === "findings" && <DynamicFindingsPanel findings={findings} summary={analysisSummary} stage1={stage1} />}
                   {tab.id === "publish" && <PublishPanel data={(displayedResults as any).publish} platforms={resultPlatforms} isPaid={isPaid} subtitleFile={(displayedResults as any).subtitleFile} videoFileName={file?.name ?? fileNameRef.current} profile={analysisProfile} />}
-                  {tab.id === "shortClips" && <ShortClipsPanel data={(displayedResults as any).shortClips} isPaid={isPaid} />}
                   {tab.id === "transcript" && <TranscriptPanel data={(displayedResults as any).transcript} isPaid={isPaid} profile={analysisProfile} />}
                 </section>
               ))}
