@@ -10,7 +10,7 @@ import {
   analyzeVisuals, analyzeAudio, analyzeEditingPoints,
   generateSeo, generateShortClipIdeas, generateSrt, translateSegments,
   computeQualityScore, getMediaDuration, logger, generateVideoName, getTotalAnalysisScore,
-  analyzePacing, buildRetentionForecast, scorePacing,
+  analyzePacing, analyzeSpeechPattern, buildRetentionForecast, scorePacing,
 } from "./services";
 
 async function withTimeout<T>(promise: Promise<T>, ms: number, label: string, jobId: string): Promise<T> {
@@ -115,6 +115,13 @@ function getMaxFrameCount(plan: string) {
   const configured = Number(process.env.ANALYSIS_MAX_FRAMES);
   const maxFrames = Number.isFinite(configured) && configured > 0 ? Math.floor(configured) : 2;
   return plan === "free" ? 1 : Math.max(1, Math.min(maxFrames, 5));
+}
+
+function getAdaptiveFrameCount(plan: string, mode: "talking_first" | "visual_first" | "mixed") {
+  const base = getMaxFrameCount(plan);
+  if (mode === "visual_first") return Math.min(plan === "free" ? 2 : 8, Math.max(base + 2, base));
+  if (mode === "mixed") return Math.min(plan === "free" ? 2 : 6, Math.max(base + 1, base));
+  return base;
 }
 
 async function stopIfMemoryHigh(jobId: string, label: string) {
@@ -290,6 +297,8 @@ async function runVideoAnalyzer(
       return;
     }
 
+    await updateJob(jobId, { status: "detecting_speech", progress: 32, currentStep: "Detecting speech pattern" });
+    const speechAnalysis = analyzeSpeechPattern(durationSec, transcriptSegments, whisperConfidence);
     await updateJob(jobId, { result: { transcript: { segments: transcriptSegments, fullText: transcriptText } } });
 
     const videoName = await withTimeout(
@@ -311,6 +320,7 @@ async function runVideoAnalyzer(
       platforms,
       modules,
       transcript: { segments: transcriptSegments, fullText: transcriptText },
+      analysisProfile: speechAnalysis,
       analysisOptions: {
         mode: "video-analyzer",
         platform: platforms[0] ?? "youtube_long",
@@ -326,14 +336,14 @@ async function runVideoAnalyzer(
         maxDurationSeconds: maxDuration,
       },
     };
-    await updateJob(jobId, { result: { videoName, analysisOptions: result.analysisOptions } });
+    await updateJob(jobId, { result: { videoName, analysisProfile: speechAnalysis, analysisOptions: result.analysisOptions } });
 
     const isFree = plan === "free";
 
     // Step 5: Quality module
     if (runQuality) {
       await updateJob(jobId, { status: "analyzing_visual", progress, currentStep: "Extracting video frames" });
-      const frameCount = getMaxFrameCount(plan);
+      const frameCount = getAdaptiveFrameCount(plan, speechAnalysis.mode);
       logger.info({ jobId, frameCount }, "Starting frame extraction");
       const frameBase64List = await withTimeout(
         extractFrames(videoPath, framesDir, frameCount),
@@ -368,11 +378,11 @@ async function runVideoAnalyzer(
       await stopIfCancelled(jobId);
       await stopIfMemoryHigh(jobId, "audio analysis");
       const qualityScore = computeQualityScore(visualAnalysis, audioAnalysis);
-      const pacing = analyzePacing(transcriptSegments, wordTimings);
+      const pacing = speechAnalysis.hasMeaningfulSpeech ? analyzePacing(transcriptSegments, wordTimings) : null;
       const retention = !isFree ? buildRetentionForecast(
         Number((visualAnalysis as { overallVisualScore?: unknown }).overallVisualScore ?? 70),
         computeQualityScore({}, audioAnalysis),
-        pacing,
+        pacing ?? { wordsPerMinute: 120, longPauseCount: 0, engagementRiskTimestamps: [], avgWordGapMs: 300, longPauseTimestamps: [], pacingRating: "good" },
         (() => {
           const wordCount = transcriptText.split(/\s+/).filter(Boolean).length;
           const fillerWordCount = Number((audioAnalysis as { fillerWords?: { numeric?: unknown } }).fillerWords?.numeric ?? 0);
@@ -383,24 +393,31 @@ async function runVideoAnalyzer(
         ((visualAnalysis as { background?: { contextAppropriate?: "yes" | "neutral" | "no" } }).background?.contextAppropriate ?? "neutral"),
         transcriptSegments[transcriptSegments.length - 1]?.end ?? await getMediaDuration(videoPath),
       ) : undefined;
-      const pacingScore = scorePacing(pacing);
+      const pacingScore = pacing ? scorePacing(pacing) : null;
+
+      if (!speechAnalysis.hasMeaningfulSpeech) {
+        delete (audioAnalysis as Record<string, unknown>).fillerWords;
+      }
 
       result.quality = {
         score: qualityScore,
         ...visualAnalysis,
         ...audioAnalysis,
-        pacing: {
-          level: pacing.pacingRating,
-          numeric: pacingScore,
-          assessment: `${Math.round(pacing.wordsPerMinute)} wpm with ${pacing.longPauseCount} silence gap${pacing.longPauseCount === 1 ? "" : "s"}.`,
-          suggestions: pacing.longPauseCount > 0
-            ? ["Cut silence gaps over 1.5 seconds and tighten slow sections before upload."]
-            : ["Keep delivery tight; use B-roll or pattern breaks before attention drops."],
-          severity: pacingScore >= 95 ? "excellent" : pacingScore >= 80 ? "good" : pacingScore >= 60 ? "needs work" : "critical",
-          wordsPerMinute: pacing.wordsPerMinute,
-          longPauseCount: pacing.longPauseCount,
-          engagementRisks: pacing.engagementRiskTimestamps,
-        },
+        ...(pacing ? {
+          pacing: {
+            level: pacing.pacingRating,
+            numeric: pacingScore,
+            assessment: `${Math.round(pacing.wordsPerMinute)} wpm with ${pacing.longPauseCount} silence gap${pacing.longPauseCount === 1 ? "" : "s"}.`,
+            suggestions: pacing.longPauseCount > 0
+              ? ["Cut silence gaps over 1.5 seconds and tighten slow sections before upload."]
+              : ["Keep delivery tight; use B-roll or pattern breaks before attention drops."],
+            severity: (pacingScore ?? 0) >= 95 ? "excellent" : (pacingScore ?? 0) >= 80 ? "good" : (pacingScore ?? 0) >= 60 ? "needs work" : "critical",
+            wordsPerMinute: pacing.wordsPerMinute,
+            longPauseCount: pacing.longPauseCount,
+            engagementRisks: pacing.engagementRiskTimestamps,
+          },
+        } : {}),
+        speechProfile: speechAnalysis,
         ...(retention ? { retention } : {}),
       };
       if (retention) result.retention = retention;
@@ -413,7 +430,7 @@ async function runVideoAnalyzer(
     if (runEditing) {
       await updateJob(jobId, { status: "analyzing_content", progress, currentStep: "Analyzing editing points" });
       const editingData = await withTimeout(
-        analyzeEditingPoints(transcriptText, transcriptSegments, audioPath, plan, userId),
+        analyzeEditingPoints(transcriptText, transcriptSegments, audioPath, plan, speechAnalysis, userId),
         90000,
         "editing analysis",
         jobId,
@@ -432,7 +449,7 @@ async function runVideoAnalyzer(
       for (const platform of platforms) {
         try {
           const seoResult = await withTimeout(
-            generateSeo(transcriptText, platform, transcriptSegments, plan, userId),
+            generateSeo(transcriptText, platform, transcriptSegments, plan, speechAnalysis, videoName, userId),
             90000,
             `SEO generation for ${platform}`,
             jobId,

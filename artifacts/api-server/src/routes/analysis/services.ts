@@ -70,6 +70,21 @@ interface PacingObservations {
   engagementRiskTimestamps: Array<{ at: number; reason: string }>; // predicted drop-off moments
 }
 
+export type AnalysisMode = "talking_first" | "visual_first" | "mixed";
+
+export interface SpeechAnalysis {
+  mode: AnalysisMode;
+  speechRatio: number;
+  firstSpeechAt: number | null;
+  lastSpeechAt: number | null;
+  spokenSegmentCount: number;
+  totalSpeechSeconds: number;
+  totalWords: number;
+  longestSpeechRun: number;
+  hasMeaningfulSpeech: boolean;
+  summary: string;
+}
+
 function scoreLighting(obs: VisualObservations): number {
   let score = 100;
   if (!obs.lightSourceVisible) score -= 10;
@@ -1474,16 +1489,74 @@ async function detectSilences(
   }
 }
 
+export function analyzeSpeechPattern(
+  durationSec: number,
+  segments: Array<{ start: number; end: number; text: string }>,
+  whisperConfidence: number
+): SpeechAnalysis {
+  const cleanedSegments = segments
+    .map((segment) => {
+      const text = segment.text.trim();
+      const wordCount = text.split(/\s+/).filter(Boolean).length;
+      return { ...segment, text, wordCount };
+    })
+    .filter((segment) => segment.wordCount > 0 && segment.end > segment.start);
+
+  const totalWords = cleanedSegments.reduce((sum, segment) => sum + segment.wordCount, 0);
+  const totalSpeechSeconds = cleanedSegments.reduce((sum, segment) => sum + Math.max(0, segment.end - segment.start), 0);
+  const firstSpeechAt = cleanedSegments[0]?.start ?? null;
+  const lastSpeechAt = cleanedSegments.length ? cleanedSegments[cleanedSegments.length - 1]!.end : null;
+  const longestSpeechRun = cleanedSegments.reduce((max, segment) => Math.max(max, segment.end - segment.start), 0);
+  const speechRatio = durationSec > 0 ? Math.min(1, totalSpeechSeconds / durationSec) : 0;
+  const hasMeaningfulSpeech = totalWords >= 25 && totalSpeechSeconds >= 8 && whisperConfidence >= 0.35;
+
+  let mode: AnalysisMode = "mixed";
+  if (!hasMeaningfulSpeech || speechRatio < 0.08) {
+    mode = "visual_first";
+  } else if (speechRatio >= 0.35 && totalWords >= 80 && longestSpeechRun >= 20) {
+    mode = "talking_first";
+  } else {
+    mode = "mixed";
+  }
+
+  if (mode !== "talking_first" && durationSec > 0 && firstSpeechAt !== null && firstSpeechAt >= durationSec * 0.45 && speechRatio < 0.2) {
+    mode = "visual_first";
+  }
+
+  const firstSpeechLabel = firstSpeechAt === null ? "none" : fmtSecs(firstSpeechAt);
+  const lastSpeechLabel = lastSpeechAt === null ? "none" : fmtSecs(lastSpeechAt);
+  const summary = mode === "visual_first"
+    ? `Limited spoken content detected. Speech covers ${Math.round(speechRatio * 100)}% of the video, first appearing at ${firstSpeechLabel}.`
+    : mode === "talking_first"
+      ? `Speech drives this video. Spoken content covers ${Math.round(speechRatio * 100)}% of the runtime from ${firstSpeechLabel} to ${lastSpeechLabel}.`
+      : `This video mixes visuals and speech. Spoken content covers ${Math.round(speechRatio * 100)}% of the runtime, first appearing at ${firstSpeechLabel}.`;
+
+  return {
+    mode,
+    speechRatio,
+    firstSpeechAt,
+    lastSpeechAt,
+    spokenSegmentCount: cleanedSegments.length,
+    totalSpeechSeconds,
+    totalWords,
+    longestSpeechRun,
+    hasMeaningfulSpeech,
+    summary,
+  };
+}
+
 export async function analyzeEditingPoints(
   transcript: string,
   segments: Array<{ start: number; end: number; text: string }>,
   audioPath?: string,
   plan = "free",
+  speechAnalysis?: SpeechAnalysis,
   userId?: number,
 ): Promise<object> {
   const lastSeg = segments[segments.length - 1];
   const totalDuration = lastSeg?.end ?? 0;
   const isFree = plan === "free";
+  const isVisualFirst = speechAnalysis?.mode === "visual_first" || !speechAnalysis?.hasMeaningfulSpeech;
 
   const editingSystemPrompt = `You are a senior video editor and YouTube strategist with 10 years experience. You give feedback like a professional editor reviewing a client's rough cut: specific, direct, actionable.
 
@@ -1496,13 +1569,16 @@ Rules:
 
   const hookCount = isFree ? 1 : 4;
   const suggestionCount = isFree ? 1 : 5;
+  const defaultHookData: { hookTexts: string[]; editingSuggestions: string[] } = { hookTexts: [], editingSuggestions: [] };
+  let hookData = defaultHookData;
 
-  const hookResponse = await callOpenAI({
-    model: "gpt-4o",
-    max_completion_tokens: isFree ? 600 : 1200,
-    messages: [{
-      role: "user",
-      content: `${editingSystemPrompt}
+  if (!isVisualFirst) {
+    const hookResponse = await callOpenAI({
+      model: "gpt-4o",
+      max_completion_tokens: isFree ? 600 : 1200,
+      messages: [{
+        role: "user",
+        content: `${editingSystemPrompt}
 
 Read this transcript. Identify the ${hookCount} strongest moment(s) that would stop a scroll. Copy EXACT text from the transcript.
 
@@ -1517,13 +1593,14 @@ Return STRICT JSON only:
   "hookTexts": ["exact sentence from transcript"],
   "editingSuggestions": ["specific tip referencing actual content"]
 }`,
-    }],
-  }, userId);
+      }],
+    }, userId);
 
-  const hookData = parseJson<{ hookTexts: string[]; editingSuggestions: string[] }>(
-    hookResponse.choices[0]?.message?.content ?? "{}",
-    { hookTexts: [], editingSuggestions: [] }
-  );
+    hookData = parseJson<{ hookTexts: string[]; editingSuggestions: string[] }>(
+      hookResponse.choices[0]?.message?.content ?? "{}",
+      defaultHookData
+    );
+  }
 
   const hooks = hookData.hookTexts
     .map(hookText => {
@@ -1653,16 +1730,24 @@ Return STRICT JSON using ONLY the provided index numbers:
     ? shortVideos.filter(sv => parseTs(sv.start) < totalDuration).map(sv => ({ ...sv, end: clampTs(sv.end) }))
     : shortVideos;
 
-  const defaultSuggestions = [
-    "Cut pauses longer than 1.5 seconds for tighter pacing",
-    "Move your strongest moment to within the first 30 seconds",
-    "Remove filler word segments shown in the cut list above",
-    "End with a clear CTA: tell them exactly what to do next",
-    "Your hook needs to land before 15 seconds on YouTube",
-  ];
+  const defaultSuggestions = isVisualFirst
+    ? [
+        "Open on the strongest visual change before any slow setup so the first three seconds communicate the payoff immediately.",
+        "Use every silence gap in the cut list as a place to tighten pacing, add a shot change, or bring in on-screen text.",
+        "If the first spoken line arrives late, add visual context early so viewers know what they are watching before dialogue begins.",
+        "Break static stretches with zooms, B-roll, captions, or screen movement before attention drops.",
+        "End on the clearest payoff frame rather than fading out on a low-information shot.",
+      ]
+    : [
+        "Cut pauses longer than 1.5 seconds for tighter pacing",
+        "Move your strongest moment to within the first 30 seconds",
+        "Remove filler word segments shown in the cut list above",
+        "End with a clear CTA: tell them exactly what to do next",
+        "Your hook needs to land before 15 seconds on YouTube",
+      ];
 
   let rewrittenHook: string | undefined;
-  if (!isFree && clampedHooks.length > 0) {
+  if (!isFree && !isVisualFirst && clampedHooks.length > 0) {
     try {
       const hookText = (clampedHooks[0] as { text: string })?.text ?? transcript.substring(0, 200);
       const hookRewriteResponse = await callOpenAI({
@@ -1695,6 +1780,7 @@ Return STRICT JSON only: {"rewrittenHook": "your complete rewritten opening here
   }
 
   return {
+    mode: isVisualFirst ? "visual_first" : speechAnalysis?.mode ?? "talking_first",
     hooks: [...clampedHooks].sort((a, b) => {
       if (!a || !b) return 0;
       return parseTs((a as { start: string }).start) - parseTs((b as { start: string }).start);
@@ -1736,10 +1822,13 @@ export async function generateSeo(
   platform: string,
   segments: Array<{ start: number; end: number; text: string }> = [],
   plan = "free",
+  speechAnalysis?: SpeechAnalysis,
+  videoName?: string,
   userId?: number,
 ): Promise<object> {
   const isFree = plan === "free";
   const chapterPoints = buildChapterPoints(segments, 10);
+  const isVisualFirst = speechAnalysis?.mode === "visual_first" || !speechAnalysis?.hasMeaningfulSpeech;
 
   const chapterHint = chapterPoints.length
     ? `\n\nReal chapter timestamps:\n${chapterPoints.map(c => `${c.time} - context: "${c.text}"`).join("\n")}`
@@ -1755,6 +1844,9 @@ export async function generateSeo(
   };
 
   const guide = platformGuide[platform] ?? "";
+  const contentHint = isVisualFirst
+    ? `Transcript signal is limited for this upload. Build packaging from the visual premise, pacing, and any sparse spoken context. Video name: "${videoName ?? "Video analysis"}". ${speechAnalysis?.summary ?? ""}`
+    : `Transcript signal is strong enough to drive platform packaging. ${speechAnalysis?.summary ?? ""}`;
 
   if (isFree) {
     const response = await callOpenAI({
@@ -1764,6 +1856,7 @@ export async function generateSeo(
 
 Generate ONE strong title, TWO description sentences, and 3 tags.
 Platform: ${guide}
+Context: ${contentHint}
 Transcript: "${transcript.substring(0, 800)}"
 TAGS: No # symbol.
 
@@ -1786,6 +1879,7 @@ Return STRICT JSON:
     messages: [{ role: "user", content: `${BASE_SYSTEM_PROMPT}
 
 You are a ${platform} SEO expert. Platform rules: ${guide}
+Context: ${contentHint}
 Transcript: "${transcript.substring(0, 2000)}"${chapterHint}
 
 ${isYouTube ? `Generate exactly 5 title options (curiosity gap, how-to, number-based, problem/solution, bold claim). Under 70 chars each.` : `Generate 3 title options.`}

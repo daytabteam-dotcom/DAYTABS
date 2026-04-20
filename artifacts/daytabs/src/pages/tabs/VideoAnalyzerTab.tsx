@@ -54,8 +54,9 @@ const RESULT_TABS = [
 const PROGRESS_STEPS = [
   { label: "Uploading video",             statuses: [] as string[],          threshold: 10  },
   { label: "Extracting audio & frames",   statuses: ["extracting_audio"],    threshold: 25  },
-  { label: "Transcribing with Whisper",   statuses: ["transcribing"],        threshold: 35  },
-  { label: "Analyzing quality",           statuses: ["analyzing_visual"],    threshold: 55  },
+  { label: "Transcribing with Whisper",   statuses: ["transcribing"],        threshold: 32  },
+  { label: "Detecting speech pattern",    statuses: ["detecting_speech"],    threshold: 40  },
+  { label: "Analyzing quality",           statuses: ["analyzing_visual"],    threshold: 58  },
   { label: "Generating suggestions",      statuses: ["analyzing_content"],   threshold: 82  },
   { label: "Building publish package",    statuses: ["generating_seo"],      threshold: 92  },
   { label: "Finalizing report",           statuses: [],                      threshold: 100 },
@@ -183,6 +184,7 @@ function getHistoryStatusLabel(status: string) {
   if (status === "error" || status === "failed") return "Failed";
   if (status === "queued") return "Queued";
   if (status === "transcribing") return "Transcribing";
+  if (status === "detecting_speech") return "Detecting mode";
   if (status === "analyzing_visual") return "Analyzing";
   if (status === "analyzing_content") return "Finding moments";
   if (status === "generating_seo") return "Publishing";
@@ -272,6 +274,63 @@ function SeverityBadge({ severity, numeric }: { severity?: string; numeric?: num
     : "text-red-400 border-red-400/20 bg-red-400/5";
   return (
     <span className={`px-2 py-0.5 rounded-full text-xs font-semibold border capitalize ${cls}`}>{s}</span>
+  );
+}
+
+function getAnalysisProfile(results: any) {
+  return results?.analysisProfile ?? results?.quality?.speechProfile ?? null;
+}
+
+function analysisModeLabel(mode?: string) {
+  if (mode === "talking_first") return "Talking-first";
+  if (mode === "visual_first") return "Visual-first";
+  if (mode === "mixed") return "Mixed";
+  return "Adaptive";
+}
+
+function formatClock(seconds?: number | null) {
+  if (seconds === null || seconds === undefined || !Number.isFinite(seconds)) return "none";
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+}
+
+function AnalysisModeCard({ profile }: { profile: any }) {
+  if (!profile) return null;
+  const speechPct = Math.round((Number(profile.speechRatio ?? 0) || 0) * 100);
+  return (
+    <PanelCard className="p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs text-white/40 uppercase tracking-wider">Detected analysis mode</p>
+          <div className="mt-2 flex items-center gap-2">
+            <span className="px-2.5 py-1 rounded-full text-xs font-semibold border border-primary/25 bg-primary/10 text-primary">
+              {analysisModeLabel(profile.mode)}
+            </span>
+            <span className="text-xs text-white/35">{speechPct}% spoken coverage</span>
+          </div>
+          <p className="mt-3 text-sm leading-relaxed text-white/65">{profile.summary}</p>
+        </div>
+        <div className="grid gap-2 text-xs text-white/45 sm:text-right">
+          <span>First speech: {formatClock(profile.firstSpeechAt)}</span>
+          <span>Last speech: {formatClock(profile.lastSpeechAt)}</span>
+          <span>{profile.totalWords ?? 0} detected words</span>
+        </div>
+      </div>
+    </PanelCard>
+  );
+}
+
+function LimitedSpeechNotice({ profile, children }: { profile?: any; children: React.ReactNode }) {
+  if (!profile || profile.hasMeaningfulSpeech !== false) return null;
+  return (
+    <div className="flex items-start gap-3 p-4 rounded-xl bg-white/5 border border-white/10">
+      <AlertTriangle className="w-4 h-4 text-amber-300 mt-0.5 shrink-0" />
+      <div>
+        <p className="text-xs text-white/40 uppercase tracking-wider mb-1">Limited transcript signal</p>
+        <p className="text-sm text-white/70 leading-relaxed">{children}</p>
+      </div>
+    </div>
   );
 }
 
@@ -405,7 +464,7 @@ function RetentionForecastCard({ data }: { data: any }) {
   );
 }
 
-function QualityPanel({ data, isPaid }: { data: any; isPaid: boolean }) {
+function QualityPanel({ data, isPaid, profile }: { data: any; isPaid: boolean; profile?: any }) {
   if (!data) return <p className="text-white/40 text-sm">No quality data.</p>;
   const overallScore = data.score ?? data.overallScore ?? data.overallVisualScore ?? 0;
   const scoreColor = overallScore >= 85 ? "text-green-400" : overallScore >= 60 ? "text-yellow-400" : "text-red-400";
@@ -438,6 +497,9 @@ function QualityPanel({ data, isPaid }: { data: any; isPaid: boolean }) {
 
   return (
     <div className="space-y-6">
+      <LimitedSpeechNotice profile={profile}>
+        Quality scoring focused on visual execution, audio cleanliness, and pacing proxies because this upload has little spoken content.
+      </LimitedSpeechNotice>
       {data.topFix && (
         <div className="flex items-start gap-3 p-4 rounded-xl bg-amber-400/8 border border-amber-400/20">
           <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
@@ -530,7 +592,7 @@ function QualityPanel({ data, isPaid }: { data: any; isPaid: boolean }) {
   );
 }
 
-function EditingPanel({ data, isPaid }: { data: any; isPaid: boolean }) {
+function EditingPanel({ data, isPaid, profile }: { data: any; isPaid: boolean; profile?: any }) {
   if (!data) return <p className="text-white/40 text-sm">No editing data.</p>;
   const hooks = data.hooks ?? [];
   const suggestions = data.editingSuggestions ?? [];
@@ -539,6 +601,9 @@ function EditingPanel({ data, isPaid }: { data: any; isPaid: boolean }) {
 
   return (
     <div className="space-y-6">
+      <LimitedSpeechNotice profile={profile}>
+        Editing notes are weighted toward pacing, visual clarity, and dead-air cleanup because there is not enough speech to power script-led hook analysis.
+      </LimitedSpeechNotice>
       {data.rewrittenHook && isPaid && (
         <div className="p-4 rounded-xl bg-primary/8 border border-primary/20">
           <p className="text-xs text-primary/70 uppercase tracking-wider mb-2 flex items-center gap-1.5"><Wand2 className="w-3.5 h-3.5" />Rewritten Hook</p>
@@ -615,7 +680,7 @@ function EditingPanel({ data, isPaid }: { data: any; isPaid: boolean }) {
   );
 }
 
-function PublishPanel({ data, platforms, isPaid, subtitleFile, videoFileName }: { data: any; platforms: string[]; isPaid: boolean; subtitleFile?: { content: string; format: string; language: string }; videoFileName?: string }) {
+function PublishPanel({ data, platforms, isPaid, subtitleFile, videoFileName, profile }: { data: any; platforms: string[]; isPaid: boolean; subtitleFile?: { content: string; format: string; language: string }; videoFileName?: string; profile?: any }) {
   const [activePlatform, setActivePlatform] = useState<string>("");
   const [copiedSection, setCopiedSection] = useState<string | null>(null);
   const publishKeys = data ? Object.keys(data) : [];
@@ -648,6 +713,9 @@ function PublishPanel({ data, platforms, isPaid, subtitleFile, videoFileName }: 
 
   return (
     <div className="space-y-4">
+      <LimitedSpeechNotice profile={profile}>
+        Publish copy was generated from the visual premise and any sparse speech that was detected, so treat these titles and descriptions as packaging drafts rather than transcript-driven summaries.
+      </LimitedSpeechNotice>
       <div className="flex gap-2 flex-wrap">
         {publishKeys.map(pk => {
           const pl = PLATFORMS.find(p => p.id === pk);
@@ -884,7 +952,7 @@ function ShortClipsPanel({ data, isPaid }: { data: any; isPaid: boolean }) {
 
 const FILLER_WORDS_RX = /\b(um+|uh+|er+|ah+|hmm+|like|you know|basically|literally|actually|so|right)\b/gi;
 
-function TranscriptPanel({ data, isPaid }: { data: any; isPaid: boolean }) {
+function TranscriptPanel({ data, isPaid, profile }: { data: any; isPaid: boolean; profile?: any }) {
   const [copied, setCopied] = useState(false);
   const segments: Array<{ start: number; end: number; text: string }> = data?.segments ?? [];
   const fullText: string = data?.fullText ?? "";
@@ -919,6 +987,9 @@ function TranscriptPanel({ data, isPaid }: { data: any; isPaid: boolean }) {
 
   return (
     <div className="space-y-4">
+      <LimitedSpeechNotice profile={profile}>
+        The transcript is intentionally downplayed here because speech is sparse or arrives late in the video. Use it as supplemental context, not the main source of truth.
+      </LimitedSpeechNotice>
       <div className="flex items-center justify-between">
         <p className="text-xs text-white/40 uppercase tracking-wider flex items-center gap-2"><AlignLeft className="w-3.5 h-3.5" />Transcript</p>
         {isPaid && (
@@ -1709,9 +1780,10 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
   const progress = statusData?.progress ?? (isSubmitting ? 5 : 0);
   const currentStepLabel = statusData?.currentStep ?? (isSubmitting ? "Uploading video..." : "");
   const errorMessage = (pollData as any)?.error ?? "An unexpected error occurred during analysis.";
+  const analysisProfile = getAnalysisProfile(displayedResults);
 
   const availableResultTabs = RESULT_TABS.filter(t => {
-    if (t.id === "transcript") return !!(displayedResults as any)?.transcript;
+    if (t.id === "transcript") return !!(displayedResults as any)?.transcript && analysisProfile?.hasMeaningfulSpeech !== false;
     return selectedModules.includes(t.id) && !!(displayedResults as any)?.[t.id];
   });
   const hasHistory = analysisHistory.length > 0;
@@ -1771,7 +1843,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
           <PanelHeader className="gap-4">
             <div>
               <PanelTitle>Video Analyzer</PanelTitle>
-              <PanelSubtitle className="max-w-2xl">Upload a raw talking video for quality scores, editing tips, script insights, and a publish package.</PanelSubtitle>
+              <PanelSubtitle className="max-w-2xl">Upload a raw video and DayTabs will detect whether it should analyze it as talking-first, visual-first, or mixed before generating notes.</PanelSubtitle>
             </div>
             {hasHistory && (
               <button
@@ -1798,7 +1870,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
               <div className="flex gap-3 rounded-lg border border-amber-500/20 bg-amber-500/8 px-4 py-3 text-left">
                 <AlertTriangle className="w-4 h-4 text-amber-300 mt-0.5 shrink-0" />
                 <p className="text-xs leading-relaxed text-white/55">
-                  Best for raw talking videos with clear speech. Silent videos, music-only clips, trailers, montages, and heavily edited versions may return weaker editing, script, and publishing recommendations.
+                  DayTabs now detects where speech actually appears in the timeline. Talking videos still get transcript-led notes, while low-dialogue uploads shift toward visual pacing, hook, and packaging guidance.
                 </p>
               </div>
 
@@ -1951,6 +2023,8 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
             </div>
           </div>
 
+          <AnalysisModeCard profile={analysisProfile} />
+
           {availableResultTabs.length > 0 && (
             <>
               <div className="flex gap-1 border-b border-white/8 overflow-x-auto">
@@ -1970,11 +2044,11 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
               </div>
               <AnimatePresence mode="wait">
                 <motion.div key={activeResultTab} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
-                  {activeResultTab === "quality"    && <QualityPanel    data={(displayedResults as any).quality}    isPaid={isPaid} />}
-                  {activeResultTab === "editing"    && <EditingPanel    data={(displayedResults as any).editing}    isPaid={isPaid} />}
-                  {activeResultTab === "publish"    && <PublishPanel    data={(displayedResults as any).publish}    platforms={selectedPlatforms} isPaid={isPaid} subtitleFile={(displayedResults as any).subtitleFile} videoFileName={file?.name} />}
+                  {activeResultTab === "quality"    && <QualityPanel    data={(displayedResults as any).quality}    isPaid={isPaid} profile={analysisProfile} />}
+                  {activeResultTab === "editing"    && <EditingPanel    data={(displayedResults as any).editing}    isPaid={isPaid} profile={analysisProfile} />}
+                  {activeResultTab === "publish"    && <PublishPanel    data={(displayedResults as any).publish}    platforms={selectedPlatforms} isPaid={isPaid} subtitleFile={(displayedResults as any).subtitleFile} videoFileName={file?.name} profile={analysisProfile} />}
                   {activeResultTab === "shortClips" && <ShortClipsPanel data={(displayedResults as any).shortClips} isPaid={isPaid} />}
-                  {activeResultTab === "transcript" && <TranscriptPanel data={(displayedResults as any).transcript} isPaid={isPaid} />}
+                  {activeResultTab === "transcript" && <TranscriptPanel data={(displayedResults as any).transcript} isPaid={isPaid} profile={analysisProfile} />}
                 </motion.div>
               </AnimatePresence>
             </>
