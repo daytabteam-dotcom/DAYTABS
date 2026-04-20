@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { pool } from "@workspace/db";
 import { requireAdmin } from "../../lib/adminAuth";
+import { TOKEN_PRODUCT_AREA_SQL_CASE } from "../../lib/tokenUsageProducts";
 
 const router = Router();
 
@@ -39,14 +40,7 @@ const COST_SQL = `
   )
 `;
 
-const FEATURE_GROUP_SQL = `
-  CASE
-    WHEN feature IN ('videoAnalysis', 'chartGeneration') THEN 'videoAnalysis'
-    WHEN feature IN ('contentCreation', 'scriptPlanner', 'growthPlanner') THEN 'contentCreation'
-    WHEN feature IN ('ytPlanGenerate', 'ytPlanRegenerate', 'channelSync', 'improveIdea', 'perfSummary') THEN 'youtubeGrowth'
-    ELSE feature
-  END
-`;
+const FEATURE_GROUP_SQL = TOKEN_PRODUCT_AREA_SQL_CASE;
 
 function toNumber(value: unknown) {
   const number = Number(value ?? 0);
@@ -61,6 +55,14 @@ function toIso(value: unknown) {
 
 function emptyTokensByFeature() {
   return Object.fromEntries(TOKEN_FEATURES.map((feature) => [feature, 0])) as Record<(typeof TOKEN_FEATURES)[number], number>;
+}
+
+function emptyProductUsage() {
+  return {
+    videoAnalysis: { totalTokens: 0, estimatedCostUsd: 0 },
+    contentPlanner: { totalTokens: 0, estimatedCostUsd: 0 },
+    youtubeGrowth: { totalTokens: 0, estimatedCostUsd: 0 },
+  };
 }
 
 router.get("/stats", async (req, res) => {
@@ -129,9 +131,12 @@ router.get("/users", async (req, res) => {
       yt_ideas_regenerated_count: string;
       charts_created_count: string;
       tokens_by_feature: Record<string, number> | null;
-      tokens_by_product: Record<string, number> | null;
+      tokens_by_product: Record<string, { totalTokens?: number; estimatedCostUsd?: number }> | null;
       tokens_by_model: Record<string, { inputTokens: number; outputTokens: number; totalTokens: number; estimatedCostUsd: number }> | null;
       failure_reasons: Array<{ reason: string; count: number }> | null;
+      video_analysis_tokens_used: string;
+      content_planner_tokens_used: string;
+      youtube_growth_tokens_used: string;
     }>(`
       WITH token_rows AS (
         SELECT
@@ -168,10 +173,15 @@ router.get("/users", async (req, res) => {
         GROUP BY user_id
       ),
       product_totals AS (
-        SELECT user_id, jsonb_object_agg(product_area, total_tokens) AS tokens_by_product
+        SELECT user_id, jsonb_object_agg(product_area, jsonb_build_object('totalTokens', total_tokens, 'estimatedCostUsd', estimated_cost_usd)) AS tokens_by_product
         FROM (
-          SELECT user_id, product_area, SUM(input_tokens + output_tokens) AS total_tokens
+          SELECT
+            user_id,
+            product_area,
+            SUM(input_tokens + output_tokens) AS total_tokens,
+            SUM(calculated_cost) AS estimated_cost_usd
           FROM token_rows
+          WHERE product_area IS NOT NULL
           GROUP BY user_id, product_area
         ) totals
         GROUP BY user_id
@@ -238,7 +248,10 @@ router.get("/users", async (req, res) => {
         COALESCE(feature_totals.tokens_by_feature, '{}'::jsonb) AS tokens_by_feature,
         COALESCE(product_totals.tokens_by_product, '{}'::jsonb) AS tokens_by_product,
         COALESCE(model_totals.tokens_by_model, '{}'::jsonb) AS tokens_by_model,
-        COALESCE(failure_reasons.failure_reasons, '[]'::jsonb) AS failure_reasons
+        COALESCE(failure_reasons.failure_reasons, '[]'::jsonb) AS failure_reasons,
+        COALESCE(uu.video_analysis_tokens_used, 0) AS video_analysis_tokens_used,
+        COALESCE(uu.content_planner_tokens_used, 0) AS content_planner_tokens_used,
+        COALESCE(uu.youtube_growth_tokens_used, 0) AS youtube_growth_tokens_used
       FROM users u
       LEFT JOIN token_totals ON token_totals.user_id = u.id
       LEFT JOIN feature_totals ON feature_totals.user_id = u.id
@@ -247,6 +260,7 @@ router.get("/users", async (req, res) => {
       LEFT JOIN analysis_totals ON analysis_totals.user_id = u.id
       LEFT JOIN failure_reasons ON failure_reasons.user_id = u.id
       LEFT JOIN script_chat_totals ON script_chat_totals.user_id = u.id
+      LEFT JOIN user_usage uu ON uu.user_id = u.id
       ORDER BY u.created_at DESC
     `);
 
@@ -257,11 +271,13 @@ router.get("/users", async (req, res) => {
         for (const feature of TOKEN_FEATURES) {
           tokensByFeature[feature] = toNumber(row.tokens_by_feature?.[feature]);
         }
-        const tokensByProduct = {
-          videoAnalysis: toNumber(row.tokens_by_product?.videoAnalysis),
-          contentCreation: toNumber(row.tokens_by_product?.contentCreation),
-          youtubeGrowth: toNumber(row.tokens_by_product?.youtubeGrowth),
-        };
+        const tokensByProduct = emptyProductUsage();
+        tokensByProduct.videoAnalysis.totalTokens = toNumber(row.video_analysis_tokens_used);
+        tokensByProduct.contentPlanner.totalTokens = toNumber(row.content_planner_tokens_used);
+        tokensByProduct.youtubeGrowth.totalTokens = toNumber(row.youtube_growth_tokens_used);
+        tokensByProduct.videoAnalysis.estimatedCostUsd = toNumber(row.tokens_by_product?.videoAnalysis?.estimatedCostUsd);
+        tokensByProduct.contentPlanner.estimatedCostUsd = toNumber(row.tokens_by_product?.contentPlanner?.estimatedCostUsd);
+        tokensByProduct.youtubeGrowth.estimatedCostUsd = toNumber(row.tokens_by_product?.youtubeGrowth?.estimatedCostUsd);
         const quota = PLAN_TOKEN_QUOTAS[row.plan] ?? PLAN_TOKEN_QUOTAS.free;
         return {
           id: String(row.id),
@@ -318,9 +334,12 @@ router.get("/users/:id", async (req, res) => {
         yt_ideas_regenerated_count: string;
         charts_created_count: string;
         tokens_by_feature: Record<string, number> | null;
-        tokens_by_product: Record<string, number> | null;
+        tokens_by_product: Record<string, { totalTokens?: number; estimatedCostUsd?: number }> | null;
         tokens_by_model: Record<string, { inputTokens: number; outputTokens: number; totalTokens: number; estimatedCostUsd: number }> | null;
         failure_reasons: Array<{ reason: string; count: number }> | null;
+        video_analysis_tokens_used: string;
+        content_planner_tokens_used: string;
+        youtube_growth_tokens_used: string;
       }>(`
         WITH token_rows AS (
           SELECT
@@ -357,10 +376,15 @@ router.get("/users/:id", async (req, res) => {
           GROUP BY user_id
         ),
         product_totals AS (
-          SELECT user_id, jsonb_object_agg(product_area, total_tokens) AS tokens_by_product
+          SELECT user_id, jsonb_object_agg(product_area, jsonb_build_object('totalTokens', total_tokens, 'estimatedCostUsd', estimated_cost_usd)) AS tokens_by_product
           FROM (
-            SELECT user_id, product_area, SUM(input_tokens + output_tokens) AS total_tokens
+            SELECT
+              user_id,
+              product_area,
+              SUM(input_tokens + output_tokens) AS total_tokens,
+              SUM(calculated_cost) AS estimated_cost_usd
             FROM token_rows
+            WHERE product_area IS NOT NULL
             GROUP BY user_id, product_area
           ) totals
           GROUP BY user_id
@@ -427,7 +451,10 @@ router.get("/users/:id", async (req, res) => {
           COALESCE(feature_totals.tokens_by_feature, '{}'::jsonb) AS tokens_by_feature,
           COALESCE(product_totals.tokens_by_product, '{}'::jsonb) AS tokens_by_product,
           COALESCE(model_totals.tokens_by_model, '{}'::jsonb) AS tokens_by_model,
-          COALESCE(failure_reasons.failure_reasons, '[]'::jsonb) AS failure_reasons
+          COALESCE(failure_reasons.failure_reasons, '[]'::jsonb) AS failure_reasons,
+          COALESCE(uu.video_analysis_tokens_used, 0) AS video_analysis_tokens_used,
+          COALESCE(uu.content_planner_tokens_used, 0) AS content_planner_tokens_used,
+          COALESCE(uu.youtube_growth_tokens_used, 0) AS youtube_growth_tokens_used
         FROM users u
         LEFT JOIN token_totals ON token_totals.user_id = u.id
         LEFT JOIN feature_totals ON feature_totals.user_id = u.id
@@ -436,6 +463,7 @@ router.get("/users/:id", async (req, res) => {
         LEFT JOIN analysis_totals ON analysis_totals.user_id = u.id
         LEFT JOIN failure_reasons ON failure_reasons.user_id = u.id
         LEFT JOIN script_chat_totals ON script_chat_totals.user_id = u.id
+        LEFT JOIN user_usage uu ON uu.user_id = u.id
         WHERE u.id = $1
       `, [req.params.id]),
       pool.query<{
@@ -465,11 +493,13 @@ router.get("/users/:id", async (req, res) => {
     for (const feature of TOKEN_FEATURES) {
       tokensByFeature[feature] = toNumber(row.tokens_by_feature?.[feature]);
     }
-    const tokensByProduct = {
-      videoAnalysis: toNumber(row.tokens_by_product?.videoAnalysis),
-      contentCreation: toNumber(row.tokens_by_product?.contentCreation),
-      youtubeGrowth: toNumber(row.tokens_by_product?.youtubeGrowth),
-    };
+    const tokensByProduct = emptyProductUsage();
+    tokensByProduct.videoAnalysis.totalTokens = toNumber(row.video_analysis_tokens_used);
+    tokensByProduct.contentPlanner.totalTokens = toNumber(row.content_planner_tokens_used);
+    tokensByProduct.youtubeGrowth.totalTokens = toNumber(row.youtube_growth_tokens_used);
+    tokensByProduct.videoAnalysis.estimatedCostUsd = toNumber(row.tokens_by_product?.videoAnalysis?.estimatedCostUsd);
+    tokensByProduct.contentPlanner.estimatedCostUsd = toNumber(row.tokens_by_product?.contentPlanner?.estimatedCostUsd);
+    tokensByProduct.youtubeGrowth.estimatedCostUsd = toNumber(row.tokens_by_product?.youtubeGrowth?.estimatedCostUsd);
     const quota = PLAN_TOKEN_QUOTAS[row.plan] ?? PLAN_TOKEN_QUOTAS.free;
 
     res.json({

@@ -11,6 +11,9 @@ export const userUsageTable = pgTable("user_usage", {
   scriptGenerationsUsed: integer("script_generations_used").notNull().default(0),
   videoAnalysesUsed: integer("video_analyses_used").notNull().default(0),
   scriptPlannerChatsUsed: integer("script_planner_chats_used").notNull().default(0),
+  videoAnalysisTokensUsed: integer("video_analysis_tokens_used").notNull().default(0),
+  contentPlannerTokensUsed: integer("content_planner_tokens_used").notNull().default(0),
+  youtubeGrowthTokensUsed: integer("youtube_growth_tokens_used").notNull().default(0),
   lastUpdated: timestamp("last_updated").defaultNow().notNull(),
 });
 

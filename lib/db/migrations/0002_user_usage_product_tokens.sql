@@ -1,0 +1,4 @@
+ALTER TABLE user_usage
+  ADD COLUMN IF NOT EXISTS video_analysis_tokens_used INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS content_planner_tokens_used INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS youtube_growth_tokens_used INTEGER NOT NULL DEFAULT 0;

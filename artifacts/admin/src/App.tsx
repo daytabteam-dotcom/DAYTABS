@@ -23,9 +23,9 @@ interface AdminUser {
     totalTokens: number;
     tokensByFeature: Record<string, number>;
     tokensByProduct: {
-      videoAnalysis: number;
-      contentCreation: number;
-      youtubeGrowth: number;
+      videoAnalysis: { totalTokens: number; estimatedCostUsd: number };
+      contentPlanner: { totalTokens: number; estimatedCostUsd: number };
+      youtubeGrowth: { totalTokens: number; estimatedCostUsd: number };
     };
     tokensByModel: Record<string, {
       inputTokens: number;
@@ -90,7 +90,7 @@ const featureLabels: Record<string, string> = {
 
 const productLabels: Record<keyof AdminUser["usage"]["tokensByProduct"], string> = {
   videoAnalysis: "Video analysis",
-  contentCreation: "Content Creation",
+  contentPlanner: "Content planner",
   youtubeGrowth: "YouTube Growth",
 };
 
@@ -255,11 +255,24 @@ function DashboardView() {
   const topUsers = [...users].sort((a, b) => b.usage.totalTokens - a.usage.totalTokens).slice(0, 5);
   const productTotals = users.reduce(
     (totals, user) => ({
-      videoAnalysis: totals.videoAnalysis + user.usage.tokensByProduct.videoAnalysis,
-      contentCreation: totals.contentCreation + user.usage.tokensByProduct.contentCreation,
-      youtubeGrowth: totals.youtubeGrowth + user.usage.tokensByProduct.youtubeGrowth,
+      videoAnalysis: {
+        totalTokens: totals.videoAnalysis.totalTokens + user.usage.tokensByProduct.videoAnalysis.totalTokens,
+        estimatedCostUsd: totals.videoAnalysis.estimatedCostUsd + user.usage.tokensByProduct.videoAnalysis.estimatedCostUsd,
+      },
+      contentPlanner: {
+        totalTokens: totals.contentPlanner.totalTokens + user.usage.tokensByProduct.contentPlanner.totalTokens,
+        estimatedCostUsd: totals.contentPlanner.estimatedCostUsd + user.usage.tokensByProduct.contentPlanner.estimatedCostUsd,
+      },
+      youtubeGrowth: {
+        totalTokens: totals.youtubeGrowth.totalTokens + user.usage.tokensByProduct.youtubeGrowth.totalTokens,
+        estimatedCostUsd: totals.youtubeGrowth.estimatedCostUsd + user.usage.tokensByProduct.youtubeGrowth.estimatedCostUsd,
+      },
     }),
-    { videoAnalysis: 0, contentCreation: 0, youtubeGrowth: 0 },
+    {
+      videoAnalysis: { totalTokens: 0, estimatedCostUsd: 0 },
+      contentPlanner: { totalTokens: 0, estimatedCostUsd: 0 },
+      youtubeGrowth: { totalTokens: 0, estimatedCostUsd: 0 },
+    },
   );
 
   async function logout() {
@@ -304,8 +317,8 @@ function DashboardView() {
         {(Object.keys(productTotals) as Array<keyof typeof productTotals>).map((key) => (
           <article key={key} className="product-card">
             <p>{productLabels[key]}</p>
-            <strong>{formatNumber(productTotals[key])}</strong>
-            <span>total tokens</span>
+            <strong>{formatNumber(productTotals[key].totalTokens)}</strong>
+            <span>{formatCurrency(productTotals[key].estimatedCostUsd)} total cost</span>
           </article>
         ))}
       </section>
@@ -400,6 +413,9 @@ function DashboardView() {
                 <th>Videos</th>
                 <th>Failed</th>
                 <th>Creator chats</th>
+                <th>Video analysis</th>
+                <th>Content planner</th>
+                <th>YouTube Growth</th>
                 <th>Tokens</th>
                 <th>Cost</th>
                 <th>Quota</th>
@@ -417,6 +433,9 @@ function DashboardView() {
                   <td>{formatNumber(user.usage.videoAnalysesTotal)}</td>
                   <td>{formatNumber(user.usage.videoAnalysesFailed)}</td>
                   <td>{formatNumber(user.usage.contentCreatorChatsCount)}</td>
+                  <td>{formatNumber(user.usage.tokensByProduct.videoAnalysis.totalTokens)}</td>
+                  <td>{formatNumber(user.usage.tokensByProduct.contentPlanner.totalTokens)}</td>
+                  <td>{formatNumber(user.usage.tokensByProduct.youtubeGrowth.totalTokens)}</td>
                   <td>{formatNumber(user.usage.totalTokens)}</td>
                   <td>{formatCurrency(user.usage.estimatedCostUsd)}</td>
                   <td>
@@ -455,7 +474,8 @@ function DashboardView() {
                   {(Object.keys(selectedUser.usage.tokensByProduct) as Array<keyof AdminUser["usage"]["tokensByProduct"]>).map((key) => (
                     <div key={key}>
                       <span>{productLabels[key]}</span>
-                      <strong>{formatNumber(selectedUser.usage.tokensByProduct[key])}</strong>
+                      <strong>{formatNumber(selectedUser.usage.tokensByProduct[key].totalTokens)}</strong>
+                      <small>{formatCurrency(selectedUser.usage.tokensByProduct[key].estimatedCostUsd)}</small>
                     </div>
                   ))}
                 </div>

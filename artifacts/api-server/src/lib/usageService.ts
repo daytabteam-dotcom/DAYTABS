@@ -1,4 +1,4 @@
-import { db, userUsageTable, analysisJobsTable, scriptPlannerChatsTable, usersTable } from "@workspace/db";
+import { db, userUsageTable, analysisJobsTable, scriptPlannerChatsTable, tokenLogsTable, usersTable } from "@workspace/db";
 import { eq, and, gte, count } from "drizzle-orm";
 import {
   normalizePlan,
@@ -8,6 +8,7 @@ import {
   buildVideoUsageLimitError,
   getVideoUsageCost,
 } from "./planLimits";
+import { getTokenProductArea } from "./tokenUsageProducts";
 
 // ─── Per-user billing cycle helpers ────────────────────────────────────────────
 
@@ -73,6 +74,11 @@ async function countUsageSince(userId: number, since: Date): Promise<{
   videoUsage: number;
   videoRuns: number;
   scriptGenerations: number;
+  productTokens: {
+    videoAnalysis: number;
+    contentPlanner: number;
+    youtubeGrowth: number;
+  };
 }> {
   const analysisRows = await db
     .select({
@@ -94,6 +100,18 @@ async function countUsageSince(userId: number, since: Date): Promise<{
       gte(scriptPlannerChatsTable.createdAt, since),
     ));
 
+  const tokenRows = await db
+    .select({
+      feature: tokenLogsTable.feature,
+      inputTokens: tokenLogsTable.inputTokens,
+      outputTokens: tokenLogsTable.outputTokens,
+    })
+    .from(tokenLogsTable)
+    .where(and(
+      eq(tokenLogsTable.userId, userId),
+      gte(tokenLogsTable.createdAt, since),
+    ));
+
   const videoUsage = analysisRows.reduce((sum, row) => {
     const analysisOptions = row.result && typeof row.result === "object"
       ? (row.result as { analysisOptions?: { durationSeconds?: unknown } }).analysisOptions
@@ -102,10 +120,22 @@ async function countUsageSince(userId: number, since: Date): Promise<{
     return sum + getVideoUsageCost(durationSeconds);
   }, 0);
 
+  const productTokens = tokenRows.reduce((totals, row) => {
+    const productArea = getTokenProductArea(row.feature);
+    if (!productArea) return totals;
+    totals[productArea] += Number(row.inputTokens ?? 0) + Number(row.outputTokens ?? 0);
+    return totals;
+  }, {
+    videoAnalysis: 0,
+    contentPlanner: 0,
+    youtubeGrowth: 0,
+  });
+
   return {
     videoUsage,
     videoRuns: analysisRows.length,
     scriptGenerations: Number(chatRow?.cnt ?? 0),
+    productTokens,
   };
 }
 
@@ -150,7 +180,7 @@ export async function getOrCreateUsage(userId: number) {
 
   if (!existing) {
     // First access — seed from completed jobs in this cycle
-    const { videoUsage, videoRuns, scriptGenerations } = await countUsageSince(userId, cycleStart);
+    const { videoUsage, videoRuns, scriptGenerations, productTokens } = await countUsageSince(userId, cycleStart);
     const [row] = await db
       .insert(userUsageTable)
       .values({
@@ -162,6 +192,9 @@ export async function getOrCreateUsage(userId: number) {
         videoAnalysisRunsUsed: videoRuns,
         videoAnalysisUsageUsed: videoUsage,
         scriptGenerationsUsed: scriptGenerations,
+        videoAnalysisTokensUsed: productTokens.videoAnalysis,
+        contentPlannerTokensUsed: productTokens.contentPlanner,
+        youtubeGrowthTokensUsed: productTokens.youtubeGrowth,
         lastUpdated: new Date(),
       })
       .returning();
@@ -170,7 +203,7 @@ export async function getOrCreateUsage(userId: number) {
 
   if (isPeriodStale(existing.periodStart, cycleStart)) {
     // New cycle started — reset counters, seed from completed jobs this cycle
-    const { videoUsage, videoRuns, scriptGenerations } = await countUsageSince(userId, cycleStart);
+    const { videoUsage, videoRuns, scriptGenerations, productTokens } = await countUsageSince(userId, cycleStart);
     const [row] = await db
       .update(userUsageTable)
       .set({
@@ -181,6 +214,9 @@ export async function getOrCreateUsage(userId: number) {
         videoAnalysisRunsUsed: videoRuns,
         videoAnalysisUsageUsed: videoUsage,
         scriptGenerationsUsed: scriptGenerations,
+        videoAnalysisTokensUsed: productTokens.videoAnalysis,
+        contentPlannerTokensUsed: productTokens.contentPlanner,
+        youtubeGrowthTokensUsed: productTokens.youtubeGrowth,
         lastUpdated: new Date(),
       })
       .where(eq(userUsageTable.userId, userId))
