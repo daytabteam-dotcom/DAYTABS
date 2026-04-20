@@ -349,6 +349,7 @@ export interface FormatProfile {
   contentFormat: ContentFormat;
   formatConfidence: "high" | "medium" | "low";
   primarySubject: string;
+  contentSummary: string;
   viewerIntent: string;
   successFactors: string[];
   ignoredSignals: string[];
@@ -894,9 +895,10 @@ export async function extractAudio(videoPath: string, outputPath: string): Promi
   );
 }
 
-export async function extractFrames(videoPath: string, framesDir: string, count = 5): Promise<string[]> {
+export async function extractFrames(videoPath: string, framesDir: string, count = 5, maxWidth = 640): Promise<string[]> {
   const duration = await getMediaDuration(videoPath);
-  const frameScaleFilter = "scale='min(640,iw)':-2";
+  const safeWidth = Math.max(320, Math.floor(maxWidth));
+  const frameScaleFilter = `scale='min(${safeWidth},iw)':-2`;
   const seekTimeoutMs = getConfiguredTimeoutMs("FFMPEG_FRAME_SEEK_TIMEOUT_MS", 45000);
   const fallbackTimeoutMs = getConfiguredTimeoutMs("FFMPEG_FRAME_FALLBACK_TIMEOUT_MS", 90000);
 
@@ -1098,6 +1100,7 @@ CRITICAL for FORMAT DETECTION:
     "contentFormat": "one of the allowed values",
     "formatConfidence": "high" | "medium" | "low",
     "primarySubject": "what the viewer is mainly supposed to watch",
+    "contentSummary": "one sentence on what this video is actually about based on visuals, not noisy transcript fragments",
     "viewerIntent": "why someone would choose to watch this type of video",
     "successFactors": ["3 to 5 concrete things that matter most for this format"],
     "ignoredSignals": ["signals that should NOT be emphasized for this format"],
@@ -1281,6 +1284,7 @@ function getDefaultFormatProfile(): FormatProfile {
     contentFormat: "general_visual",
     formatConfidence: "low",
     primarySubject: "the main action on screen",
+    contentSummary: "A visual-first video centered on the main subject and its progression toward a clear payoff.",
     viewerIntent: "understand the visual idea quickly and stay for a clear payoff",
     successFactors: ["clear subject visibility", "steady progression", "strong opening", "clear payoff"],
     ignoredSignals: ["presenter eye-line scoring when the subject is not a face"],
@@ -1289,46 +1293,19 @@ function getDefaultFormatProfile(): FormatProfile {
   };
 }
 
-export async function analyzeVisuals(
-  frameBase64List: string[],
-  platform: string,
-  plan = "free",
-  transcript?: string,  // NEW: pass transcript so AI can judge background context against topic
-  userId?: number,
-): Promise<object> {
-  const imageContent = frameBase64List.map(b64 => ({
-    type: "image_url",
-    image_url: { url: `data:image/jpeg;base64,${b64}` },
-  }));
+interface VisualAnalysisRequestOptions {
+  detail?: "low" | "high";
+  focus?: "understanding" | "quality" | "balanced";
+}
 
-  const isFree = plan === "free";
+interface VisualAnalysisParts {
+  observations: VisualObservations;
+  assessments: Record<string, string>;
+  formatProfile: FormatProfile;
+}
 
-  // Provide transcript context to the AI so it can judge background appropriateness
-  const transcriptContext = transcript
-    ? `\n\nVIDEO TOPIC CONTEXT (from transcript): "${transcript.substring(0, 400)}"\nUse this to judge whether the background is appropriate for what is being discussed.`
-    : "";
-
-  const prompt = `${BASE_SYSTEM_PROMPT}
-
-Analyze these ${frameBase64List.length} frame(s) from a ${platform} video.${transcriptContext}
-
-For EACH dimension, write exactly as a professional video producer giving paid notes:
-- Reference where in the frame or when in the video the issue occurs
-- Never use vague praise without a specific physical observation
-- If something scores above 85, name the ONE thing that would push it to 100
-- Suggest a concrete, measurable fix
-
-CRITICAL RULE: Never reference frame numbers. Reference approximate time positions.
-
-BACKGROUND CONTEXT RULE: Judge background against the VIDEO'S TOPIC. If the creator is discussing a business app but is standing in a kitchen with appliances visible — that is "no" for backgroundContextAppropriate, even if the shot is technically clean. Explain what is wrong and suggest a specific alternative that fits the topic.
-
-PRESENCE RULE: Assess eye contact, energy, and confidence. A slow, hesitant delivery is a retention risk. A confident, direct presenter retains viewers. Be specific.
-
-FORMAT RULE: If this is not mainly a face-to-camera presenter video, avoid presenter-specific language like eye-line, headroom, and on-camera presence unless it is genuinely relevant to what the viewer is watching.
-
-${VISUAL_OBSERVATIONS_SCHEMA}`;
-
-  const defaultObs: VisualObservations = {
+function getDefaultVisualObservations(): VisualObservations {
+  return {
     lightSourceVisible: true,
     lightSourceSide: "front",
     catchLightsVisible: false,
@@ -1360,9 +1337,11 @@ ${VISUAL_OBSERVATIONS_SCHEMA}`;
     presenceOnCamera: "adequate",
     visualVariety: "low",
   };
+}
 
-  const defaultAssessments = {
-    overallTopFix: "Ensure your background is appropriate for the video topic — a neutral wall or branded backdrop will keep focus on you and the content.",
+function getDefaultVisualAssessments(): Record<string, string> {
+  return {
+    overallTopFix: "Ensure the main subject becomes obvious earlier and stays visually clear throughout the video.",
     colorGradingRecommendation: "Add +10 warmth to counteract any cool daylight cast and make skin tones more natural.",
     lighting: "Key light positioning needs review — front-facing light eliminates facial depth.",
     lightingSuggestion: "Shift key light 40 degrees to the right to create natural dimensionality.",
@@ -1374,48 +1353,228 @@ ${VISUAL_OBSERVATIONS_SCHEMA}`;
     colorTemperatureSuggestion: "Add +5 warmth to neutralize any shadow cast.",
     background: "Background needs to be evaluated for topic appropriateness, not just visual cleanliness.",
     backgroundSuggestion: "Choose a backdrop that signals credibility and matches your video topic — a clean wall, bookshelf, or branded setup works for most content categories.",
-    framing: "Eyes should land at the upper-third line for maximum viewer connection.",
-    framingSuggestion: "Lower the camera or raise your seat so eyes land at the upper-third line.",
-    sharpness: "Confirm focus is locked on the eyes specifically during setup.",
-    sharpnessSuggestion: "Use manual focus and zoom in on the eyes during setup to confirm sharpness.",
+    framing: "Frame the actual subject so the viewer can understand what matters without searching around the image.",
+    framingSuggestion: "Tighten the crop or camera position so the main subject fills more of the frame.",
+    sharpness: "Confirm focus is locked on the main subject during setup.",
+    sharpnessSuggestion: "Use manual focus or focus lock on the key subject area before recording.",
     stability: "Use a locking tripod to eliminate any movement.",
     stabilitySuggestion: "Use a locking ballhead to eliminate drift common with fluid heads on static shots.",
-    presenceFeedback: "Evaluate eye contact and delivery energy throughout the video.",
-    presenceSuggestion: "Speak directly into the lens as if talking to one specific person — pick a spot on the lens and hold it.",
+    presenceFeedback: "Evaluate whether the visible subject has enough visual energy and clarity to hold attention.",
+    presenceSuggestion: "Increase visual intention in the opening so the main subject reads instantly.",
     hookStrength: "moderate",
     hookStrengthReason: "The opening needs to create more urgency in the first 5 seconds.",
   };
+}
+
+function normalizeFormatProfile(
+  raw: Partial<FormatProfile> | undefined,
+  fallback = getDefaultFormatProfile(),
+): FormatProfile {
+  return {
+    ...fallback,
+    ...(raw ?? {}),
+    successFactors: Array.isArray(raw?.successFactors) && raw.successFactors.length
+      ? raw.successFactors.slice(0, 5)
+      : fallback.successFactors,
+    ignoredSignals: Array.isArray(raw?.ignoredSignals) && raw.ignoredSignals.length
+      ? raw.ignoredSignals.slice(0, 4)
+      : fallback.ignoredSignals,
+  };
+}
+
+async function requestVisualAnalysisParts(
+  frameBase64List: string[],
+  platform: string,
+  plan = "free",
+  transcript?: string,
+  userId?: number,
+  options: VisualAnalysisRequestOptions = {},
+): Promise<VisualAnalysisParts> {
+  const detail = options.detail ?? "high";
+  const focus = options.focus ?? "balanced";
+  const imageContent = frameBase64List.map((b64) => ({
+    type: "image_url",
+    image_url: { url: `data:image/jpeg;base64,${b64}`, detail },
+  }));
+  const isFree = plan === "free";
+  const transcriptContext = transcript
+    ? `\n\nVIDEO TOPIC CONTEXT (secondary evidence only): "${transcript.substring(0, 400)}"\nUse transcript text only as weak context. If sparse words conflict with the visuals, trust the visuals.`
+    : "";
+  const focusInstruction = focus === "understanding"
+    ? `PRIMARY GOAL: Understand what this video is actually about from visuals across the timeline.
+- Identify the real format, primary subject, progression, and payoff.
+- Write contentSummary from what is visibly happening, not from noisy transcript fragments.
+- If this looks like art, craft, cooking, ambience, or process content, say so directly.
+- Do not overclaim fine-detail issues unless they are obvious across the set of frames.`
+    : focus === "quality"
+    ? `PRIMARY GOAL: Judge quality-critical details using these higher-resolution frames.
+- Focus on sharpness, lighting, framing, color accuracy, texture detail, and text readability.
+- Keep the video topic aligned with the visible subject already understood from the broader visual pass.
+- Do not rename the topic based on isolated transcript words or random objects in the frame.`
+    : `PRIMARY GOAL: Balance topic understanding with quality judgment, but keep packaging aligned with the visible subject.`;
+
+  const prompt = `${BASE_SYSTEM_PROMPT}
+
+Analyze these ${frameBase64List.length} ${detail}-detail frame(s) from a ${platform} video.${transcriptContext}
+
+${focusInstruction}
+
+For EACH dimension, write exactly as a professional video producer giving paid notes:
+- Reference where in the frame or when in the video the issue occurs
+- Never use vague praise without a specific physical observation
+- If something scores above 85, name the ONE thing that would push it to 100
+- Suggest a concrete, measurable fix
+
+CRITICAL RULE: Never reference frame numbers. Reference approximate time positions.
+
+BACKGROUND CONTEXT RULE: Judge background against the VIDEO'S TOPIC. If the creator is discussing a business app but is standing in a kitchen with appliances visible — that is "no" for backgroundContextAppropriate, even if the shot is technically clean. Explain what is wrong and suggest a specific alternative that fits the topic.
+
+FORMAT RULE: If this is not mainly a face-to-camera presenter video, avoid presenter-specific language like eye-line, headroom, and on-camera presence unless it is genuinely relevant to what the viewer is watching.
+
+TOPIC LOCK RULE: Never invent a different niche just because a sparse transcript fragment mentions unrelated words. Packaging and summary must stay anchored to what is visibly happening in the frames.
+
+${VISUAL_OBSERVATIONS_SCHEMA}`;
+
+  const defaultObs = getDefaultVisualObservations();
+  const defaultAssessments = getDefaultVisualAssessments();
   const defaultFormatProfile = getDefaultFormatProfile();
 
+  const response = await callOpenAI({
+    model: "gpt-4o",
+    max_completion_tokens: isFree ? 1200 : 2500,
+    messages: [{ role: "user", content: [{ type: "text", text: prompt }, ...imageContent] }],
+  }, userId);
+
+  const raw = parseJson<{ formatProfile?: Partial<FormatProfile>; observations?: Partial<VisualObservations>; assessments?: Record<string, string> }>(
+    response.choices[0]?.message?.content ?? "{}",
+    {},
+  );
+
+  return {
+    observations: { ...defaultObs, ...(raw.observations ?? {}) },
+    assessments: { ...defaultAssessments, ...(raw.assessments ?? {}) },
+    formatProfile: normalizeFormatProfile(raw.formatProfile, defaultFormatProfile),
+  };
+}
+
+const HIGH_DETAIL_ASSESSMENT_KEYS = [
+  "lighting",
+  "lightingSuggestion",
+  "brightness",
+  "brightnessSuggestion",
+  "contrast",
+  "contrastSuggestion",
+  "colorTemperature",
+  "colorTemperatureSuggestion",
+  "framing",
+  "framingSuggestion",
+  "sharpness",
+  "sharpnessSuggestion",
+  "stability",
+  "stabilitySuggestion",
+  "colorGradingRecommendation",
+] as const;
+
+const HIGH_DETAIL_OBSERVATION_KEYS: Array<keyof VisualObservations> = [
+  "lightSourceVisible",
+  "lightSourceSide",
+  "catchLightsVisible",
+  "hardShadowsOnFace",
+  "colorTemperatureMismatch",
+  "skinExposure",
+  "blownRegions",
+  "blacksCrushed",
+  "highlightsClipped",
+  "imageLooksFlat",
+  "eyeLinePosition",
+  "excessiveHeadroom",
+  "shouldersCutAwkwardly",
+  "focusOnEyes",
+  "motionBlurPresent",
+  "microJitterVisible",
+  "driftVisible",
+  "stabilizationArtifacts",
+  "colorCast",
+  "colorCastSeverity",
+];
+
+export async function analyzeVisualsHybrid(
+  lowDetailFrames: string[],
+  highDetailFrames: string[],
+  platform: string,
+  plan = "free",
+  transcript?: string,
+  userId?: number,
+): Promise<object> {
+  const fallbackProfile = getDefaultFormatProfile();
+  const defaultObs = getDefaultVisualObservations();
+  const defaultAssessments = getDefaultVisualAssessments();
+
   try {
-    const response = await callOpenAI({
-      model: "gpt-4o",
-      max_completion_tokens: isFree ? 1200 : 2500,
-      messages: [{ role: "user", content: [{ type: "text", text: prompt }, ...imageContent] }],
-    }, userId);
+    const understandingPromise = requestVisualAnalysisParts(lowDetailFrames, platform, plan, transcript, userId, {
+      detail: "low",
+      focus: "understanding",
+    });
+    const qualityPromise = requestVisualAnalysisParts(highDetailFrames, platform, plan, transcript, userId, {
+      detail: "high",
+      focus: "quality",
+    });
 
-    const raw = parseJson<{ formatProfile?: Partial<typeof defaultFormatProfile>; observations?: Partial<VisualObservations>; assessments?: Record<string, string> }>(
-      response.choices[0]?.message?.content ?? "{}",
-      {}
-    );
+    const [understanding, quality] = await Promise.all([understandingPromise, qualityPromise]);
 
-    const obs: VisualObservations = { ...defaultObs, ...(raw.observations ?? {}) };
-    const assessments = { ...defaultAssessments, ...(raw.assessments ?? {}) };
-    const formatProfile = {
-      ...defaultFormatProfile,
-      ...(raw.formatProfile ?? {}),
-      successFactors: Array.isArray(raw.formatProfile?.successFactors) && raw.formatProfile?.successFactors.length
-        ? raw.formatProfile.successFactors.slice(0, 5)
-        : defaultFormatProfile.successFactors,
-      ignoredSignals: Array.isArray(raw.formatProfile?.ignoredSignals) && raw.formatProfile?.ignoredSignals.length
-        ? raw.formatProfile.ignoredSignals.slice(0, 4)
-        : defaultFormatProfile.ignoredSignals,
+    const mergedObservations: VisualObservations = {
+      ...defaultObs,
+      ...understanding.observations,
     };
+    for (const key of HIGH_DETAIL_OBSERVATION_KEYS) {
+      if (quality.observations[key] !== undefined) {
+        (mergedObservations as unknown as Record<string, unknown>)[key] = quality.observations[key];
+      }
+    }
 
-    return buildVisualResult(obs, assessments, plan, formatProfile);
+    const mergedAssessments: Record<string, string> = {
+      ...defaultAssessments,
+      ...understanding.assessments,
+    };
+    for (const key of HIGH_DETAIL_ASSESSMENT_KEYS) {
+      if (quality.assessments[key] !== undefined) {
+        mergedAssessments[key] = quality.assessments[key];
+      }
+    }
+
+    if (quality.assessments.overallTopFix && /sharp|light|frame|color|text|texture/i.test(quality.assessments.overallTopFix)) {
+      mergedAssessments.overallTopFix = quality.assessments.overallTopFix;
+    }
+
+    return buildVisualResult(
+      mergedObservations,
+      mergedAssessments,
+      plan,
+      understanding.formatProfile ?? fallbackProfile,
+    );
+  } catch (err) {
+    logger.warn({ err }, "Hybrid visual analysis failed, falling back to single-pass visual analysis");
+    return analyzeVisuals(highDetailFrames.length ? highDetailFrames : lowDetailFrames, platform, plan, transcript, userId, {
+      detail: "high",
+      focus: "balanced",
+    });
+  }
+}
+
+export async function analyzeVisuals(
+  frameBase64List: string[],
+  platform: string,
+  plan = "free",
+  transcript?: string,
+  userId?: number,
+  options: VisualAnalysisRequestOptions = {},
+): Promise<object> {
+  try {
+    const parts = await requestVisualAnalysisParts(frameBase64List, platform, plan, transcript, userId, options);
+    return buildVisualResult(parts.observations, parts.assessments, plan, parts.formatProfile);
   } catch (err) {
     logger.warn({ err }, "Visual analysis failed, using defaults");
-    return buildVisualResult(defaultObs, defaultAssessments, plan, defaultFormatProfile);
+    return buildVisualResult(getDefaultVisualObservations(), getDefaultVisualAssessments(), plan, getDefaultFormatProfile());
   }
 }
 
@@ -2039,6 +2198,7 @@ export async function generateSeo(
   const formatHint = formatProfile
     ? `Detected format: ${formatProfile.contentFormat ?? "general_visual"}.
 Primary subject: ${formatProfile.primarySubject ?? "the main subject on screen"}.
+Visual summary: ${formatProfile.contentSummary ?? "A visual-first video centered on the main subject and its payoff."}.
 Viewer intent: ${formatProfile.viewerIntent ?? "stay for the core payoff"}.
 Success factors: ${(formatProfile.successFactors ?? []).join(", ") || "clear subject visibility, strong payoff"}.
 Ignored signals: ${(formatProfile.ignoredSignals ?? []).join(", ") || "none"}.`
@@ -2175,6 +2335,7 @@ export async function generateShortClipIdeas(
   const formatHint = formatProfile
     ? `Detected format: ${formatProfile.contentFormat ?? "general_visual"}.
 Primary subject: ${formatProfile.primarySubject ?? "the main subject on screen"}.
+Visual summary: ${formatProfile.contentSummary ?? "A visual-first video centered on the main subject and its payoff."}.
 Viewer intent: ${formatProfile.viewerIntent ?? "stay for the payoff"}.
 Success factors: ${(formatProfile.successFactors ?? []).join(", ") || "clear payoff"}.`
     : "";

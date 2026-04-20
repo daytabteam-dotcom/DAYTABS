@@ -7,7 +7,7 @@ import { eq } from "drizzle-orm";
 import { deleteFromB2, downloadFromB2 } from "../../lib/b2";
 import {
   updateJob, transcribeAudio, extractAudio, extractFrames,
-  analyzeVisuals, analyzeAudio, analyzeEditingPoints,
+  analyzeVisuals, analyzeVisualsHybrid, analyzeAudio, analyzeEditingPoints,
   generateSeo, generateShortClipIdeas, generateSrt, translateSegments,
   computeQualityScore, getMediaDuration, getMediaMetadata, logger, generateVideoName, getTotalAnalysisScore,
   analyzePacing, analyzeSpeechPattern, buildRetentionForecast, scorePacing,
@@ -227,6 +227,8 @@ async function runVideoAnalyzer(
   const workDir = path.dirname(videoPath);
   const audioPath = path.join(workDir, "audio.mp3");
   const framesDir = path.join(workDir, "frames");
+  const lowFramesDir = path.join(workDir, "frames-low");
+  const highFramesDir = path.join(workDir, "frames-high");
 
   const plan = options.plan ?? "free";
   const modules = options.modules ?? ["quality", "editing"];
@@ -245,6 +247,8 @@ async function runVideoAnalyzer(
   try {
     await fs.mkdir(workDir, { recursive: true });
     await fs.mkdir(framesDir, { recursive: true });
+    await fs.mkdir(lowFramesDir, { recursive: true });
+    await fs.mkdir(highFramesDir, { recursive: true });
     await stopIfCancelled(jobId);
     await stopIfMemoryHigh(jobId, "analysis start");
 
@@ -352,31 +356,53 @@ async function runVideoAnalyzer(
     // Step 5: Quality module
     if (runQuality) {
       await updateJob(jobId, { status: "analyzing_visual", progress, currentStep: "Extracting video frames" });
-      const frameCount = getAdaptiveFrameCount(plan, speechAnalysis.mode);
-      logger.info({ jobId, frameCount }, "Starting frame extraction");
-      const frameBase64List = await withTimeout(
-        extractFrames(videoPath, framesDir, frameCount),
+      const useHybridVisualPass = speechAnalysis.mode === "visual_first";
+      const frameCount = speechAnalysis.mode === "talking_first"
+        ? 4
+        : getAdaptiveFrameCount(plan, speechAnalysis.mode);
+      const lowDetailFrameCount = useHybridVisualPass ? 12 : 0;
+      const highDetailFrameCount = useHybridVisualPass ? 4 : frameCount;
+      logger.info({ jobId, frameCount, lowDetailFrameCount, highDetailFrameCount, useHybridVisualPass }, "Starting frame extraction");
+      const frameExtractionPromise = useHybridVisualPass
+        ? Promise.all([
+            extractFrames(videoPath, lowFramesDir, lowDetailFrameCount, 640),
+            extractFrames(videoPath, highFramesDir, highDetailFrameCount, 1280),
+          ])
+        : Promise.all([
+            Promise.resolve<string[]>([]),
+            extractFrames(videoPath, framesDir, highDetailFrameCount, 1280),
+          ]);
+      const [lowDetailFrames, highDetailFrames] = await withTimeout(
+        frameExtractionPromise,
         getFrameExtractionTimeoutMs(),
         "frame extraction",
         jobId,
       );
       await stopIfCancelled(jobId);
       await stopIfMemoryHigh(jobId, "frame extraction");
-      logger.info({ jobId, frameCount: frameBase64List.length }, "Frame extraction completed");
+      logger.info({ jobId, lowDetailFrames: lowDetailFrames.length, highDetailFrames: highDetailFrames.length }, "Frame extraction completed");
 
       progress = 45;
       await updateJob(jobId, { status: "analyzing_visual", progress, currentStep: "Analyzing video quality" });
       const primaryPlatform = platforms[0] ?? "youtube_long";
       const visualAnalysis = await withTimeout(
-        analyzeVisuals(frameBase64List, primaryPlatform, plan, transcriptText, userId),
+        useHybridVisualPass
+          ? analyzeVisualsHybrid(lowDetailFrames, highDetailFrames, primaryPlatform, plan, transcriptText, userId)
+          : analyzeVisuals(highDetailFrames, primaryPlatform, plan, transcriptText, userId, {
+              detail: "high",
+              focus: "balanced",
+            }),
         90000,
         "visual analysis",
         jobId,
       );
       await stopIfCancelled(jobId);
-      frameBase64List.length = 0;
       await fs.rm(framesDir, { recursive: true, force: true }).catch(() => {});
+      await fs.rm(lowFramesDir, { recursive: true, force: true }).catch(() => {});
+      await fs.rm(highFramesDir, { recursive: true, force: true }).catch(() => {});
       await fs.mkdir(framesDir, { recursive: true }).catch(() => {});
+      await fs.mkdir(lowFramesDir, { recursive: true }).catch(() => {});
+      await fs.mkdir(highFramesDir, { recursive: true }).catch(() => {});
       await stopIfMemoryHigh(jobId, "visual analysis");
       const audioAnalysis = await withTimeout(
         analyzeAudio(transcriptText, whisperConfidence, audioPath, speechAnalysis, userId),
