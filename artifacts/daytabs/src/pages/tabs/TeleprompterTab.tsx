@@ -24,8 +24,9 @@ export default function TeleprompterTab() {
   const [script, setScript] = useState("");
   const [open, setOpen] = useState(false);
   const [startInRecordMode, setStartInRecordMode] = useState(false);
+  const hasScript = Boolean(script.trim());
 
-  const displayScript = script.trim() || PLACEHOLDER;
+  const displayScript = script.trim();
 
   return (
     <>
@@ -51,6 +52,7 @@ export default function TeleprompterTab() {
           <div className="flex flex-wrap gap-2">
             <Button
               variant="secondary"
+              disabled={!hasScript}
               onClick={() => {
                 setStartInRecordMode(false);
                 setOpen(true);
@@ -60,6 +62,7 @@ export default function TeleprompterTab() {
               Use teleprompter
             </Button>
             <Button
+              disabled={!hasScript}
               onClick={() => {
                 setStartInRecordMode(true);
                 setOpen(true);
@@ -97,6 +100,11 @@ export default function TeleprompterTab() {
         </PanelCard>
 
         <PanelCardSoft className="space-y-1.5 p-4 text-xs text-white/35">
+          {!hasScript ? (
+            <p className="text-sm font-medium text-amber-200">
+              Paste your script first to unlock the teleprompter and recording view.
+            </p>
+          ) : null}
           <p className="text-white/55">
             Use teleprompter opens the front-camera view without starting a recording. Teleprompter + record starts the same view and begins a local recording automatically.
           </p>

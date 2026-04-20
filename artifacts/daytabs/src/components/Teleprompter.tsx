@@ -14,6 +14,7 @@ import {
   CameraOff,
   Circle,
   Download,
+  Settings,
 } from "lucide-react";
 
 interface TeleprompterProps {
@@ -31,6 +32,7 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const rafRef = useRef<number>(0);
@@ -69,6 +71,7 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
       streamRef.current = null;
     }
     if (videoRef.current) videoRef.current.srcObject = null;
+    setCameraReady(false);
   }, []);
 
   const getSupportedMimeType = useCallback(() => {
@@ -157,10 +160,21 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
       });
       streamRef.current = stream;
       if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play().catch(() => undefined);
+        const video = videoRef.current;
+        video.muted = true;
+        video.playsInline = true;
+        video.srcObject = stream;
+        video.onloadedmetadata = () => {
+          setCameraReady(true);
+          void video.play().catch(() => undefined);
+        };
+        if (video.readyState >= 1) {
+          setCameraReady(true);
+          await video.play().catch(() => undefined);
+        }
+      } else {
+        setCameraReady(true);
       }
-      setCameraReady(true);
     } catch (error) {
       setCameraError(error instanceof Error ? error.message : "Could not access the front camera.");
     }
@@ -235,19 +249,21 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
     setFontSize(s => Math.min(80, Math.max(20, s + delta)));
 
   const speedPercent = Math.round(((speed - 0.5) / 9.5) * 100);
+  const primaryActionLabel = playing ? "Pause" : "Play";
+  const primaryActionIcon = playing ? Pause : Play;
+  const PrimaryActionIcon = primaryActionIcon;
 
   return (
     <div className="fixed inset-0 z-[100] flex flex-col overflow-hidden bg-black select-none">
       <div className="absolute inset-0">
-        {cameraReady ? (
-          <video
-            ref={videoRef}
-            className="h-full w-full object-cover scale-x-[-1]"
-            autoPlay
-            muted
-            playsInline
-          />
-        ) : (
+        <video
+          ref={videoRef}
+          className={cameraReady ? "h-full w-full object-cover scale-x-[-1]" : "hidden"}
+          autoPlay
+          muted
+          playsInline
+        />
+        {!cameraReady ? (
           <div className="flex h-full w-full items-center justify-center bg-[#050505]">
             <div className="max-w-md px-6 text-center text-white/60">
               <CameraOff className="mx-auto h-10 w-10 text-white/35" />
@@ -259,7 +275,7 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
               </p>
             </div>
           </div>
-        )}
+        ) : null}
       </div>
       <div className="absolute inset-0 bg-black/60" />
 
@@ -269,7 +285,7 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
           showControls ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-2 pointer-events-none"
         }`}
       >
-        <div className="relative z-20 flex items-center justify-between gap-4 px-6 py-4 bg-gradient-to-b from-black via-black/95 to-transparent">
+        <div className="relative z-20 flex items-center justify-between gap-4 px-4 py-4 bg-gradient-to-b from-black via-black/95 to-transparent sm:px-6">
 
           {/* Left: Close */}
           <div className="flex items-center gap-3">
@@ -278,7 +294,7 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
               className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/8 px-3 py-2 text-white/50 transition-all hover:bg-white/15 hover:text-white/90"
             >
               <X className="w-4 h-4" />
-              <span className="text-sm font-medium">Close</span>
+              <span className="hidden text-sm font-medium sm:inline">Close</span>
             </button>
             <div className="hidden rounded-xl border border-white/10 bg-black/35 px-3 py-2 text-xs text-white/75 sm:block">
               <p className="font-semibold text-white">
@@ -289,7 +305,7 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
           </div>
 
           {/* Center: Core playback controls */}
-          <div className="flex items-center gap-3">
+          <div className="hidden items-center gap-3 md:flex">
             {/* Reset */}
             <button
               onClick={reset}
@@ -331,8 +347,8 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
           </div>
 
           {/* Right: Speed + Font size */}
-          <div className="flex items-center gap-5">
-            <div className="hidden items-center gap-2 rounded-xl border border-white/10 bg-black/35 px-3 py-2 text-xs text-white/70 lg:flex">
+          <div className="hidden items-center gap-5 md:flex">
+            <div className="hidden items-center gap-2 rounded-xl border border-white/10 bg-black/35 px-3 py-2 text-xs text-white/70 xl:flex">
               <Download className="h-3.5 w-3.5 text-white/45" />
               <span>{savedMessage ?? (recording ? "Recording locally" : "Not recording")}</span>
             </div>
@@ -415,7 +431,7 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
 
         {/* Script text */}
         <div
-          className="mx-auto max-w-3xl px-6 pb-[50vh] sm:px-10"
+          className="mx-auto max-w-3xl px-6 pb-[12rem] pt-2 sm:px-10 sm:pb-[50vh]"
           style={{
             fontSize: `${fontSize}px`,
             lineHeight: 1.75,
@@ -463,13 +479,100 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
         </div>
       </div>
 
+      {/* ── Mobile sticky controls ───────────────────────────────────────────── */}
+      <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] md:hidden">
+        <div className="pointer-events-auto rounded-[28px] border border-white/10 bg-black/85 p-3 shadow-2xl shadow-black/60 backdrop-blur-xl">
+          {settingsOpen ? (
+            <div className="mb-3 space-y-3 rounded-2xl border border-white/10 bg-white/[0.04] p-3">
+              <div className="flex items-center justify-between gap-3 text-xs text-white/55">
+                <span className="font-semibold uppercase tracking-[0.16em]">Teleprompter settings</span>
+                <span>{savedMessage ?? (recording ? "Recording locally" : "Not recording")}</span>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => adjustSpeed(-0.5)}
+                  className="rounded-2xl border border-white/10 bg-white/[0.05] px-4 py-3 text-sm font-medium text-white"
+                >
+                  Slower
+                </button>
+                <button
+                  onClick={() => adjustSpeed(0.5)}
+                  className="rounded-2xl border border-white/10 bg-white/[0.05] px-4 py-3 text-sm font-medium text-white"
+                >
+                  Faster
+                </button>
+                <button
+                  onClick={() => adjustFont(-4)}
+                  className="rounded-2xl border border-white/10 bg-white/[0.05] px-4 py-3 text-sm font-medium text-white"
+                >
+                  Smaller text
+                </button>
+                <button
+                  onClick={() => adjustFont(4)}
+                  className="rounded-2xl border border-white/10 bg-white/[0.05] px-4 py-3 text-sm font-medium text-white"
+                >
+                  Bigger text
+                </button>
+                <button
+                  onClick={reset}
+                  className="rounded-2xl border border-white/10 bg-white/[0.05] px-4 py-3 text-sm font-medium text-white"
+                >
+                  Restart
+                </button>
+                <button
+                  onClick={() => (recording ? stopRecording() : startRecording())}
+                  disabled={!cameraReady}
+                  className={`rounded-2xl px-4 py-3 text-sm font-semibold transition-all ${
+                    recording
+                      ? "bg-red-500 text-white"
+                      : "border border-white/10 bg-white/[0.05] text-white disabled:cursor-not-allowed disabled:text-white/35"
+                  }`}
+                >
+                  {recording ? "Stop recording" : "Start recording"}
+                </button>
+                <button
+                  onClick={onClose}
+                  className="col-span-2 rounded-2xl border border-white/10 bg-white/[0.05] px-4 py-3 text-sm font-medium text-white"
+                >
+                  Close teleprompter
+                </button>
+              </div>
+              <div className="flex items-center justify-between text-xs text-white/45">
+                <span>Speed {speed.toFixed(1)}x</span>
+                <span>Text {fontSize}px</span>
+              </div>
+            </div>
+          ) : null}
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setPlaying(p => !p)}
+              className={`flex min-h-16 flex-1 items-center justify-center gap-3 rounded-[22px] px-5 text-base font-semibold transition-all ${
+                playing
+                  ? "bg-white text-black hover:bg-white/90"
+                  : "bg-violet-600 text-white hover:bg-violet-500"
+              }`}
+            >
+              <PrimaryActionIcon className="h-5 w-5" />
+              <span>{primaryActionLabel}</span>
+            </button>
+            <button
+              onClick={() => setSettingsOpen(current => !current)}
+              className="flex min-h-16 min-w-16 items-center justify-center rounded-[22px] border border-white/10 bg-white/[0.06] text-white"
+              aria-label="Open teleprompter settings"
+            >
+              <Settings className="h-5 w-5" />
+            </button>
+          </div>
+        </div>
+      </div>
+
       {/* ── Bottom key hints ──────────────────────────────────────────────────── */}
       <div
         className={`shrink-0 transition-all duration-300 ${
           showControls ? "opacity-100" : "opacity-0"
         }`}
       >
-        <div className="relative z-20 flex items-center justify-center gap-8 bg-gradient-to-t from-black to-transparent py-2.5 text-[11px] text-white/25">
+        <div className="relative z-20 hidden items-center justify-center gap-8 bg-gradient-to-t from-black to-transparent py-2.5 text-[11px] text-white/25 md:flex">
           <span className="flex items-center gap-1.5">
             <kbd className="px-1.5 py-0.5 rounded bg-white/8 text-white/35 font-mono text-[10px]">Space</kbd>
             Play / Pause
