@@ -13,6 +13,7 @@ import {
   type YoutubeConnection,
 } from "@workspace/db";
 import { openai } from "./openai";
+import { logTokenUsage, usageTokens } from "./logTokens";
 
 const JWT_SECRET = process.env.JWT_SECRET!;
 const YOUTUBE_CLIENT_ID = process.env.YOUTUBE_CLIENT_ID || process.env.GOOGLE_CLIENT_ID || "";
@@ -1114,7 +1115,7 @@ async function searchChannelIds(userId: number, query: string, maxResults = 25) 
     .filter((id): id is string => Boolean(id));
 }
 
-async function analyzeNiche(channel: JsonRecord, recentVideos: YoutubeRecentVideo[]): Promise<YoutubeNicheProfile> {
+async function analyzeNiche(userId: number, channel: JsonRecord, recentVideos: YoutubeRecentVideo[]): Promise<YoutubeNicheProfile> {
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
@@ -1154,6 +1155,12 @@ Return shape:
     response_format: { type: "json_object" },
     max_completion_tokens: 1200,
   });
+  await logTokenUsage({
+    userId,
+    feature: "channelSync",
+    model: "gpt-4o-mini",
+    ...usageTokens(completion.usage),
+  });
   const raw = completion.choices[0]?.message?.content ?? "{}";
   const parsed = asRecord(parseAiJson(raw));
   return {
@@ -1186,7 +1193,7 @@ export async function syncYoutubeChannel(userId: number) {
   const thumbnails = asRecord(snippet.thumbnails);
   const channelThumbnailUrl = asString(asRecord(thumbnails.high).url) || asString(asRecord(thumbnails.medium).url) || asString(asRecord(thumbnails.default).url);
   const recentVideos = await fetchRecentVideos(userId, channelId, 20);
-  const analyzedNicheProfile = await analyzeNiche({
+  const analyzedNicheProfile = await analyzeNiche(userId, {
     id: channelId,
     title: asString(snippet.title),
     description: asString(snippet.description),
@@ -1635,6 +1642,12 @@ Return shape:
     response_format: { type: "json_object" },
     max_completion_tokens: 1200,
   });
+  await logTokenUsage({
+    userId,
+    feature: "perfSummary",
+    model: "gpt-4o-mini",
+    ...usageTokens(completion.usage),
+  });
   return parseAiJson(completion.choices[0]?.message?.content ?? "{}");
 }
 
@@ -1916,6 +1929,12 @@ Return this exact shape:
     response_format: { type: "json_object" },
     max_completion_tokens: 5000,
   });
+  await logTokenUsage({
+    userId,
+    feature: "ytPlanGenerate",
+    model: "gpt-4o",
+    ...usageTokens(completion.usage),
+  });
 
   const plan = normalizeGeneratedYoutubePlan(asRecord(parseAiJson(completion.choices[0]?.message?.content ?? "{}")), startDate, performanceSignals, preferredPostsPerWeek);
   if (shouldReplaceDraftPlan && lastPlan) {
@@ -1990,6 +2009,12 @@ Return shape:
     ],
     response_format: { type: "json_object" },
     max_completion_tokens: 1400,
+  });
+  await logTokenUsage({
+    userId,
+    feature: "improveIdea",
+    model: "gpt-4o-mini",
+    ...usageTokens(completion.usage),
   });
   const improved = asRecord(parseAiJson(completion.choices[0]?.message?.content ?? "{}"));
   const improvedTitle = asString(improved.improvedTitle)?.trim() || idea.title?.trim() || "YouTube idea";
@@ -2165,6 +2190,12 @@ Return shape:
     ],
     response_format: { type: "json_object" },
     max_completion_tokens: 1600,
+  });
+  await logTokenUsage({
+    userId,
+    feature: "ytPlanRegenerate",
+    model: "gpt-4o-mini",
+    ...usageTokens(completion.usage),
   });
 
   const raw = asRecord(parseAiJson(completion.choices[0]?.message?.content ?? "{}"));

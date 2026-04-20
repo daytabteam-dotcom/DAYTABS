@@ -1,11 +1,14 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import { SignJWT } from "jose";
+import { timingSafeEqual } from "node:crypto";
 import { OAuth2Client } from "google-auth-library";
 import { db } from "@workspace/db";
 import { usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { requireAuth } from "../../middlewares/auth";
+import { ADMIN_SESSION_COOKIE } from "../../lib/adminAuth";
 import { normalizePlan, PLAN_LIMITS } from "../../lib/planLimits";
 import { getOrCreateUsage } from "../../lib/usageService";
 import { CONTACT_EMAIL, SMTP_USER, assertMailConfigured, createMailTransport, escapeHtml } from "../../lib/email";
@@ -28,6 +31,9 @@ const CANONICAL_APP_ORIGIN = (
 ).replace(/\/$/, "");
 const RENDER_HOST = "daytabs.onrender.com";
 const GOOGLE_CALLBACK_PATH = "/api/auth/google/callback";
+const ADMIN_MAX_ATTEMPTS = 5;
+const ADMIN_WINDOW_MS = 15 * 60 * 1000;
+const adminAttempts = new Map<string, { count: number; resetAt: number }>();
 
 function getPublicBaseUrl(req: import("express").Request): string {
   const forwarded = req.get("x-forwarded-host");
@@ -76,6 +82,82 @@ function signToken(userId: number, email: string, name?: string | null, plan = "
     { expiresIn: "7d" }
   );
 }
+
+function checkRateLimit(ip: string): boolean {
+  const now = Date.now();
+  const entry = adminAttempts.get(ip);
+  if (!entry || now > entry.resetAt) {
+    adminAttempts.set(ip, { count: 1, resetAt: now + ADMIN_WINDOW_MS });
+    return true;
+  }
+  if (entry.count >= ADMIN_MAX_ATTEMPTS) return false;
+  entry.count++;
+  return true;
+}
+
+function timingSafeStringEqual(value: string, expected: string) {
+  const expectedBuffer = Buffer.from(expected);
+  const valueBuffer = Buffer.from(value);
+  const sameLength = valueBuffer.length === expectedBuffer.length;
+  const safeValueBuffer = sameLength ? valueBuffer : Buffer.alloc(expectedBuffer.length);
+  return expectedBuffer.length > 0 && timingSafeEqual(safeValueBuffer, expectedBuffer) && sameLength;
+}
+
+function adminJwtSecret() {
+  const secret = process.env.ADMIN_JWT_SECRET;
+  if (!secret) throw new Error("ADMIN_JWT_SECRET environment variable is required");
+  return new TextEncoder().encode(secret);
+}
+
+router.post("/admin-login", async (req, res) => {
+  const ip = req.headers["x-forwarded-for"]?.toString().split(",")[0] ?? "127.0.0.1";
+  const rateLimitOk = checkRateLimit(ip);
+  const { username = "", password = "" } = (req.body ?? {}) as { username?: string; password?: string };
+  await new Promise((resolve) => setTimeout(resolve, 600));
+
+  if (!rateLimitOk) {
+    res.status(429).json({ error: "Too many attempts" });
+    return;
+  }
+
+  try {
+    const usernameMatches = timingSafeStringEqual(username, process.env.ADMIN_USERNAME ?? "");
+    const passwordMatches = await bcrypt.compare(password, process.env.ADMIN_PASSWORD_HASH ?? "");
+
+    if (!usernameMatches || !passwordMatches) {
+      res.status(401).json({ error: "Invalid credentials" });
+      return;
+    }
+
+    const token = await new SignJWT({ role: "admin" })
+      .setProtectedHeader({ alg: "HS256" })
+      .setExpirationTime("8h")
+      .sign(adminJwtSecret());
+
+    res.cookie(ADMIN_SESSION_COOKIE, token, {
+      httpOnly: true,
+      secure: true,
+      sameSite: "strict",
+      maxAge: 60 * 60 * 8 * 1000,
+      path: "/",
+    });
+    res.status(200).json({ ok: true });
+  } catch (err) {
+    req.log.error({ err }, "Admin login error");
+    res.status(401).json({ error: "Invalid credentials" });
+  }
+});
+
+router.post("/admin-logout", (_req, res) => {
+  res.cookie(ADMIN_SESSION_COOKIE, "", {
+    httpOnly: true,
+    secure: true,
+    sameSite: "strict",
+    maxAge: 0,
+    path: "/",
+  });
+  res.json({ ok: true });
+});
 
 router.post("/signup", async (req, res) => {
   try {

@@ -9,6 +9,7 @@ import growthPlannerRouter from "./growth-planner/index";
 import userRouter from "./user/index";
 import uploadRouter from "./upload/index";
 import youtubeRouter from "./youtube/index";
+import adminRouter from "./admin/index";
 
 const router: IRouter = Router();
 
@@ -22,5 +23,6 @@ router.use("/dubbing", dubbingRouter);
 router.use("/growth-planner", growthPlannerRouter);
 router.use("/youtube", youtubeRouter);
 router.use("/user", userRouter);
+router.use("/admin", adminRouter);
 
 export default router;
