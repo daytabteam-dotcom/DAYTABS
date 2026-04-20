@@ -474,6 +474,36 @@ function compactTags(tags: Array<{ tag?: string }> = [], max = 8) {
     .slice(0, max);
 }
 
+function SignalChip({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5">
+      <span className="text-[10px] uppercase tracking-[0.16em] text-white/35">{label}</span>
+      <span className="ml-2 text-xs font-semibold text-white/80">{value}</span>
+    </div>
+  );
+}
+
+function ProofMomentCard({
+  title,
+  eyebrow,
+  detail,
+  accent,
+}: {
+  title: string;
+  eyebrow: string;
+  detail: string;
+  accent: string;
+}) {
+  return (
+    <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-background/70 p-4">
+      <div className={`absolute inset-x-0 top-0 h-1 ${accent}`} />
+      <p className="text-[10px] uppercase tracking-[0.16em] text-white/35">{eyebrow}</p>
+      <p className="mt-3 text-base font-semibold text-white">{title}</p>
+      <p className="mt-2 text-sm leading-relaxed text-white/60">{detail}</p>
+    </div>
+  );
+}
+
 function CreatorReportIntro({ results, profile }: { results: any; profile?: any }) {
   if (!results) return null;
   const formatProfile = getFormatProfile(profile);
@@ -481,12 +511,73 @@ function CreatorReportIntro({ results, profile }: { results: any; profile?: any 
   const publishData = results?.publish ? Object.values(results.publish)[0] as any : null;
   const topFixes = collectTopFixes(results);
   const usefulTags = compactTags(publishData?.hashtags ?? []);
+  const strongest = strongestMetric(results?.quality, profile);
+  const firstHook = results?.editing?.hooks?.[0] ?? null;
+  const firstRisk = results?.quality?.retention?.dropOffMoments?.[0] ?? null;
+  const primaryPromise = publishData?.audiencePromise ?? editingData?.packagingAngle ?? formatProfile?.viewerIntent ?? "Clear outcome-driven packaging";
 
   return (
     <div className="space-y-5">
+      <PanelCard className="overflow-hidden border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(244,114,182,0.14),transparent_28%),radial-gradient(circle_at_top_right,rgba(59,130,246,0.12),transparent_30%)] p-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="max-w-3xl">
+            <p className="text-[11px] uppercase tracking-[0.18em] text-white/35">AI Spotted This Fast</p>
+            <h3 className="mt-3 text-2xl font-semibold text-white">
+              {editingData?.topic ?? formatProfile?.primarySubject ?? "Your core video idea"} 
+            </h3>
+            <p className="mt-3 max-w-2xl text-sm leading-7 text-white/68">
+              {editingData?.viewPotential ?? "This section gives the fast answer on whether the cut is strong enough and what is holding it back."}
+            </p>
+          </div>
+          <div className="rounded-2xl border border-primary/20 bg-primary/10 px-4 py-4 text-center">
+            <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Fast Promise</p>
+            <p className="mt-2 max-w-[220px] text-sm font-medium leading-relaxed text-white/82">{primaryPromise}</p>
+          </div>
+        </div>
+        <div className="mt-5 flex flex-wrap gap-2">
+          {formatProfile?.contentFormat ? <SignalChip label="Detected" value={contentFormatLabel(formatProfile.contentFormat)} /> : null}
+          {formatProfile?.primarySubject ? <SignalChip label="Topic" value={formatProfile.primarySubject} /> : null}
+          {formatProfile?.viewerIntent ? <SignalChip label="Viewer Wants" value={formatProfile.viewerIntent} /> : null}
+          {editingData?.editingStyle ? <SignalChip label="Edit Style" value={editingData.editingStyle} /> : null}
+        </div>
+      </PanelCard>
+
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {firstHook ? (
+          <ProofMomentCard
+            eyebrow="Best Hook"
+            title={firstHook.start ?? "Opening"}
+            detail={firstHook.text ?? firstHook.description ?? "Strong opening moment"}
+            accent="bg-gradient-to-r from-yellow-400 to-amber-500"
+          />
+        ) : null}
+        {firstRisk ? (
+          <ProofMomentCard
+            eyebrow="Attention Risk"
+            title={firstRisk.at ?? "Early drop-off"}
+            detail={firstRisk.reason ?? "This is where the video is most likely to lose people."}
+            accent="bg-gradient-to-r from-red-400 to-rose-500"
+          />
+        ) : null}
+        {strongest ? (
+          <ProofMomentCard
+            eyebrow="Strongest Signal"
+            title={strongest.label}
+            detail={strongest.metric.assessment ?? "This is one of the cleanest parts of the current cut."}
+            accent="bg-gradient-to-r from-emerald-400 to-green-500"
+          />
+        ) : null}
+        <ProofMomentCard
+          eyebrow="Packaging Angle"
+          title={publishData?.audiencePromise ?? "Core click promise"}
+          detail={editingData?.packagingAngle ?? publishData?.packagingStrategy ?? "This is the angle the title and thumbnail should sell first."}
+          accent="bg-gradient-to-r from-sky-400 to-blue-500"
+        />
+      </div>
+
       <div className="grid gap-4 lg:grid-cols-3">
         <PanelCardSoft className="border border-white/10 p-4">
-          <p className="text-[11px] uppercase tracking-[0.16em] text-white/40">Will This Get Views?</p>
+          <p className="text-[11px] uppercase tracking-[0.16em] text-white/40">Will This Pull?</p>
           {editingData?.viewPotential ? (
             <>
               <p className="mt-3 text-lg font-semibold text-white">{editingData.topic ?? "Current cut outlook"}</p>
@@ -498,7 +589,7 @@ function CreatorReportIntro({ results, profile }: { results: any; profile?: any 
         </PanelCardSoft>
 
         <PanelCardSoft className="border border-white/10 p-4">
-          <p className="text-[11px] uppercase tracking-[0.16em] text-white/40">Best Edit Style</p>
+          <p className="text-[11px] uppercase tracking-[0.16em] text-white/40">How To Edit It</p>
           {editingData?.editingStyle ? (
             <>
               <p className="mt-3 text-lg font-semibold text-white">{editingData.editingStyle}</p>
@@ -510,7 +601,7 @@ function CreatorReportIntro({ results, profile }: { results: any; profile?: any 
         </PanelCardSoft>
 
         <PanelCardSoft className="border border-white/10 p-4">
-          <p className="text-[11px] uppercase tracking-[0.16em] text-white/40">Packaging Should Sell</p>
+          <p className="text-[11px] uppercase tracking-[0.16em] text-white/40">What Wins The Click</p>
           {editingData?.packagingAngle || publishData?.audiencePromise ? (
             <>
               <p className="mt-3 text-lg font-semibold text-white">{publishData?.audiencePromise ?? "Core click promise"}</p>
@@ -524,7 +615,7 @@ function CreatorReportIntro({ results, profile }: { results: any; profile?: any 
 
       {formatProfile?.viewerIntent && (
         <PanelCardSoft className="border border-white/10 p-4">
-          <p className="text-[11px] uppercase tracking-[0.16em] text-white/40">Viewer Intent</p>
+          <p className="text-[11px] uppercase tracking-[0.16em] text-white/40">Why Someone Would Watch</p>
           <p className="mt-3 text-sm leading-6 text-white/65">{formatProfile.viewerIntent}</p>
         </PanelCardSoft>
       )}
@@ -545,7 +636,7 @@ function CreatorReportIntro({ results, profile }: { results: any; profile?: any 
 
       {usefulTags.length ? (
         <PanelCardSoft className="border border-white/10 p-4">
-          <p className="text-[11px] uppercase tracking-[0.16em] text-white/40">Best Tags To Use</p>
+          <p className="text-[11px] uppercase tracking-[0.16em] text-white/40">Best Tags To Paste</p>
           <div className="mt-3 flex flex-wrap gap-2">
             {usefulTags.map((tag) => (
               <span key={tag} className="rounded-lg border border-primary/20 bg-primary/10 px-2.5 py-1 text-xs font-mono text-primary/80">
