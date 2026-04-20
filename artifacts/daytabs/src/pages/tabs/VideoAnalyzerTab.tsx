@@ -17,6 +17,7 @@ import { PlanPickerModal } from "@/components/PlanPickerModal";
 import { generateAnalysisPDF } from "@/lib/generateAnalysisPDF";
 import { UpgradeErrorModal, type LimitError } from "@/components/UpgradeErrorModal";
 import { PanelPage, PanelHeader, PanelTitle, PanelSubtitle, PanelCard, PanelCardSoft } from "@/components/panel-system";
+import { Skeleton } from "@/components/ui/skeleton";
 
 interface TabProps {
   onDataReady: () => void;
@@ -1036,6 +1037,36 @@ function TranscriptPanel({ data, isPaid, profile }: { data: any; isPaid: boolean
   );
 }
 
+function VideoAnalyzerLoadingState() {
+  return (
+    <PanelPage className="space-y-8">
+      <PanelHeader className="gap-4">
+        <div>
+          <Skeleton className="h-8 w-48 bg-white/10" />
+          <Skeleton className="mt-3 h-5 w-[32rem] max-w-full bg-white/10" />
+        </div>
+      </PanelHeader>
+      <div className="grid gap-5 lg:grid-cols-3">
+        <div className="space-y-5 lg:col-span-2">
+          <PanelCard className="p-6">
+            <Skeleton className="h-56 bg-white/10" />
+          </PanelCard>
+          <PanelCard className="p-4">
+            <Skeleton className="h-24 bg-white/10" />
+          </PanelCard>
+        </div>
+        <PanelCard className="space-y-3 p-4">
+          <Skeleton className="h-6 w-36 bg-white/10" />
+          {Array.from({ length: 4 }).map((_, index) => (
+            <Skeleton key={index} className="h-20 bg-white/10" />
+          ))}
+          <Skeleton className="h-12 bg-white/10" />
+        </PanelCard>
+      </div>
+    </PanelPage>
+  );
+}
+
 function AnalyzingScreen({
   progress,
   currentStep,
@@ -1428,11 +1459,13 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [limitError, setLimitError] = useState<LimitError | null>(null);
   const [analysisHistory, setAnalysisHistory] = useState<AnalysisHistoryItem[]>([]);
-  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(true);
   const [historyResult, setHistoryResult] = useState<any | null>(null);
   const [openedHistoryJobId, setOpenedHistoryJobId] = useState<string | null>(null);
   const [cancellingJobId, setCancellingJobId] = useState<string | null>(null);
   const [showUploadForm, setShowUploadForm] = useState(false);
+  const [historyBootstrapped, setHistoryBootstrapped] = useState(false);
+  const [recoveryBootstrapped, setRecoveryBootstrapped] = useState(false);
 
   const { uploadAsync: uploadVideo, isPending: isUploading, uploadInfo, cancelUpload } = useVideoUpload();
   const { data: pollData } = useAnalysisPolling(jobId);
@@ -1460,7 +1493,13 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
 
   const loadAnalysisHistory = useCallback(async () => {
     const token = getStoredAuthToken();
-    if (!token) return;
+    if (!token) {
+      setAnalysisHistory([]);
+      setShowUploadForm(true);
+      setHistoryLoading(false);
+      setHistoryBootstrapped(true);
+      return;
+    }
 
     setHistoryLoading(true);
     try {
@@ -1475,6 +1514,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
       // History is helpful but non-blocking; upload and polling remain the main path.
     } finally {
       setHistoryLoading(false);
+      setHistoryBootstrapped(true);
     }
   }, []);
 
@@ -1484,7 +1524,14 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
 
   useEffect(() => {
     const recovery = readPendingUploadRecovery();
-    if (!recovery || jobId) return;
+    if (jobId) {
+      setRecoveryBootstrapped(true);
+      return;
+    }
+    if (!recovery) {
+      setRecoveryBootstrapped(true);
+      return;
+    }
 
     if (recovery.fileName) fileNameRef.current = recovery.fileName;
     if (recovery.platforms?.length) setSelectedPlatforms(recovery.platforms);
@@ -1498,6 +1545,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
         title: "Analysis restored",
         description: "We reconnected to your previous upload.",
       });
+      setRecoveryBootstrapped(true);
       return;
     }
 
@@ -1517,7 +1565,10 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
           description: "Your upload kept processing, so we reconnected to it.",
         });
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setRecoveryBootstrapped(true);
+      });
 
     return () => {
       cancelled = true;
@@ -1788,6 +1839,9 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
   });
   const hasHistory = analysisHistory.length > 0;
   const showHistoryLanding = !hasResults && !showAnalyzing && !isError && hasHistory && !showUploadForm;
+  const isBootstrapping = planLoading || !historyBootstrapped || !recoveryBootstrapped;
+
+  if (isBootstrapping) return <VideoAnalyzerLoadingState />;
 
   return (
     <PanelPage className="space-y-8">

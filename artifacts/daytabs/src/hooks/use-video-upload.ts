@@ -54,6 +54,58 @@ async function readErrorBody(res: Response) {
   return text ? { error: text.slice(0, 240) } : {};
 }
 
+function shouldTryLegacyFallback(err: unknown) {
+  if (!(err instanceof Error)) return false;
+  const message = err.message.toLowerCase();
+  return (
+    message.includes("cloudflare upload failed") ||
+    message.includes("upload stalled") ||
+    message.includes("server did not confirm") ||
+    message.includes("assembly failed")
+  );
+}
+
+async function uploadViaLegacyEndpoint(file: File, options: VideoUploadOptions) {
+  const formData = new FormData();
+  formData.append("video", file);
+  formData.append("mode", options.mode);
+  formData.append("platform", options.platform ?? options.platforms?.[0] ?? "youtube_long");
+  formData.append("platforms", JSON.stringify(options.platforms ?? (options.platform ? [options.platform] : ["youtube_long"])));
+  formData.append("modules", JSON.stringify(options.modules ?? ["quality", "editing"]));
+
+  if (options.translateSubtitles !== undefined) {
+    formData.append("translateSubtitles", String(options.translateSubtitles));
+  }
+  if (options.subtitleLanguage) {
+    formData.append("subtitleLanguage", options.subtitleLanguage);
+  }
+  if (options.audioLanguage) {
+    formData.append("audioLanguage", options.audioLanguage);
+  }
+  if (options.audioVoice) {
+    formData.append("audioVoice", options.audioVoice);
+  }
+
+  const res = await fetch("/api/analysis/upload", {
+    method: "POST",
+    headers: authHeaders(),
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const body = await readErrorBody(res);
+    const err = new Error(
+      body.message ??
+      body.error ??
+      getHttpErrorMessage(res.status, `Fallback upload failed (HTTP ${res.status})`)
+    );
+    if ((body as { code?: string }).code) (err as any).structured = body;
+    throw err;
+  }
+
+  return res.json() as Promise<{ jobId: string }>;
+}
+
 async function fetchWithTimeout(
   input: RequestInfo | URL,
   init: RequestInit,
@@ -306,7 +358,6 @@ export function useVideoUpload() {
         uploadIdRef.current = null;
         return { jobId };
       } catch (err: any) {
-        const finalErr = cancelledRef.current ? new Error("Upload cancelled") : err;
         const id = uploadIdRef.current;
         if (id && (cancelledRef.current || cleanupRemoteUploadOnError)) {
           fetch(`/api/upload/${id}`, {
@@ -315,6 +366,28 @@ export function useVideoUpload() {
           }).catch(() => {});
           uploadIdRef.current = null;
         }
+
+        if (!cancelledRef.current && shouldTryLegacyFallback(err)) {
+          try {
+            setUploadInfo({
+              phase: "assembling",
+              pct: 100,
+              mbUploaded: file.size / (1024 * 1024),
+              totalMb: file.size / (1024 * 1024),
+              etaSec: null,
+              retrying: true,
+            });
+            const fallback = await uploadViaLegacyEndpoint(file, options);
+            setError(null);
+            return fallback;
+          } catch (fallbackErr) {
+            const finalErr = fallbackErr instanceof Error ? fallbackErr : new Error("Upload failed");
+            setError(finalErr);
+            throw finalErr;
+          }
+        }
+
+        const finalErr = cancelledRef.current ? new Error("Upload cancelled") : err;
         setError(finalErr);
         throw finalErr;
       } finally {

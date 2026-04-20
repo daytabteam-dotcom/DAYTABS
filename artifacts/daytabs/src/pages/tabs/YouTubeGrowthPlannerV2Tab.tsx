@@ -2419,6 +2419,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
   }
 
   useEffect(() => {
+    if (planLoading) return;
     if (!plan.isStudio) {
       setLoading(false);
       return;
@@ -2432,7 +2433,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
       const next = params.toString() ? `${window.location.pathname}?${params.toString()}` : window.location.pathname;
       window.history.replaceState({}, "", next);
     }
-  }, [plan.isStudio]);
+  }, [plan.isStudio, planLoading]);
 
   const calendarDays = useMemo(() => [...days].sort((a, b) => a.date.localeCompare(b.date) || a.day - b.day), [days]);
   const weekCalendarDates = useMemo(() => {
@@ -2507,8 +2508,8 @@ export default function YouTubeGrowthPlannerV2Tab() {
     }));
   }, [resultsByDay, recentVideoById]);
 
-  if (!plan.isStudio) return <GrowthPlannerComingSoon />;
   if (loading || planLoading) return <LoadingState />;
+  if (!plan.isStudio) return <GrowthPlannerComingSoon />;
 
   function updateDay(cardId: string, patch: Partial<PlanDay>) {
     setDays((current) => current.map((day) => toCardId(day) === cardId ? { ...day, ...patch } : day));
