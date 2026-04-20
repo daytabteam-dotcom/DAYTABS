@@ -193,27 +193,19 @@ const platforms = [
 const faqs = [
   {
     q: "How does DayTabs analyze my video?",
-    a: "DayTabs extracts the audio from your video, transcribes every word with timestamps, analyzes individual frames for lighting and visual quality, and sends the full context to our AI pipeline. The result is a complete report covering quality scores, content feedback, SEO-optimized titles and tags, chapter timestamps, and short clip suggestions, all in one upload.",
+    a: "You upload your video and DayTabs analyzes it with top models and platform algorithms in mind, then gives you a complete report with clear feedback to help improve your videos.",
   },
   {
     q: "Is my video stored on your servers?",
     a: "No. Videos are deleted immediately after analysis completes. Only your transcript and report results are saved so you can access them later. Your raw video file is never retained.",
   },
   {
-    q: "Which platforms does DayTabs support?",
-    a: "DayTabs supports YouTube (Long-form and Shorts), Instagram Reels, TikTok, Twitter/X, and LinkedIn. Platform selection gives you tailored title suggestions, hashtag recommendations, and format-specific feedback.",
-  },
-  {
-    q: "How is DayTabs different from ChatGPT?",
-    a: "ChatGPT requires you to know what to ask and how to upload frames manually. DayTabs handles the entire pipeline, upload once, get a complete report with quality scores, edit suggestions, platform-specific titles, tags, timestamps, and short clip ideas. No prompting required.",
+    q: "How is DayTabs different from AI tools?",
+    a: "Most AI tools can help you write ideas, but they cannot analyze your actual full video. DayTabs reviews the full upload for you and turns it into a complete report with clear improvements, stronger publish assets, and next steps you can use right away.",
   },
   {
     q: "Can I use DayTabs for free?",
-    a: "Yes. DayTabs offers a free plan with 2 video analyses per month, teleprompter access, and basic quality reports. No credit card required. Upgrade to Creator, Pro, or Studio for more analyses, publish packages, and subtitle downloads.",
-  },
-  {
-    q: "Does DayTabs generate subtitle files?",
-    a: "Yes. Creator, Pro, and Studio plans include a downloadable .srt subtitle file for every analysis. The subtitle file is generated from your transcript and is formatted for direct upload to YouTube, TikTok, or any video platform that accepts .srt.",
+    a: "Yes. DayTabs offers a free plan with 1 video analysis per month, teleprompter access, and basic quality reports. No credit card required. Upgrade to Creator, Pro, or Studio for more analyses, deeper workflows, and more planning capacity.",
   },
 ];
 

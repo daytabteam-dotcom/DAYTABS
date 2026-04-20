@@ -5,7 +5,6 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import Home from "./pages/Home";
 import NotFound from "@/pages/not-found";
 import ProtectedRoute from "./components/ProtectedRoute";
-import ApiWakeGate from "./components/ApiWakeGate";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -31,12 +30,10 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <ApiWakeGate>
-          <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-            <Router />
-          </WouterRouter>
-          <Toaster />
-        </ApiWakeGate>
+        <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+          <Router />
+        </WouterRouter>
+        <Toaster />
       </TooltipProvider>
     </QueryClientProvider>
   );

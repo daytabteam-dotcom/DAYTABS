@@ -20,7 +20,7 @@ const plans = [
     borderColor: "border-white/10",
     popular: false,
     features: [
-      { text: "2 video analyses / month" },
+      { text: "1 video analysis / month" },
       { text: "Up to 200 MB per video" },
       { text: "Up to 5 min video duration" },
       { text: "Quality and editing reports" },
@@ -42,14 +42,14 @@ const plans = [
     borderColor: "border-violet-500/50",
     popular: true,
     features: [
-      { text: "15 video analyses / month" },
+      { text: "10 video analyses / month" },
       { text: "Up to 1 GB per video" },
-      { text: "Up to 40 min video duration" },
+      { text: "Up to 25 min video duration" },
       { text: "Quality and editing reports" },
       { text: "Publish package (titles, descriptions, tags)" },
       { text: "Short clip ideas" },
       { text: "Teleprompter" },
-      { text: "15 script planner chats / month" },
+      { text: "20 script planner chats / month" },
     ] as Feature[],
     missing: [] as string[],
     cta: "Start Creator",
@@ -66,12 +66,11 @@ const plans = [
     borderColor: "border-emerald-500/30",
     popular: false,
     features: [
-      { text: "40 video analyses / month" },
+      { text: "25 video analyses / month" },
       { text: "Up to 5 GB per video" },
-      { text: "Up to 2 hr video duration" },
+      { text: "Up to 60 min video duration" },
       { text: "All Creator features included" },
-      { text: "Subtitle file download" },
-      { text: "40 script planner chats / month" },
+      { text: "60 script planner chats / month" },
       { text: "Priority processing" },
     ] as Feature[],
     missing: [] as string[],
@@ -89,11 +88,11 @@ const plans = [
     borderColor: "border-white/10",
     popular: false,
     features: [
-      { text: "Unlimited video analyses" },
+      { text: "80 video analyses / month" },
       { text: "Up to 100 GB per video" },
-      { text: "Up to 3 hr video duration" },
+      { text: "Up to 90 min video duration" },
       { text: "All Pro features included" },
-      { text: "Unlimited script planner chats" },
+      { text: "200 script planner chats / month" },
       { text: "Content Growth", badge: "Coming Soon" },
       { text: "Priority support" },
     ] as Feature[],
@@ -141,15 +140,7 @@ export default function PricingPage() {
         name: "Is DayTabs free to use?",
         acceptedAnswer: {
           "@type": "Answer",
-          text: "Yes. DayTabs offers a free plan with 2 video analyses per month, teleprompter access, and basic quality reports. No credit card required.",
-        },
-      },
-      {
-        "@type": "Question",
-        name: "What platforms does DayTabs support?",
-        acceptedAnswer: {
-          "@type": "Answer",
-          text: "DayTabs supports YouTube (Long and Shorts), Instagram Reels, TikTok, Twitter/X, and LinkedIn.",
+          text: "Yes. DayTabs offers a free plan with 1 video analysis per month, teleprompter access, and basic quality reports. No credit card required.",
         },
       },
       {
@@ -165,7 +156,7 @@ export default function PricingPage() {
         name: "What is included in the publish package?",
         acceptedAnswer: {
           "@type": "Answer",
-          text: "The publish package generates 5 title options, a full SEO description, 25-30 optimized tags, chapter timestamps, and a downloadable .srt subtitle file for YouTube.",
+          text: "The publish package generates title options, a full SEO description, optimized tags, and chapter timestamps so your upload is easier to publish with confidence.",
         },
       },
     ],
@@ -177,7 +168,7 @@ export default function PricingPage() {
         <title>DayTabs Pricing - Free, Creator, Pro &amp; Studio Plans</title>
         <meta
           name="description"
-          content="Start free with 2 video analyses per month. Upgrade for more analyses, publish packages, subtitle downloads, and script planning. No contracts."
+          content="Start free with 1 video analysis per month. Upgrade for more analyses, publish packages, and script planning. No contracts."
         />
         <meta name="robots" content="index, follow" />
         <link rel="canonical" href="https://daytabs.com/pricing" />
@@ -185,7 +176,7 @@ export default function PricingPage() {
         <meta property="og:title" content="DayTabs Pricing - Free, Creator, Pro &amp; Studio Plans" />
         <meta
           property="og:description"
-          content="Start free with 2 video analyses per month. Upgrade for more analyses, publish packages, subtitle downloads, and script planning. No contracts."
+          content="Start free with 1 video analysis per month. Upgrade for more analyses, publish packages, and script planning. No contracts."
         />
         <meta property="og:image" content="https://daytabs.com/opengraph.jpg" />
         <meta property="og:url" content="https://daytabs.com/pricing" />
@@ -195,7 +186,7 @@ export default function PricingPage() {
         <meta name="twitter:title" content="DayTabs Pricing - Free, Creator, Pro &amp; Studio Plans" />
         <meta
           name="twitter:description"
-          content="Start free with 2 video analyses per month. Upgrade for more analyses, publish packages, subtitle downloads, and script planning. No contracts."
+          content="Start free with 1 video analysis per month. Upgrade for more analyses, publish packages, and script planning. No contracts."
         />
         <meta name="twitter:image" content="https://daytabs.com/opengraph.jpg" />
         <script type="application/ld+json">{JSON.stringify(faqSchema)}</script>
