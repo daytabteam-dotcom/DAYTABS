@@ -947,6 +947,31 @@ function parseJson<T>(raw: string, fallback: T): T {
   }
 }
 
+function buildOutputLanguageInstruction(
+  transcript: string,
+  speechAnalysis?: SpeechAnalysis,
+): string {
+  if (!speechAnalysis?.hasMeaningfulSpeech) {
+    return "Write all output in English only. Do not use any other language.";
+  }
+
+  const sample = transcript.slice(0, 1200);
+  const hasKana = /[\u3040-\u30ff]/.test(sample);
+  const hasHangul = /[\uac00-\ud7af]/.test(sample);
+  const hasArabic = /[\u0600-\u06ff]/.test(sample);
+  const hasCyrillic = /[\u0400-\u04ff]/.test(sample);
+  const hasDevanagari = /[\u0900-\u097f]/.test(sample);
+  const hasHan = /[\u4e00-\u9fff]/.test(sample);
+
+  if (hasKana) return "Write all output in Japanese. Do not translate to English.";
+  if (hasHangul) return "Write all output in Korean. Do not translate to English.";
+  if (hasArabic) return "Write all output in Arabic. Do not translate to English.";
+  if (hasCyrillic) return "Write all output in the same Cyrillic-script language used by the speaker in the transcript. Do not translate to English.";
+  if (hasDevanagari) return "Write all output in the same Devanagari-script language used by the speaker in the transcript. Do not translate to English.";
+  if (hasHan) return "Write all output in Simplified Chinese. Do not translate to English.";
+  return "Write all output in the same language the speaker uses in the transcript. If the transcript is mainly English, write English. Do not translate unless asked.";
+}
+
 const BASE_SYSTEM_PROMPT = `You are an expert content strategist and video consultant. You have personally reviewed over 1,000 YouTube, TikTok, and Instagram videos. You give feedback the way a senior consultant would in a paid review session: specific, confident, and focused on what actually moves the needle.
 
 Never use: "Great job!", "Consider trying", "You might want to", "As a content creator", "In conclusion", or any filler phrase. Every sentence must contain a specific observation or action. Write in second person ("your video", "you open with"). Be direct but not harsh. Lead every section with the most important insight first. If something is genuinely good, say so in one word and move on.`;
@@ -1304,6 +1329,7 @@ export async function analyzeAudio(
   transcript: string,
   whisperConfidence: number,
   audioPath?: string,
+  speechAnalysis?: SpeechAnalysis,
   userId?: number,
 ): Promise<object> {
   // Expanded filler word list
@@ -1335,10 +1361,13 @@ export async function analyzeAudio(
   const initialNoiseScore = scoreBackgroundNoise(audioSignals.noiseFloorDb);
   const fillerScore = scoreFillerWords(fillerRatio);
 
+  const languageInstruction = buildOutputLanguageInstruction(transcript, speechAnalysis);
   const response = await callOpenAI({
     model: "gpt-4o-mini",
     max_completion_tokens: 800,
     messages: [{ role: "user", content: `You are a professional audio engineer and presentation coach. Write assessment text only — do NOT produce any numeric scores.
+
+${languageInstruction}
 
 Rules:
 - Reference actual words, patterns, or moments — never generic advice
@@ -1634,6 +1663,7 @@ export async function analyzeEditingPoints(
   const totalDuration = lastSeg?.end ?? 0;
   const isFree = plan === "free";
   const isVisualFirst = speechAnalysis?.mode === "visual_first" || !speechAnalysis?.hasMeaningfulSpeech;
+  const languageInstruction = buildOutputLanguageInstruction(transcript, speechAnalysis);
 
   const editingSystemPrompt = `You are a senior video editor and YouTube strategist with 10 years experience. You give feedback like a professional editor reviewing a client's rough cut: specific, direct, actionable.
 
@@ -1656,6 +1686,8 @@ Rules:
       messages: [{
         role: "user",
         content: `${editingSystemPrompt}
+
+${languageInstruction}
 
 Read this transcript. Identify the ${hookCount} strongest moment(s) that would stop a scroll. Copy EXACT text from the transcript.
 
@@ -1832,7 +1864,9 @@ Return STRICT JSON using ONLY the provided index numbers:
         max_completion_tokens: 400,
         messages: [{
           role: "user",
-          content: `${editingSystemPrompt}
+        content: `${editingSystemPrompt}
+
+${languageInstruction}
 
 Rewrite this opening as a creator would say it on camera — natural, direct, confident.
 
@@ -1906,6 +1940,7 @@ export async function generateSeo(
   const isFree = plan === "free";
   const chapterPoints = buildChapterPoints(segments, 10);
   const isVisualFirst = speechAnalysis?.mode === "visual_first" || !speechAnalysis?.hasMeaningfulSpeech;
+  const languageInstruction = buildOutputLanguageInstruction(transcript, speechAnalysis);
 
   const chapterHint = chapterPoints.length
     ? `\n\nReal chapter timestamps:\n${chapterPoints.map(c => `${c.time} - context: "${c.text}"`).join("\n")}`
@@ -1931,6 +1966,8 @@ export async function generateSeo(
       max_completion_tokens: 500,
       messages: [{ role: "user", content: `${BASE_SYSTEM_PROMPT}
 
+${languageInstruction}
+
 Generate ONE strong title, TWO description sentences, and 3 tags.
 Platform: ${guide}
 Context: ${contentHint}
@@ -1954,6 +1991,8 @@ Return STRICT JSON:
     model: "gpt-4o",
     max_completion_tokens: 2500,
     messages: [{ role: "user", content: `${BASE_SYSTEM_PROMPT}
+
+${languageInstruction}
 
 You are a ${platform} SEO expert. Platform rules: ${guide}
 Context: ${contentHint}
@@ -1987,11 +2026,13 @@ export async function generateShortClipIdeas(
   segments: Array<{ start: number; end: number; text: string }>,
   platforms: string[],
   plan = "free",
+  speechAnalysis?: SpeechAnalysis,
   userId?: number,
 ): Promise<object> {
   if (!segments.length) return { clips: [] };
   const isFree = plan === "free";
   const totalDuration = segments[segments.length - 1]!.end;
+  const languageInstruction = buildOutputLanguageInstruction(transcript, speechAnalysis);
 
   const platformLabels: Record<string, string> = {
     youtube_long: "YouTube Long", youtube_shorts: "YouTube Shorts",
@@ -2031,6 +2072,8 @@ export async function generateShortClipIdeas(
     messages: [{
       role: "user",
       content: `${BASE_SYSTEM_PROMPT}
+
+${languageInstruction}
 
 Identify the best ${clipCount} clip(s) for: ${targetPlatformList}
 Total duration: ${Math.round(totalDuration)}s

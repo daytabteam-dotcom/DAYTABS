@@ -417,6 +417,139 @@ function AnalysisModeCard({ profile }: { profile: any }) {
   );
 }
 
+function scoreVerdict(score: number) {
+  if (score >= 85) return { label: "Publish-ready", tone: "border-emerald-400/25 bg-emerald-500/10 text-emerald-100", description: "This video looks strong enough to publish with only small refinements." };
+  if (score >= 70) return { label: "Almost ready", tone: "border-sky-400/25 bg-sky-500/10 text-sky-100", description: "The foundation is good. One or two focused changes should make this feel much stronger." };
+  if (score >= 55) return { label: "Needs one editing pass", tone: "border-amber-400/25 bg-amber-500/10 text-amber-100", description: "There is clear potential here, but the current version is still leaving easy wins on the table." };
+  return { label: "Rework before publishing", tone: "border-red-400/25 bg-red-500/10 text-red-100", description: "The current cut is likely to underperform unless you fix the main clarity or pacing problems first." };
+}
+
+function strongestMetric(data: any, profile?: any) {
+  const candidates = [
+    { key: "lighting", label: "Lighting", metric: data?.lighting },
+    { key: "brightness", label: "Brightness", metric: data?.brightness },
+    { key: "contrast", label: "Contrast", metric: data?.contrast },
+    { key: "background", label: metricDisplayLabel("Background", profile), metric: data?.background },
+    { key: "framing", label: metricDisplayLabel("Framing", profile), metric: data?.framing },
+    { key: "sharpness", label: "Sharpness", metric: data?.sharpness },
+    { key: "stability", label: "Stability", metric: data?.stability },
+    { key: "audioClarity", label: "Audio clarity", metric: data?.audioClarity },
+    { key: "audioVolume", label: "Audio volume", metric: data?.audioVolume },
+    { key: "backgroundNoise", label: "Background noise", metric: data?.backgroundNoise },
+    { key: "pacing", label: "Pacing", metric: data?.pacing },
+  ].filter((item) => typeof item.metric?.numeric === "number");
+
+  return candidates.sort((a, b) => (b.metric.numeric ?? 0) - (a.metric.numeric ?? 0))[0] ?? null;
+}
+
+function collectTopFixes(results: any) {
+  const fixes = [
+    results?.quality?.topFix,
+    results?.quality?.retention?.dropOffMoments?.[0]?.fix,
+    results?.editing?.editingSuggestions?.[0],
+    results?.quality?.background?.suggestions?.[0],
+    results?.quality?.framing?.suggestions?.[0],
+    results?.quality?.sharpness?.suggestions?.[0],
+  ]
+    .filter((value): value is string => Boolean(value?.trim()))
+    .filter((value, index, array) => array.findIndex((item) => item.toLowerCase() === value.toLowerCase()) === index);
+
+  return fixes.slice(0, 3);
+}
+
+function CreatorReportIntro({ results, profile }: { results: any; profile?: any }) {
+  if (!results) return null;
+  const formatProfile = getFormatProfile(profile);
+  const overallScore = Number(results?.quality?.score ?? results?.quality?.overallScore ?? results?.quality?.overallVisualScore ?? 0);
+  const verdict = scoreVerdict(overallScore);
+  const strongest = strongestMetric(results?.quality, profile);
+  const topFixes = collectTopFixes(results);
+  const firstRisk = results?.quality?.retention?.dropOffMoments?.[0] ?? null;
+  const bestClip = results?.shortClips?.clips?.[0] ?? results?.editing?.hooks?.[0] ?? null;
+
+  return (
+    <div className="space-y-5">
+      <PanelCard className="p-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="max-w-3xl">
+            <p className="text-xs uppercase tracking-[0.16em] text-white/40">Creator Summary</p>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${verdict.tone}`}>{verdict.label}</span>
+              {formatProfile?.contentFormat ? (
+                <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-semibold text-white/70">
+                  {contentFormatLabel(formatProfile.contentFormat)}
+                </span>
+              ) : null}
+            </div>
+            <p className="mt-3 text-sm leading-6 text-white/70">{verdict.description}</p>
+            {formatProfile?.viewerIntent ? (
+              <p className="mt-3 text-sm leading-6 text-white/55">
+                <span className="text-white/75">What this video is trying to do:</span> {formatProfile.viewerIntent}
+              </p>
+            ) : null}
+          </div>
+          <div className="min-w-[120px] rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-center">
+            <p className="text-4xl font-bold font-mono text-white">{overallScore}</p>
+            <p className="mt-1 text-xs text-white/40">overall score</p>
+          </div>
+        </div>
+      </PanelCard>
+
+      <div className="grid gap-4 lg:grid-cols-3">
+        <PanelCardSoft className="border border-white/10 p-4">
+          <p className="text-[11px] uppercase tracking-[0.16em] text-white/40">Strongest part</p>
+          {strongest ? (
+            <>
+              <p className="mt-3 text-lg font-semibold text-white">{strongest.label}</p>
+              <p className="mt-2 text-sm text-white/60">{strongest.metric.assessment ?? "This is one of the cleanest parts of the current cut."}</p>
+            </>
+          ) : (
+            <p className="mt-3 text-sm text-white/55">Once more evidence is available, this section will call out the strongest signal in the video.</p>
+          )}
+        </PanelCardSoft>
+
+        <PanelCardSoft className="border border-white/10 p-4">
+          <p className="text-[11px] uppercase tracking-[0.16em] text-white/40">Main retention risk</p>
+          {firstRisk ? (
+            <>
+              <p className="mt-3 text-lg font-semibold text-white">{firstRisk.at}</p>
+              <p className="mt-2 text-sm text-white/60">{firstRisk.reason}</p>
+            </>
+          ) : (
+            <p className="mt-3 text-sm text-white/55">No obvious early drop-off point was detected from the current report.</p>
+          )}
+        </PanelCardSoft>
+
+        <PanelCardSoft className="border border-white/10 p-4">
+          <p className="text-[11px] uppercase tracking-[0.16em] text-white/40">Best reusable moment</p>
+          {bestClip ? (
+            <>
+              <p className="mt-3 text-lg font-semibold text-white">{bestClip.start ?? "Clip"}</p>
+              <p className="mt-2 text-sm text-white/60">{bestClip.title ?? bestClip.text ?? bestClip.description ?? "This moment has the most repurposing potential in the current cut."}</p>
+            </>
+          ) : (
+            <p className="mt-3 text-sm text-white/55">No standout clip was extracted yet. Short clip ideas will appear here when available.</p>
+          )}
+        </PanelCardSoft>
+      </div>
+
+      {topFixes.length ? (
+        <PanelCardSoft className="border border-amber-400/20 bg-amber-400/5 p-5">
+          <p className="text-[11px] uppercase tracking-[0.16em] text-amber-200/70">Top 3 fixes</p>
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            {topFixes.map((fix, index) => (
+              <div key={`${index}-${fix}`} className="rounded-xl border border-white/10 bg-black/10 p-4">
+                <p className="text-[10px] uppercase tracking-[0.16em] text-white/35">Fix {index + 1}</p>
+                <p className="mt-2 text-sm leading-6 text-white/75">{fix}</p>
+              </div>
+            ))}
+          </div>
+        </PanelCardSoft>
+      ) : null}
+    </div>
+  );
+}
+
 function LimitedSpeechNotice({ profile, children }: { profile?: any; children: React.ReactNode }) {
   if (!profile || profile.hasMeaningfulSpeech !== false) return null;
   return (
@@ -1220,19 +1353,16 @@ function AnalyzingScreen({
 
         <div className="mb-6">
           <div className="flex justify-between text-xs text-white/40 mb-2">
-            <span>{isAssembling ? "Processing upload..." : retrying ? "Connection issue - retrying..." : `Uploading... ${pct}%`}</span>
+            <span>{isAssembling ? "Processing upload..." : "Uploading..."}</span>
             {!isAssembling && <span>{pct}%</span>}
           </div>
           <div className="h-2 bg-white/8 rounded-full overflow-hidden">
             <motion.div
               animate={{ width: `${isAssembling ? 100 : pct}%` }}
               transition={{ duration: 0.4, ease: "easeOut" }}
-              className={`h-full rounded-full ${retrying ? "bg-amber-400" : "bg-primary"}`}
+              className="h-full rounded-full bg-primary"
             />
           </div>
-          {retrying && (
-            <p className="text-xs text-amber-400/80 mt-2">Connection issue - retrying chunk...</p>
-          )}
         </div>
 
         {!isAssembling && (
@@ -2186,6 +2316,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
           </div>
 
           <AnalysisModeCard profile={analysisProfile} />
+          <CreatorReportIntro results={displayedResults} profile={analysisProfile} />
 
           {availableResultTabs.length > 0 && (
             <>

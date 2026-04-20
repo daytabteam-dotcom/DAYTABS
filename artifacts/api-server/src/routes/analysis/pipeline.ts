@@ -370,7 +370,7 @@ async function runVideoAnalyzer(
       await fs.mkdir(framesDir, { recursive: true }).catch(() => {});
       await stopIfMemoryHigh(jobId, "visual analysis");
       const audioAnalysis = await withTimeout(
-        analyzeAudio(transcriptText, whisperConfidence, audioPath, userId),
+        analyzeAudio(transcriptText, whisperConfidence, audioPath, speechAnalysis, userId),
         90000,
         "audio analysis",
         jobId,
@@ -502,7 +502,7 @@ async function runVideoAnalyzer(
     if (runShortClips) {
       await updateJob(jobId, { status: "analyzing_content", progress, currentStep: "Finding best short clip moments" });
       const shortClipsData = await withTimeout(
-        generateShortClipIdeas(transcriptText, transcriptSegments, platforms, plan, userId),
+        generateShortClipIdeas(transcriptText, transcriptSegments, platforms, plan, speechAnalysis, userId),
         90000,
         "short clip generation",
         jobId,
