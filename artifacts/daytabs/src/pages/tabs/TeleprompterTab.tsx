@@ -16,7 +16,7 @@ const PLACEHOLDER = `Welcome to DayTabs Teleprompter.
 
 Paste or type your script here. Each paragraph will scroll smoothly so you can read naturally while looking at the camera.
 
-Use the Play button (or press Space) to start. Adjust speed and font size to your comfort before you begin recording.
+Use Play for teleprompter-only mode, or choose Teleprompter + record and press Record when you're ready to start scrolling and capture video together.
 
 Good luck with your video!`;
 
@@ -46,7 +46,7 @@ export default function TeleprompterTab() {
               <PanelTitle>Teleprompter</PanelTitle>
             </div>
             <PanelSubtitle>
-              Paste your script, then choose whether to rehearse with the camera view only or record locally on the device.
+              Paste your script, then choose between a clean teleprompter view or a record mode that only opens the camera when you press Record.
             </PanelSubtitle>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -106,7 +106,7 @@ export default function TeleprompterTab() {
             </p>
           ) : null}
           <p className="text-white/55">
-            Use teleprompter opens the front-camera view without starting a recording. Teleprompter + record starts the same view and begins a local recording automatically.
+            Use teleprompter keeps the camera off. Teleprompter + record opens the same teleprompter, then starts camera access and local recording only after you press Record.
           </p>
           <p className="font-semibold text-white/55 mb-2">Keyboard shortcuts</p>
           <div className="grid gap-x-6 gap-y-1 sm:grid-cols-2">
