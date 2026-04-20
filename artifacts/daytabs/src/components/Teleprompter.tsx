@@ -26,7 +26,7 @@ interface TeleprompterProps {
 export function Teleprompter({ script, onClose, startInRecordMode = false }: TeleprompterProps) {
   const [playing, setPlaying] = useState(false);
   const [previewing, setPreviewing] = useState(false);
-  const [speed, setSpeed] = useState(3);
+  const [speed, setSpeed] = useState(2);
   const [fontSize, setFontSize] = useState(36);
   const [showControls, setShowControls] = useState(true);
   const [cameraRequested, setCameraRequested] = useState(false);
@@ -51,6 +51,11 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
   const scrollOffsetRef = useRef(0);
   const maxScrollRef = useRef(0);
   const stopCameraAfterRecordingRef = useRef(false);
+  const recordingRef = useRef(false);
+
+  useEffect(() => {
+    recordingRef.current = recording;
+  }, [recording]);
 
   const revealControls = useCallback(() => {
     setShowControls(true);
@@ -79,6 +84,11 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
     maxScrollRef.current = Math.max(0, contentHeight - viewportHeight);
     scrollOffsetRef.current = Math.min(scrollOffsetRef.current, maxScrollRef.current);
     syncScrollPosition();
+  }, [syncScrollPosition]);
+
+  const resetScrollPosition = useCallback(() => {
+    scrollOffsetRef.current = 0;
+    syncScrollPosition(0);
   }, [syncScrollPosition]);
 
   const clearCountdown = useCallback(() => {
@@ -228,6 +238,19 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
     revealControls();
   }, [clearCountdown, recording, revealControls, stopMediaTracks, stopRecording]);
 
+  const endRecordingSession = useCallback(() => {
+    clearCountdown();
+    setPlaying(false);
+    setPreviewing(false);
+    stopCameraAfterRecordingRef.current = true;
+    if (recording) {
+      stopRecording();
+    } else {
+      stopMediaTracks();
+    }
+    revealControls();
+  }, [clearCountdown, recording, revealControls, stopMediaTracks, stopRecording]);
+
   const stopPreviewSession = useCallback(() => {
     clearCountdown();
     setPlaying(false);
@@ -238,15 +261,17 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
   const beginPreviewSession = useCallback(() => {
     if (recording || countdownValue !== null) return;
     clearCountdown();
+    resetScrollPosition();
     setPreviewing(true);
     setPlaying(true);
     revealControls();
-  }, [clearCountdown, countdownValue, recording, revealControls]);
+  }, [clearCountdown, countdownValue, recording, resetScrollPosition, revealControls]);
 
   const beginRecordingSession = useCallback(async () => {
     if (countdownValue !== null) return;
 
     clearCountdown();
+    resetScrollPosition();
     setPreviewing(false);
     setSavedMessage(null);
 
@@ -260,6 +285,7 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
 
         countdownTimerRef.current = null;
         setCountdownValue(null);
+        resetScrollPosition();
 
         const ready = cameraReady || await startCamera();
         if (!ready) return;
@@ -271,25 +297,25 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
     };
 
     runCountdown(3);
-  }, [cameraReady, clearCountdown, countdownValue, revealControls, startCamera, startRecording]);
+  }, [cameraReady, clearCountdown, countdownValue, resetScrollPosition, revealControls, startCamera, startRecording]);
 
   const reset = useCallback(() => {
     clearCountdown();
     setPlaying(false);
     setPreviewing(false);
-    scrollOffsetRef.current = 0;
-    syncScrollPosition(0);
+    resetScrollPosition();
     if (startInRecordMode) {
       stopRecordingSession();
     }
-  }, [clearCountdown, startInRecordMode, stopRecordingSession, syncScrollPosition]);
+  }, [clearCountdown, resetScrollPosition, startInRecordMode, stopRecordingSession]);
 
   const togglePrimaryAction = useCallback(() => {
     if (startInRecordMode) {
-      if (countdownValue !== null || playing || recording) {
+      if (countdownValue !== null) {
         stopRecordingSession();
         return;
       }
+      if (recording) return;
       void beginRecordingSession();
       return;
     }
@@ -313,8 +339,8 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
           if (previewing) {
             setPreviewing(false);
             revealControls();
-          } else if (startInRecordMode && (recording || cameraReady)) {
-            stopRecordingSession();
+          } else if (recording) {
+            revealControls();
           }
           return;
         }
@@ -379,6 +405,22 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
     };
   }, [clearCountdown, stopMediaTracks, stopRecording, syncScrollBounds]);
 
+  useEffect(() => {
+    const handlePageExit = () => {
+      if (!recordingRef.current) return;
+      stopCameraAfterRecordingRef.current = true;
+      stopRecording();
+    };
+
+    window.addEventListener("beforeunload", handlePageExit);
+    window.addEventListener("pagehide", handlePageExit);
+
+    return () => {
+      window.removeEventListener("beforeunload", handlePageExit);
+      window.removeEventListener("pagehide", handlePageExit);
+    };
+  }, [stopRecording]);
+
   const adjustSpeed = (delta: number) =>
     setSpeed((s) => Math.min(10, Math.max(0.5, parseFloat((s + delta).toFixed(1)))));
   const adjustFont = (delta: number) =>
@@ -386,10 +428,10 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
 
   const speedPercent = Math.round(((speed - 0.5) / 9.5) * 100);
   const primaryActionLabel = startInRecordMode
-    ? (countdownValue !== null ? "Cancel" : playing || recording ? "Stop" : "Record")
+    ? (countdownValue !== null ? "Cancel" : "Record")
     : (playing ? "Pause" : "Play");
   const primaryActionIcon = startInRecordMode
-    ? (countdownValue !== null || playing || recording ? Circle : Camera)
+    ? (countdownValue !== null ? Circle : Camera)
     : (playing ? Pause : Play);
   const PrimaryActionIcon = primaryActionIcon;
 
@@ -470,6 +512,16 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
               </button>
             ) : null}
 
+            {startInRecordMode && recording ? (
+              <button
+                onClick={endRecordingSession}
+                className="flex items-center gap-2.5 px-5 py-3 rounded-2xl font-semibold text-sm transition-all border border-red-400/30 bg-red-500 text-white hover:bg-red-400"
+              >
+                <Circle className="w-4 h-4 fill-current" />
+                <span>End recording</span>
+              </button>
+            ) : null}
+
             <button
               onClick={reset}
               title="Restart from top"
@@ -480,15 +532,16 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
 
             <button
               onClick={togglePrimaryAction}
+              disabled={recording}
               className={`flex items-center gap-2.5 px-7 py-3 rounded-2xl font-bold text-base transition-all shadow-2xl ${
-                countdownValue !== null || playing || recording
+                countdownValue !== null
                   ? "bg-white text-black hover:bg-white/90 shadow-white/20"
                   : startInRecordMode
                     ? "bg-red-500 hover:bg-red-400 text-white shadow-red-500/35"
                     : "bg-violet-600 hover:bg-violet-500 text-white shadow-violet-500/40"
               }`}
             >
-              <PrimaryActionIcon className={`w-5 h-5 ${startInRecordMode && (countdownValue !== null || playing || recording) ? "fill-current" : ""}`} />
+              <PrimaryActionIcon className={`w-5 h-5 ${startInRecordMode && countdownValue !== null ? "fill-current" : ""}`} />
               <span>{primaryActionLabel}</span>
             </button>
           </div>
@@ -685,17 +738,27 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
                 <span>{previewing ? "Stop preview" : "Preview"}</span>
               </button>
             ) : null}
+            {startInRecordMode && recording ? (
+              <button
+                onClick={endRecordingSession}
+                className="flex min-h-16 flex-1 items-center justify-center gap-3 rounded-[22px] bg-red-500 px-5 text-base font-semibold text-white hover:bg-red-400"
+              >
+                <Circle className="h-5 w-5 fill-current" />
+                <span>End recording</span>
+              </button>
+            ) : null}
             <button
               onClick={togglePrimaryAction}
+              disabled={recording}
               className={`flex min-h-16 flex-1 items-center justify-center gap-3 rounded-[22px] px-5 text-base font-semibold transition-all ${
-                countdownValue !== null || playing || recording
+                countdownValue !== null
                   ? "bg-white text-black hover:bg-white/90"
                   : startInRecordMode
                     ? "bg-red-500 text-white hover:bg-red-400"
                     : "bg-violet-600 text-white hover:bg-violet-500"
               }`}
             >
-              <PrimaryActionIcon className={`h-5 w-5 ${startInRecordMode && (countdownValue !== null || playing || recording) ? "fill-current" : ""}`} />
+              <PrimaryActionIcon className={`h-5 w-5 ${startInRecordMode && countdownValue !== null ? "fill-current" : ""}`} />
               <span>{primaryActionLabel}</span>
             </button>
             <button
@@ -717,7 +780,7 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
         <div className="relative z-20 hidden items-center justify-center gap-8 bg-gradient-to-t from-black to-transparent py-2.5 text-[11px] text-white/25 md:flex">
           <span className="flex items-center gap-1.5">
             <kbd className="px-1.5 py-0.5 rounded bg-white/8 text-white/35 font-mono text-[10px]">Space</kbd>
-            {startInRecordMode ? "Record / Stop / Cancel" : "Play / Pause"}
+            {startInRecordMode ? "Record / Cancel" : "Play / Pause"}
           </span>
           <span className="flex items-center gap-1.5">
             <kbd className="px-1.5 py-0.5 rounded bg-white/8 text-white/35 font-mono text-[10px]">↑ ↓</kbd>
