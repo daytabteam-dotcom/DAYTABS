@@ -1051,8 +1051,6 @@ function RetentionForecastCard({ data }: { data: any }) {
 
 function QualityPanel({ data, isPaid, profile }: { data: any; isPaid: boolean; profile?: any }) {
   if (!data) return <p className="text-white/40 text-sm">No quality data.</p>;
-  const overallScore = data.score ?? data.overallScore ?? data.overallVisualScore ?? 0;
-  const scoreColor = overallScore >= 85 ? "text-green-400" : overallScore >= 60 ? "text-yellow-400" : "text-red-400";
   const topFixGuidance = parseDualGuidance(data.topFix);
   const gradingGuidance = parseDualGuidance(data.colorGradingRecommendation);
   const visualMetricDefs = [
@@ -1126,26 +1124,6 @@ function QualityPanel({ data, isPaid, profile }: { data: any; isPaid: boolean; p
           </div>
         </div>
       )}
-
-      <div className="flex items-center gap-4 p-5 rounded-2xl border border-white/8 bg-background/40">
-        <div className="text-center min-w-[80px]">
-          <span className={`text-5xl font-bold font-mono ${scoreColor}`}>{overallScore}</span>
-          <p className="text-xs text-white/40 mt-1">quality score</p>
-        </div>
-        <div className="flex-1">
-          <div className="h-3 bg-white/8 rounded-full overflow-hidden">
-            <motion.div
-              initial={{ width: 0 }}
-              animate={{ width: `${overallScore}%` }}
-              transition={{ duration: 1, ease: "easeOut" }}
-              className={`h-full rounded-full ${overallScore >= 85 ? "bg-gradient-to-r from-green-500 to-emerald-400" : overallScore >= 60 ? "bg-gradient-to-r from-yellow-500 to-amber-400" : "bg-gradient-to-r from-red-500 to-rose-400"}`}
-            />
-          </div>
-          <p className="text-xs text-white/40 mt-2">
-            {overallScore >= 85 ? "Most of the craft is already working. Fix the highlighted weak spots and ship." : overallScore >= 60 ? "The foundation is usable, but the highlighted issues are costing trust and retention." : "This cut needs a stronger craft pass before it is ready to represent the idea well."}
-          </p>
-        </div>
-      </div>
 
       <CollapsibleSection
         title="Main Issues"
