@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { motion } from "framer-motion";
-import { MonitorPlay, Trash2, Type } from "lucide-react";
+import { Camera, MonitorPlay, Trash2, Type } from "lucide-react";
 import { Teleprompter } from "@/components/Teleprompter";
 import { Button } from "@/components/ui/button";
 import {
@@ -23,13 +23,14 @@ Good luck with your video!`;
 export default function TeleprompterTab() {
   const [script, setScript] = useState("");
   const [open, setOpen] = useState(false);
+  const [startInRecordMode, setStartInRecordMode] = useState(false);
 
   const displayScript = script.trim() || PLACEHOLDER;
 
   return (
     <>
       {open && (
-        <Teleprompter script={displayScript} onClose={() => setOpen(false)} />
+        <Teleprompter script={displayScript} startInRecordMode={startInRecordMode} onClose={() => setOpen(false)} />
       )}
 
       <motion.div
@@ -44,13 +45,30 @@ export default function TeleprompterTab() {
               <PanelTitle>Teleprompter</PanelTitle>
             </div>
             <PanelSubtitle>
-              Paste your script, set your pace, and read cleanly on camera.
+              Paste your script, then choose whether to rehearse with the camera view only or record locally on the device.
             </PanelSubtitle>
           </div>
-          <Button onClick={() => setOpen(true)}>
-            <MonitorPlay className="w-4 h-4 mr-2" />
-            Start
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setStartInRecordMode(false);
+                setOpen(true);
+              }}
+            >
+              <MonitorPlay className="mr-2 h-4 w-4" />
+              Use teleprompter
+            </Button>
+            <Button
+              onClick={() => {
+                setStartInRecordMode(true);
+                setOpen(true);
+              }}
+            >
+              <Camera className="mr-2 h-4 w-4" />
+              Teleprompter + record
+            </Button>
+          </div>
         </PanelHeader>
 
         <PanelCard className="overflow-hidden">
@@ -78,7 +96,10 @@ export default function TeleprompterTab() {
           />
         </PanelCard>
 
-        <PanelCardSoft className="p-4 text-xs text-white/35 space-y-1.5">
+        <PanelCardSoft className="space-y-1.5 p-4 text-xs text-white/35">
+          <p className="text-white/55">
+            Use teleprompter opens the front-camera view without starting a recording. Teleprompter + record starts the same view and begins a local recording automatically.
+          </p>
           <p className="font-semibold text-white/55 mb-2">Keyboard shortcuts</p>
           <div className="grid gap-x-6 gap-y-1 sm:grid-cols-2">
             <span>
