@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { getPublicSiteUrl } from "@/lib/runtime";
 
 export interface UserInfo {
   userId: number;
@@ -70,7 +71,7 @@ export function useUser() {
     localStorage.removeItem("daytabs_token");
     localStorage.removeItem("daytabs_user_name");
     setUser(null);
-    window.location.href = "/login";
+    window.location.href = getPublicSiteUrl("/login/");
   };
 
   return { user, logout };

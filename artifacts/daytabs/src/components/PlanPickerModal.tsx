@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { useLocation } from "wouter";
 import { X, Zap, Star, Building, Check, Loader2 } from "lucide-react";
 import { usePaddle, PADDLE_PRICES } from "@/hooks/use-paddle";
 import { useUser } from "@/hooks/use-user";
 import { usePaddlePrices } from "@/hooks/use-paddle-subscription";
+import { getPublicSiteUrl } from "@/lib/runtime";
 
 interface PlanPickerModalProps {
   onClose: () => void;
@@ -102,7 +102,6 @@ export function PlanPickerModal({
   const { user } = useUser();
   const { openCheckout, checkoutError } = usePaddle();
   const { prices, formatPrice, loading: pricesLoading } = usePaddlePrices();
-  const [, navigate] = useLocation();
   const [selectedPlan, setSelectedPlan] = useState<
     "creator" | "pro" | "studio" | null
   >(null);
@@ -127,7 +126,7 @@ export function PlanPickerModal({
   const handleSelect = async (planKey: "creator" | "pro" | "studio") => {
     if (!user) {
       onClose();
-      navigate("/login");
+      window.location.href = getPublicSiteUrl("/login/");
       return;
     }
 
