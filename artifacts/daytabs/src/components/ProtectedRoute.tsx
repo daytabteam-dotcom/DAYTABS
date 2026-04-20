@@ -1,21 +1,6 @@
 import { useEffect, useState } from "react";
 import { getPublicSiteUrl } from "@/lib/runtime";
 
-function createDevToken() {
-  const payload = {
-    user_id: 1,
-    email: "studio-preview@daytabs.local",
-    name: "Studio Preview",
-    plan: "professional",
-    exp: Math.floor(Date.now() / 1000) + 24 * 60 * 60,
-  };
-  const encoded = btoa(JSON.stringify(payload))
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
-  return `dev.${encoded}.preview`;
-}
-
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
   try {
     const parts = token.split(".");
@@ -46,7 +31,10 @@ function getValidToken(): string | null {
   }
 
   const stored = localStorage.getItem("daytabs_token");
-  if (stored && decodeJwtPayload(stored)) return stored;
+  if (stored) {
+    if (decodeJwtPayload(stored)) return stored;
+    localStorage.removeItem("daytabs_token");
+  }
 
   return null;
 }
@@ -59,12 +47,28 @@ export default function ProtectedRoute({ children }: Props) {
   const [status, setStatus] = useState<"checking" | "authenticated" | "unauthenticated">("checking");
 
   useEffect(() => {
-    const token = getValidToken();
-    if (token) {
-      setStatus("authenticated");
-    } else {
-      setStatus("unauthenticated");
-    }
+    const syncAuthStatus = () => {
+      const token = getValidToken();
+      setStatus(token ? "authenticated" : "unauthenticated");
+    };
+
+    syncAuthStatus();
+
+    const handleVisibilityChange = () => {
+      if (!document.hidden) syncAuthStatus();
+    };
+
+    window.addEventListener("focus", syncAuthStatus);
+    window.addEventListener("storage", syncAuthStatus);
+    window.addEventListener("daytabs:plan-updated", syncAuthStatus);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener("focus", syncAuthStatus);
+      window.removeEventListener("storage", syncAuthStatus);
+      window.removeEventListener("daytabs:plan-updated", syncAuthStatus);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
   }, []);
 
   if (status === "checking") {
@@ -76,7 +80,6 @@ export default function ProtectedRoute({ children }: Props) {
   }
 
   if (status === "unauthenticated") {
-    const loginPath = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/login`;
     const rootLoginPath = getPublicSiteUrl("/login");
 
     return (
@@ -85,29 +88,16 @@ export default function ProtectedRoute({ children }: Props) {
           <p className="text-xs uppercase tracking-[0.2em] text-violet-300 mb-3">DayTabs panel</p>
           <h1 className="text-2xl font-bold mb-2">Sign in to open your workspace.</h1>
           <p className="text-sm text-white/50 mb-5">
-            This panel runs under <span className="text-white/75">/panel/</span>. If you are testing locally, use Studio preview to open gated features without the landing auth server.
+            You must log in to access your own plan, uploads, and workspace data. Preview accounts and shared fallback access are not available here.
           </p>
           <div className="flex flex-col gap-3">
-            <button
-              type="button"
-              onClick={() => {
-                localStorage.setItem("daytabs_token", createDevToken());
-                window.location.reload();
-              }}
-              className="rounded-lg bg-violet-400 px-4 py-3 text-sm font-semibold text-violet-950 hover:bg-violet-300 transition-colors"
-            >
-              Open Studio preview
-            </button>
             <a
               href={rootLoginPath}
-              className="rounded-lg border border-white/10 px-4 py-3 text-center text-sm font-semibold text-white/70 hover:bg-white/5 transition-colors"
+              className="rounded-lg bg-violet-400 px-4 py-3 text-center text-sm font-semibold text-violet-950 hover:bg-violet-300 transition-colors"
             >
               Go to login
             </a>
           </div>
-          <p className="text-xs text-white/30 mt-4">
-            If your dev server only hosts the panel app, <span className="text-white/50">{loginPath}</span> may show the app shell instead of the public login page.
-          </p>
         </div>
       </div>
     );
