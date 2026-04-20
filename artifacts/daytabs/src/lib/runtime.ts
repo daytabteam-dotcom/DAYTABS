@@ -3,7 +3,6 @@ import { setBaseUrl } from "@workspace/api-client-react";
 const RAW_API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() || "";
 const RAW_PUBLIC_SITE_URL = (import.meta.env.VITE_PUBLIC_SITE_URL as string | undefined)?.trim() || "";
 const DEFAULT_PUBLIC_SITE_URL = "https://www.daytabs.com";
-const ADMIN_HOST = "ctrl-a3f9e21b.daytabs.com";
 
 const API_BASE_URL = RAW_API_BASE_URL.replace(/\/+$/, "");
 const PUBLIC_SITE_URL = RAW_PUBLIC_SITE_URL.replace(/\/+$/, "");
@@ -32,9 +31,7 @@ function getPublicSiteBaseUrl() {
 
   const { hostname, origin } = window.location;
   if (hostname === "www.daytabs.com") return origin.replace(/\/+$/, "");
-  if (hostname === "daytabs.com") return DEFAULT_PUBLIC_SITE_URL;
-  if (hostname === ADMIN_HOST || hostname.endsWith(".daytabs.com")) return DEFAULT_PUBLIC_SITE_URL;
-  return origin.replace(/\/+$/, "");
+  return DEFAULT_PUBLIC_SITE_URL;
 }
 
 export function getPublicSiteUrl(path = "/login/") {
