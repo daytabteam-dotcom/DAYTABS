@@ -266,7 +266,7 @@ async function runVideoAnalyzer(
     const durationSec = mediaMetadata.durationSec || await getMediaDuration(audioPath);
     const platforms = inferPlatformsFromMedia(mediaMetadata);
     const shortClipEligible = !mediaMetadata.isShortForm && !mediaMetadata.isVertical;
-    const runShortClips = modules.includes("shortClips") && shortClipEligible;
+    const runShortClips = plan !== "free" && shortClipEligible;
     await stopIfCancelled(jobId);
     await stopIfMemoryHigh(jobId, "duration check");
     if (durationSec > maxDuration) {
@@ -471,7 +471,7 @@ async function runVideoAnalyzer(
     if (runEditing) {
       await updateJob(jobId, { status: "analyzing_content", progress, currentStep: "Analyzing editing points" });
       const editingData = await withTimeout(
-        analyzeEditingPoints(transcriptText, transcriptSegments, audioPath, plan, speechAnalysis, userId),
+        analyzeEditingPoints(transcriptText, transcriptSegments, audioPath, plan, speechAnalysis, videoName, formatProfile, userId),
         90000,
         "editing analysis",
         jobId,

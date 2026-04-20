@@ -34,7 +34,6 @@ const MODULES = [
   { id: "quality",    label: "Quality Check",       icon: Shield,    desc: "Lighting, audio, framing, and pacing scores",    color: "blue",   freeIncluded: true  },
   { id: "editing",    label: "Editing Suggestions",  icon: Scissors,  desc: "Hook moments, cut points, and B-roll cues",      color: "yellow", freeIncluded: true  },
   { id: "publish",    label: "Publish Package",      icon: TrendingUp, desc: "Titles, descriptions, and tags per platform",  color: "green",  freeIncluded: false },
-  { id: "shortClips", label: "Short Clip Ideas",    icon: Sparkles,  desc: "Best moments for Shorts, TikTok, and Reels",     color: "violet", freeIncluded: false },
 ];
 
 const MODULE_COLORS: Record<string, string> = {
@@ -594,10 +593,22 @@ function getMetricIcon(title: string): LucideIcon {
   return METRIC_ICONS[title.replace(/\s+/g, "").toLowerCase()] ?? Sparkles;
 }
 
+function parseDualGuidance(text?: string | null) {
+  if (!text?.trim()) return { fixNow: "", nextVideo: "", plain: "" };
+  const nowMatch = text.match(/fix now:\s*([^]+?)(?=\s*next video:|$)/i);
+  const nextMatch = text.match(/next video:\s*([^]+)$/i);
+  return {
+    fixNow: nowMatch?.[1]?.trim() ?? "",
+    nextVideo: nextMatch?.[1]?.trim() ?? "",
+    plain: text.trim(),
+  };
+}
+
 function MetricCard({ title, metric }: { title: string; metric: any }) {
   if (!metric) return null;
   const numVal = metric.numeric ?? 0;
   const Icon = getMetricIcon(title);
+  const guidance = parseDualGuidance(metric.suggestions?.[0]);
   return (
     <div className="h-full bg-background/60 rounded-xl p-4 border border-white/8 hover:border-primary/20 transition-all">
       <div className="mb-3">
@@ -608,7 +619,9 @@ function MetricCard({ title, metric }: { title: string; metric: any }) {
       </div>
       <SeverityBadge severity={metric.severity} numeric={numVal} />
       {metric.assessment && <p className="text-xs text-white/50 mt-2">{metric.assessment}</p>}
-      {metric.suggestions?.[0] && <p className="text-xs text-primary/80 mt-1">→ {metric.suggestions[0]}</p>}
+      {guidance.fixNow && <p className="text-xs text-primary/80 mt-2"><span className="text-white/35">Fix now:</span> {guidance.fixNow}</p>}
+      {guidance.nextVideo && <p className="text-xs text-white/55 mt-1"><span className="text-white/35">Next video:</span> {guidance.nextVideo}</p>}
+      {!guidance.fixNow && !guidance.nextVideo && guidance.plain && <p className="text-xs text-primary/80 mt-1">→ {guidance.plain}</p>}
     </div>
   );
 }
@@ -755,6 +768,8 @@ function QualityPanel({ data, isPaid, profile }: { data: any; isPaid: boolean; p
   if (!data) return <p className="text-white/40 text-sm">No quality data.</p>;
   const overallScore = data.score ?? data.overallScore ?? data.overallVisualScore ?? 0;
   const scoreColor = overallScore >= 85 ? "text-green-400" : overallScore >= 60 ? "text-yellow-400" : "text-red-400";
+  const topFixGuidance = parseDualGuidance(data.topFix);
+  const gradingGuidance = parseDualGuidance(data.colorGradingRecommendation);
   const retentionPreview = data.retention ?? (!isPaid ? {
     estimatedRetentionPct: 43,
     retentionGrade: "C",
@@ -795,7 +810,8 @@ function QualityPanel({ data, isPaid, profile }: { data: any; isPaid: boolean; p
           <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
           <div>
             <p className="text-xs text-amber-400/70 uppercase tracking-wider mb-0.5 font-semibold">Most Important Fix</p>
-            <p className="text-sm text-white/80">{data.topFix}</p>
+            <p className="text-sm text-white/80">{topFixGuidance.fixNow || topFixGuidance.plain}</p>
+            {topFixGuidance.nextVideo && <p className="mt-2 text-xs text-white/55"><span className="text-white/35">Next video:</span> {topFixGuidance.nextVideo}</p>}
           </div>
         </div>
       )}
@@ -862,7 +878,8 @@ function QualityPanel({ data, isPaid, profile }: { data: any; isPaid: boolean; p
       {data.colorGradingRecommendation && isPaid && (
         <div className="p-4 rounded-xl bg-background/60 border border-white/8">
           <p className="text-xs text-white/40 uppercase tracking-wider mb-2 flex items-center gap-1.5"><Eye className="w-3.5 h-3.5" />Color Grading Recommendation</p>
-          <p className="text-sm text-white/70">{data.colorGradingRecommendation}</p>
+          <p className="text-sm text-white/70">{gradingGuidance.fixNow || gradingGuidance.plain}</p>
+          {gradingGuidance.nextVideo && <p className="mt-2 text-xs text-white/55"><span className="text-white/35">Next video:</span> {gradingGuidance.nextVideo}</p>}
         </div>
       )}
     </div>
@@ -875,6 +892,9 @@ function EditingPanel({ data, isPaid, profile }: { data: any; isPaid: boolean; p
   const suggestions = data.editingSuggestions ?? [];
   const firstSuggestion = suggestions[0];
   const extraSuggestions = suggestions.slice(1);
+  const nowFixes: string[] = data.nowFixes ?? [];
+  const nextVideoFixes: string[] = data.nextVideoFixes ?? [];
+  const editorNotes: string[] = data.editorNotes ?? [];
 
   return (
     <div className="space-y-6">
@@ -884,6 +904,83 @@ function EditingPanel({ data, isPaid, profile }: { data: any; isPaid: boolean; p
       <LimitedSpeechNotice profile={profile}>
         Editing notes are weighted toward pacing, visual clarity, and dead-air cleanup because there is not enough speech to power script-led hook analysis.
       </LimitedSpeechNotice>
+      {(data.topic || data.viewPotential || data.editingStyle) && (
+        <div className="grid gap-4 lg:grid-cols-[1.2fr,0.8fr]">
+          <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+            <p className="text-xs text-white/35 uppercase tracking-wider">Editor Blueprint</p>
+            {data.topic && <p className="mt-3 text-lg font-semibold text-white">{data.topic}</p>}
+            {data.audienceGoal && <p className="mt-2 text-sm leading-relaxed text-white/65">{data.audienceGoal}</p>}
+            {data.viewPotential && <p className="mt-3 text-sm leading-relaxed text-amber-100/85">{data.viewPotential}</p>}
+          </div>
+          <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+            <p className="text-xs text-white/35 uppercase tracking-wider">Best Editing Style</p>
+            {data.editingStyle && <p className="mt-3 text-sm leading-relaxed text-white/75">{data.editingStyle}</p>}
+            {data.packagingAngle && <p className="mt-3 text-xs leading-relaxed text-white/50"><span className="text-white/35">What the packaging should sell:</span> {data.packagingAngle}</p>}
+          </div>
+        </div>
+      )}
+      {(data.introGuidance || data.pacingGuidance || data.motionGuidance || data.hookApproach) && (
+        <div className="grid gap-3 md:grid-cols-2">
+          {data.introGuidance && (
+            <div className="rounded-xl border border-white/8 bg-background/60 p-4">
+              <p className="text-xs uppercase tracking-wider text-white/35">Intro</p>
+              <p className="mt-2 text-sm text-white/70">{data.introGuidance}</p>
+            </div>
+          )}
+          {data.pacingGuidance && (
+            <div className="rounded-xl border border-white/8 bg-background/60 p-4">
+              <p className="text-xs uppercase tracking-wider text-white/35">Pacing</p>
+              <p className="mt-2 text-sm text-white/70">{data.pacingGuidance}</p>
+            </div>
+          )}
+          {data.motionGuidance && (
+            <div className="rounded-xl border border-white/8 bg-background/60 p-4">
+              <p className="text-xs uppercase tracking-wider text-white/35">Motion Level</p>
+              <p className="mt-2 text-sm text-white/70">{data.motionGuidance}</p>
+            </div>
+          )}
+          {data.hookApproach && (
+            <div className="rounded-xl border border-white/8 bg-background/60 p-4">
+              <p className="text-xs uppercase tracking-wider text-white/35">Opening Strategy</p>
+              <p className="mt-2 text-sm text-white/70">{data.hookApproach}</p>
+            </div>
+          )}
+        </div>
+      )}
+      {(nowFixes.length > 0 || nextVideoFixes.length > 0) && (
+        <div className="grid gap-4 lg:grid-cols-2">
+          {nowFixes.length > 0 && (
+            <div className="rounded-xl border border-amber-400/20 bg-amber-400/5 p-4">
+              <p className="text-xs uppercase tracking-wider text-amber-200/70">Fix this cut now</p>
+              <div className="mt-3 space-y-2">
+                {nowFixes.map((fix, index) => (
+                  <p key={`${index}-${fix}`} className="text-sm text-white/75">{index + 1}. {fix}</p>
+                ))}
+              </div>
+            </div>
+          )}
+          {nextVideoFixes.length > 0 && (
+            <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+              <p className="text-xs uppercase tracking-wider text-white/35">Improve the next shoot</p>
+              <div className="mt-3 space-y-2">
+                {nextVideoFixes.map((fix, index) => (
+                  <p key={`${index}-${fix}`} className="text-sm text-white/70">{index + 1}. {fix}</p>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+      {editorNotes.length > 0 && isPaid && (
+        <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+          <p className="text-xs uppercase tracking-wider text-white/35">Format-specific Notes</p>
+          <div className="mt-3 space-y-2">
+            {editorNotes.map((note, index) => (
+              <p key={`${index}-${note}`} className="text-sm text-white/65">{note}</p>
+            ))}
+          </div>
+        </div>
+      )}
       {data.rewrittenHook && isPaid && (
         <div className="p-4 rounded-xl bg-primary/8 border border-primary/20">
           <p className="text-xs text-primary/70 uppercase tracking-wider mb-2 flex items-center gap-1.5"><Wand2 className="w-3.5 h-3.5" />Rewritten Hook</p>
@@ -1000,6 +1097,38 @@ function PublishPanel({ data, platforms, isPaid, subtitleFile, videoFileName, pr
       <LimitedSpeechNotice profile={profile}>
         Publish copy was generated from the visual premise and any sparse speech that was detected, so treat these titles and descriptions as packaging drafts rather than transcript-driven summaries.
       </LimitedSpeechNotice>
+      {(pData?.algorithmFit || pData?.packagingStrategy || pData?.audiencePromise) && (
+        <div className="grid gap-3 md:grid-cols-3">
+          {pData?.audiencePromise && (
+            <div className="rounded-xl border border-white/8 bg-background/60 p-4">
+              <p className="text-xs uppercase tracking-wider text-white/35">Viewer Promise</p>
+              <p className="mt-2 text-sm text-white/70">{pData.audiencePromise}</p>
+            </div>
+          )}
+          {pData?.packagingStrategy && (
+            <div className="rounded-xl border border-white/8 bg-background/60 p-4">
+              <p className="text-xs uppercase tracking-wider text-white/35">Packaging Angle</p>
+              <p className="mt-2 text-sm text-white/70">{pData.packagingStrategy}</p>
+            </div>
+          )}
+          {pData?.algorithmFit && (
+            <div className="rounded-xl border border-white/8 bg-background/60 p-4">
+              <p className="text-xs uppercase tracking-wider text-white/35">Algorithm Fit</p>
+              <p className="mt-2 text-sm text-white/70">{pData.algorithmFit}</p>
+            </div>
+          )}
+        </div>
+      )}
+      {Array.isArray(pData?.nicheReferences) && pData.nicheReferences.length > 0 && (
+        <div className="rounded-xl border border-white/8 bg-background/60 p-4">
+          <p className="text-xs uppercase tracking-wider text-white/35">Viral Packaging Patterns In This Niche</p>
+          <div className="mt-3 space-y-2">
+            {pData.nicheReferences.map((item: string, index: number) => (
+              <p key={`${index}-${item}`} className="text-sm text-white/65">{item}</p>
+            ))}
+          </div>
+        </div>
+      )}
       <div className="flex gap-2 flex-wrap">
         {publishKeys.map(pk => {
           const pl = PLATFORMS.find(p => p.id === pk);
@@ -2197,7 +2326,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
               <div className="flex gap-3 rounded-lg border border-amber-500/20 bg-amber-500/8 px-4 py-3 text-left">
                 <AlertTriangle className="w-4 h-4 text-amber-300 mt-0.5 shrink-0" />
                 <p className="text-xs leading-relaxed text-white/55">
-                  DayTabs now auto-detects where speech appears, whether the upload is long or short, and whether the frame is horizontal or vertical. Vertical or already-short videos skip short-clip ideation automatically.
+                  DayTabs now auto-detects where speech appears, whether the upload is long or short, and whether the frame is horizontal or vertical. Short clip ideas are generated automatically only when the video format actually supports them.
                 </p>
               </div>
             </div>

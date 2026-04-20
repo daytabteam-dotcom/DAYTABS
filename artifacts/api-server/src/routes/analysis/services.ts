@@ -1142,21 +1142,21 @@ CRITICAL for FORMAT DETECTION:
     "overallTopFix": "the single most impactful fix — specific, measurable",
     "colorGradingRecommendation": "one specific color grading suggestion with a concrete value",
     "lighting": "specific observation referencing light source, shadows, catch lights",
-    "lightingSuggestion": "exact measurable fix",
+    "lightingSuggestion": "Fix now: exact post-production or edit fix. Next video: exact production fix.",
     "brightness": "specific note on skin exposure, blown regions, or underexposed areas",
-    "brightnessSuggestion": "exact exposure adjustment",
+    "brightnessSuggestion": "Fix now: exact exposure adjustment in editing software. Next video: exact production fix.",
     "contrast": "specific note on crushed blacks, clipped highlights, or flat image — reference face, background, clothing",
-    "contrastSuggestion": "exact fix",
+    "contrastSuggestion": "Fix now: exact contrast fix in post. Next video: exact production fix.",
     "colorTemperature": "name the specific cast and where it is most visible",
-    "colorTemperatureSuggestion": "specific correction value",
+    "colorTemperatureSuggestion": "Fix now: specific color correction value. Next video: exact lighting or white balance fix.",
     "background": "describe exactly what objects are visible AND whether they are appropriate for the video topic — name the topic explicitly",
-    "backgroundSuggestion": "contextual fix that references what IS in the background and what should replace it (e.g. 'replace kitchen appliances with a simple wall or branded backdrop appropriate for a tech product demo')",
+    "backgroundSuggestion": "Fix now: contextual post or crop fix that references what is visible. Next video: what background to shoot against instead.",
     "framing": "headroom, eye-line position, shoulder crop — be exact",
-    "framingSuggestion": "specific camera or posture adjustment",
+    "framingSuggestion": "Fix now: exact crop or reframe adjustment. Next video: exact camera or posture adjustment.",
     "sharpness": "focus plane location, any motion blur, background sharpness relative to subject",
-    "sharpnessSuggestion": "exact fix",
+    "sharpnessSuggestion": "Fix now: exact sharpening or cleanup move. Next video: exact focus, shutter, or lens fix.",
     "stability": "note micro-jitter, drift, or stabilization artifacts and when they occur",
-    "stabilitySuggestion": "exact fix",
+    "stabilitySuggestion": "Fix now: exact stabilization edit fix. Next video: exact support or camera movement fix.",
     "presenceFeedback": "direct feedback on eye contact, energy, confidence on camera",
     "presenceSuggestion": "one specific actionable improvement for on-camera presence",
     "hookStrength": "strong" | "moderate" | "weak",
@@ -1344,21 +1344,21 @@ function getDefaultVisualAssessments(): Record<string, string> {
     overallTopFix: "Ensure the main subject becomes obvious earlier and stays visually clear throughout the video.",
     colorGradingRecommendation: "Add +10 warmth to counteract any cool daylight cast and make skin tones more natural.",
     lighting: "Key light positioning needs review — front-facing light eliminates facial depth.",
-    lightingSuggestion: "Shift key light 40 degrees to the right to create natural dimensionality.",
+    lightingSuggestion: "Fix now: Add a gentle exposure mask or shadow lift to separate the subject from the background. Next video: Shift the key light 40 degrees to the right to create natural dimensionality.",
     brightness: "Check for exposure inconsistency between subject and background.",
-    brightnessSuggestion: "Confirm highlights are not clipping by checking the histogram before recording.",
+    brightnessSuggestion: "Fix now: Lower highlights slightly and raise exposure only until the subject reads clearly without clipping. Next video: Confirm highlights are not clipping by checking the histogram before recording.",
     contrast: "Image may appear slightly flat — blacks should be seated properly.",
-    contrastSuggestion: "Lower blacks by 10 points in your color grade.",
+    contrastSuggestion: "Fix now: Lower blacks by about 10 points and add a small midtone contrast bump in the grade. Next video: Light the subject and background separately so the image has depth before grading.",
     colorTemperature: "Check for any mixed light sources causing color cast.",
-    colorTemperatureSuggestion: "Add +5 warmth to neutralize any shadow cast.",
+    colorTemperatureSuggestion: "Fix now: Add roughly +5 warmth and rebalance tint until neutrals stop drifting. Next video: Set white balance manually instead of letting mixed light sources fight each other.",
     background: "Background needs to be evaluated for topic appropriateness, not just visual cleanliness.",
-    backgroundSuggestion: "Choose a backdrop that signals credibility and matches your video topic — a clean wall, bookshelf, or branded setup works for most content categories.",
+    backgroundSuggestion: "Fix now: Crop tighter or darken the background slightly so distracting objects pull less attention. Next video: Choose a backdrop that signals credibility and matches your video topic — a clean wall, bookshelf, or branded setup works for most content categories.",
     framing: "Frame the actual subject so the viewer can understand what matters without searching around the image.",
-    framingSuggestion: "Tighten the crop or camera position so the main subject fills more of the frame.",
+    framingSuggestion: "Fix now: Reframe the shot so the main subject fills more of the frame and dead space is reduced. Next video: Set camera height and distance before recording so the viewer never has to search for the subject.",
     sharpness: "Confirm focus is locked on the main subject during setup.",
-    sharpnessSuggestion: "Use manual focus or focus lock on the key subject area before recording.",
+    sharpnessSuggestion: "Fix now: Add only light sharpening and avoid pushing clarity so far that edges look brittle. Next video: Use manual focus or focus lock on the key subject area before recording.",
     stability: "Use a locking tripod to eliminate any movement.",
-    stabilitySuggestion: "Use a locking ballhead to eliminate drift common with fluid heads on static shots.",
+    stabilitySuggestion: "Fix now: Stabilize lightly in post and trim the moments where drift is most visible. Next video: Use a locking ballhead to eliminate drift common with fluid heads on static shots.",
     presenceFeedback: "Evaluate whether the visible subject has enough visual energy and clarity to hold attention.",
     presenceSuggestion: "Increase visual intention in the opening so the main subject reads instantly.",
     hookStrength: "moderate",
@@ -1424,6 +1424,7 @@ For EACH dimension, write exactly as a professional video producer giving paid n
 - Never use vague praise without a specific physical observation
 - If something scores above 85, name the ONE thing that would push it to 100
 - Suggest a concrete, measurable fix
+- Every suggestion field must use this format exactly: "Fix now: ... Next video: ..."
 
 CRITICAL RULE: Never reference frame numbers. Reference approximate time positions.
 
@@ -1910,6 +1911,8 @@ export async function analyzeEditingPoints(
   audioPath?: string,
   plan = "free",
   speechAnalysis?: SpeechAnalysis,
+  videoName?: string,
+  formatProfile?: Partial<FormatProfile> | null,
   userId?: number,
 ): Promise<object> {
   const lastSeg = segments[segments.length - 1];
@@ -1917,6 +1920,13 @@ export async function analyzeEditingPoints(
   const isFree = plan === "free";
   const isVisualFirst = speechAnalysis?.mode === "visual_first" || !speechAnalysis?.hasMeaningfulSpeech;
   const languageInstruction = buildOutputLanguageInstruction(transcript, speechAnalysis);
+  const formatHint = formatProfile
+    ? `Detected format: ${formatProfile.contentFormat ?? "general_visual"}.
+Primary subject: ${formatProfile.primarySubject ?? "the main subject on screen"}.
+Visual summary: ${formatProfile.contentSummary ?? "A visual-first video centered on the main subject and payoff"}.
+Viewer intent: ${formatProfile.viewerIntent ?? "get the promised payoff quickly"}.
+Success factors: ${(formatProfile.successFactors ?? []).join(", ") || "clarity, pacing, payoff"}.`
+    : "";
 
   const editingSystemPrompt = `You are a senior video editor and YouTube strategist with 10 years experience. You give feedback like a professional editor reviewing a client's rough cut: specific, direct, actionable.
 
@@ -1926,6 +1936,108 @@ Rules:
 - When suggesting a cut, explain what value is lost vs gained in one sentence
 - Reference platform-specific best practices
 - Never say "consider" or "you might want to"`;
+
+  const defaultStrategy = {
+    topic: videoName ?? (isVisualFirst ? "Visual process / payoff video" : "Speaker-led informational video"),
+    audienceGoal: isVisualFirst
+      ? "See the visual payoff quickly and understand why the result is worth staying for."
+      : "Get the main idea quickly and stay because the delivery feels tight, useful, and easy to follow.",
+    viewPotential: isVisualFirst
+      ? "This can earn views if the payoff becomes obvious early and the middle keeps showing visible progress."
+      : "This can earn views if the value proposition lands early and the pacing stays tighter than the average niche upload.",
+    editingStyle: isVisualFirst
+      ? "Use progression-first editing: open on the strongest visual state, cut repetition hard, and let each cut reveal clear progress."
+      : "Use clarity-first editing: remove throat-clearing, open on the strongest claim, and keep every cut moving the viewer toward the takeaway.",
+    introGuidance: "Skip a long branded intro. Open on the strongest promise, result, or tension point before any setup.",
+    pacingGuidance: isVisualFirst
+      ? "Keep visual momentum high. If progress is not visible for more than a few seconds, add a cut, zoom, overlay, or time jump."
+      : "Front-load the point, cut pauses aggressively, and treat every slow sentence as a candidate for tightening or visual support.",
+    motionGuidance: isVisualFirst
+      ? "Use motion only when it helps the viewer read progress: punch-ins, speed ramps, reframes, and overlays should clarify the work, not decorate it."
+      : "Use moderate motion. Podcasts, commentary, and educational videos usually perform better with intentional punch-ins, angle swaps, captions, and selective B-roll than with constant movement.",
+    hookApproach: "Make the first 5-15 seconds prove why this video is worth a click by showing the payoff, conflict, or strongest line immediately.",
+    packagingAngle: "Package the video around the clearest viewer outcome, not a vague summary of what happens on screen.",
+    nowFixes: [
+      "Trim the slowest setup lines before the main payoff or thesis appears.",
+      "Move the clearest outcome, strongest quote, or best visual moment into the opening.",
+      "Use pattern breaks where attention is likely to dip: B-roll, punch-ins, captions, or a cleaner cut point.",
+    ],
+    nextVideoFixes: [
+      "Plan the opening around the payoff before recording so the first 10 seconds do more work.",
+      "Record cleaner pickup lines or alternate angles for sections that usually drag.",
+      "Design the shoot so every minute creates a visible change, proof point, or emotional turn.",
+    ],
+    editorNotes: [
+      "Match editing intensity to the format. Podcasts and educational videos usually want restraint plus clarity, not hyperactive motion.",
+      "If the topic is niche or technical, on-screen text should clarify the takeaway rather than repeat every spoken sentence.",
+    ],
+  };
+
+  const strategyContext = segments.length
+    ? segments
+        .slice(0, Math.min(segments.length, 10))
+        .map((seg) => `${fmtSecs(seg.start)}-${fmtSecs(seg.end)} ${seg.text}`)
+        .join("\n")
+    : transcript.substring(0, 1200);
+
+  let editingStrategy = defaultStrategy;
+  try {
+    const strategyResponse = await callOpenAI({
+      model: "gpt-4o",
+      max_completion_tokens: isFree ? 700 : 1400,
+      messages: [{
+        role: "user",
+        content: `${editingSystemPrompt}
+
+${languageInstruction}
+
+You are building an editor brief for this specific video.
+
+Video name: "${videoName ?? "Video analysis"}"
+Speech profile: ${speechAnalysis?.summary ?? "Speech data not available."}
+${formatHint}
+
+Use only what is supported by the transcript, timing, and detected format. Write this like a working editor telling a creator how to make this cut more watchable and more competitive for views.
+
+Requirements:
+- Name the topic or angle as specifically as the evidence allows.
+- Explain the editing style this format actually wants.
+- Say whether this video needs an intro, how fast the pacing should feel, and whether the edit should be simple, moderate, or motion-heavy.
+- Separate "fix now on this cut" from "fix in the next shoot".
+- Ground every recommendation in real editing techniques, not generic motivation.
+- Include a blunt viewPotential sentence that answers whether the current structure gives this a chance to pull views.
+
+Transcript / timed context:
+${strategyContext}
+
+Return STRICT JSON only:
+{
+  "topic": "specific topic or angle",
+  "audienceGoal": "what the viewer wants from this video",
+  "viewPotential": "one sentence on whether this can pull views in its current state and why",
+  "editingStyle": "best editing style for this format and topic",
+  "introGuidance": "does this need an intro or should it cold open",
+  "pacingGuidance": "how fast or restrained the pacing should be",
+  "motionGuidance": "how much motion, punch-ins, captions, or visual movement this format wants",
+  "hookApproach": "what the opening should do",
+  "packagingAngle": "what the title/thumbnail/packaging should sell",
+  "nowFixes": ["3 direct instructions for this current cut"],
+  "nextVideoFixes": ["3 direct instructions for the next shoot"],
+  "editorNotes": ["2 to 4 short format-aware editing truths for this creator"]
+}`,
+      }],
+    }, userId);
+
+    editingStrategy = {
+      ...defaultStrategy,
+      ...parseJson<typeof defaultStrategy>(
+        strategyResponse.choices[0]?.message?.content ?? "{}",
+        defaultStrategy,
+      ),
+    };
+  } catch (err) {
+    logger.warn({ err }, "Editing strategy generation failed");
+  }
 
   const hookCount = isFree ? 1 : 4;
   const suggestionCount = isFree ? 1 : 5;
@@ -2145,6 +2257,7 @@ Return STRICT JSON only: {"rewrittenHook": "your complete rewritten opening here
 
   return {
     mode: isVisualFirst ? "visual_first" : speechAnalysis?.mode ?? "talking_first",
+    ...editingStrategy,
     hooks: [...clampedHooks].sort((a, b) => {
       if (!a || !b) return 0;
       return parseTs((a as { start: string }).start) - parseTs((b as { start: string }).start);
@@ -2235,15 +2348,16 @@ Platform: ${guide}
 Context: ${contentHint}
 Transcript: "${transcript.substring(0, 800)}"
 Hard rule: never infer cooking, food, dessert, recipe, or kitchen themes unless the detected format or transcript clearly supports that topic.
+Make the packaging algorithm-aware for this platform: strong topic clarity, clear audience promise, and wording that matches how high-performing creators in this niche package similar videos without copying anyone directly.
 TAGS: No # symbol.
 
 Return STRICT JSON:
-{"titles":["one title"],"description":"Two sentences.","hashtags":[{"tag":"Tag","effect":"why"},{"tag":"Tag2","effect":"..."},{"tag":"Tag3","effect":"..."}],"timestamps":[{"time":"0:00","label":"Intro"}]}` }],
+{"titles":["one title"],"description":"Two sentences.","hashtags":[{"tag":"Tag","effect":"why"},{"tag":"Tag2","effect":"..."},{"tag":"Tag3","effect":"..."}],"timestamps":[{"time":"0:00","label":"Intro"}],"algorithmFit":"one sentence on why this packaging can attract clicks in this niche","packagingStrategy":"one sentence on the angle this title and description are selling"}` }],
     }, userId);
 
-    const parsed = parseJson<{ titles: string[]; description: string; hashtags: Array<{ tag: string; effect?: string }>; timestamps: Array<{ time: string; label: string }> }>(
+    const parsed = parseJson<{ titles: string[]; description: string; hashtags: Array<{ tag: string; effect?: string }>; timestamps: Array<{ time: string; label: string }>; algorithmFit?: string; packagingStrategy?: string }>(
       response.choices[0]?.message?.content ?? "{}",
-      { titles: ["Your Video Title"], description: "Your video content.", hashtags: [{ tag: "VideoContent", effect: "Broad reach" }], timestamps: [{ time: "0:00", label: "Introduction" }] }
+      { titles: ["Your Video Title"], description: "Your video content.", hashtags: [{ tag: "VideoContent", effect: "Broad reach" }], timestamps: [{ time: "0:00", label: "Introduction" }], algorithmFit: "", packagingStrategy: "" }
     );
     parsed.hashtags = (parsed.hashtags ?? []).map(h => ({ ...h, tag: typeof h.tag === "string" ? h.tag.replace(/^#+/, "") : h.tag }));
     return parsed;
@@ -2262,6 +2376,7 @@ Context: ${contentHint}
 Transcript: "${transcript.substring(0, 2000)}"${chapterHint}
 Hard rule: never infer cooking, food, dessert, recipe, or kitchen themes unless the detected format or transcript clearly supports that topic.
 If transcript signal is limited, prefer accurate format-aware packaging over specific nouns from sparse or noisy transcript fragments.
+Act like a strategist who studies viral creators in the same niche. Do not copy them or name them unless the evidence is obvious. Instead, extract the style patterns that make similar videos clickable: audience promise, tension, payoff clarity, specificity, and search intent.
 
 ${isYouTube ? `Generate exactly 5 title options (curiosity gap, how-to, number-based, problem/solution, bold claim). Under 70 chars each.` : `Generate 3 title options.`}
 
@@ -2270,12 +2385,12 @@ Description: First 2 lines state what the video is about. Use primary keyword na
 TAGS: No # symbols. 25-30 tags.
 
 Return STRICT JSON:
-{"titles":["t1","t2","t3","t4","t5"],"description":"full description","hashtags":[{"tag":"Tag","effect":"audience"}],"timestamps":[{"time":"0:00","label":"complete label"}],"titleStrategies":["curiosity gap","how-to","number-based","problem/solution","bold claim"]}` }],
+{"titles":["t1","t2","t3","t4","t5"],"description":"full description","hashtags":[{"tag":"Tag","effect":"audience"}],"timestamps":[{"time":"0:00","label":"complete label"}],"titleStrategies":["curiosity gap","how-to","number-based","problem/solution","bold claim"],"algorithmFit":"2 sentences on why this packaging matches platform behavior and niche click patterns","packagingStrategy":"2 sentences on what audience promise these titles are selling","nicheReferences":["3 short notes describing the kind of viral packaging patterns being used"],"audiencePromise":"one sentence on the core promise that should win the click"}` }],
   }, userId);
 
-  const parsed = parseJson<{ titles: string[]; description: string; hashtags: object[]; timestamps: Array<{ time: string; label: string }>; titleStrategies?: string[] }>(
+  const parsed = parseJson<{ titles: string[]; description: string; hashtags: object[]; timestamps: Array<{ time: string; label: string }>; titleStrategies?: string[]; algorithmFit?: string; packagingStrategy?: string; nicheReferences?: string[]; audiencePromise?: string }>(
     response.choices[0]?.message?.content ?? "{}",
-    { titles: ["Engaging title"], description: "Description.", hashtags: [], timestamps: [{ time: "0:00", label: "Introduction" }] }
+    { titles: ["Engaging title"], description: "Description.", hashtags: [], timestamps: [{ time: "0:00", label: "Introduction" }], algorithmFit: "", packagingStrategy: "", nicheReferences: [], audiencePromise: "" }
   );
 
   if (chapterPoints.length) {
