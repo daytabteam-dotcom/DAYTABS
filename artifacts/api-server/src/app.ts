@@ -120,17 +120,30 @@ app.use("/api", router);
 
 const projectRoot = path.resolve('/app');
 const adminDist = path.join(projectRoot, 'artifacts/admin/dist/public');
+const adminStatic = express.static(adminDist);
 
-app.get('/', adminHostOnly, (_req, res) => {
-  res.sendFile(path.join(adminDist, 'index.html'));
-});
+app.use((req, res, next) => {
+  if (!ADMIN_HOST || requestHostname(req) !== ADMIN_HOST) {
+    next();
+    return;
+  }
 
-app.use('/', adminHostOnly, express.static(adminDist));
-app.get('/app/{*adminPath}', adminHostOnly, (_req, res) => {
-  res.sendFile(path.join(adminDist, 'index.html'));
-});
-app.get('/{*adminPath}', adminHostOnly, (_req, res) => {
-  res.redirect(302, '/');
+  if (req.path === "/") {
+    res.sendFile(path.join(adminDist, "index.html"));
+    return;
+  }
+
+  if (req.path.startsWith("/assets/")) {
+    adminStatic(req, res, next);
+    return;
+  }
+
+  if (req.path === "/app" || req.path.startsWith("/app/")) {
+    res.sendFile(path.join(adminDist, "index.html"));
+    return;
+  }
+
+  res.redirect(302, "/");
 });
 
 app.use('/', express.static(path.join(projectRoot, 'artifacts/landing/dist/public')));
