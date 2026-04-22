@@ -63,7 +63,8 @@ export function useAnalysisPolling(jobId: string | null) {
         if (status === "complete" || status === "error" || status === "cancelled") {
           return false; // Stop polling
         }
-        return 2000; // Poll every 2 seconds
+        if (status === "queued") return 5000;
+        return 3500;
       }
     } as any
   });

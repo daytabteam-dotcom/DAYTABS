@@ -9,9 +9,7 @@ import { promisify } from "util";
 import { db } from "@workspace/db";
 import { analysisJobsTable } from "@workspace/db";
 import { desc, eq, sql } from "drizzle-orm";
-import { runAnalysisPipeline, type PipelineMode } from "./pipeline";
-import { updateJob } from "./services";
-import { analysisQueue, enqueueAnalysisJob, forgetQueuedJob, getJobQueueStatus, getQueueStatus } from "../../lib/analysisQueue";
+import { type PipelineMode } from "./pipeline";
 import { openai } from "../../lib/openai";
 import {
   GetAnalysisStatusParams,
@@ -21,9 +19,10 @@ import {
 } from "@workspace/api-zod";
 import { optionalAuth } from "../../middlewares/auth";
 import { signalAnalysisCancellation } from "../../lib/analysisCancellation";
+import { getActiveAnalysisCount, getDbJobQueueStatus, getDbQueueStatus } from "../../lib/analysisJobQueueDb";
 import { normalizePlan, getLimits, buildFileTooLargeError } from "../../lib/planLimits";
 import { buildVideoTooLongError } from "../../lib/planLimits";
-import { checkVideoAnalysisLimit, incrementVideoAnalysis, getOrCreateUsage } from "../../lib/usageService";
+import { checkVideoAnalysisLimit, getOrCreateUsage } from "../../lib/usageService";
 import {
   buildR2ObjectKey,
   deleteFromB2,
@@ -247,7 +246,7 @@ router.post("/upload", (req, res, next) => {
     const audioVoice = req.body.audioVoice || "alloy";
     const originalFileName = req.file.originalname;
 
-    if (analysisQueue.size >= 10) {
+    if (await getActiveAnalysisCount() >= 25) {
       await fs.unlink(req.file.path).catch(() => {});
       res.status(429).json({ error: "Too many analysis jobs queued. Please wait and try again." });
       return;
@@ -288,37 +287,9 @@ router.post("/upload", (req, res, next) => {
       },
     } as any);
 
-    // Respond immediately — analysis will execute through the queue.
+    // Respond immediately — a dedicated worker process will claim this queued job.
     res.json({ jobId, message: "Video uploaded. Analysis queued." });
-
-    const uploadedVideoPath = req.file.path;
-    enqueueAnalysisJob(jobId, async () => {
-        try {
-          const [freshJob] = await db.select().from(analysisJobsTable).where(eq(analysisJobsTable.id, jobId)).limit(1);
-          if (freshJob?.status === "cancelled") return;
-          await updateJob(jobId, { status: "queued", progress: 5, currentStep: "Starting analysis" });
-          const completed = await runAnalysisPipeline(jobId, b2Key, {
-            mode: validatedMode,
-            platform: validatedPlatforms[0] ?? "youtube_long",
-            platforms: validatedPlatforms,
-            modules: validatedModules,
-            translateSubtitles,
-            subtitleLanguage: req.body.subtitleLanguage || undefined,
-            audioLanguage: audioLanguage || undefined,
-            audioVoice,
-            originalFileName,
-            plan: rawPlan,
-            maxDurationSeconds,
-            durationSeconds: hasDuration ? durationSeconds : undefined,
-          });
-          if (completed && userId) await incrementVideoAnalysis(userId, hasDuration ? durationSeconds : null);
-        } finally {
-          await fs.unlink(uploadedVideoPath).catch(() => {});
-        }
-      }, rawPlan)
-      .catch((err) => {
-        req.log.error({ err, jobId }, "Queued pipeline error");
-      });
+    await fs.unlink(req.file.path).catch(() => {});
   } catch (err) {
     req.log.error({ err }, "Upload handler error");
     if (req.file?.path) await fs.unlink(req.file.path).catch(() => {});
@@ -326,8 +297,8 @@ router.post("/upload", (req, res, next) => {
   }
 });
 
-router.get("/queue-status", (req, res) => {
-  res.json(getQueueStatus());
+router.get("/queue-status", async (req, res) => {
+  res.json(await getDbQueueStatus());
 });
 
 // ── User analysis history ────────────────────────────────────────────────────
@@ -439,7 +410,6 @@ router.post("/cancel-active", async (req, res) => {
         })
         .where(eq(analysisJobsTable.id, job.id));
 
-      forgetQueuedJob(job.id);
       signalAnalysisCancellation(job.id);
       cancelledJobIds.push(job.id);
 
@@ -495,7 +465,6 @@ router.post("/:jobId/cancel", async (req, res) => {
         })
         .where(eq(analysisJobsTable.id, params.jobId));
 
-      forgetQueuedJob(job.id);
       signalAnalysisCancellation(job.id);
 
       if (job.b2Key) {
@@ -513,7 +482,7 @@ router.post("/:jobId/cancel", async (req, res) => {
 });
 
 // ── Upload health check ───────────────────────────────────────────────────────
-router.get("/upload-health", (req, res) => {
+router.get("/upload-health", async (req, res) => {
   const uploadDir = path.join(os.tmpdir(), "daytabs-uploads");
   const r2Status = getR2RequiredEnvStatus();
 
@@ -524,8 +493,7 @@ router.get("/upload-health", (req, res) => {
     uploadDirExists: require("fs").existsSync(uploadDir),
     r2Configured: r2Status.configured,
     missingR2Vars: r2Status.missing,
-    queueSize: analysisQueue.size,
-    queuePending: analysisQueue.pending,
+    queue: await getDbQueueStatus(),
     multerLimits: {
       fileSize: "5GB",
       allowedTypes: ["video/mp4", "video/quicktime", "video/x-msvideo", "video/webm", "video/mpeg", "video/mov"]
@@ -547,7 +515,7 @@ router.get("/:jobId/status", async (req, res) => {
       progress: j.progress,
       currentStep: j.currentStep,
       error: j.error || undefined,
-      queue: j.status === "queued" ? getJobQueueStatus(j.id) : undefined,
+      queue: ["complete", "error", "cancelled"].includes(j.status) ? undefined : await getDbJobQueueStatus(j.id),
     });
   } catch (err) {
     req.log.error({ err }, "Status error");

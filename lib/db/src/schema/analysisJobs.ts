@@ -20,6 +20,10 @@ export const analysisJobsTable = pgTable("analysis_jobs", {
   framesDir: text("frames_dir"),
   result: jsonb("result"),
   error: text("error"),
+  attemptCount: integer("attempt_count").notNull().default(0),
+  lockedBy: text("locked_by"),
+  startedAt: timestamp("started_at"),
+  heartbeatAt: timestamp("heartbeat_at"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

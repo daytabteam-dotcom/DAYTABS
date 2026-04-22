@@ -3,11 +3,9 @@ import multer from "multer";
 import { v4 as uuidv4 } from "uuid";
 import path from "path";
 import fs from "fs/promises";
-import { eq } from "drizzle-orm";
 import { db } from "@workspace/db";
 import { analysisJobsTable } from "@workspace/db";
-import { runAnalysisPipeline, type PipelineMode } from "../analysis/pipeline";
-import { updateJob } from "../analysis/services";
+import { type PipelineMode } from "../analysis/pipeline";
 import { optionalAuth } from "../../middlewares/auth";
 import {
   normalizePlan,
@@ -17,10 +15,8 @@ import {
 } from "../../lib/planLimits";
 import {
   checkVideoAnalysisLimit,
-  incrementVideoAnalysis,
 } from "../../lib/usageService";
 import { logger } from "../../lib/logger";
-import { enqueueAnalysisJob } from "../../lib/analysisQueue";
 import {
   buildR2ObjectKey,
   createR2UploadUrl,
@@ -371,35 +367,7 @@ router.post("/complete", async (req, res) => {
     sessions.delete(uploadId);
 
     res.json({ jobId, filePath: b2Key });
-
-    enqueueAnalysisJob(jobId, async () => {
-        try {
-          const [freshJob] = await db.select().from(analysisJobsTable).where(eq(analysisJobsTable.id, jobId)).limit(1);
-          if (freshJob?.status === "cancelled") return;
-          await updateJob(jobId, { status: "queued", progress: 5, currentStep: "Starting analysis" });
-          const completed = await runAnalysisPipeline(jobId, b2Key, {
-            mode: validatedMode,
-            platform: session.platforms[0] ?? "youtube_long",
-            platforms: session.platforms,
-            modules: session.modules,
-            translateSubtitles: session.translateSubtitles,
-            subtitleLanguage: session.subtitleLanguage ?? undefined,
-            audioLanguage: session.audioLanguage ?? undefined,
-            audioVoice: session.audioVoice,
-            originalFileName: session.filename,
-            plan: rawPlan,
-            maxDurationSeconds,
-            durationSeconds: session.durationSeconds ?? undefined,
-          });
-          if (completed && userId) await incrementVideoAnalysis(userId, session.durationSeconds);
-        } finally {
-          await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
-        }
-      }, rawPlan)
-      .catch(async (err) => {
-        logger.error({ err, jobId }, "Queued pipeline error after chunked upload");
-        await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
-      });
+    await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
   } catch (err) {
     logger.error({ err }, "Upload complete error");
     res.status(500).json({ error: "Failed to assemble upload" });

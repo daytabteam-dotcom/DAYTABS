@@ -255,6 +255,8 @@ function getHistoryStatusLabel(status: string) {
 
 function getFriendlyAnalysisStep(status?: string, fallback?: string) {
   if (status === "queued") return "Waiting for your turn";
+  if (status === "processing") return "Starting analysis";
+  if (status === "downloading") return "Downloading your video";
   if (status === "extracting_audio") return "Preparing your video";
   if (status === "transcribing") return "Understanding the words";
   if (status === "detecting_speech") return "Understanding the style";

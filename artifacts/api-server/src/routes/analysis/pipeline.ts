@@ -172,7 +172,7 @@ export async function runAnalysisPipeline(
     await fs.mkdir(workDir, { recursive: true });
     await stopIfCancelled(jobId);
     await stopIfMemoryHigh(jobId, "download start");
-    await updateJob(jobId, { status: "queued", progress: 7, currentStep: "Downloading uploaded video" });
+    await updateJob(jobId, { status: "downloading", progress: 7, currentStep: "Downloading uploaded video" });
     if (sourceVideoPath) {
       logger.info({ jobId, sourceVideoPath, localVideoPath }, "Copying uploaded video from local storage for analysis");
       await fs.copyFile(sourceVideoPath, localVideoPath);
