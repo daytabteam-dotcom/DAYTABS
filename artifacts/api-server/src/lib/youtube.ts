@@ -68,6 +68,15 @@ interface YoutubeSettings {
   needsPostingPreference: boolean;
 }
 
+type CompetitorSource = "manual" | "discovered";
+
+interface StoredCompetitorMeta {
+  source: CompetitorSource;
+  nicheLabel?: string;
+  reportSummary?: string;
+  addedFromUrl?: string | null;
+}
+
 type IdeaOrigin = "ai" | "manual";
 type IdeaFeedback = "liked" | "disliked" | null;
 type SignalSource = "performance" | "feedback" | "competitor" | "trend" | "channel_gap" | "low_signal";
@@ -287,6 +296,34 @@ function asArray(value: unknown): unknown[] {
 
 function asString(value: unknown): string | null {
   return typeof value === "string" ? value : value == null ? null : String(value);
+}
+
+function readCompetitorMeta(value: unknown): StoredCompetitorMeta {
+  const raw = asString(value);
+  if (!raw) return { source: "discovered" };
+  try {
+    const parsed = JSON.parse(raw) as StoredCompetitorMeta;
+    return {
+      source: parsed.source === "manual" ? "manual" : "discovered",
+      nicheLabel: asString(parsed.nicheLabel) || undefined,
+      reportSummary: asString(parsed.reportSummary) || undefined,
+      addedFromUrl: asString(parsed.addedFromUrl),
+    };
+  } catch {
+    return {
+      source: "discovered",
+      nicheLabel: raw,
+    };
+  }
+}
+
+function serializeCompetitorMeta(meta: StoredCompetitorMeta) {
+  return JSON.stringify({
+    source: meta.source === "manual" ? "manual" : "discovered",
+    nicheLabel: meta.nicheLabel || "",
+    reportSummary: meta.reportSummary || "",
+    addedFromUrl: meta.addedFromUrl || null,
+  });
 }
 
 function extractJSON(raw: string): string {
@@ -1070,6 +1107,18 @@ function normalizeVideo(item: unknown): YoutubeRecentVideo {
   };
 }
 
+function summarizeRecentCompetitorVideos(videos: YoutubeRecentVideo[]) {
+  return [...videos]
+    .sort((a, b) => new Date(b.publishedAt || 0).getTime() - new Date(a.publishedAt || 0).getTime())
+    .map((video) => ({
+      title: video.title,
+      viewCount: video.viewCount,
+      url: video.url,
+      publishedAt: video.publishedAt,
+      thumbnailUrl: video.thumbnailUrl,
+    }));
+}
+
 async function fetchRecentVideos(userId: number, channelId: string, limit = 20) {
   const search = await youtubeJson<{ items?: unknown[] }>(userId, dataApiUrl("search", {
     part: "snippet",
@@ -1113,6 +1162,203 @@ async function searchChannelIds(userId: number, query: string, maxResults = 25) 
   return asArray(search.items)
     .map((item) => asString(asRecord(asRecord(item).id).channelId))
     .filter((id): id is string => Boolean(id));
+}
+
+function normalizeYoutubeChannelUrl(input: string) {
+  const trimmed = input.trim();
+  if (!trimmed) throw new Error("Enter a YouTube channel URL");
+  const candidate = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  const url = new URL(candidate);
+  const hostname = url.hostname.replace(/^www\./i, "").toLowerCase();
+  if (hostname !== "youtube.com" && hostname !== "m.youtube.com") {
+    throw new Error("Please enter a valid YouTube channel URL");
+  }
+  return url;
+}
+
+async function resolveYoutubeChannelIdFromUrl(channelUrl: string) {
+  const url = normalizeYoutubeChannelUrl(channelUrl);
+  const path = url.pathname.replace(/\/+$/, "");
+  const channelIdMatch = path.match(/\/channel\/(UC[\w-]{22})$/i);
+  if (channelIdMatch?.[1]) return channelIdMatch[1];
+
+  if (
+    path === "/watch"
+    || path.startsWith("/watch/")
+    || path.startsWith("/shorts/")
+    || path.startsWith("/live/")
+    || path.startsWith("/playlist")
+  ) {
+    throw new Error("Please enter a YouTube channel URL, not a video or playlist URL");
+  }
+
+  const response = await fetch(url.toString(), {
+    redirect: "follow",
+    headers: {
+      "user-agent": "Mozilla/5.0 (compatible; DayTabsBot/1.0; +https://daytabs.com)",
+      accept: "text/html,application/xhtml+xml",
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error("We could not verify that YouTube channel URL");
+  }
+
+  const finalUrl = new URL(response.url);
+  const finalPath = finalUrl.pathname.replace(/\/+$/, "");
+  const finalChannelIdMatch = finalPath.match(/\/channel\/(UC[\w-]{22})$/i);
+  if (finalChannelIdMatch?.[1]) return finalChannelIdMatch[1];
+
+  const html = await response.text();
+  const htmlMatch = html.match(/(?:externalId|channelId)":"(UC[\w-]{22})"/)
+    || html.match(/itemprop="identifier"\s+content="(UC[\w-]{22})"/i)
+    || html.match(/youtube\.com\/channel\/(UC[\w-]{22})/i);
+  if (htmlMatch?.[1]) return htmlMatch[1];
+
+  throw new Error("That URL does not appear to be a valid public YouTube channel");
+}
+
+async function generateCompetitorReportSummary(
+  userId: number,
+  creatorProfile: typeof youtubeChannelProfilesTable.$inferSelect,
+  competitor: {
+    channelId: string;
+    channelName: string;
+    subscriberCount?: string | null;
+    postingFrequency?: string | null;
+  },
+  recentVideos: YoutubeRecentVideo[],
+) {
+  const completion = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [
+      {
+        role: "system",
+        content: `You are summarizing a YouTube competitor for a creator dashboard.
+Return JSON only with this shape:
+{"reportSummary": string}
+
+Write 2 concise sentences.
+Mention what this competitor seems to do well and one practical takeaway for the creator.
+Do not use hype. Do not use bullet points.`,
+      },
+      {
+        role: "user",
+        content: JSON.stringify({
+          creatorChannel: {
+            channelName: creatorProfile.channelName,
+            nicheProfile: creatorProfile.nicheProfile,
+            subscriberCount: creatorProfile.subscriberCount,
+          },
+          competitor,
+          recentVideos: recentVideos.slice(0, 8),
+        }),
+      },
+    ],
+    response_format: { type: "json_object" },
+    max_completion_tokens: 250,
+  });
+
+  await logTokenUsage({
+    userId,
+    feature: "youtubeCompetitorReport",
+    model: "gpt-4o-mini",
+    ...usageTokens(completion.usage),
+  });
+
+  const raw = completion.choices[0]?.message?.content ?? "{}";
+  const parsed = asRecord(parseAiJson(raw));
+  return asString(parsed.reportSummary) || "";
+}
+
+async function upsertYoutubeCompetitor(
+  userId: number,
+  profile: typeof youtubeChannelProfilesTable.$inferSelect,
+  channelId: string,
+  options?: {
+    source?: CompetitorSource;
+    requestedUrl?: string | null;
+    existingCompetitor?: typeof youtubeCompetitorsTable.$inferSelect | null;
+    preserveManualSource?: boolean;
+    generateAiReport?: boolean;
+  },
+) {
+  if (channelId === profile.channelId) {
+    throw new Error("You cannot add your own channel as a competitor");
+  }
+
+  const existingCompetitor = options?.existingCompetitor ?? null;
+  const existingMeta = readCompetitorMeta(existingCompetitor?.niche);
+  const source: CompetitorSource =
+    options?.preserveManualSource && existingMeta.source === "manual"
+      ? "manual"
+      : options?.source ?? existingMeta.source ?? "discovered";
+
+  const channels = await fetchChannelsByIds(userId, [channelId]);
+  const channel = asRecord(channels[0]);
+  if (!Object.keys(channel).length) {
+    throw new Error("That YouTube channel could not be found");
+  }
+
+  const snippet = asRecord(channel.snippet);
+  const stats = asRecord(channel.statistics);
+  const thumbnails = asRecord(snippet.thumbnails);
+  const thumbnailUrl = asString(asRecord(thumbnails.high).url) || asString(asRecord(thumbnails.medium).url) || asString(asRecord(thumbnails.default).url);
+  const recent = await fetchRecentVideos(userId, channelId, 10);
+  const postingFrequencyLabel = postingFrequency(recent);
+  const reportSummary = options?.generateAiReport
+    ? await generateCompetitorReportSummary(
+        userId,
+        profile,
+        {
+          channelId,
+          channelName: asString(snippet.title) || "YouTube competitor",
+          subscriberCount: asString(stats.subscriberCount),
+          postingFrequency: postingFrequencyLabel,
+        },
+        recent,
+      )
+    : existingMeta.reportSummary || "";
+
+  const competitorMeta = serializeCompetitorMeta({
+    source,
+    nicheLabel: asString(asRecord(profile.nicheProfile).niche) || profile.channelName,
+    reportSummary,
+    addedFromUrl: options?.requestedUrl ?? existingMeta.addedFromUrl ?? null,
+  });
+
+  if (existingCompetitor) {
+    const [updated] = await db.update(youtubeCompetitorsTable)
+      .set({
+        channelId,
+        channelName: asString(snippet.title) || "YouTube competitor",
+        thumbnailUrl,
+        subscriberCount: asString(stats.subscriberCount),
+        mostViewedRecentVideos: summarizeRecentCompetitorVideos(recent),
+        postingFrequency: postingFrequencyLabel,
+        niche: competitorMeta,
+        fetchedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(youtubeCompetitorsTable.id, existingCompetitor.id))
+      .returning();
+    return updated;
+  }
+
+  const [created] = await db.insert(youtubeCompetitorsTable).values({
+    userId,
+    channelId,
+    channelName: asString(snippet.title) || "YouTube competitor",
+    thumbnailUrl,
+    subscriberCount: asString(stats.subscriberCount),
+    mostViewedRecentVideos: summarizeRecentCompetitorVideos(recent),
+    postingFrequency: postingFrequencyLabel,
+    niche: competitorMeta,
+    fetchedAt: new Date(),
+    updatedAt: new Date(),
+  }).returning();
+
+  return created;
 }
 
 async function analyzeNiche(userId: number, channel: JsonRecord, recentVideos: YoutubeRecentVideo[]): Promise<YoutubeNicheProfile> {
@@ -1287,23 +1533,6 @@ export async function getYoutubeStatus(userId: number) {
     }
   }
 
-  const newestCompetitorFetch = competitors[0]?.fetchedAt?.getTime?.() ?? 0;
-  const shouldAutoRefreshCompetitors = Boolean(
-    connection && profile && (
-      competitors.length === 0
-      || !newestCompetitorFetch
-      || (Date.now() - newestCompetitorFetch) > (15 * 60 * 1000)
-    ),
-  );
-
-  if (shouldAutoRefreshCompetitors && profile) {
-    try {
-      competitors = await discoverCompetitors(userId, profile);
-    } catch {
-      // Fall back to the saved competitor snapshot if live refresh fails.
-    }
-  }
-
   const competitorsMissingImages = competitors.filter((competitor) => competitor.channelId && !competitor.thumbnailUrl);
   if (connection && competitorsMissingImages.length) {
     try {
@@ -1466,41 +1695,84 @@ export async function discoverCompetitors(userId: number, profile: typeof youtub
     ...withTiers.filter((item) => item.tier === 3).sort((a, b) => a.subscribers - b.subscribers).slice(0, 6),
   ].filter((item, index, list) => list.findIndex((candidate) => asString(candidate.item.id) === asString(item.item.id)) === index);
 
-  await db.delete(youtubeCompetitorsTable).where(eq(youtubeCompetitorsTable.userId, userId));
+  const existingCompetitors = await db
+    .select()
+    .from(youtubeCompetitorsTable)
+    .where(eq(youtubeCompetitorsTable.userId, userId));
+  const existingByChannelId = new Map(
+    existingCompetitors
+      .filter((competitor) => competitor.channelId)
+      .map((competitor) => [competitor.channelId, competitor] as const),
+  );
+  const selectedChannelIds = new Set(
+    selected
+      .map((item) => asString(asRecord(item.item).id))
+      .filter((id): id is string => Boolean(id)),
+  );
+  const staleDiscoveredIds = existingCompetitors
+    .filter((competitor) => {
+      const meta = readCompetitorMeta(competitor.niche);
+      return meta.source !== "manual" && !selectedChannelIds.has(competitor.channelId);
+    })
+    .map((competitor) => competitor.id);
+
+  for (const competitorId of staleDiscoveredIds) {
+    await db.delete(youtubeCompetitorsTable).where(eq(youtubeCompetitorsTable.id, competitorId));
+  }
 
   const saved = [];
   for (const entry of selected) {
     const channel = asRecord(entry.item);
     const channelId = asString(channel.id);
     if (!channelId) continue;
-    const snippet = asRecord(channel.snippet);
-    const stats = asRecord(channel.statistics);
-    const thumbnails = asRecord(snippet.thumbnails);
-    const thumbnailUrl = asString(asRecord(thumbnails.high).url) || asString(asRecord(thumbnails.medium).url) || asString(asRecord(thumbnails.default).url);
-    const recent = await fetchRecentVideos(userId, channelId, 10);
-    const recentVideoSummary = [...recent]
-      .sort((a, b) => new Date(b.publishedAt || 0).getTime() - new Date(a.publishedAt || 0).getTime())
-      .map((video) => ({
-        title: video.title,
-        viewCount: video.viewCount,
-        url: video.url,
-        publishedAt: video.publishedAt,
-        thumbnailUrl: video.thumbnailUrl,
-      }));
-    const [competitor] = await db.insert(youtubeCompetitorsTable).values({
-      userId,
-      channelId,
-      channelName: asString(snippet.title) || "YouTube competitor",
-      thumbnailUrl,
-      subscriberCount: asString(stats.subscriberCount),
-      mostViewedRecentVideos: recentVideoSummary,
-      postingFrequency: postingFrequency(recent),
-      niche: asString(niche.niche) || query,
-      updatedAt: new Date(),
-    }).returning();
+    const competitor = await upsertYoutubeCompetitor(userId, profile, channelId, {
+      source: "discovered",
+      existingCompetitor: existingByChannelId.get(channelId) ?? null,
+      preserveManualSource: true,
+      generateAiReport: false,
+    });
     saved.push(competitor);
   }
-  return saved;
+
+  return await db
+    .select()
+    .from(youtubeCompetitorsTable)
+    .where(eq(youtubeCompetitorsTable.userId, userId))
+    .orderBy(desc(youtubeCompetitorsTable.fetchedAt));
+}
+
+export async function addYoutubeCompetitorByUrl(userId: number, channelUrl: string) {
+  const [profile] = await db
+    .select()
+    .from(youtubeChannelProfilesTable)
+    .where(eq(youtubeChannelProfilesTable.userId, userId))
+    .limit(1);
+  if (!profile) throw new Error("Connect YouTube before adding competitors");
+
+  const channelId = await resolveYoutubeChannelIdFromUrl(channelUrl);
+  const existingCompetitors = await db
+    .select()
+    .from(youtubeCompetitorsTable)
+    .where(eq(youtubeCompetitorsTable.userId, userId));
+  const existing = existingCompetitors.find((competitor) => competitor.channelId === channelId) ?? null;
+  return await upsertYoutubeCompetitor(userId, profile, channelId, {
+    source: "manual",
+    requestedUrl: channelUrl.trim(),
+    existingCompetitor: existing,
+    preserveManualSource: true,
+    generateAiReport: true,
+  });
+}
+
+export async function removeYoutubeCompetitor(userId: number, competitorId: number) {
+  const [competitor] = await db
+    .select()
+    .from(youtubeCompetitorsTable)
+    .where(and(eq(youtubeCompetitorsTable.id, competitorId), eq(youtubeCompetitorsTable.userId, userId)))
+    .limit(1);
+  if (!competitor) throw new Error("Competitor not found");
+  await db.delete(youtubeCompetitorsTable).where(eq(youtubeCompetitorsTable.id, competitorId));
+  return { removed: true, id: competitorId };
 }
 
 async function analyticsSummary(userId: number) {

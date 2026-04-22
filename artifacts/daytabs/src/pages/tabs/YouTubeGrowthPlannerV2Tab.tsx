@@ -31,6 +31,7 @@ import {
   Settings,
   Send,
   Sparkles,
+  Trash2,
   ThumbsDown,
   ThumbsUp,
   TrendingDown,
@@ -128,6 +129,7 @@ interface YoutubeCompetitor {
   thumbnailUrl?: string | null;
   subscriberCount?: string | null;
   postingFrequency?: string | null;
+  niche?: string | null;
   mostViewedRecentVideos?: Array<{ title?: string; viewCount?: string | null; url?: string; publishedAt?: string | null; thumbnailUrl?: string | null }>;
 }
 
@@ -270,6 +272,13 @@ interface YoutubeStatus {
   };
 }
 
+interface CompetitorStoredMeta {
+  source?: "manual" | "discovered";
+  nicheLabel?: string;
+  reportSummary?: string;
+  addedFromUrl?: string | null;
+}
+
 interface GrowthPlannerNotification {
   id: string;
   type: "today" | "overdue";
@@ -382,6 +391,18 @@ function metricLabel(value: unknown) {
   if (value == null) return "n/a";
   if (typeof value === "number") return new Intl.NumberFormat().format(value);
   return String(value);
+}
+
+function readCompetitorStoredMeta(competitor: YoutubeCompetitor): CompetitorStoredMeta {
+  if (!competitor.niche) return {};
+  try {
+    const parsed = JSON.parse(competitor.niche) as CompetitorStoredMeta;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {
+      nicheLabel: competitor.niche,
+    };
+  }
 }
 
 function dayName(isoDate: string) {
@@ -758,30 +779,39 @@ function ideaThumbnail(day: PlanDay) {
 
 function IdeaPackageFields({ day, compact = false }: { day: PlanDay; compact?: boolean }) {
   const tags = ideaTags(day);
+  if (compact) {
+    return (
+      <div className="mt-3 space-y-2">
+        <div className="rounded-lg border border-white/10 bg-black/10 p-3">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">Video Title</p>
+          <p className="mt-1 line-clamp-2 text-xs font-semibold leading-5 text-white">{day.contentIdea}</p>
+        </div>
+      </div>
+    );
+  }
   return (
-    <div className={cn("space-y-2", compact ? "mt-3" : "mt-4")}>
+    <div className="mt-4 space-y-2">
       <div className="rounded-lg border border-white/10 bg-black/10 p-3">
         <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">Video Title</p>
-        <p className={cn("mt-1 font-semibold text-white", compact ? "line-clamp-2 text-xs leading-5" : "text-sm leading-6")}>{day.contentIdea}</p>
+        <p className="mt-1 text-sm font-semibold leading-6 text-white">{day.contentIdea}</p>
       </div>
       <div className="rounded-lg border border-white/10 bg-black/10 p-3">
         <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">Video Description</p>
-        <p className={cn("mt-1 text-white/60", compact ? "line-clamp-2 text-xs leading-5" : "text-sm leading-6")}>{ideaDescription(day)}</p>
+        <p className="mt-1 text-sm leading-6 text-white/60">{ideaDescription(day)}</p>
       </div>
       <div className="rounded-lg border border-white/10 bg-black/10 p-3">
         <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">Tags</p>
         {tags.length ? (
           <div className="mt-2 flex flex-wrap gap-1.5">
-            {tags.slice(0, compact ? 4 : 10).map((tag) => (
+            {tags.slice(0, 10).map((tag) => (
               <span key={tag} className="rounded-full border border-white/10 bg-white/[0.05] px-2 py-1 text-[10px] text-white/65">{tag}</span>
             ))}
-            {compact && tags.length > 4 ? <span className="text-[10px] text-white/35">+{tags.length - 4}</span> : null}
           </div>
         ) : <p className="mt-1 text-xs text-white/35">AI improve can generate niche tags.</p>}
       </div>
       <div className="rounded-lg border border-white/10 bg-black/10 p-3">
         <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">Thumbnail Idea</p>
-        <p className={cn("mt-1 text-white/60", compact ? "line-clamp-2 text-xs leading-5" : "text-sm leading-6")}>{ideaThumbnail(day)}</p>
+        <p className="mt-1 text-sm leading-6 text-white/60">{ideaThumbnail(day)}</p>
       </div>
     </div>
   );
@@ -2461,6 +2491,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
   const [movingDay, setMovingDay] = useState<PlanDay | null>(null);
   const [postingFrequencyInput, setPostingFrequencyInput] = useState("3");
   const [savingSettings, setSavingSettings] = useState(false);
+  const [manualCompetitorUrl, setManualCompetitorUrl] = useState("");
 
   const latestPlan = status?.latestPlan ?? null;
   const planPayload = latestPlan?.plan ?? {};
@@ -2731,6 +2762,44 @@ export default function YouTubeGrowthPlannerV2Tab() {
       await loadStatus();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not discover competitors");
+    } finally {
+      setWorking(null);
+    }
+  }
+
+  async function addCompetitorFromUrl(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const channelUrl = manualCompetitorUrl.trim();
+    if (!channelUrl) return;
+    setWorking("competitor-add");
+    setError(null);
+    try {
+      await jsonFetch<{ competitor: YoutubeCompetitor }>("/api/youtube/competitors", {
+        method: "POST",
+        body: JSON.stringify({ channelUrl }),
+      });
+      setManualCompetitorUrl("");
+      await loadStatus();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not add competitor");
+    } finally {
+      setWorking(null);
+    }
+  }
+
+  async function removeCompetitor(competitorId: number) {
+    setWorking(`competitor-remove:${competitorId}`);
+    setError(null);
+    try {
+      await jsonFetch(`/api/youtube/competitors/${competitorId}`, {
+        method: "DELETE",
+      });
+      setStatus((current) => current ? {
+        ...current,
+        competitors: (current.competitors ?? []).filter((competitor) => competitor.id !== competitorId),
+      } : current);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not remove competitor");
     } finally {
       setWorking(null);
     }
@@ -3566,15 +3635,30 @@ export default function YouTubeGrowthPlannerV2Tab() {
 
           <section id="competitor-playbook" className="scroll-mt-24">
             <PanelCard className="p-6 transition-all hover:-translate-y-1 hover:bg-white/[0.04]">
-              <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
                   <h2 className="text-2xl font-semibold text-white">Competitor Playbook</h2>
                   <p className="mt-1 text-sm text-white/45">Use this like a coach&apos;s scouting report: who you can catch now, who is just ahead, and who defines the playbook for your niche.</p>
                 </div>
-                <Button variant="secondary" className="rounded-lg" onClick={discoverCompetitorsOnly} disabled={Boolean(working)}>
-                  {working === "competitors" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="mr-2 h-4 w-4" />}
-                  Discover competitors
-                </Button>
+                <div className="flex w-full flex-col gap-3 md:w-auto md:min-w-[360px]">
+                  <Button variant="secondary" className="rounded-lg" onClick={discoverCompetitorsOnly} disabled={Boolean(working)}>
+                    {working === "competitors" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="mr-2 h-4 w-4" />}
+                    Discover competitors
+                  </Button>
+                  <form onSubmit={(event) => void addCompetitorFromUrl(event)} className="flex flex-col gap-2 sm:flex-row">
+                    <Input
+                      value={manualCompetitorUrl}
+                      onChange={(event) => setManualCompetitorUrl(event.target.value)}
+                      placeholder="Add competitor by YouTube channel URL"
+                      disabled={Boolean(working)}
+                      className="border-white/10 bg-white/[0.04] text-white placeholder:text-white/30"
+                    />
+                    <Button type="submit" className="rounded-lg" disabled={!manualCompetitorUrl.trim() || Boolean(working)}>
+                      {working === "competitor-add" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
+                      Add competitor
+                    </Button>
+                  </form>
+                </div>
               </div>
               <div className="mt-5 space-y-6">
                 {[
@@ -3608,8 +3692,10 @@ export default function YouTubeGrowthPlannerV2Tab() {
                     <div className="grid gap-4 md:grid-cols-2">
                       {tier.rows.map((competitor) => {
                         const insight = planPayload.competitorInsights?.find((item) => item.channelName === competitor.channelName);
+                        const storedMeta = readCompetitorStoredMeta(competitor);
                         const url = insight?.channelUrl || `https://www.youtube.com/channel/${competitor.channelId ?? ""}`;
                         const topVideo = [...(competitor.mostViewedRecentVideos ?? [])].sort((a, b) => parseNumber(b.viewCount) - parseNumber(a.viewCount))[0];
+                        const isRemoving = working === `competitor-remove:${competitor.id}`;
                         return (
                           <PanelCardSoft key={`${tier.key}-${competitor.id}`} className={cn("border p-4 transition-all hover:-translate-y-0.5 hover:bg-white/[0.05]", tier.accent)}>
                             <div className="flex items-start justify-between gap-3">
@@ -3623,9 +3709,21 @@ export default function YouTubeGrowthPlannerV2Tab() {
                                   <p className="mt-1 text-xs text-white/40">{formatNumber(competitor.subscriberCount)} subscribers · {competitor.videosPerWeekLabel}</p>
                                 </div>
                               </div>
-                              <a href={url} target="_blank" rel="noreferrer" className="rounded-lg border border-white/10 p-2 text-white/55 hover:bg-white/5"><ExternalLink className="h-4 w-4" /></a>
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => void removeCompetitor(competitor.id)}
+                                  disabled={isRemoving || Boolean(working && working !== `competitor-remove:${competitor.id}`)}
+                                  className="rounded-lg border border-white/10 p-2 text-white/55 transition-colors hover:bg-white/5 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                                  aria-label={`Remove ${competitor.channelName}`}
+                                >
+                                  {isRemoving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                                </button>
+                                <a href={url} target="_blank" rel="noreferrer" className="rounded-lg border border-white/10 p-2 text-white/55 hover:bg-white/5"><ExternalLink className="h-4 w-4" /></a>
+                              </div>
                             </div>
-                            <p className="mt-4 text-sm leading-6 text-white/70">{deriveCompetitorCardInsight(competitor)}</p>
+                            <p className="mt-4 text-sm leading-6 text-white/70">{storedMeta.reportSummary || deriveCompetitorCardInsight(competitor)}</p>
+                            {storedMeta.source === "manual" ? <p className="mt-2 text-xs text-sky-100/70">Added by you{storedMeta.addedFromUrl ? " from a channel URL" : ""}.</p> : null}
                             {tier.key === "tier3" ? <p className="mt-2 text-sm text-amber-100/75">Watch their top video to see what your niche&apos;s audience loves most.</p> : null}
                             {topVideo ? (
                               <a href={topVideo.url} target="_blank" rel="noreferrer" className="mt-3 block text-sm text-red-200 transition-colors hover:text-red-100">

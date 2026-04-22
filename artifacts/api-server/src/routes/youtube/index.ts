@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { db, youtubeChannelProfilesTable } from "@workspace/db";
 import { requireAuth } from "../../middlewares/auth";
 import {
+  addYoutubeCompetitorByUrl,
   createYoutubePlanDay,
   createYoutubeAuthUrl,
   deleteYoutubePlanDay,
@@ -16,6 +17,7 @@ import {
   patchYoutubePlanDay,
   improveYoutubeIdea,
   regenerateYoutubePlanIdea,
+  removeYoutubeCompetitor,
   savePlanResults,
   storeYoutubeTokens,
   syncYoutubeChannel,
@@ -130,6 +132,36 @@ router.post("/competitors/discover", requireAuth, async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "YouTube competitor discovery error");
     res.status(500).json({ error: err instanceof Error ? err.message : "Failed to discover competitors" });
+  }
+});
+
+router.post("/competitors", requireAuth, async (req, res) => {
+  try {
+    const channelUrl = typeof req.body?.channelUrl === "string" ? req.body.channelUrl.trim() : "";
+    if (!channelUrl) {
+      res.status(400).json({ error: "A YouTube channel URL is required" });
+      return;
+    }
+    const competitor = await addYoutubeCompetitorByUrl(req.auth!.user_id, channelUrl);
+    res.json({ competitor });
+  } catch (err) {
+    req.log.error({ err }, "YouTube competitor add error");
+    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to add competitor" });
+  }
+});
+
+router.delete("/competitors/:competitorId", requireAuth, async (req, res) => {
+  try {
+    const competitorId = Number(req.params.competitorId);
+    if (!Number.isInteger(competitorId) || competitorId <= 0) {
+      res.status(400).json({ error: "A valid competitor ID is required" });
+      return;
+    }
+    const removed = await removeYoutubeCompetitor(req.auth!.user_id, competitorId);
+    res.json(removed);
+  } catch (err) {
+    req.log.error({ err }, "YouTube competitor remove error");
+    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to remove competitor" });
   }
 });
 
