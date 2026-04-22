@@ -1160,34 +1160,66 @@ function partitionCompetitors(ownSubscribers: number, competitors: Array<ReturnT
 }
 
 function deriveWeeklyComparisonData(
-  tier1: Array<ReturnType<typeof deriveCompetitorRows>[number]>,
+  competitors: Array<ReturnType<typeof deriveCompetitorRows>[number]>,
   latestPlan: YoutubeWeeklyPlan | null,
   recentVideos: RecentVideo[],
   channelName?: string,
 ) {
   if (!latestPlan) return null;
-  const start = `${latestPlan.startDate}T00:00:00Z`;
-  const end = `${latestPlan.endDate}T23:59:59Z`;
-  const inWindow = (value?: string | null) => {
+  const scheduledStart = new Date(`${latestPlan.startDate}T00:00:00Z`);
+  const scheduledEnd = new Date(`${latestPlan.endDate}T23:59:59Z`);
+  const inWindow = (value: string | null | undefined, start: Date, end: Date) => {
     if (!value) return false;
     const time = new Date(value).getTime();
-    return Number.isFinite(time) && time >= new Date(start).getTime() && time <= new Date(end).getTime();
+    return Number.isFinite(time) && time >= start.getTime() && time <= end.getTime();
   };
-  const yourVideos = recentVideos.filter((video) => inWindow(video.publishedAt));
 
-  const competitorRows = tier1.map((competitor, index) => {
-    const weeklyVideos = (competitor.mostViewedRecentVideos ?? []).filter((video) => inWindow(video.publishedAt));
-    return {
-      key: `competitor${index}`,
-      name: competitor.channelName,
-      shortName: competitor.channelName,
-      views: weeklyVideos.reduce((sum, video) => sum + parseNumber(video.viewCount), 0),
-      uploads: weeklyVideos.length,
-      fill: leaderboardCompetitorColors[index % leaderboardCompetitorColors.length],
-      isYou: false,
-      videos: weeklyVideos,
-    } satisfies WeeklyComparisonCompetitorRow;
-  });
+  const scheduledCompetitorRows = competitors.map((competitor) => ({
+    competitor,
+    videos: (competitor.mostViewedRecentVideos ?? []).filter((video) => inWindow(video.publishedAt, scheduledStart, scheduledEnd)),
+  }));
+  const scheduledHasCompetitorActivity = scheduledCompetitorRows.some((row) => row.videos.length > 0);
+
+  let comparisonStart = scheduledStart;
+  let comparisonEnd = scheduledEnd;
+  let windowLabel = "Current scheduled week";
+  let windowDescription = "Published videos from your current plan week.";
+
+  if (!scheduledHasCompetitorActivity) {
+    const allPublishedTimes = competitors
+      .flatMap((competitor) => competitor.mostViewedRecentVideos ?? [])
+      .map((video) => video.publishedAt ? new Date(video.publishedAt).getTime() : Number.NaN)
+      .filter((time) => Number.isFinite(time));
+
+    if (allPublishedTimes.length) {
+      const latestPublishedTime = Math.max(...allPublishedTimes);
+      comparisonEnd = new Date(latestPublishedTime);
+      comparisonEnd.setUTCHours(23, 59, 59, 999);
+      comparisonStart = new Date(comparisonEnd.getTime() - 6 * 24 * 60 * 60 * 1000);
+      comparisonStart.setUTCHours(0, 0, 0, 0);
+      windowLabel = "Latest live competitor week";
+      windowDescription = "Latest 7-day window with live competitor publishes.";
+    }
+  }
+
+  const yourVideos = recentVideos.filter((video) => inWindow(video.publishedAt, comparisonStart, comparisonEnd));
+
+  const competitorRows = competitors
+    .map((competitor, index) => {
+      const weeklyVideos = (competitor.mostViewedRecentVideos ?? []).filter((video) => inWindow(video.publishedAt, comparisonStart, comparisonEnd));
+      return {
+        key: `competitor${index}`,
+        name: competitor.channelName,
+        shortName: competitor.channelName,
+        views: weeklyVideos.reduce((sum, video) => sum + parseNumber(video.viewCount), 0),
+        uploads: weeklyVideos.length,
+        fill: leaderboardCompetitorColors[index % leaderboardCompetitorColors.length],
+        isYou: false,
+        videos: weeklyVideos,
+      } satisfies WeeklyComparisonCompetitorRow;
+    })
+    .filter((row) => row.uploads > 0 || row.views > 0);
+
   const youRow = {
     key: "you",
     name: channelName || "You",
@@ -1198,28 +1230,39 @@ function deriveWeeklyComparisonData(
     isYou: true,
     videos: yourVideos,
   } satisfies WeeklyComparisonYouRow;
-  const motivatingCompetitor = [...competitorRows].sort((a, b) => Math.abs(a.uploads - youRow.uploads) - Math.abs(b.uploads - youRow.uploads) || Math.abs(a.views - youRow.views) - Math.abs(b.views - youRow.views))[0];
-  const weekdayRows = latestPlan.startDate && latestPlan.endDate
-    ? Array.from({ length: 7 }).map((_, index) => {
-      const iso = toIsoDate(addUtcDays(new Date(`${latestPlan.startDate}T00:00:00Z`), index));
-      const day = daysOfWeek[new Date(`${iso}T00:00:00Z`).getUTCDay()];
-      const yourDayVideos = yourVideos.filter((video) => video.publishedAt?.slice(0, 10) === iso);
-      const row: WeeklyComparisonWeekdayRow = {
-        iso,
-        day,
-        youViews: yourDayVideos.reduce((sum, video) => sum + parseNumber(video.viewCount), 0),
-        youUploads: yourDayVideos.length,
-      };
-      for (const competitor of competitorRows) {
-        const competitorDayVideos = competitor.videos.filter((video) => video.publishedAt?.slice(0, 10) === iso);
-        row[`${competitor.key}Views`] = competitorDayVideos.reduce((sum, video) => sum + parseNumber(video.viewCount), 0);
-        row[`${competitor.key}Uploads`] = competitorDayVideos.length;
-      }
-      return row;
-    })
-    : [];
 
-  return { rows: [youRow, ...competitorRows], competitors: competitorRows, motivatingCompetitor, weekdayRows };
+  if (!competitorRows.length) {
+    return {
+      rows: [youRow],
+      competitors: [],
+      motivatingCompetitor: undefined,
+      weekdayRows: [],
+      windowLabel,
+      windowDescription,
+    };
+  }
+
+  const weekdayRows = Array.from({ length: 7 }).map((_, index) => {
+    const iso = toIsoDate(addUtcDays(new Date(comparisonStart), index));
+    const day = daysOfWeek[new Date(`${iso}T00:00:00Z`).getUTCDay()];
+    const yourDayVideos = yourVideos.filter((video) => video.publishedAt?.slice(0, 10) === iso);
+    const row: WeeklyComparisonWeekdayRow = {
+      iso,
+      day,
+      youViews: yourDayVideos.reduce((sum, video) => sum + parseNumber(video.viewCount), 0),
+      youUploads: yourDayVideos.length,
+    };
+    for (const competitor of competitorRows) {
+      const competitorDayVideos = competitor.videos.filter((video) => video.publishedAt?.slice(0, 10) === iso);
+      row[`${competitor.key}Views`] = competitorDayVideos.reduce((sum, video) => sum + parseNumber(video.viewCount), 0);
+      row[`${competitor.key}Uploads`] = competitorDayVideos.length;
+    }
+    return row;
+  });
+
+  const motivatingCompetitor = [...competitorRows].sort((a, b) => Math.abs(a.uploads - youRow.uploads) - Math.abs(b.uploads - youRow.uploads) || Math.abs(a.views - youRow.views) - Math.abs(b.views - youRow.views))[0];
+
+  return { rows: [youRow, ...competitorRows], competitors: competitorRows, motivatingCompetitor, weekdayRows, windowLabel, windowDescription };
 }
 
 function deriveCurrentWeekConsistencyData(weekDates: string[], plannedDates: Set<string>, videos: RecentVideo[]) {
@@ -1711,7 +1754,7 @@ function WeeklyComparisonChart({
     <div className="mt-4 grid gap-4 xl:grid-cols-2">
       <PanelCardSoft className="p-4">
         <h5 className="text-sm font-semibold text-white">Upload count by weekday</h5>
-        <p className="mt-1 text-xs text-white/45">Current scheduled week, comparing your uploads with every Tier 1 competitor.</p>
+        <p className="mt-1 text-xs text-white/45">Comparing your uploads with every competitor that has live published-video data in the active window.</p>
         <div className="mt-4 h-56">
           <ChartContainer config={uploadsConfig} className="h-full w-full">
             <BarChart data={weekdayRows} margin={{ left: 6, right: 6, top: 12, bottom: 32 }}>
@@ -2524,7 +2567,14 @@ export default function YouTubeGrowthPlannerV2Tab() {
   const topDiagnostics = useMemo(() => buildVideoDiagnostics(overview.whatWorkedVideos ?? [], recentVideos, titleLengthSummary, bestTime, "top"), [overview, recentVideos, titleLengthSummary, bestTime]);
   const underperformerDiagnostics = useMemo(() => buildVideoDiagnostics(overview.underperformerVideos ?? [], recentVideos, titleLengthSummary, bestTime, "bottom"), [overview, recentVideos, titleLengthSummary, bestTime]);
   const competitorTiers = useMemo(() => partitionCompetitors(ownSubscribers, competitorRows), [ownSubscribers, competitorRows]);
-  const weeklyComparison = useMemo(() => deriveWeeklyComparisonData(competitorTiers.tier1, latestPlan, recentVideos, status?.channel?.channelName), [competitorTiers.tier1, latestPlan, recentVideos, status?.channel?.channelName]);
+  const weeklyComparison = useMemo(() => deriveWeeklyComparisonData(competitorRows, latestPlan, recentVideos, status?.channel?.channelName), [competitorRows, latestPlan, recentVideos, status?.channel?.channelName]);
+  const leaderboardHostTierKey = useMemo(() => {
+    if (!weeklyComparison?.competitors.length) return null;
+    if (competitorTiers.tier1.length) return "tier1";
+    if (competitorTiers.tier2.length) return "tier2";
+    if (competitorTiers.tier3.length) return "tier3";
+    return null;
+  }, [competitorTiers.tier1.length, competitorTiers.tier2.length, competitorTiers.tier3.length, weeklyComparison?.competitors.length]);
   const publishableVideos = useMemo(
     () => [...recentVideos].sort((a, b) => new Date(b.publishedAt || 0).getTime() - new Date(a.publishedAt || 0).getTime()),
     [recentVideos],
@@ -3587,12 +3637,13 @@ export default function YouTubeGrowthPlannerV2Tab() {
                       })}
                       {!tier.rows.length ? <PanelCardSoft className="p-4 text-sm text-white/55 md:col-span-2">No channels are in this tier yet. Refresh competitors and DayTabs will keep scouting your niche.</PanelCardSoft> : null}
                     </div>
-                    {tier.key === "tier1" && weeklyComparison ? (
+                    {tier.key === leaderboardHostTierKey && weeklyComparison ? (
                       <PanelCardSoft className="border border-emerald-400/20 p-4">
                         <h4 className="text-base font-semibold text-white">This Week&apos;s Friendly Leaderboard</h4>
-                        <p className="mt-1 text-sm text-white/50">Weekday-by-weekday uploads and views for you and every Tier 1 competitor in the current scheduled week.</p>
+                        <p className="mt-1 text-sm text-white/50">{weeklyComparison.windowLabel}: uploads and views for you and competitors based on published videos.</p>
                         <WeeklyComparisonChart rows={weeklyComparison.rows} weekdayRows={weeklyComparison.weekdayRows} />
-                        {weeklyLeaderboardMessage ? <p className="mt-3 text-sm text-white/65">{weeklyLeaderboardMessage}</p> : null}
+                        <p className="mt-3 text-sm text-white/55">{weeklyComparison.windowDescription}</p>
+                        {weeklyLeaderboardMessage ? <p className="mt-2 text-sm text-white/65">{weeklyLeaderboardMessage}</p> : null}
                       </PanelCardSoft>
                     ) : null}
                   </div>
