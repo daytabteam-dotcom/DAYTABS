@@ -156,6 +156,15 @@ interface PlanDay {
   updatedAt?: string | null;
 }
 
+interface CustomIdeaDraft {
+  title: string;
+  angle: string;
+  date: string;
+  description: string;
+  tags: string;
+  thumbnail: string;
+}
+
 interface PerformanceInsight {
   type?: string;
   title?: string;
@@ -733,6 +742,49 @@ function isManualIdea(day: PlanDay) {
 
 function isAiIdea(day: PlanDay) {
   return !isManualIdea(day);
+}
+
+function ideaDescription(day: PlanDay) {
+  return day.descriptionSuggestion?.trim() || "AI improve can generate a ready-to-paste description in your channel voice.";
+}
+
+function ideaTags(day: PlanDay) {
+  return (day.tags ?? []).map((tag) => tag.trim()).filter(Boolean);
+}
+
+function ideaThumbnail(day: PlanDay) {
+  return day.thumbnailConcept?.trim() || "AI improve can generate a thumbnail idea based on your niche and top performers.";
+}
+
+function IdeaPackageFields({ day, compact = false }: { day: PlanDay; compact?: boolean }) {
+  const tags = ideaTags(day);
+  return (
+    <div className={cn("space-y-2", compact ? "mt-3" : "mt-4")}>
+      <div className="rounded-lg border border-white/10 bg-black/10 p-3">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">Video Title</p>
+        <p className={cn("mt-1 font-semibold text-white", compact ? "line-clamp-2 text-xs leading-5" : "text-sm leading-6")}>{day.contentIdea}</p>
+      </div>
+      <div className="rounded-lg border border-white/10 bg-black/10 p-3">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">Video Description</p>
+        <p className={cn("mt-1 text-white/60", compact ? "line-clamp-2 text-xs leading-5" : "text-sm leading-6")}>{ideaDescription(day)}</p>
+      </div>
+      <div className="rounded-lg border border-white/10 bg-black/10 p-3">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">Tags</p>
+        {tags.length ? (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {tags.slice(0, compact ? 4 : 10).map((tag) => (
+              <span key={tag} className="rounded-full border border-white/10 bg-white/[0.05] px-2 py-1 text-[10px] text-white/65">{tag}</span>
+            ))}
+            {compact && tags.length > 4 ? <span className="text-[10px] text-white/35">+{tags.length - 4}</span> : null}
+          </div>
+        ) : <p className="mt-1 text-xs text-white/35">AI improve can generate niche tags.</p>}
+      </div>
+      <div className="rounded-lg border border-white/10 bg-black/10 p-3">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">Thumbnail Idea</p>
+        <p className={cn("mt-1 text-white/60", compact ? "line-clamp-2 text-xs leading-5" : "text-sm leading-6")}>{ideaThumbnail(day)}</p>
+      </div>
+    </div>
+  );
 }
 
 function ideaOriginMeta(day: PlanDay) {
@@ -1601,8 +1653,7 @@ function CalendarPreviewCard({
                 {origin.label}
               </span>
             </div>
-            <p className="line-clamp-3 text-base font-semibold leading-6 text-white">{day.contentIdea}</p>
-            {day.hook && day.hook !== day.contentIdea ? <p className="mt-3 line-clamp-2 text-sm leading-5 text-white/50">{day.hook}</p> : null}
+            <IdeaPackageFields day={day} compact />
             <div className="mt-4 flex gap-2">
               <Button
                 type="button"
@@ -1833,8 +1884,7 @@ function PlannerIdeaCard({ day, onDragStart, onDelete, onOpen }: { day: PlanDay;
           <span className={cn("inline-flex rounded-full border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]", origin.chipClassName)}>
             {origin.label}
           </span>
-          <p className="text-sm font-semibold leading-5 text-white">{day.contentIdea}</p>
-          {day.hook && day.hook !== day.contentIdea ? <p className="mt-2 text-xs leading-5 text-white/55">{day.hook}</p> : null}
+          <IdeaPackageFields day={day} compact />
         </div>
       </div>
     </div>
@@ -2357,7 +2407,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
   const [resultSelections, setResultSelections] = useState<Record<number, string>>({});
   const [detailDay, setDetailDay] = useState<PlanDay | null>(null);
   const [customOpen, setCustomOpen] = useState(false);
-  const [customIdea, setCustomIdea] = useState({ title: "", angle: "", date: "" });
+  const [customIdea, setCustomIdea] = useState<CustomIdeaDraft>({ title: "", angle: "", date: "", description: "", tags: "", thumbnail: "" });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [channelDetailsOpen, setChannelDetailsOpen] = useState(false);
   const [tagExpanded, setTagExpanded] = useState(false);
@@ -2684,6 +2734,9 @@ export default function YouTubeGrowthPlannerV2Tab() {
         ...current,
         title: data.idea.contentIdea || current.title,
         angle: [data.idea.hook, ...(data.idea.outline ?? []), data.idea.rationale].filter(Boolean).join("\n"),
+        description: data.idea.descriptionSuggestion || current.description,
+        tags: (data.idea.tags ?? []).join(", ") || current.tags,
+        thumbnail: data.idea.thumbnailConcept || current.thumbnail,
       }));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not improve idea");
@@ -2715,11 +2768,11 @@ export default function YouTubeGrowthPlannerV2Tab() {
       outline: ideaLines.slice(1, 5),
       bestPostingTime: "",
       rationale: customIdea.angle.trim(),
-      tags: [],
+      tags: customIdea.tags.split(",").map((tag) => tag.trim()).filter(Boolean).slice(0, 10),
       soundSuggestion: "",
       competitorReference: "",
-      descriptionSuggestion: "",
-      thumbnailConcept: "",
+      descriptionSuggestion: customIdea.description.trim(),
+      thumbnailConcept: customIdea.thumbnail.trim(),
       isDeleted: false,
       deletedAt: null,
     };
@@ -2737,7 +2790,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
     } else {
       setDays((current) => [...current, newDay]);
     }
-    setCustomIdea({ title: "", angle: "", date: "" });
+    setCustomIdea({ title: "", angle: "", date: "", description: "", tags: "", thumbnail: "" });
     setCustomOpen(false);
   }
 
@@ -3634,25 +3687,12 @@ export default function YouTubeGrowthPlannerV2Tab() {
                       </PanelCardSoft>
                     ) : null}
                     <PanelCardSoft className="p-4">
-                      <p className="text-white">{detailDay.contentIdea}</p>
-                      <p className="mt-2 text-white/60">{detailDay.contentIdea.length} chars · Your sweet spot: {titleRange} chars.</p>
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-xs uppercase tracking-[0.16em] text-white/40">Publish package</p>
+                        <p className="text-xs text-white/45">{detailDay.contentIdea.length} chars · Sweet spot: {titleRange}</p>
+                      </div>
+                      <IdeaPackageFields day={detailDay} />
                     </PanelCardSoft>
-                    {(detailDay.tags ?? []).length ? (
-                      <PanelCardSoft className="p-4">
-                        <div className="flex flex-wrap gap-2">
-                          {(detailDay.tags ?? []).map((tag) => (
-                            <button
-                              key={tag}
-                              type="button"
-                              onClick={() => void navigator.clipboard?.writeText(tag)}
-                              className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-xs text-white transition-colors hover:bg-white/[0.08]"
-                            >
-                              {tag}
-                            </button>
-                          ))}
-                        </div>
-                      </PanelCardSoft>
-                    ) : null}
                     {(detailDay.outline ?? []).length ? (
                       <PanelCardSoft className="p-4">
                         <p className="text-xs uppercase tracking-[0.16em] text-white/40">Outline</p>
@@ -3663,18 +3703,6 @@ export default function YouTubeGrowthPlannerV2Tab() {
                             </p>
                           ))}
                         </div>
-                      </PanelCardSoft>
-                    ) : null}
-                    {detailDay.descriptionSuggestion ? (
-                      <PanelCardSoft className="p-4">
-                        <p className="text-xs uppercase tracking-[0.16em] text-white/40">Description idea</p>
-                        <p className="mt-3 leading-6 text-white/70">{detailDay.descriptionSuggestion}</p>
-                      </PanelCardSoft>
-                    ) : null}
-                    {detailDay.thumbnailConcept ? (
-                      <PanelCardSoft className="p-4">
-                        <p className="text-xs uppercase tracking-[0.16em] text-white/40">Thumbnail concept</p>
-                        <p className="mt-3 leading-6 text-white/70">{detailDay.thumbnailConcept}</p>
                       </PanelCardSoft>
                     ) : null}
                     {detailDay.competitorReference ? (
@@ -3902,6 +3930,9 @@ export default function YouTubeGrowthPlannerV2Tab() {
             <Input value={customIdea.title} onChange={(event) => setCustomIdea((current) => ({ ...current, title: event.target.value }))} placeholder="Idea title" />
             <Input type="date" value={customIdea.date} onChange={(event) => setCustomIdea((current) => ({ ...current, date: event.target.value }))} />
             <Textarea value={customIdea.angle} onChange={(event) => setCustomIdea((current) => ({ ...current, angle: event.target.value }))} placeholder="Angle, rough hook, or notes" className="min-h-28" />
+            <Textarea value={customIdea.description} onChange={(event) => setCustomIdea((current) => ({ ...current, description: event.target.value }))} placeholder="Video description" className="min-h-24" />
+            <Input value={customIdea.tags} onChange={(event) => setCustomIdea((current) => ({ ...current, tags: event.target.value }))} placeholder="Tags, separated by commas" />
+            <Textarea value={customIdea.thumbnail} onChange={(event) => setCustomIdea((current) => ({ ...current, thumbnail: event.target.value }))} placeholder="Thumbnail idea" className="min-h-20" />
             <div className="flex gap-2">
               <Button variant="secondary" className="flex-1 rounded-lg" onClick={improveCustomIdea} disabled={working === "improve"}>{working === "improve" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}AI improve</Button>
               <Button className="flex-1 rounded-lg" onClick={addCustomIdea}><Plus className="mr-2 h-4 w-4" />Add idea</Button>

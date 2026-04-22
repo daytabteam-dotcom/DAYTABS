@@ -1710,11 +1710,11 @@ function normalizeGeneratedYoutubePlan(
       outline: [],
       bestPostingTime: selected.slot.suggestedTime || (asString(source.bestPostingTime) || "20:00"),
       rationale: whyThisIdea || asString(source.rationale) || `${selected.weekday} ${selected.slot.slotLabel} is one of your strongest available windows from the heatmap, so this idea is scheduled to ride that signal.`,
-      tags: asArray(source.tags).map((item) => String(item)).filter(Boolean).slice(0, 8),
+      tags: asArray(source.tags).map((item) => String(item)).filter(Boolean).slice(0, 10),
       soundSuggestion: asString(source.estimatedLength) || asString(source.soundSuggestion) || "",
       competitorReference: asString(source.signalSource) || asString(source.competitorReference) || "",
-      descriptionSuggestion: asString(source.targetKeyword) || asString(source.descriptionSuggestion) || "",
-      thumbnailConcept: asString(source.thumbnailConcept) || "",
+      descriptionSuggestion: asString(source.videoDescription) || asString(source.descriptionSuggestion) || asString(source.targetKeyword) || "",
+      thumbnailConcept: asString(source.thumbnailIdea) || asString(source.thumbnailConcept) || "",
       format: asString(source.format) || "",
       targetKeyword: asString(source.targetKeyword) || "",
       estimatedLength: asString(source.estimatedLength) || "",
@@ -1820,6 +1820,7 @@ export async function generateYoutubeWeeklyPlan(userId: number) {
       return {
         id: asString(item.id),
         title: asString(item.title),
+        description: asString(item.description)?.slice(0, 900),
         publishedAt: asString(item.publishedAt),
         viewCount: parseNumber(item.viewCount),
         tags: asArray(item.tags).map((tag) => String(tag)).filter(Boolean),
@@ -1882,10 +1883,15 @@ Now generate. Every idea must trace to at least one of the above signals. If you
 
 IDEA QUALITY RULES:
 
-Titles must sound like a real creator wrote them — specific, direct, with a clear payoff implied. Never use hollow phrases like "the ultimate guide", "you need to know this", or "game changer."
+Titles, descriptions, tags, and thumbnail ideas must sound like this creator wrote them. Infer their language from recent video titles/descriptions/tags: repeated phrases, tone, word choice, audience address, punctuation, and how they frame value.
+Use the nicheProfile and competitor/top-performer examples to make the package feel native to this content category, not generic YouTube advice.
+Titles must be specific, direct, with a clear payoff implied. Never use hollow phrases like "the ultimate guide", "you need to know this", or "game changer."
 Hook must name a specific tension or question the video answers in the first 10 seconds. Not a vague teaser.
 Thumbnail concept must be visually distinct from competitors. Describe the specific visual — not "bold text + face."
 Tags must be actual search terms a real viewer would type — not keyword-stuffed variations of the title.
+Descriptions must be ready-to-paste YouTube descriptions in the creator's own voice: 2-4 sentences, clear promise, niche keywords woven naturally, no fake stats.
+Every card needs all four publish assets: title, videoDescription, tags, thumbnailIdea.
+Study which previous videos earned the most views/CTR/subscriber lift. Reuse their winning title structure, topic framing, tag clusters, and thumbnail logic where it honestly fits.
 If the channel's data is thin on a given day, set confidence to "low" and explain why in lowSignalNote.
 Never suggest a topic concept the user deleted in the past. Flag it if you're unsure whether a concept is too similar.
 
@@ -1910,8 +1916,9 @@ Return this exact shape:
 "date": string,
 "bestDay": string | null,
 "title": string,
+"videoDescription": string,
 "hook": string,
-"thumbnailConcept": string,
+"thumbnailIdea": string,
 "format": string,
 "targetKeyword": string,
 "tags": string[],
@@ -1968,6 +1975,37 @@ export async function improveYoutubeIdea(userId: number, idea: { title?: string;
   if (!profile) throw new Error("Connect YouTube before improving ideas");
   const plans = await db.select().from(youtubeWeeklyPlansTable).where(eq(youtubeWeeklyPlansTable.userId, userId)).orderBy(desc(youtubeWeeklyPlansTable.weekNumber));
   const ideaFeedbackSummary = await getPersistedIdeaFeedbackSummary(userId, profile, plans);
+  const recentVideos = Array.isArray(profile.recentVideos) ? profile.recentVideos.map((video) => asRecord(video)) : [];
+  const topVideos = [...recentVideos]
+    .sort((a, b) => parseNumber(asRecord(b).viewCount) - parseNumber(asRecord(a).viewCount))
+    .slice(0, 10)
+    .map((video) => ({
+      title: asString(video.title),
+      description: asString(video.description)?.slice(0, 900),
+      tags: asArray(video.tags).map((tag) => String(tag)).filter(Boolean).slice(0, 12),
+      viewCount: parseNumber(video.viewCount),
+      publishedAt: asString(video.publishedAt),
+    }));
+  const recentLanguageSamples = recentVideos.slice(0, 12).map((video) => ({
+    title: asString(video.title),
+    description: asString(video.description)?.slice(0, 500),
+    tags: asArray(video.tags).map((tag) => String(tag)).filter(Boolean).slice(0, 10),
+  }));
+  const competitors = await db
+    .select()
+    .from(youtubeCompetitorsTable)
+    .where(eq(youtubeCompetitorsTable.userId, userId))
+    .limit(8);
+  const competitorExamples = competitors.map((competitor) => ({
+    channelName: competitor.channelName,
+    mostViewedRecentVideos: asArray(competitor.mostViewedRecentVideos).map((video) => {
+      const item = asRecord(video);
+      return {
+        title: asString(item.title),
+        viewCount: asString(item.viewCount),
+      };
+    }).filter((video) => video.title).slice(0, 5),
+  }));
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
@@ -1977,9 +2015,15 @@ export async function improveYoutubeIdea(userId: number, idea: { title?: string;
 Your job is NOT to replace their idea with something generic. Your job is to make their specific idea stronger — better title, clearer hook, more search-targeted, more thumbnail-friendly — while staying true to what they were going for.
 Rules:
 
+Use the creator's own language. Infer it from their previous published video titles, descriptions, and tags: tone, recurring words, audience address, pacing, punctuation, and promise style.
+Use the niche profile and competitor/top-performer examples to make the idea likely to perform in this content category.
+Output a complete publish package: Video Title, Video Description, Tags, Thumbnail Idea.
+Look for the algorithm/pattern behind successful previous videos: winning title structure, topic framing, tag clusters, and thumbnail logic. Reuse those patterns when they fit this idea.
 Read their feedback history. If this idea direction was previously disliked or deleted, flag it honestly rather than silently improving it.
 Improve the title: make it more specific, cut filler words, front-load the payoff.
 Sharpen the hook: name the exact tension or question the viewer will care about in the first 10 seconds.
+Write a ready-to-paste description in the creator's voice: 2-4 sentences, natural niche keywords, clear promise, no fake claims.
+Suggest 8-10 tags that combine the creator's proven tags, niche search phrases, and category language.
 Suggest a thumbnail concept that is visually distinct — describe the actual image, not just "bold text."
 Suggest 1 alternative angle on the same topic if the original framing has weak search volume potential.
 Do not pad the response with explanations. Return JSON only.
@@ -1987,9 +2031,11 @@ Do not pad the response with explanations. Return JSON only.
 Return shape:
 {
 "improvedTitle": string,
+"videoDescription": string,
 "improvedHook": string,
-"thumbnailConcept": string,
+"thumbnailIdea": string,
 "targetKeyword": string,
+"tags": string[],
 "alternativeAngle": string | null,
 "feedbackWarning": string | null
 }`,
@@ -2004,6 +2050,10 @@ Return shape:
             disliked: ideaFeedbackSummary.disliked,
             deleted: ideaFeedbackSummary.deleted,
           },
+          nicheProfile: asRecord(profile.nicheProfile),
+          recentLanguageSamples,
+          topVideos,
+          competitorExamples,
         }),
       },
     ],
@@ -2028,8 +2078,9 @@ Return shape:
     hook: improvedHook,
     outline: alternativeAngle ? [alternativeAngle] : [],
     rationale: rationaleParts.join(" "),
-    thumbnailConcept: asString(improved.thumbnailConcept)?.trim() || "",
-    descriptionSuggestion: asString(improved.targetKeyword)?.trim() || "",
+    tags: asArray(improved.tags).map((item) => String(item)).filter(Boolean).slice(0, 10),
+    thumbnailConcept: asString(improved.thumbnailIdea)?.trim() || asString(improved.thumbnailConcept)?.trim() || "",
+    descriptionSuggestion: asString(improved.videoDescription)?.trim() || asString(improved.descriptionSuggestion)?.trim() || asString(improved.targetKeyword)?.trim() || "",
   };
 }
 
@@ -2153,15 +2204,20 @@ Rules:
 Check the ideaFeedbackSummary. If the rejected idea matches a pattern of previously disliked or deleted ideas, explicitly steer away from that direction.
 Look at siblingIdeas (other videos planned this week). The new idea must not overlap in topic or format with any sibling.
 The new idea must trace to a real signal: past performance, a competitor gap, a trend, or an underexplored keyword in the channel's niche.
+Title, description, tags, and thumbnail idea must match the creator's own language from previous uploads and the channel niche.
 Title must be specific and creator-voiced. No hollow clickbait phrases.
+Description must be ready-to-paste: 2-4 sentences in the creator's voice, with niche keywords naturally included.
+Tags must include 8-10 real search phrases/tags that fit this category and echo tags that worked before.
+Thumbnail idea must describe the actual image composition and emotional contrast.
 Explain in whyDifferent how this idea is distinct from the one it replaces.
 Return JSON only.
 
 Return shape:
 {
 "title": string,
+"videoDescription": string,
 "hook": string,
-"thumbnailConcept": string,
+"thumbnailIdea": string,
 "format": string,
 "targetKeyword": string,
 "tags": string[],
@@ -2179,6 +2235,8 @@ Return shape:
           dayIndex,
           channelProfile: profile,
           siblingIdeas,
+          nicheProfile: asRecord(profile.nicheProfile),
+          recentVideos: Array.isArray(profile.recentVideos) ? profile.recentVideos : [],
           ideaFeedbackSummary: {
             liked: ideaFeedbackSummary.liked,
             disliked: ideaFeedbackSummary.disliked,
@@ -2207,11 +2265,11 @@ Return shape:
     outline: [],
     bestPostingTime: asString(day.bestPostingTime) || "",
     rationale: [asString(raw.whyThisIdea)?.trim(), asString(raw.whyDifferent)?.trim()].filter(Boolean).join(" ").trim() || asString(day.rationale) || "",
-    tags: asArray(raw.tags).map((item) => String(item)).filter(Boolean).slice(0, 8),
+    tags: asArray(raw.tags).map((item) => String(item)).filter(Boolean).slice(0, 10),
     soundSuggestion: asString(raw.format) || "",
     competitorReference: asString(raw.signalSource) || "",
-    descriptionSuggestion: asString(raw.targetKeyword) || "",
-    thumbnailConcept: asString(raw.thumbnailConcept) || "",
+    descriptionSuggestion: asString(raw.videoDescription) || asString(raw.descriptionSuggestion) || asString(raw.targetKeyword) || "",
+    thumbnailConcept: asString(raw.thumbnailIdea) || asString(raw.thumbnailConcept) || "",
     format: asString(raw.format) || "",
     targetKeyword: asString(raw.targetKeyword) || "",
     whyThisIdea: asString(raw.whyThisIdea) || "",
