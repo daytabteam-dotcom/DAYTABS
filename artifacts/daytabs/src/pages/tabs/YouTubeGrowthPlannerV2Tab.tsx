@@ -3444,7 +3444,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
               type="button"
               onClick={() => setActiveSubtab(tab.id)}
               className={cn(
-                "group relative flex min-w-[128px] flex-1 items-center justify-between gap-3 overflow-hidden rounded-2xl px-3 py-3 text-left transition-all duration-200",
+                "group relative flex min-w-[128px] flex-1 items-center justify-center gap-2 overflow-hidden rounded-2xl px-3 py-3 text-center transition-all duration-200",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-200/50 focus-visible:ring-offset-2 focus-visible:ring-offset-black",
                 isActive
                   ? "bg-white/[0.14] text-white shadow-[0_10px_30px_rgba(0,0,0,0.18)]"
@@ -3454,14 +3454,14 @@ export default function YouTubeGrowthPlannerV2Tab() {
             >
               <span className={cn("pointer-events-none absolute inset-0 bg-gradient-to-br opacity-0 transition-opacity duration-200", tab.accent, isActive ? "opacity-100" : "group-hover:opacity-70")} />
               {isActive ? <span className="pointer-events-none absolute inset-x-5 bottom-0 h-0.5 rounded-full bg-white/65" /> : null}
-              <span className="relative flex min-w-0 items-center gap-2.5">
+              <span className="relative flex min-w-0 items-center justify-center gap-2.5">
                 <span className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition-all", isActive ? "bg-white/16 text-white" : "bg-white/[0.045] text-white/50 group-hover:text-white")}>
                   <Icon className="h-4 w-4" />
                 </span>
                 <span className="truncate text-sm font-semibold">{tab.label}</span>
               </span>
               {hasBadge ? (
-                <span className="relative flex min-w-7 shrink-0 items-center justify-center rounded-full bg-amber-300/20 px-2 py-1 text-[10px] font-bold text-amber-50 shadow-[0_0_18px_rgba(251,191,36,0.14)]">
+                <span className="absolute right-2 top-2 flex min-w-6 shrink-0 items-center justify-center rounded-full bg-amber-300/20 px-1.5 py-0.5 text-[10px] font-bold text-amber-50 shadow-[0_0_18px_rgba(251,191,36,0.14)]">
                   {tab.badge}
                 </span>
               ) : null}
