@@ -62,6 +62,7 @@ function shouldTryLegacyFallback(err: unknown) {
   return (
     message.includes("cloudflare upload failed") ||
     message.includes("upload stalled") ||
+    message.includes("upload aborted before completion") ||
     message.includes("server did not confirm") ||
     message.includes("assembly failed")
   );
@@ -166,6 +167,7 @@ function uploadToSignedUrl({
     const xhr = new XMLHttpRequest();
     let settled = false;
     let stallTimer: number | undefined;
+    let abortedByUser = false;
 
     const cleanup = () => {
       if (stallTimer) window.clearTimeout(stallTimer);
@@ -188,12 +190,14 @@ function uploadToSignedUrl({
     const resetStallTimer = () => {
       if (stallTimer) window.clearTimeout(stallTimer);
       stallTimer = window.setTimeout(() => {
+        abortedByUser = false;
         xhr.abort();
         rejectOnce(new Error("Upload stalled for more than 90 seconds. Please check your connection and try again."));
       }, UPLOAD_STALL_TIMEOUT_MS);
     };
 
     onAbortReady(() => {
+      abortedByUser = true;
       xhr.abort();
       rejectOnce(new Error("Upload cancelled"));
     });
@@ -212,7 +216,7 @@ function uploadToSignedUrl({
     };
     xhr.onerror = () => rejectOnce(new Error("Cloudflare upload failed. Check your connection and try again."));
     xhr.ontimeout = () => rejectOnce(new Error("Upload took too long and was cancelled. Please try again with a smaller file or a more stable connection."));
-    xhr.onabort = () => rejectOnce(new Error("Upload cancelled"));
+    xhr.onabort = () => rejectOnce(new Error(abortedByUser ? "Upload cancelled" : "Upload aborted before completion. Please retry."));
     xhr.open("PUT", uploadUrl);
     xhr.timeout = UPLOAD_HARD_TIMEOUT_MS;
     xhr.setRequestHeader("Content-Type", file.type || "video/mp4");
@@ -257,7 +261,7 @@ export function useVideoUpload() {
       setError(null);
       setUploadProgress(1);
       setUploadInfo(null);
-      let cleanupRemoteUploadOnError = true;
+      let shouldDeleteRemoteUpload = false;
 
       try {
         const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
@@ -351,7 +355,6 @@ export function useVideoUpload() {
         if (cancelledRef.current) throw new Error("Upload cancelled");
 
         setUploadProgress(100);
-        cleanupRemoteUploadOnError = false;
 
         setUploadInfo({
           phase: "assembling",
@@ -392,12 +395,8 @@ export function useVideoUpload() {
         return { jobId };
       } catch (err: any) {
         const id = uploadIdRef.current;
-        if (id && (cancelledRef.current || cleanupRemoteUploadOnError)) {
-          fetch(`/api/upload/${id}`, {
-            method: "DELETE",
-            headers: authHeaders(),
-          }).catch(() => {});
-          uploadIdRef.current = null;
+        if (cancelledRef.current) {
+          shouldDeleteRemoteUpload = true;
         }
 
         if (!cancelledRef.current && shouldTryLegacyFallback(err)) {
@@ -413,13 +412,25 @@ export function useVideoUpload() {
             const fallback = await uploadViaLegacyEndpoint(file, options, (abort) => {
               abortUploadRef.current = abort;
             });
+            if (id) {
+              uploadIdRef.current = null;
+            }
             setError(null);
             return fallback;
           } catch (fallbackErr) {
+            shouldDeleteRemoteUpload = true;
             const finalErr = fallbackErr instanceof Error ? fallbackErr : new Error("Upload failed");
             setError(finalErr);
             throw finalErr;
           }
+        }
+
+        if (id && shouldDeleteRemoteUpload) {
+          fetch(`/api/upload/${id}`, {
+            method: "DELETE",
+            headers: authHeaders(),
+          }).catch(() => {});
+          uploadIdRef.current = null;
         }
 
         const finalErr = cancelledRef.current ? new Error("Upload cancelled") : err;
