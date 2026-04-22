@@ -1349,7 +1349,7 @@ function QualityPanel({ data, isPaid, profile }: { data: any; isPaid: boolean; p
         <p className="text-sm text-white/70">{qualityIntro(profile)}</p>
       </div>
       <LimitedSpeechNotice profile={profile}>
-        Quality scoring focused on visual execution, audio cleanliness, and pacing proxies because this upload has little spoken content.
+        Video Analyzer is tuned for spoken videos, so results are most reliable when there is clear narration, conversation, or on-camera instruction.
       </LimitedSpeechNotice>
       {data.topFix && (
         <div className="flex items-start gap-3 p-4 rounded-xl bg-amber-400/8 border border-amber-400/20">
@@ -1457,7 +1457,7 @@ function EditingPanel({ data, isPaid, profile }: { data: any; isPaid: boolean; p
         <p className="text-sm text-white/70">{editingIntro(profile)}</p>
       </div>
       <LimitedSpeechNotice profile={profile}>
-        Editing notes are weighted toward pacing, visual clarity, and dead-air cleanup because there is not enough speech to power script-led hook analysis.
+        Video Analyzer is tuned for spoken videos, so editing notes work best when there is clear narration, conversation, or on-camera instruction.
       </LimitedSpeechNotice>
       {(data.topic || data.viewPotential || data.editingStyle) && (
         <div className="grid gap-4 lg:grid-cols-[1.2fr,0.8fr]">
@@ -3001,7 +3001,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
           <PanelHeader className="gap-4">
             <div>
               <PanelTitle>Video Analyzer</PanelTitle>
-              <PanelSubtitle className="max-w-2xl">Upload a raw video and DayTabs will detect whether it should analyze it as talking-first, visual-first, or mixed before generating notes.</PanelSubtitle>
+              <PanelSubtitle className="max-w-2xl">Upload a spoken video such as a podcast, talking head, tutorial, walkthrough, or demo. Silent or mostly visual videos are not supported yet.</PanelSubtitle>
             </div>
             {hasHistory && (
               <button
@@ -3028,7 +3028,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
               <div className="flex gap-3 rounded-lg border border-amber-500/20 bg-amber-500/8 px-4 py-3 text-left">
                 <AlertTriangle className="w-4 h-4 text-amber-300 mt-0.5 shrink-0" />
                 <p className="text-xs leading-relaxed text-white/55">
-                  DayTabs now auto-detects where speech appears and whether the upload should be judged as talking-first, visual-first, or mixed before generating your report.
+                  Video Analyzer needs clear spoken content to produce useful feedback. Use it for podcasts, talking heads, tutorials, walkthroughs, demos, and similar narrated videos.
                 </p>
               </div>
             </div>
