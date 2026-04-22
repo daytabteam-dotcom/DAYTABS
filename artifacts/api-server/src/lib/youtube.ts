@@ -29,6 +29,9 @@ const CANONICAL_APP_ORIGIN = (
 const YOUTUBE_CALLBACK_PATH = "/api/youtube/callback";
 const YOUTUBE_DAILY_QUOTA_LIMIT = Number(process.env.YOUTUBE_DAILY_QUOTA_LIMIT || 10000);
 const YOUTUBE_QUOTA_CACHE_THRESHOLD = Number(process.env.YOUTUBE_QUOTA_CACHE_THRESHOLD || 0.9);
+const YOUTUBE_THUMBNAIL_WIDTH = 1280;
+const YOUTUBE_THUMBNAIL_HEIGHT = 720;
+const YOUTUBE_THUMBNAIL_MAX_BYTES = 2 * 1024 * 1024;
 
 export const YOUTUBE_SCOPES = [
   "https://www.googleapis.com/auth/youtube.readonly",
@@ -511,16 +514,23 @@ function normalizePlanDayRecord(day: JsonRecord, fallbackIndex: number) {
 function sanitizeSourceImageDataUrls(value: unknown) {
   return asArray(value)
     .map((item) => asString(item)?.trim() || "")
-    .filter((item) => /^data:image\/(?:png|jpeg|jpg|webp);base64,/i.test(item))
+    .filter((item) => {
+      const match = item.match(/^data:image\/(?:jpeg|jpg);base64,(.+)$/i);
+      if (!match) return false;
+      return Buffer.from(match[1], "base64").byteLength <= YOUTUBE_THUMBNAIL_MAX_BYTES;
+    })
     .slice(0, 4);
 }
 
 function dataUrlToImageFile(dataUrl: string, index: number) {
-  const match = dataUrl.match(/^data:(image\/(?:png|jpeg|jpg|webp));base64,(.+)$/i);
-  if (!match) throw new Error("Invalid source image data URL");
+  const match = dataUrl.match(/^data:(image\/(?:jpeg|jpg));base64,(.+)$/i);
+  if (!match) throw new Error("Source images must be JPG thumbnails under 2 MB");
   const mimeType = match[1].toLowerCase() === "image/jpg" ? "image/jpeg" : match[1].toLowerCase();
-  const extension = mimeType.split("/")[1] === "jpeg" ? "jpg" : mimeType.split("/")[1];
-  return toFile(Buffer.from(match[2], "base64"), `source-${index + 1}.${extension}`, { type: mimeType });
+  const buffer = Buffer.from(match[2], "base64");
+  if (buffer.byteLength > YOUTUBE_THUMBNAIL_MAX_BYTES) {
+    throw new Error("Source images must be 2 MB or smaller");
+  }
+  return toFile(buffer, `source-${index + 1}.jpg`, { type: mimeType });
 }
 
 async function buildYoutubeThumbnailPrompt(
@@ -595,12 +605,14 @@ STEP 4: Final editing instructions
 
 Generate a precise image editing prompt that:
 - Keeps the exact original image
+- Produces a YouTube thumbnail composition at ${YOUTUBE_THUMBNAIL_WIDTH} x ${YOUTUBE_THUMBNAIL_HEIGHT}px, 16:9 aspect ratio
 - Enhances subject visibility with lighting and contrast
 - Applies cinematic color grading
 - Adds strong depth with background blur if needed
 - Places bold readable text in a non-blocking area
 - Uses high contrast colors for text
 - Ensures readability on mobile
+- Keeps the final asset as JPG format and suitable for YouTube's 2 MB thumbnail limit
 
 If you modify or regenerate the subject instead of editing the provided image, the output is invalid.
 
@@ -642,6 +654,7 @@ Pick the strongest concept based on CTR potential.
 
 STEP 4: Final image generation instructions
 Create a highly detailed image prompt with:
+- YouTube thumbnail canvas: ${YOUTUBE_THUMBNAIL_WIDTH} x ${YOUTUBE_THUMBNAIL_HEIGHT}px, 16:9 aspect ratio, JPG format, suitable for YouTube's 2 MB thumbnail limit
 - Composition (foreground/background)
 - Lighting (dramatic, soft, high contrast, etc.)
 - Colors (vibrant, contrasting palette)
@@ -657,6 +670,7 @@ IMPORTANT RULES:
 - Ensure subject stands out strongly from background
 - Use visual contrast to guide attention
 - Keep text readable on small screens
+- The final image must be a 16:9 YouTube thumbnail composition, optimized for ${YOUTUBE_THUMBNAIL_WIDTH} x ${YOUTUBE_THUMBNAIL_HEIGHT}px
 - If the user gave source images, use them as visual references for subject, style, or assets when helpful
 - If the user did not specify text, generate the strongest 3-5 word text yourself
 - Return ONLY the final image generation prompt`;
@@ -695,15 +709,22 @@ async function generateYoutubeThumbnailImage(userId: number, prompt: string, sou
 
 If you modify or regenerate the subject instead of editing the provided image, the output is invalid.`,
       size: "1536x1024",
+      output_format: "jpeg",
+      output_compression: 85,
     })
     : await openai.images.generate({
       model: "gpt-image-1",
       prompt,
       size: "1536x1024",
+      output_format: "jpeg",
+      output_compression: 85,
     });
   const base64 = response.data?.[0]?.b64_json;
   if (!base64) {
     throw new Error("Thumbnail generation did not return an image");
+  }
+  if (Buffer.from(base64, "base64").byteLength > YOUTUBE_THUMBNAIL_MAX_BYTES) {
+    throw new Error("Generated thumbnail exceeded YouTube's 2 MB limit. Try a simpler source image or less thumbnail text.");
   }
   await logTokenUsage({
     userId,
@@ -712,7 +733,7 @@ If you modify or regenerate the subject instead of editing the provided image, t
     inputTokens: 0,
     outputTokens: 0,
   });
-  return `data:image/png;base64,${base64}`;
+  return `data:image/jpeg;base64,${base64}`;
 }
 
 function normalizeStoredIdeaFeedbackSummary(value: unknown): StoredIdeaFeedbackSummary {

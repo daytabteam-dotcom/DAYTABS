@@ -80,6 +80,11 @@ type IdeaOrigin = "ai" | "manual";
 type IdeaFeedback = "liked" | "disliked" | null;
 type GrowthSubtab = "overview" | "plan" | "competitors" | "insights" | "tasks";
 
+const YOUTUBE_THUMBNAIL_WIDTH = 1280;
+const YOUTUBE_THUMBNAIL_HEIGHT = 720;
+const YOUTUBE_THUMBNAIL_MIN_WIDTH = 640;
+const YOUTUBE_THUMBNAIL_MAX_BYTES = 2 * 1024 * 1024;
+
 interface RecentVideo {
   id: string;
   title: string;
@@ -393,6 +398,13 @@ async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 async function resizeImageFileToDataUrl(file: File) {
+  if (!["image/jpeg", "image/jpg"].includes(file.type.toLowerCase())) {
+    throw new Error(`${file.name} must be a JPG image.`);
+  }
+  if (file.size > YOUTUBE_THUMBNAIL_MAX_BYTES) {
+    throw new Error(`${file.name} must be 2 MB or smaller.`);
+  }
+
   return await new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = () => reject(new Error(`Could not read ${file.name}`));
@@ -405,24 +417,58 @@ async function resizeImageFileToDataUrl(file: File) {
       const image = new window.Image();
       image.onerror = () => reject(new Error(`Could not process ${file.name}`));
       image.onload = () => {
-        const maxWidth = 1600;
-        const maxHeight = 1600;
-        const scale = Math.min(maxWidth / image.width, maxHeight / image.height, 1);
+        if (image.width < YOUTUBE_THUMBNAIL_MIN_WIDTH) {
+          reject(new Error(`${file.name} must be at least ${YOUTUBE_THUMBNAIL_MIN_WIDTH}px wide.`));
+          return;
+        }
         const canvas = document.createElement("canvas");
-        canvas.width = Math.max(1, Math.round(image.width * scale));
-        canvas.height = Math.max(1, Math.round(image.height * scale));
+        canvas.width = YOUTUBE_THUMBNAIL_WIDTH;
+        canvas.height = YOUTUBE_THUMBNAIL_HEIGHT;
         const context = canvas.getContext("2d");
         if (!context) {
           reject(new Error(`Could not process ${file.name}`));
           return;
         }
-        context.drawImage(image, 0, 0, canvas.width, canvas.height);
-        resolve(canvas.toDataURL("image/jpeg", 0.88));
+        const coverScale = Math.max(canvas.width / image.width, canvas.height / image.height);
+        const coverWidth = image.width * coverScale;
+        const coverHeight = image.height * coverScale;
+        context.save();
+        context.filter = "blur(18px) brightness(0.72)";
+        context.drawImage(image, (canvas.width - coverWidth) / 2, (canvas.height - coverHeight) / 2, coverWidth, coverHeight);
+        context.restore();
+        context.fillStyle = "rgba(0, 0, 0, 0.18)";
+        context.fillRect(0, 0, canvas.width, canvas.height);
+
+        const containScale = Math.min(canvas.width / image.width, canvas.height / image.height);
+        const containWidth = image.width * containScale;
+        const containHeight = image.height * containScale;
+        context.drawImage(image, (canvas.width - containWidth) / 2, (canvas.height - containHeight) / 2, containWidth, containHeight);
+
+        let quality = 0.9;
+        let dataUrl = canvas.toDataURL("image/jpeg", quality);
+        while (dataUrlBytes(dataUrl) > YOUTUBE_THUMBNAIL_MAX_BYTES && quality > 0.6) {
+          quality -= 0.08;
+          dataUrl = canvas.toDataURL("image/jpeg", quality);
+        }
+        if (dataUrlBytes(dataUrl) > YOUTUBE_THUMBNAIL_MAX_BYTES) {
+          reject(new Error(`${file.name} could not be compressed under 2 MB as a JPG thumbnail.`));
+          return;
+        }
+        resolve(dataUrl);
       };
       image.src = src;
     };
     reader.readAsDataURL(file);
   });
+}
+
+function dataUrlBytes(dataUrl: string) {
+  const base64 = dataUrl.split(",")[1] ?? "";
+  return Math.floor((base64.length * 3) / 4);
+}
+
+function thumbnailDownloadExtension(dataUrl: string) {
+  return dataUrl.startsWith("data:image/jpeg") ? "jpg" : "png";
 }
 
 function parseNumber(value: unknown) {
@@ -2923,7 +2969,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
   }
 
   async function handleThumbnailSourceFiles(files: FileList | null) {
-    const nextFiles = Array.from(files ?? []).filter((file) => file.type.startsWith("image/")).slice(0, 4);
+    const nextFiles = Array.from(files ?? []).slice(0, 4);
     if (!nextFiles.length) return;
     setError(null);
     try {
@@ -3374,22 +3420,20 @@ export default function YouTubeGrowthPlannerV2Tab() {
   const growthSubtabs: Array<{
     id: GrowthSubtab;
     label: string;
-    description: string;
     Icon: LucideIcon;
     accent: string;
     badge?: string;
   }> = [
-    { id: "overview", label: "Overview", description: "Big-picture command center.", Icon: LayoutGrid, accent: "from-sky-300/25 to-cyan-300/10" },
-    { id: "plan", label: "Plan", description: "Shape this week's uploads.", Icon: CalendarDays, accent: "from-red-300/30 to-orange-300/10" },
-    { id: "competitors", label: "Competitors", description: "Channels to watch and beat.", Icon: Youtube, accent: "from-rose-300/30 to-red-300/10" },
-    { id: "insights", label: "Insights", description: "Signals worth repeating.", Icon: BarChart3, accent: "from-emerald-300/25 to-lime-300/10" },
-    { id: "tasks", label: "Tasks", description: "Resolve unmatched uploads.", Icon: ListChecks, accent: "from-amber-300/30 to-yellow-300/10", badge: unlinkedWeekVideos.length ? String(unlinkedWeekVideos.length) : undefined },
+    { id: "overview", label: "Overview", Icon: LayoutGrid, accent: "from-sky-300/20 to-cyan-300/8" },
+    { id: "plan", label: "Plan", Icon: CalendarDays, accent: "from-red-300/24 to-orange-300/8" },
+    { id: "competitors", label: "Competitors", Icon: Youtube, accent: "from-rose-300/24 to-red-300/8" },
+    { id: "insights", label: "Insights", Icon: BarChart3, accent: "from-emerald-300/20 to-lime-300/8" },
+    { id: "tasks", label: "Tasks", Icon: ListChecks, accent: "from-amber-300/24 to-yellow-300/8", badge: unlinkedWeekVideos.length ? String(unlinkedWeekVideos.length) : undefined },
   ];
 
   const subtabNav = (
-    <PanelCardSoft className="sticky top-4 z-20 overflow-hidden border-white/10 bg-black/30 p-2 shadow-2xl shadow-black/20 backdrop-blur-xl">
-      <div className="pointer-events-none absolute inset-x-3 top-0 h-px bg-gradient-to-r from-transparent via-white/25 to-transparent" />
-      <div className="flex gap-2 overflow-x-auto pb-1">
+    <div className="sticky top-4 z-20 overflow-hidden rounded-3xl bg-white/[0.055] p-1.5 shadow-xl shadow-black/10 backdrop-blur-xl">
+      <div className="flex w-full gap-1.5 overflow-x-auto">
         {growthSubtabs.map((tab) => {
           const isActive = activeSubtab === tab.id;
           const hasBadge = Boolean(tab.badge);
@@ -3400,43 +3444,32 @@ export default function YouTubeGrowthPlannerV2Tab() {
               type="button"
               onClick={() => setActiveSubtab(tab.id)}
               className={cn(
-                "group relative min-w-[185px] overflow-hidden rounded-2xl border px-4 py-3 text-left transition-all duration-200",
+                "group relative flex min-w-[128px] flex-1 items-center justify-between gap-3 overflow-hidden rounded-2xl px-3 py-3 text-left transition-all duration-200",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-200/50 focus-visible:ring-offset-2 focus-visible:ring-offset-black",
                 isActive
-                  ? "border-white/20 bg-white/[0.09] text-white shadow-[0_18px_45px_rgba(0,0,0,0.24),0_0_0_1px_rgba(255,255,255,0.06)]"
-                  : "border-white/10 bg-white/[0.025] text-white/60 hover:-translate-y-0.5 hover:border-white/18 hover:bg-white/[0.06] hover:text-white",
+                  ? "bg-white/[0.14] text-white shadow-[0_10px_30px_rgba(0,0,0,0.18)]"
+                  : "text-white/58 hover:bg-white/[0.075] hover:text-white",
               )}
               aria-current={isActive ? "page" : undefined}
             >
-              <span className={cn("pointer-events-none absolute inset-0 bg-gradient-to-br opacity-0 transition-opacity duration-200", tab.accent, isActive ? "opacity-100" : "group-hover:opacity-60")} />
-              {isActive ? <span className="pointer-events-none absolute inset-x-4 bottom-0 h-0.5 rounded-full bg-gradient-to-r from-red-200 via-amber-100 to-emerald-200" /> : null}
-              <div className="flex items-center justify-between gap-3">
-                <span className="relative flex items-center gap-3">
-                  <span
-                    className={cn(
-                      "flex h-9 w-9 items-center justify-center rounded-xl border transition-all",
-                      isActive ? "border-white/20 bg-white/15 text-white" : "border-white/10 bg-white/[0.05] text-white/50 group-hover:text-white",
-                    )}
-                  >
-                    <Icon className="h-4 w-4" />
-                  </span>
-                  <span>
-                    <span className="block text-sm font-semibold">{tab.label}</span>
-                    {isActive ? <span className="mt-0.5 block text-[10px] font-semibold uppercase tracking-[0.18em] text-white/45">Active</span> : null}
-                  </span>
+              <span className={cn("pointer-events-none absolute inset-0 bg-gradient-to-br opacity-0 transition-opacity duration-200", tab.accent, isActive ? "opacity-100" : "group-hover:opacity-70")} />
+              {isActive ? <span className="pointer-events-none absolute inset-x-5 bottom-0 h-0.5 rounded-full bg-white/65" /> : null}
+              <span className="relative flex min-w-0 items-center gap-2.5">
+                <span className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition-all", isActive ? "bg-white/16 text-white" : "bg-white/[0.045] text-white/50 group-hover:text-white")}>
+                  <Icon className="h-4 w-4" />
                 </span>
-                {hasBadge ? (
-                  <span className="relative flex min-w-7 items-center justify-center rounded-full border border-amber-200/30 bg-amber-300/20 px-2 py-1 text-[10px] font-bold text-amber-50 shadow-[0_0_18px_rgba(251,191,36,0.18)]">
-                    {tab.badge}
-                  </span>
-                ) : null}
-              </div>
-              <p className={cn("relative mt-2 text-xs leading-5", isActive ? "text-white/72" : "text-white/40")}>{tab.description}</p>
+                <span className="truncate text-sm font-semibold">{tab.label}</span>
+              </span>
+              {hasBadge ? (
+                <span className="relative flex min-w-7 shrink-0 items-center justify-center rounded-full bg-amber-300/20 px-2 py-1 text-[10px] font-bold text-amber-50 shadow-[0_0_18px_rgba(251,191,36,0.14)]">
+                  {tab.badge}
+                </span>
+              ) : null}
             </button>
           );
         })}
       </div>
-    </PanelCardSoft>
+    </div>
   );
 
   const todayActionCard = (
@@ -4302,6 +4335,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
               <PanelCardSoft className="p-4">
                 <p className="text-xs uppercase tracking-[0.16em] text-white/40">Source images</p>
                 <p className="mt-2 text-sm text-white/55">Add up to 4 images. Preserve mode uses your upload as the base image and only edits lighting, clarity, text, overlays, and focus.</p>
+                <p className="mt-2 text-xs text-white/40">Requirements: JPG, 16:9 thumbnail output, 1280 x 720px, minimum source width 640px, max 2 MB.</p>
                 <div className="mt-3 flex flex-wrap gap-3">
                   {thumbnailSourceImages.map((image, index) => (
                     <div key={`${image.name}-${index}`} className="relative overflow-hidden rounded-xl border border-white/10 bg-black/20">
@@ -4322,7 +4356,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
                       Add image
                       <input
                         type="file"
-                        accept="image/*"
+                        accept="image/jpeg,.jpg,.jpeg"
                         multiple
                         className="hidden"
                         onChange={(event) => void handleThumbnailSourceFiles(event.target.files)}
@@ -4377,7 +4411,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
                     </div>
                     <a
                       href={thumbnailDay.generatedThumbnail.imageDataUrl}
-                      download={`${thumbnailDay.contentIdea.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "youtube-thumbnail"}.png`}
+                      download={`${thumbnailDay.contentIdea.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "youtube-thumbnail"}.${thumbnailDownloadExtension(thumbnailDay.generatedThumbnail.imageDataUrl)}`}
                       className="inline-flex items-center rounded-lg border border-white/10 px-3 py-2 text-sm text-white/75 transition-colors hover:bg-white/[0.06] hover:text-white"
                     >
                       <Download className="mr-2 h-4 w-4" />
