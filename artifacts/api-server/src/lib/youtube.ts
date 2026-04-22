@@ -1936,11 +1936,10 @@ export async function discoverCompetitors(userId: number, profile: typeof youtub
     }
   }
 
-  const selected = [
-    ...withTiers.filter((item) => item.tier === 1).sort((a, b) => a.subscribers - b.subscribers).slice(0, 6),
-    ...withTiers.filter((item) => item.tier === 2).sort((a, b) => a.subscribers - b.subscribers).slice(0, 6),
-    ...withTiers.filter((item) => item.tier === 3).sort((a, b) => a.subscribers - b.subscribers).slice(0, 6),
-  ].filter((item, index, list) => list.findIndex((candidate) => asString(candidate.item.id) === asString(item.item.id)) === index);
+  const selected = tier1
+    .sort((a, b) => a.subscribers - b.subscribers)
+    .slice(0, 6)
+    .filter((item, index, list) => list.findIndex((candidate) => asString(candidate.item.id) === asString(item.item.id)) === index);
 
   const existingCompetitors = await db
     .select()
@@ -1981,11 +1980,16 @@ export async function discoverCompetitors(userId: number, profile: typeof youtub
     saved.push(competitor);
   }
 
-  return await db
+  const savedCompetitors = await db
     .select()
     .from(youtubeCompetitorsTable)
     .where(eq(youtubeCompetitorsTable.userId, userId))
     .orderBy(desc(youtubeCompetitorsTable.fetchedAt));
+
+  return savedCompetitors.filter((competitor) => {
+    const subscribers = parseNumber(competitor.subscriberCount);
+    return userSubscribers > 0 && subscribers > 0 && subscribers <= userSubscribers * 5;
+  });
 }
 
 export async function addYoutubeCompetitorByUrl(userId: number, channelUrl: string) {

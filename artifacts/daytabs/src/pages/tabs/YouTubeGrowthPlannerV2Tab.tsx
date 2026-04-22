@@ -45,8 +45,11 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  Cell,
   Line,
   LineChart,
+  Pie,
+  PieChart,
   ReferenceArea,
   ReferenceDot,
   ReferenceLine,
@@ -360,6 +363,8 @@ type WeeklyComparisonWeekdayRow = {
   youViews: number;
   youUploads: number;
 } & Record<string, string | number>;
+
+const WEEKDAY_VIEW_COLORS = ["#38bdf8", "#f97316", "#a78bfa", "#f43f5e", "#22c55e", "#eab308", "#14b8a6"];
 
 const stages: Array<{ id: Stage; label: string }> = [
   { id: "idea", label: "Ideas" },
@@ -1277,11 +1282,8 @@ function deriveCompetitorRows(ownSubscribers: number, recentVideos: RecentVideo[
   });
 }
 
-function partitionCompetitors(ownSubscribers: number, competitors: Array<ReturnType<typeof deriveCompetitorRows>[number]>) {
-  const tier1 = competitors.filter((item) => ownSubscribers > 0 && item.subscribers > 0 && item.subscribers <= ownSubscribers * 5);
-  const tier2 = competitors.filter((item) => ownSubscribers > 0 && item.subscribers > ownSubscribers * 5 && item.subscribers <= ownSubscribers * 30);
-  const tier3 = competitors.filter((item) => ownSubscribers > 0 && item.subscribers > ownSubscribers * 30);
-  return { tier1, tier2, tier3 };
+function filterReachableCompetitors(ownSubscribers: number, competitors: Array<ReturnType<typeof deriveCompetitorRows>[number]>) {
+  return competitors.filter((item) => ownSubscribers > 0 && item.subscribers > 0 && item.subscribers <= ownSubscribers * 5);
 }
 
 function deriveWeeklyComparisonData(
@@ -1886,14 +1888,31 @@ function WeeklyComparisonChart({
   weekdayRows: WeeklyComparisonWeekdayRow[];
 }) {
   const competitors = rows.filter((row): row is WeeklyComparisonCompetitorRow => !row.isYou);
-  const uploadsConfig = {
+  const uploadsConfig: Record<string, { label: string; color: string }> = {
     youUploads: { label: "You", color: "#34d399" },
     ...Object.fromEntries(competitors.map((competitor) => [`${competitor.key}Uploads`, { label: competitor.name, color: competitor.fill }])),
   };
-  const viewsConfig = {
-    youViews: { label: "You", color: "#34d399" },
-    ...Object.fromEntries(competitors.map((competitor) => [`${competitor.key}Views`, { label: competitor.name, color: competitor.fill }])),
-  };
+  const viewPieData = weekdayRows.map((point, index) => {
+    const breakdown = [
+      { label: "You", value: Number(point.youViews ?? 0), color: "#34d399" },
+      ...competitors.map((competitor) => ({
+        label: competitor.name,
+        value: Number(point[`${competitor.key}Views`] ?? 0),
+        color: competitor.fill,
+      })),
+    ];
+    return {
+      day: point.day,
+      iso: point.iso,
+      views: breakdown.reduce((sum, item) => sum + item.value, 0),
+      fill: WEEKDAY_VIEW_COLORS[index % WEEKDAY_VIEW_COLORS.length],
+      breakdown,
+    };
+  });
+  const hasViewPieData = viewPieData.some((point) => point.views > 0);
+  const viewsConfig: Record<string, { label: string; color: string }> = Object.fromEntries(
+    viewPieData.map((point) => [point.day, { label: point.day, color: point.fill }]),
+  );
 
   return (
     <div className="mt-4 grid gap-4 xl:grid-cols-2">
@@ -1907,21 +1926,19 @@ function WeeklyComparisonChart({
               <XAxis dataKey="day" tickLine={false} axisLine={false} interval={0} height={42} />
               <YAxis tickLine={false} axisLine={false} />
               <ChartTooltip
+                shared={false}
                 content={({ active, payload }: TooltipProps<number, string>) => {
                   if (!active || !payload?.length) return null;
-                  const point = payload[0]?.payload as WeeklyComparisonWeekdayRow;
+                  const activeBar = payload[0];
+                  const point = activeBar?.payload as WeeklyComparisonWeekdayRow | undefined;
+                  const dataKey = String(activeBar?.dataKey ?? "");
+                  const label = uploadsConfig[dataKey]?.label ?? String(activeBar?.name ?? "Uploads");
+                  const uploads = Number(activeBar?.value ?? 0);
+                  if (!point) return null;
                   return (
                     <div className="rounded-lg border border-white/10 bg-[#120d1f] px-3 py-2 text-xs text-white shadow-xl">
                       <p className="font-medium">{formatIsoDate(point.iso)}</p>
-                      <p className="mt-1 text-white/65">You: {point.youUploads} upload{point.youUploads === 1 ? "" : "s"}</p>
-                      {competitors.map((competitor) => {
-                        const uploads = Number(point[`${competitor.key}Uploads`] ?? 0);
-                        return (
-                          <p key={`${competitor.key}-uploads-tooltip`} className="mt-1 text-white/65">
-                            {competitor.name}: {uploads} upload{uploads === 1 ? "" : "s"}
-                          </p>
-                        );
-                      })}
+                      <p className="mt-1 text-white/65">{label}: {uploads} upload{uploads === 1 ? "" : "s"}</p>
                     </div>
                   );
                 }}
@@ -1939,32 +1956,48 @@ function WeeklyComparisonChart({
         <p className="mt-1 text-xs text-white/45">Current scheduled week view totals, sourced from published videos in this window.</p>
         <div className="mt-4 h-56">
           <ChartContainer config={viewsConfig} className="h-full w-full">
-            <BarChart data={weekdayRows} margin={{ left: 6, right: 6, top: 12, bottom: 32 }}>
-              <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.08)" />
-              <XAxis dataKey="day" tickLine={false} axisLine={false} interval={0} height={42} />
-              <YAxis tickLine={false} axisLine={false} />
-              <ChartTooltip
-                content={({ active, payload }: TooltipProps<number, string>) => {
-                  if (!active || !payload?.length) return null;
-                  const point = payload[0]?.payload as WeeklyComparisonWeekdayRow;
-                  return (
-                    <div className="rounded-lg border border-white/10 bg-[#120d1f] px-3 py-2 text-xs text-white shadow-xl">
-                      <p className="font-medium">{formatIsoDate(point.iso)}</p>
-                      <p className="mt-1 text-white/65">You: {formatNumber(point.youViews)} views</p>
-                      {competitors.map((competitor) => (
-                        <p key={`${competitor.key}-views-tooltip`} className="mt-1 text-white/65">
-                          {competitor.name}: {formatNumber(point[`${competitor.key}Views`])} views
-                        </p>
-                      ))}
-                    </div>
-                  );
-                }}
-              />
-              <Bar dataKey="youViews" radius={[8, 8, 0, 0]} fill="#34d399" />
-              {competitors.map((competitor) => (
-                <Bar key={`${competitor.key}-views`} dataKey={`${competitor.key}Views`} radius={[8, 8, 0, 0]} fill={competitor.fill} />
-              ))}
-            </BarChart>
+            {hasViewPieData ? (
+              <PieChart margin={{ left: 6, right: 6, top: 8, bottom: 8 }}>
+                <ChartTooltip
+                  content={({ active, payload }: TooltipProps<number, string>) => {
+                    if (!active || !payload?.length) return null;
+                    const point = payload[0]?.payload as (typeof viewPieData)[number] | undefined;
+                    if (!point) return null;
+                    return (
+                      <div className="rounded-lg border border-white/10 bg-[#120d1f] px-3 py-2 text-xs text-white shadow-xl">
+                        <p className="font-medium">{point.day} · {formatIsoDate(point.iso)}</p>
+                        <p className="mt-1 text-white/70">{formatNumber(point.views)} total views</p>
+                        {point.breakdown.map((item) => (
+                          <p key={`${point.iso}-${item.label}-views-tooltip`} className="mt-1 text-white/55">
+                            {item.label}: {formatNumber(item.value)}
+                          </p>
+                        ))}
+                      </div>
+                    );
+                  }}
+                />
+                <Pie
+                  data={viewPieData}
+                  dataKey="views"
+                  nameKey="day"
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={46}
+                  outerRadius={82}
+                  paddingAngle={2}
+                  stroke="rgba(18,13,31,0.9)"
+                  strokeWidth={2}
+                >
+                  {viewPieData.map((point) => (
+                    <Cell key={`weekday-views-${point.iso}`} fill={point.fill} />
+                  ))}
+                </Pie>
+              </PieChart>
+            ) : (
+              <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-white/10 text-sm text-white/45">
+                No weekday view data yet.
+              </div>
+            )}
           </ChartContainer>
         </div>
       </PanelCardSoft>
@@ -2733,15 +2766,8 @@ export default function YouTubeGrowthPlannerV2Tab() {
   const resultsByDay = useMemo(() => new Map(latestResults.map((result) => [result.dayIndex, result])), [latestResults]);
   const topDiagnostics = useMemo(() => buildVideoDiagnostics(overview.whatWorkedVideos ?? [], recentVideos, titleLengthSummary, bestTime, "top"), [overview, recentVideos, titleLengthSummary, bestTime]);
   const underperformerDiagnostics = useMemo(() => buildVideoDiagnostics(overview.underperformerVideos ?? [], recentVideos, titleLengthSummary, bestTime, "bottom"), [overview, recentVideos, titleLengthSummary, bestTime]);
-  const competitorTiers = useMemo(() => partitionCompetitors(ownSubscribers, competitorRows), [ownSubscribers, competitorRows]);
-  const weeklyComparison = useMemo(() => deriveWeeklyComparisonData(competitorRows, latestPlan, recentVideos, status?.channel?.channelName), [competitorRows, latestPlan, recentVideos, status?.channel?.channelName]);
-  const leaderboardHostTierKey = useMemo(() => {
-    if (!weeklyComparison?.competitors.length) return null;
-    if (competitorTiers.tier1.length) return "tier1";
-    if (competitorTiers.tier2.length) return "tier2";
-    if (competitorTiers.tier3.length) return "tier3";
-    return null;
-  }, [competitorTiers.tier1.length, competitorTiers.tier2.length, competitorTiers.tier3.length, weeklyComparison?.competitors.length]);
+  const reachableCompetitors = useMemo(() => filterReachableCompetitors(ownSubscribers, competitorRows), [ownSubscribers, competitorRows]);
+  const weeklyComparison = useMemo(() => deriveWeeklyComparisonData(reachableCompetitors, latestPlan, recentVideos, status?.channel?.channelName), [reachableCompetitors, latestPlan, recentVideos, status?.channel?.channelName]);
   const publishableVideos = useMemo(
     () => [...recentVideos].sort((a, b) => new Date(b.publishedAt || 0).getTime() - new Date(a.publishedAt || 0).getTime()),
     [recentVideos],
@@ -3973,43 +3999,20 @@ export default function YouTubeGrowthPlannerV2Tab() {
                 </div>
               </div>
               <div className="mt-5 space-y-6">
-                {[
-                  {
-                    key: "tier1",
-                    title: "Tier 1: Your Level, Channels You Can Beat",
-                    subtitle: "These are the channels close enough to race right now. Treat them like proof that your next push can move the leaderboard.",
-                    rows: competitorTiers.tier1,
-                    accent: "border-emerald-400/25",
-                  },
-                  {
-                    key: "tier2",
-                    title: "Tier 2: Growing Fast, Just Ahead of You",
-                    subtitle: "These channels are realistic near-term targets. Study the patterns that helped them break away.",
-                    rows: competitorTiers.tier2,
-                    accent: "border-white/10",
-                  },
-                  {
-                    key: "tier3",
-                    title: "Tier 3: Top of Your Niche, Study Their Playbook",
-                    subtitle: "Learn from the best in your niche. Use them as ideation fuel, not intimidation.",
-                    rows: competitorTiers.tier3,
-                    accent: "border-amber-300/25",
-                  },
-                ].map((tier) => (
-                  <div key={tier.key} className="space-y-3">
+                <div className="space-y-3">
                     <div>
-                      <h3 className="text-lg font-semibold text-white">{tier.title}</h3>
-                      <p className="mt-1 text-sm text-white/50">{tier.subtitle}</p>
+                      <h3 className="text-lg font-semibold text-white">Channels You Can Beat</h3>
+                      <p className="mt-1 text-sm text-white/50">These are the channels close enough to race right now. Treat them like proof that your next push can move the leaderboard.</p>
                     </div>
                     <div className="grid gap-4 md:grid-cols-2">
-                      {tier.rows.map((competitor) => {
+                      {reachableCompetitors.map((competitor) => {
                         const insight = planPayload.competitorInsights?.find((item) => item.channelName === competitor.channelName);
                         const storedMeta = readCompetitorStoredMeta(competitor);
                         const url = insight?.channelUrl || `https://www.youtube.com/channel/${competitor.channelId ?? ""}`;
                         const topVideo = [...(competitor.mostViewedRecentVideos ?? [])].sort((a, b) => parseNumber(b.viewCount) - parseNumber(a.viewCount))[0];
                         const isRemoving = working === `competitor-remove:${competitor.id}`;
                         return (
-                          <PanelCardSoft key={`${tier.key}-${competitor.id}`} className={cn("border p-4 transition-all hover:-translate-y-0.5 hover:bg-white/[0.05]", tier.accent)}>
+                          <PanelCardSoft key={competitor.id} className="border border-emerald-400/25 p-4 transition-all hover:-translate-y-0.5 hover:bg-white/[0.05]">
                             <div className="flex items-start justify-between gap-3">
                               <div className="flex items-center gap-3">
                                 <Avatar className="h-12 w-12">
@@ -4036,7 +4039,6 @@ export default function YouTubeGrowthPlannerV2Tab() {
                             </div>
                             <p className="mt-4 text-sm leading-6 text-white/70">{storedMeta.reportSummary || deriveCompetitorCardInsight(competitor)}</p>
                             {storedMeta.source === "manual" ? <p className="mt-2 text-xs text-sky-100/70">Added by you{storedMeta.addedFromUrl ? " from a channel URL" : ""}.</p> : null}
-                            {tier.key === "tier3" ? <p className="mt-2 text-sm text-amber-100/75">Watch their top video to see what your niche&apos;s audience loves most.</p> : null}
                             {topVideo ? (
                               <a href={topVideo.url} target="_blank" rel="noreferrer" className="mt-3 block text-sm text-red-200 transition-colors hover:text-red-100">
                                 Top video: {topVideo.title}
@@ -4045,9 +4047,9 @@ export default function YouTubeGrowthPlannerV2Tab() {
                           </PanelCardSoft>
                         );
                       })}
-                      {!tier.rows.length ? <PanelCardSoft className="p-4 text-sm text-white/55 md:col-span-2">No channels are in this tier yet. Refresh competitors and DayTabs will keep scouting your niche.</PanelCardSoft> : null}
+                      {!reachableCompetitors.length ? <PanelCardSoft className="p-4 text-sm text-white/55 md:col-span-2">No matching channels yet. Refresh competitors and DayTabs will keep scouting your niche.</PanelCardSoft> : null}
                     </div>
-                    {tier.key === leaderboardHostTierKey && weeklyComparison ? (
+                    {weeklyComparison ? (
                       <PanelCardSoft className="border border-emerald-400/20 p-4">
                         <h4 className="text-base font-semibold text-white">This Week&apos;s Friendly Leaderboard</h4>
                         <p className="mt-1 text-sm text-white/50">{weeklyComparison.windowLabel}: uploads and views for you and competitors based on published videos.</p>
@@ -4057,7 +4059,6 @@ export default function YouTubeGrowthPlannerV2Tab() {
                       </PanelCardSoft>
                     ) : null}
                   </div>
-                ))}
               </div>
             </PanelCard>
           </section>
