@@ -245,6 +245,9 @@ router.post("/upload", (req, res, next) => {
     const audioLanguage = req.body.audioLanguage || null;
     const audioVoice = req.body.audioVoice || "alloy";
     const originalFileName = req.file.originalname;
+    const recoveryId = typeof req.body.recoveryId === "string" && req.body.recoveryId.trim()
+      ? req.body.recoveryId.trim()
+      : null;
 
     if (await getActiveAnalysisCount() >= 25) {
       await fs.unlink(req.file.path).catch(() => {});
@@ -275,6 +278,7 @@ router.post("/upload", (req, res, next) => {
           platform: validatedPlatforms[0] ?? "youtube_long",
           platforms: validatedPlatforms,
           modules: validatedModules,
+          uploadRecoveryId: recoveryId ?? undefined,
           translateSubtitles,
           subtitleLanguage: req.body.subtitleLanguage || undefined,
           audioLanguage: audioLanguage || undefined,
@@ -351,6 +355,9 @@ router.get("/recover", async (req, res) => {
     }
 
     const sinceParam = typeof req.query.since === "string" ? Number(req.query.since) : 0;
+    const recoveryId = typeof req.query.recoveryId === "string" && req.query.recoveryId.trim()
+      ? req.query.recoveryId.trim()
+      : null;
     const since = Number.isFinite(sinceParam) && sinceParam > 0
       ? new Date(sinceParam)
       : new Date(Date.now() - 6 * 60 * 60 * 1000);
@@ -358,7 +365,16 @@ router.get("/recover", async (req, res) => {
     const jobs = await db
       .select()
       .from(analysisJobsTable)
-      .where(sql`${analysisJobsTable.userId} = ${userId} AND ${analysisJobsTable.createdAt} >= ${since}`)
+      .where(
+        recoveryId
+          ? sql`${analysisJobsTable.userId} = ${userId}
+              AND ${analysisJobsTable.mode} = 'video-analyzer'
+              AND ${analysisJobsTable.createdAt} >= ${since}
+              AND ${analysisJobsTable.result} -> 'analysisOptions' ->> 'uploadRecoveryId' = ${recoveryId}`
+          : sql`${analysisJobsTable.userId} = ${userId}
+              AND ${analysisJobsTable.mode} = 'video-analyzer'
+              AND ${analysisJobsTable.createdAt} >= ${since}`
+      )
       .orderBy(desc(analysisJobsTable.createdAt))
       .limit(1);
 

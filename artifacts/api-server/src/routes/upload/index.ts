@@ -35,6 +35,7 @@ interface UploadSession {
   uploadId: string;
   userId: number | null;
   rawPlan: string;
+  recoveryId: string | null;
   filename: string;
   fileSize: number;
   mimeType: string;
@@ -85,6 +86,7 @@ router.post("/init", async (req, res) => {
       mimeType,
       totalChunks,
       mode,
+      recoveryId,
       platforms,
       modules,
       translateSubtitles,
@@ -188,6 +190,7 @@ router.post("/init", async (req, res) => {
       uploadId,
       userId,
       rawPlan,
+      recoveryId: typeof recoveryId === "string" && recoveryId.trim() ? recoveryId.trim() : null,
       filename: filename ?? "upload.mp4",
       fileSize: size,
       mimeType,
@@ -352,6 +355,7 @@ router.post("/complete", async (req, res) => {
           platform: session.platforms[0] ?? "youtube_long",
           platforms: session.platforms,
           modules: session.modules,
+          uploadRecoveryId: session.recoveryId ?? undefined,
           translateSubtitles: session.translateSubtitles,
           subtitleLanguage: session.subtitleLanguage ?? undefined,
           audioLanguage: session.audioLanguage ?? undefined,

@@ -5,6 +5,7 @@ export interface VideoUploadOptions {
   platform?: string;
   platforms?: string[];
   modules?: string[];
+  recoveryId?: string;
   durationSeconds?: number;
   translateSubtitles?: boolean;
   subtitleLanguage?: string;
@@ -80,6 +81,9 @@ async function uploadViaLegacyEndpoint(
   formData.append("platform", options.platform ?? options.platforms?.[0] ?? "youtube_long");
   formData.append("platforms", JSON.stringify(options.platforms ?? (options.platform ? [options.platform] : ["youtube_long"])));
   formData.append("modules", JSON.stringify(options.modules ?? ["quality", "editing"]));
+  if (options.recoveryId) {
+    formData.append("recoveryId", options.recoveryId);
+  }
 
   if (options.translateSubtitles !== undefined) {
     formData.append("translateSubtitles", String(options.translateSubtitles));
@@ -265,6 +269,7 @@ export function useVideoUpload() {
           mimeType: file.type || "video/mp4",
           totalChunks,
           mode: options.mode,
+          recoveryId: options.recoveryId ?? null,
           durationSeconds: options.durationSeconds ?? null,
           platforms: JSON.stringify(
             options.platforms ?? (options.platform ? [options.platform] : ["youtube_long"])

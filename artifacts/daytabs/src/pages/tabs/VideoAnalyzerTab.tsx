@@ -71,6 +71,7 @@ const RECOVERY_STORAGE_KEY = "daytabs:video-analyzer:pending-upload";
 
 interface PendingUploadRecovery {
   startedAt: number;
+  recoveryId: string;
   fileName?: string;
   jobId?: string;
   platforms: string[];
@@ -116,26 +117,37 @@ interface AnalysisQueueStatus {
 
 function readPendingUploadRecovery(): PendingUploadRecovery | null {
   try {
-    const raw = localStorage.getItem(RECOVERY_STORAGE_KEY);
+    const raw = sessionStorage.getItem(RECOVERY_STORAGE_KEY) ?? localStorage.getItem(RECOVERY_STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as PendingUploadRecovery;
-    if (!parsed.startedAt || Date.now() - parsed.startedAt > 6 * 60 * 60 * 1000) {
+    if (!parsed.startedAt || !parsed.recoveryId || Date.now() - parsed.startedAt > 6 * 60 * 60 * 1000) {
+      sessionStorage.removeItem(RECOVERY_STORAGE_KEY);
       localStorage.removeItem(RECOVERY_STORAGE_KEY);
       return null;
     }
     return parsed;
   } catch {
+    sessionStorage.removeItem(RECOVERY_STORAGE_KEY);
     localStorage.removeItem(RECOVERY_STORAGE_KEY);
     return null;
   }
 }
 
 function writePendingUploadRecovery(recovery: PendingUploadRecovery) {
-  localStorage.setItem(RECOVERY_STORAGE_KEY, JSON.stringify(recovery));
+  sessionStorage.setItem(RECOVERY_STORAGE_KEY, JSON.stringify(recovery));
+  localStorage.removeItem(RECOVERY_STORAGE_KEY);
 }
 
 function clearPendingUploadRecovery() {
+  sessionStorage.removeItem(RECOVERY_STORAGE_KEY);
   localStorage.removeItem(RECOVERY_STORAGE_KEY);
+}
+
+function createUploadRecoveryId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `upload-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 function playAnalysisCompleteSound() {
@@ -188,7 +200,11 @@ async function recoverPendingAnalysis(recovery: PendingUploadRecovery) {
   const token = getStoredAuthToken();
   if (!token) return null;
 
-  const res = await fetch(`/api/analysis/recover?since=${recovery.startedAt}`, {
+  const params = new URLSearchParams({
+    since: String(recovery.startedAt),
+    recoveryId: recovery.recoveryId,
+  });
+  const res = await fetch(`/api/analysis/recover?${params.toString()}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) return null;
@@ -2212,6 +2228,16 @@ function AnalyzingScreen({
           );
         })}
       </div>
+      <div className="mt-6 flex justify-center">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="flex items-center gap-2 rounded-lg border border-white/10 px-4 py-2 text-xs font-semibold text-white/40 transition-all hover:border-white/25 hover:text-white/60"
+        >
+          <X className="h-3.5 w-3.5" />
+          {isWaiting ? "Leave queue" : "Cancel analysis"}
+        </button>
+      </div>
       <p className="text-xs text-white/20 text-center mt-6">Do not close this tab while analyzing</p>
     </div>
   );
@@ -2647,8 +2673,16 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
   useEffect(() => {
     if (statusData?.status === "error") {
       clearPendingUploadRecovery();
+      return;
     }
-  }, [statusData?.status]);
+    if (statusData?.status === "cancelled") {
+      clearPendingUploadRecovery();
+      setJobId(null);
+      setHistoryResult(null);
+      setOpenedHistoryJobId(null);
+      loadAnalysisHistory();
+    }
+  }, [statusData?.status, loadAnalysisHistory]);
 
   useEffect(() => {
     const ahead = statusData?.queue?.ahead;
@@ -2757,6 +2791,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
     setOpenedHistoryJobId(null);
     const recovery: PendingUploadRecovery = {
       startedAt: Date.now(),
+      recoveryId: createUploadRecoveryId(),
       fileName: file.name,
       platforms: [],
       modules: selectedModules,
@@ -2768,6 +2803,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
         options: {
           mode: "video-analyzer",
           modules: selectedModules,
+          recoveryId: recovery.recoveryId,
           durationSeconds: fileDurationSec ?? undefined,
         },
       });
@@ -2829,6 +2865,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
       setJobId(item.jobId);
       writePendingUploadRecovery({
         startedAt: item.createdAt ? new Date(item.createdAt).getTime() : Date.now(),
+        recoveryId: createUploadRecoveryId(),
         jobId: item.jobId,
         platforms: options?.platforms?.length ? options.platforms : [item.platform ?? "youtube_long"],
         modules: options?.modules?.length ? options.modules : ["quality", "editing"],
