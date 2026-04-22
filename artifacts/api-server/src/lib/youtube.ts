@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import jwt from "jsonwebtoken";
+import { toFile } from "openai";
 import { OAuth2Client } from "google-auth-library";
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import {
@@ -104,6 +105,7 @@ interface GeneratedThumbnailRecord {
   imageDataUrl: string;
   prompt: string;
   requestedText: string | null;
+  preserveUploadedImage?: boolean;
   createdAt: string;
 }
 
@@ -500,6 +502,7 @@ function normalizePlanDayRecord(day: JsonRecord, fallbackIndex: number) {
       imageDataUrl,
       prompt: asString(generatedThumbnail.prompt) || "",
       requestedText: asString(generatedThumbnail.requestedText),
+      preserveUploadedImage: Boolean(generatedThumbnail.preserveUploadedImage),
       createdAt: asString(generatedThumbnail.createdAt) || new Date().toISOString(),
     } satisfies GeneratedThumbnailRecord : null,
   };
@@ -512,6 +515,14 @@ function sanitizeSourceImageDataUrls(value: unknown) {
     .slice(0, 4);
 }
 
+function dataUrlToImageFile(dataUrl: string, index: number) {
+  const match = dataUrl.match(/^data:(image\/(?:png|jpeg|jpg|webp));base64,(.+)$/i);
+  if (!match) throw new Error("Invalid source image data URL");
+  const mimeType = match[1].toLowerCase() === "image/jpg" ? "image/jpeg" : match[1].toLowerCase();
+  const extension = mimeType.split("/")[1] === "jpeg" ? "jpg" : mimeType.split("/")[1];
+  return toFile(Buffer.from(match[2], "base64"), `source-${index + 1}.${extension}`, { type: mimeType });
+}
+
 async function buildYoutubeThumbnailPrompt(
   userId: number,
   payload: {
@@ -520,8 +531,11 @@ async function buildYoutubeThumbnailPrompt(
     tags: string[];
     textPreference: string | null;
     sourceImages: string[];
+    preserveUploadedImage: boolean;
   },
 ) {
+  const hasSourceImages = payload.sourceImages.length > 0;
+  const shouldPreserveImage = hasSourceImages && payload.preserveUploadedImage;
   const userContent: Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }> = [
     {
       type: "text",
@@ -529,7 +543,7 @@ async function buildYoutubeThumbnailPrompt(
 Description: ${payload.description}
 Tags: ${payload.tags.join(", ")}
 User Text Preference: ${payload.textPreference?.trim() || "auto-generate"}
-Image Inputs: ${payload.sourceImages.length ? `The attached ${payload.sourceImages.length} source image(s) are reference inputs provided by the user.` : "No source images provided."}`,
+Image Inputs: ${hasSourceImages ? `The attached ${payload.sourceImages.length} source image(s) are provided by the user.` : "No source images provided."}`,
     },
   ];
 
@@ -540,12 +554,59 @@ Image Inputs: ${payload.sourceImages.length ? `The attached ${payload.sourceImag
     });
   }
 
-  const completion = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
-    messages: [
-      {
-        role: "system",
-        content: `You are an expert YouTube thumbnail designer and viral content strategist.
+  const systemPrompt = shouldPreserveImage
+    ? `You are an expert YouTube thumbnail designer focused on maximizing CTR.
+
+IMPORTANT: The user has provided an image.
+
+STRICT RULES (MUST FOLLOW):
+- The provided image MUST remain the base of the final thumbnail
+- DO NOT recreate, redraw, or reinterpret the scene
+- DO NOT change the subject, pose, composition, or camera angle
+- DO NOT replace the person or objects
+- You may ONLY:
+  - enhance colors
+  - improve lighting and contrast
+  - increase sharpness and clarity
+  - slightly blur or simplify the background for focus
+  - add text, overlays, icons, or graphic elements
+- The original image content must remain clearly recognizable and unchanged
+
+INPUT:
+Title: ${payload.title}
+Description: ${payload.description}
+Tags: ${payload.tags.join(", ")}
+User Text: ${payload.textPreference?.trim() || "auto"}
+
+STEP 1: Analyze intent
+- What is the core idea?
+- What emotion should trigger clicks?
+
+STEP 2: Thumbnail strategy
+- Where should attention go in THIS image?
+- What area is safe for text?
+- What should be emphasized visually?
+
+STEP 3: Text decision
+- If user provided text, optimize it and shorten if needed
+- If not, generate 2-3 options and pick the best one, max 3-5 words
+
+STEP 4: Final editing instructions
+
+Generate a precise image editing prompt that:
+- Keeps the exact original image
+- Enhances subject visibility with lighting and contrast
+- Applies cinematic color grading
+- Adds strong depth with background blur if needed
+- Places bold readable text in a non-blocking area
+- Uses high contrast colors for text
+- Ensures readability on mobile
+
+If you modify or regenerate the subject instead of editing the provided image, the output is invalid.
+
+OUTPUT:
+Return ONLY the final image editing prompt.`
+    : `You are an expert YouTube thumbnail designer and viral content strategist.
 
 Your goal is NOT just to create a beautiful image, but to maximize click-through-rate (CTR).
 
@@ -561,7 +622,7 @@ Thumbnail style should match top-performing YouTube thumbnails:
 - High contrast lighting
 - Clean background (or intentionally blurred)
 - Expressive subject (if applicable)
-- Minimal but powerful text (3–5 words max)
+- Minimal but powerful text (3-5 words max)
 
 STEP 1: Analyze intent
 - What is the core idea of the video?
@@ -598,7 +659,14 @@ IMPORTANT RULES:
 - Keep text readable on small screens
 - If the user gave source images, use them as visual references for subject, style, or assets when helpful
 - If the user did not specify text, generate the strongest 3-5 word text yourself
-- Return ONLY the final image generation prompt`,
+- Return ONLY the final image generation prompt`;
+
+  const completion = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [
+      {
+        role: "system",
+        content: systemPrompt,
       },
       {
         role: "user",
@@ -618,12 +686,21 @@ IMPORTANT RULES:
   return (completion.choices[0]?.message?.content || "").trim();
 }
 
-async function generateYoutubeThumbnailImage(userId: number, prompt: string) {
-  const response = await openai.images.generate({
-    model: "gpt-image-1",
-    prompt,
-    size: "1536x1024",
-  });
+async function generateYoutubeThumbnailImage(userId: number, prompt: string, sourceImages: string[], preserveUploadedImage: boolean) {
+  const response = sourceImages.length && preserveUploadedImage
+    ? await openai.images.edit({
+      model: "gpt-image-1",
+      image: await Promise.all(sourceImages.map(dataUrlToImageFile)),
+      prompt: `${prompt}
+
+If you modify or regenerate the subject instead of editing the provided image, the output is invalid.`,
+      size: "1536x1024",
+    })
+    : await openai.images.generate({
+      model: "gpt-image-1",
+      prompt,
+      size: "1536x1024",
+    });
   const base64 = response.data?.[0]?.b64_json;
   if (!base64) {
     throw new Error("Thumbnail generation did not return an image");
@@ -2594,7 +2671,7 @@ export async function generateYoutubeIdeaThumbnail(
   userId: number,
   planId: number,
   dayIndex: number,
-  input: { textPreference?: string | null; sourceImages?: unknown },
+  input: { textPreference?: string | null; sourceImages?: unknown; preserveUploadedImage?: unknown },
 ) {
   const plan = await loadPlanForUpdate(userId, planId);
   const rawDays = asPlanDays(asArray(asRecord(plan.plan).days));
@@ -2602,20 +2679,24 @@ export async function generateYoutubeIdeaThumbnail(
   if (!existingDay) throw new Error("Idea not found");
 
   const normalizedDay = normalizePlanDayRecord(existingDay, dayIndex);
+  const sourceImages = sanitizeSourceImageDataUrls(input.sourceImages);
+  const preserveUploadedImage = sourceImages.length > 0 && input.preserveUploadedImage !== false;
   const prompt = await buildYoutubeThumbnailPrompt(userId, {
     title: normalizedDay.contentIdea,
     description: normalizedDay.descriptionSuggestion,
     tags: asArray(normalizedDay.tags).map((item) => String(item)).filter(Boolean),
     textPreference: asString(input.textPreference)?.trim() || null,
-    sourceImages: sanitizeSourceImageDataUrls(input.sourceImages),
+    sourceImages,
+    preserveUploadedImage,
   });
   if (!prompt) throw new Error("Thumbnail prompt generation failed");
 
-  const imageDataUrl = await generateYoutubeThumbnailImage(userId, prompt);
+  const imageDataUrl = await generateYoutubeThumbnailImage(userId, prompt, sourceImages, preserveUploadedImage);
   const generatedThumbnail: GeneratedThumbnailRecord = {
     imageDataUrl,
     prompt,
     requestedText: asString(input.textPreference)?.trim() || null,
+    preserveUploadedImage,
     createdAt: new Date().toISOString(),
   };
 

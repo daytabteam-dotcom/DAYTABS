@@ -309,6 +309,7 @@ router.post("/plans/:planId/days/:dayIndex/thumbnail", requireAuth, async (req, 
     const result = await generateYoutubeIdeaThumbnail(req.auth!.user_id, planId, dayIndex, {
       textPreference: typeof req.body?.textPreference === "string" ? req.body.textPreference : null,
       sourceImages: req.body?.sourceImages,
+      preserveUploadedImage: req.body?.preserveUploadedImage,
     });
     res.json(result);
   } catch (err) {

@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
   Archive,
@@ -78,6 +78,7 @@ type ViewMode = "calendar" | "planner";
 type InsightConfidence = "high" | "medium" | "low";
 type IdeaOrigin = "ai" | "manual";
 type IdeaFeedback = "liked" | "disliked" | null;
+type GrowthSubtab = "overview" | "plan" | "competitors" | "insights" | "tasks";
 
 interface RecentVideo {
   id: string;
@@ -163,6 +164,7 @@ interface PlanDay {
     imageDataUrl: string;
     prompt?: string;
     requestedText?: string | null;
+    preserveUploadedImage?: boolean;
     createdAt?: string | null;
   } | null;
 }
@@ -2553,9 +2555,11 @@ function LoadingState() {
 
 export default function YouTubeGrowthPlannerV2Tab() {
   const { plan, loading: planLoading } = usePlan();
+  const lastAutoOpenedTaskCountRef = useRef(0);
   const [status, setStatus] = useState<YoutubeStatus | null>(null);
   const [days, setDays] = useState<PlanDay[]>([]);
   const [viewMode, setViewMode] = useState<ViewMode>("calendar");
+  const [activeSubtab, setActiveSubtab] = useState<GrowthSubtab>("overview");
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -2577,6 +2581,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
   const [thumbnailDay, setThumbnailDay] = useState<PlanDay | null>(null);
   const [thumbnailTextPreference, setThumbnailTextPreference] = useState("");
   const [thumbnailSourceImages, setThumbnailSourceImages] = useState<ThumbnailSourceImage[]>([]);
+  const [preserveThumbnailSourceImage, setPreserveThumbnailSourceImage] = useState(true);
 
   const latestPlan = status?.latestPlan ?? null;
   const planPayload = latestPlan?.plan ?? {};
@@ -2699,6 +2704,18 @@ export default function YouTubeGrowthPlannerV2Tab() {
     () => publishableVideos.filter((video) => isVideoInPlanWindow(video, latestPlan) && !linkedVideoIds.has(video.id)),
     [publishableVideos, latestPlan, linkedVideoIds],
   );
+
+  useEffect(() => {
+    if (!status?.connected || loading) return;
+    if (!unlinkedWeekVideos.length) {
+      lastAutoOpenedTaskCountRef.current = 0;
+      return;
+    }
+    if (unlinkedWeekVideos.length <= lastAutoOpenedTaskCountRef.current) return;
+    lastAutoOpenedTaskCountRef.current = unlinkedWeekVideos.length;
+    setActiveSubtab("tasks");
+  }, [loading, status?.connected, unlinkedWeekVideos.length]);
+
   const todayIso = new Date().toISOString().slice(0, 10);
   const todayPlannedDays = useMemo(
     () => (daysByDate.get(todayIso) ?? []).filter((day) => effectivePlannerStage(day, resultsByDay, recentVideoById) !== "published"),
@@ -2743,6 +2760,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
   function openThumbnailDialog(day: PlanDay) {
     setThumbnailDay(day);
     setThumbnailTextPreference(day.generatedThumbnail?.requestedText || "");
+    setPreserveThumbnailSourceImage(day.generatedThumbnail?.preserveUploadedImage ?? true);
     setThumbnailSourceImages([]);
   }
 
@@ -2750,6 +2768,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
     setThumbnailDay(null);
     setThumbnailTextPreference("");
     setThumbnailSourceImages([]);
+    setPreserveThumbnailSourceImage(true);
   }
 
   async function deleteDay(day: PlanDay) {
@@ -2928,6 +2947,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
         body: JSON.stringify({
           textPreference: thumbnailTextPreference.trim() || null,
           sourceImages: thumbnailSourceImages.map((image) => image.dataUrl),
+          preserveUploadedImage: preserveThumbnailSourceImage,
         }),
       });
       applyServerPlanUpdate(data.plan, data.day);
@@ -3351,19 +3371,71 @@ export default function YouTubeGrowthPlannerV2Tab() {
     </PanelCard>
   ) : null;
 
-  const sectionNav = (
-    <PanelCardSoft className="sticky top-4 z-20 flex flex-wrap gap-2 p-2 backdrop-blur">
-      {[
-        ["this-week-plan", "Plan"],
-        ["repeat-or-fix", "Patterns"],
-        ["posting-consistency", "Consistency"],
-        ["performance-signals", "Performance"],
-        ["competitor-playbook", "Competitors"],
-      ].map(([id, label]) => (
-        <a key={id} href={`#${id}`} className="rounded-full border border-white/10 px-3 py-1.5 text-xs font-medium text-white/55 transition-colors hover:bg-white/[0.06] hover:text-white">
-          {label}
-        </a>
-      ))}
+  const growthSubtabs: Array<{
+    id: GrowthSubtab;
+    label: string;
+    description: string;
+    Icon: LucideIcon;
+    accent: string;
+    badge?: string;
+  }> = [
+    { id: "overview", label: "Overview", description: "Big-picture command center.", Icon: LayoutGrid, accent: "from-sky-300/25 to-cyan-300/10" },
+    { id: "plan", label: "Plan", description: "Shape this week's uploads.", Icon: CalendarDays, accent: "from-red-300/30 to-orange-300/10" },
+    { id: "competitors", label: "Competitors", description: "Channels to watch and beat.", Icon: Youtube, accent: "from-rose-300/30 to-red-300/10" },
+    { id: "insights", label: "Insights", description: "Signals worth repeating.", Icon: BarChart3, accent: "from-emerald-300/25 to-lime-300/10" },
+    { id: "tasks", label: "Tasks", description: "Resolve unmatched uploads.", Icon: ListChecks, accent: "from-amber-300/30 to-yellow-300/10", badge: unlinkedWeekVideos.length ? String(unlinkedWeekVideos.length) : undefined },
+  ];
+
+  const subtabNav = (
+    <PanelCardSoft className="sticky top-4 z-20 overflow-hidden border-white/10 bg-black/30 p-2 shadow-2xl shadow-black/20 backdrop-blur-xl">
+      <div className="pointer-events-none absolute inset-x-3 top-0 h-px bg-gradient-to-r from-transparent via-white/25 to-transparent" />
+      <div className="flex gap-2 overflow-x-auto pb-1">
+        {growthSubtabs.map((tab) => {
+          const isActive = activeSubtab === tab.id;
+          const hasBadge = Boolean(tab.badge);
+          const Icon = tab.Icon;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveSubtab(tab.id)}
+              className={cn(
+                "group relative min-w-[185px] overflow-hidden rounded-2xl border px-4 py-3 text-left transition-all duration-200",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-200/50 focus-visible:ring-offset-2 focus-visible:ring-offset-black",
+                isActive
+                  ? "border-white/20 bg-white/[0.09] text-white shadow-[0_18px_45px_rgba(0,0,0,0.24),0_0_0_1px_rgba(255,255,255,0.06)]"
+                  : "border-white/10 bg-white/[0.025] text-white/60 hover:-translate-y-0.5 hover:border-white/18 hover:bg-white/[0.06] hover:text-white",
+              )}
+              aria-current={isActive ? "page" : undefined}
+            >
+              <span className={cn("pointer-events-none absolute inset-0 bg-gradient-to-br opacity-0 transition-opacity duration-200", tab.accent, isActive ? "opacity-100" : "group-hover:opacity-60")} />
+              {isActive ? <span className="pointer-events-none absolute inset-x-4 bottom-0 h-0.5 rounded-full bg-gradient-to-r from-red-200 via-amber-100 to-emerald-200" /> : null}
+              <div className="flex items-center justify-between gap-3">
+                <span className="relative flex items-center gap-3">
+                  <span
+                    className={cn(
+                      "flex h-9 w-9 items-center justify-center rounded-xl border transition-all",
+                      isActive ? "border-white/20 bg-white/15 text-white" : "border-white/10 bg-white/[0.05] text-white/50 group-hover:text-white",
+                    )}
+                  >
+                    <Icon className="h-4 w-4" />
+                  </span>
+                  <span>
+                    <span className="block text-sm font-semibold">{tab.label}</span>
+                    {isActive ? <span className="mt-0.5 block text-[10px] font-semibold uppercase tracking-[0.18em] text-white/45">Active</span> : null}
+                  </span>
+                </span>
+                {hasBadge ? (
+                  <span className="relative flex min-w-7 items-center justify-center rounded-full border border-amber-200/30 bg-amber-300/20 px-2 py-1 text-[10px] font-bold text-amber-50 shadow-[0_0_18px_rgba(251,191,36,0.18)]">
+                    {tab.badge}
+                  </span>
+                ) : null}
+              </div>
+              <p className={cn("relative mt-2 text-xs leading-5", isActive ? "text-white/72" : "text-white/40")}>{tab.description}</p>
+            </button>
+          );
+        })}
+      </div>
     </PanelCardSoft>
   );
 
@@ -3410,6 +3482,71 @@ export default function YouTubeGrowthPlannerV2Tab() {
         </div>
       ) : null}
     </PanelCardSoft>
+  );
+
+  const overviewSection = (
+    <div className="space-y-6">
+      {todayActionCard}
+      <div className="grid gap-4 xl:grid-cols-2">
+        <PanelCard className="p-5 transition-all hover:-translate-y-1 hover:bg-white/[0.04]">
+          <div className="flex items-center gap-3">
+            <CalendarDays className="h-5 w-5 text-red-300" />
+            <h3 className="text-xl font-semibold text-white">Plan at a glance</h3>
+          </div>
+          <p className="mt-2 text-sm leading-6 text-white/50">Your next week should feel actionable, not crowded. Jump into the planner when you are ready to shape titles, thumbnails, and publish timing.</p>
+          <div className="mt-4 grid gap-3 sm:grid-cols-3">
+            <PanelCardSoft className="border border-white/10 p-4">
+              <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Planned cards</p>
+              <p className="mt-2 text-2xl font-semibold text-white">{days.length}</p>
+            </PanelCardSoft>
+            <PanelCardSoft className="border border-white/10 p-4">
+              <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Published this week</p>
+              <p className="mt-2 text-2xl font-semibold text-white">{progressState.posted}</p>
+            </PanelCardSoft>
+            <PanelCardSoft className="border border-white/10 p-4">
+              <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Best next slot</p>
+              <p className="mt-2 text-lg font-semibold text-white">{bestTime.highest ? `${bestTime.highest.day} ${bestTime.highest.hour}` : "Need more data"}</p>
+            </PanelCardSoft>
+          </div>
+          <Button type="button" className="mt-5 rounded-lg" onClick={() => setActiveSubtab("plan")}>
+            Open planning workspace
+          </Button>
+        </PanelCard>
+
+        <PanelCard className="p-5 transition-all hover:-translate-y-1 hover:bg-white/[0.04]">
+          <div className="flex items-center gap-3">
+            <BarChart3 className="h-5 w-5 text-emerald-300" />
+            <h3 className="text-xl font-semibold text-white">What needs attention</h3>
+          </div>
+          <p className="mt-2 text-sm leading-6 text-white/50">A simple triage view so you know where to go next without scanning the whole page.</p>
+          <div className="mt-4 grid gap-3 sm:grid-cols-3">
+            <PanelCardSoft className="border border-white/10 p-4">
+              <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Tasks waiting</p>
+              <p className="mt-2 text-2xl font-semibold text-white">{unlinkedWeekVideos.length}</p>
+            </PanelCardSoft>
+            <PanelCardSoft className="border border-white/10 p-4">
+              <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Competitors saved</p>
+              <p className="mt-2 text-2xl font-semibold text-white">{competitorRows.length}</p>
+            </PanelCardSoft>
+            <PanelCardSoft className="border border-white/10 p-4">
+              <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Insight cards</p>
+              <p className="mt-2 text-2xl font-semibold text-white">{topDiagnostics.length + underperformerDiagnostics.length}</p>
+            </PanelCardSoft>
+          </div>
+          <div className="mt-5 flex flex-wrap gap-2">
+            <Button type="button" variant="secondary" className="rounded-lg" onClick={() => setActiveSubtab("tasks")}>
+              Open tasks
+            </Button>
+            <Button type="button" variant="secondary" className="rounded-lg" onClick={() => setActiveSubtab("competitors")}>
+              Open competitors
+            </Button>
+            <Button type="button" variant="secondary" className="rounded-lg" onClick={() => setActiveSubtab("insights")}>
+              Open insights
+            </Button>
+          </div>
+        </PanelCard>
+      </div>
+    </div>
   );
 
   return (
@@ -3523,11 +3660,16 @@ export default function YouTubeGrowthPlannerV2Tab() {
             </div>
           </PanelCardStrong>
 
-          {uploadReviewSection}
-          {sectionNav}
-          {todayActionCard}
-          {planCalendarSection}
+          {subtabNav}
 
+          {activeSubtab === "overview" ? overviewSection : null}
+
+          {activeSubtab === "tasks" ? uploadReviewSection : null}
+
+          {activeSubtab === "plan" ? planCalendarSection : null}
+
+          {activeSubtab === "insights" ? (
+            <>
           <section id="repeat-or-fix" className="scroll-mt-24">
             <PanelCard className="overflow-hidden border border-white/10 p-0 transition-all hover:-translate-y-1 hover:bg-white/[0.04]">
               <div className="border-b border-white/10 bg-white/[0.03] p-6">
@@ -3766,7 +3908,10 @@ export default function YouTubeGrowthPlannerV2Tab() {
 
             </div>
           </PanelCard>
+            </>
+          ) : null}
 
+          {activeSubtab === "competitors" ? (
           <section id="competitor-playbook" className="scroll-mt-24">
             <PanelCard className="p-6 transition-all hover:-translate-y-1 hover:bg-white/[0.04]">
               <div className="flex flex-wrap items-start justify-between gap-4">
@@ -3883,6 +4028,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
               </div>
             </PanelCard>
           </section>
+          ) : null}
         </>
       )}
 
@@ -4155,7 +4301,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
 
               <PanelCardSoft className="p-4">
                 <p className="text-xs uppercase tracking-[0.16em] text-white/40">Source images</p>
-                <p className="mt-2 text-sm text-white/55">Add up to 4 images. These are optional reference inputs for the AI.</p>
+                <p className="mt-2 text-sm text-white/55">Add up to 4 images. Preserve mode uses your upload as the base image and only edits lighting, clarity, text, overlays, and focus.</p>
                 <div className="mt-3 flex flex-wrap gap-3">
                   {thumbnailSourceImages.map((image, index) => (
                     <div key={`${image.name}-${index}`} className="relative overflow-hidden rounded-xl border border-white/10 bg-black/20">
@@ -4184,6 +4330,32 @@ export default function YouTubeGrowthPlannerV2Tab() {
                     </label>
                   ) : null}
                 </div>
+                {thumbnailSourceImages.length ? (
+                  <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                    <button
+                      type="button"
+                      onClick={() => setPreserveThumbnailSourceImage(true)}
+                      className={cn(
+                        "rounded-xl border p-3 text-left transition-all",
+                        preserveThumbnailSourceImage ? "border-emerald-300/35 bg-emerald-400/10 text-white" : "border-white/10 bg-white/[0.03] text-white/55 hover:bg-white/[0.06] hover:text-white",
+                      )}
+                    >
+                      <span className="text-sm font-semibold">Preserve my image</span>
+                      <span className="mt-1 block text-xs leading-5 text-white/45">Recommended. Keeps the exact subject, pose, scene, and composition.</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPreserveThumbnailSourceImage(false)}
+                      className={cn(
+                        "rounded-xl border p-3 text-left transition-all",
+                        !preserveThumbnailSourceImage ? "border-red-300/35 bg-red-400/10 text-white" : "border-white/10 bg-white/[0.03] text-white/55 hover:bg-white/[0.06] hover:text-white",
+                      )}
+                    >
+                      <span className="text-sm font-semibold">Allow AI to redesign</span>
+                      <span className="mt-1 block text-xs leading-5 text-white/45">Uses uploads as references, but can create a new thumbnail scene.</span>
+                    </button>
+                  </div>
+                ) : null}
               </PanelCardSoft>
 
               <PanelCardSoft className="p-4">
