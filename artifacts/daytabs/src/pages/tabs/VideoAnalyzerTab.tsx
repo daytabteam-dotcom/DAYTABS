@@ -143,6 +143,30 @@ function clearPendingUploadRecovery() {
   localStorage.removeItem(RECOVERY_STORAGE_KEY);
 }
 
+function readVideoAnalyzerJobIdFromUrl() {
+  if (typeof window === "undefined") return null;
+  const params = new URLSearchParams(window.location.search);
+  const tab = params.get("tab");
+  const jobId = params.get("jobId");
+  if (tab !== "video-analyzer" || !jobId?.trim()) return null;
+  return jobId.trim();
+}
+
+function syncVideoAnalyzerJobIdInUrl(jobId: string | null) {
+  if (typeof window === "undefined") return;
+  const url = new URL(window.location.href);
+  if ((url.searchParams.get("tab") ?? "dashboard") !== "video-analyzer") return;
+  if (jobId?.trim()) {
+    url.searchParams.set("jobId", jobId.trim());
+  } else {
+    url.searchParams.delete("jobId");
+  }
+  const nextUrl = `${url.pathname}${url.search}${url.hash}`;
+  const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+  if (nextUrl === currentUrl) return;
+  window.history.replaceState(window.history.state, "", nextUrl);
+}
+
 function createUploadRecoveryId() {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
@@ -2166,7 +2190,19 @@ function AnalyzingScreen({
           <Wand2 className="w-8 h-8 text-primary animate-pulse" />
         </div>
         <h2 className="text-xl font-semibold text-white">Analyzing your video</h2>
-        <p className="text-white/40 text-sm mt-1">This takes 1-3 minutes depending on length</p>
+        <p className="text-white/40 text-sm mt-1">This can take a little while depending on your video size and the queue.</p>
+      </div>
+
+      <div className="mb-6 rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-4">
+        <div className="flex items-start gap-3">
+          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />
+          <div>
+            <p className="text-sm font-semibold text-white">Your report will be emailed to you</p>
+            <p className="mt-1 text-xs leading-relaxed text-white/60">
+              We&apos;ll send an email with a direct link to this report in DayTabs as soon as it&apos;s ready.
+            </p>
+          </div>
+        </div>
       </div>
 
       {(isWaiting || isStarting) && (
@@ -2564,6 +2600,10 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
   useEffect(() => { if (file?.name) fileNameRef.current = file.name; }, [file]);
 
   useEffect(() => {
+    syncVideoAnalyzerJobIdInUrl(openedHistoryJobId ?? jobId);
+  }, [jobId, openedHistoryJobId]);
+
+  useEffect(() => {
     if (!jobId || !isDone || !results) return;
     if (completedJobSoundRef.current === jobId) return;
     completedJobSoundRef.current = jobId;
@@ -2602,6 +2642,16 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
   }, [loadAnalysisHistory]);
 
   useEffect(() => {
+    const jobIdFromUrl = readVideoAnalyzerJobIdFromUrl();
+    if (jobIdFromUrl) {
+      setHistoryResult(null);
+      setOpenedHistoryJobId(null);
+      setJobId(jobIdFromUrl);
+      setShowUploadForm(true);
+      setRecoveryBootstrapped(true);
+      return;
+    }
+
     const recovery = readPendingUploadRecovery();
     if (jobId) {
       setRecoveryBootstrapped(true);
@@ -2811,6 +2861,10 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
       setHistoryResult(null);
       setOpenedHistoryJobId(null);
       setJobId(id);
+      toast({
+        title: "We’ll email your report",
+        description: "Your report will be sent to your email with a direct link as soon as it’s ready. This can take some time depending on your video size and the queue.",
+      });
     } catch (err: any) {
       // Silently reset if the user cancelled
       if (err?.message === "Upload cancelled") {
@@ -2953,6 +3007,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
     setOpenedHistoryJobId(null);
     setShowUploadForm(analysisHistory.length === 0);
     onDataReset();
+    syncVideoAnalyzerJobIdInUrl(null);
   }
 
   function handleCancel() {
