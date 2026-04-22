@@ -16,7 +16,7 @@ import {
 import VideoAnalyzerTab from "./tabs/VideoAnalyzerTab";
 import TeleprompterTab from "./tabs/TeleprompterTab";
 import ScriptPlannerTab from "./tabs/ScriptPlannerTab";
-import GrowthPlannerTab, {
+import YouTubeGrowthPlannerV2Tab, {
   getGrowthPlannerNotificationCounts,
   getGrowthPlannerNotifications,
 } from "./tabs/YouTubeGrowthPlannerV2Tab";
@@ -638,7 +638,7 @@ export default function Home() {
           <VideoAnalyzerTab {...tabCallbacks} />
         )}
         {activeTab === "script-planner" && <ScriptPlannerTab />}
-        {activeTab === "growth-planner" && <GrowthPlannerTab />}
+        {activeTab === "growth-planner" && <YouTubeGrowthPlannerV2Tab />}
         {activeTab === "teleprompter" && <TeleprompterTab />}
       </main>
     </div>
