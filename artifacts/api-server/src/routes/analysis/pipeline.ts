@@ -172,11 +172,12 @@ export async function runAnalysisPipeline(
     await fs.mkdir(workDir, { recursive: true });
     await stopIfCancelled(jobId);
     await stopIfMemoryHigh(jobId, "download start");
+    await updateJob(jobId, { status: "queued", progress: 7, currentStep: "Downloading uploaded video" });
     if (sourceVideoPath) {
       logger.info({ jobId, sourceVideoPath, localVideoPath }, "Copying uploaded video from local storage for analysis");
       await fs.copyFile(sourceVideoPath, localVideoPath);
     } else {
-      await downloadFromB2(b2Key, localVideoPath);
+      await downloadFromB2(b2Key, localVideoPath, jobId);
     }
     await stopIfCancelled(jobId);
     await stopIfMemoryHigh(jobId, "download complete");
@@ -256,7 +257,7 @@ async function runVideoAnalyzer(
     // Step 1: Extract audio
     await updateJob(jobId, { status: "extracting_audio", progress: 12, currentStep: "Extracting audio" });
     logger.info({ jobId, videoPath, audioPath }, "Calling extractAudio");
-    await extractAudio(videoPath, audioPath);
+    await extractAudio(videoPath, audioPath, jobId);
     await stopIfCancelled(jobId);
     await stopIfMemoryHigh(jobId, "audio extraction");
     logger.info({ jobId, audioPath }, "Audio extraction complete");
@@ -364,12 +365,12 @@ async function runVideoAnalyzer(
       logger.info({ jobId, frameCount, lowDetailFrameCount, highDetailFrameCount, useHybridVisualPass }, "Starting frame extraction");
       const frameExtractionPromise = useHybridVisualPass
         ? Promise.all([
-            extractFrames(videoPath, lowFramesDir, lowDetailFrameCount, 640),
-            extractFrames(videoPath, highFramesDir, highDetailFrameCount, 1280),
+            extractFrames(videoPath, lowFramesDir, lowDetailFrameCount, 640, jobId),
+            extractFrames(videoPath, highFramesDir, highDetailFrameCount, 1280, jobId),
           ])
         : Promise.all([
             Promise.resolve<string[]>([]),
-            extractFrames(videoPath, framesDir, highDetailFrameCount, 1280),
+            extractFrames(videoPath, framesDir, highDetailFrameCount, 1280, jobId),
           ]);
       const [lowDetailFrames, highDetailFrames] = await withTimeout(
         frameExtractionPromise,

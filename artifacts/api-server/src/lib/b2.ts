@@ -4,6 +4,12 @@ import fs from "fs";
 import { createReadStream } from "fs";
 import path from "path";
 import { logger } from "./logger";
+import { registerAnalysisCancelHandler } from "./analysisCancellation";
+
+function getConfiguredTimeoutMs(envName: string, defaultMs: number): number {
+  const value = Number(process.env[envName]);
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : defaultMs;
+}
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -168,12 +174,13 @@ export async function uploadToB2(key: string, filePath: string, contentType: str
   }
 }
 
-export async function downloadFromB2(key: string, destPath: string) {
+export async function downloadFromB2(key: string, destPath: string, jobId?: string) {
   const client = getR2Client();
   const bucket = getR2Bucket();
+  const timeoutMs = getConfiguredTimeoutMs("R2_DOWNLOAD_TIMEOUT_MS", 30 * 60 * 1000);
 
   try {
-    logger.info({ key, destPath }, "Starting R2 download");
+    logger.info({ key, destPath, timeoutMs }, "Starting R2 download");
     const response = await client.send(
       new GetObjectCommand({
         Bucket: bucket,
@@ -184,14 +191,64 @@ export async function downloadFromB2(key: string, destPath: string) {
     await fs.promises.mkdir(dir, { recursive: true });
     
     const writeStream = fs.createWriteStream(destPath);
+    const body = response.Body as NodeJS.ReadableStream | undefined;
+    if (!body || typeof body.pipe !== "function") {
+      throw new Error("R2 download failed because the response body was empty");
+    }
+
     return new Promise<void>((resolve, reject) => {
-      (response.Body as any).pipe(writeStream);
-      writeStream.on("finish", () => {
-        logger.info({ key }, "R2 download completed successfully");
+      let settled = false;
+      let bytesDownloaded = 0;
+      const startedAt = Date.now();
+      const unregisterCancelHandler = jobId
+        ? registerAnalysisCancelHandler(jobId, () => {
+            fail(new Error("Analysis cancelled"));
+          })
+        : undefined;
+
+      const cleanup = () => {
+        clearTimeout(timeout);
+        unregisterCancelHandler?.();
+        body.off("data", onData);
+        body.off("error", onError);
+        writeStream.off("finish", onFinish);
+        writeStream.off("error", onError);
+      };
+
+      const fail = (err: Error) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        (body as { destroy?: (error?: Error) => void }).destroy?.(err);
+        writeStream.destroy(err);
+        reject(err);
+      };
+
+      const timeout = setTimeout(() => {
+        fail(new Error(`R2 download timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+
+      const onData = (chunk: Buffer) => {
+        bytesDownloaded += chunk.length;
+      };
+
+      const onError = (err: Error) => {
+        fail(err);
+      };
+
+      const onFinish = () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        logger.info({ key, bytesDownloaded, durationMs: Date.now() - startedAt }, "R2 download completed successfully");
         resolve();
-      });
-      writeStream.on("error", reject);
-      (response.Body as any).on("error", reject);
+      };
+
+      body.on("data", onData);
+      body.on("error", onError);
+      writeStream.on("finish", onFinish);
+      writeStream.on("error", onError);
+      body.pipe(writeStream);
     });
   } catch (err) {
     logger.error({ err, key, destPath }, "R2 download failed");

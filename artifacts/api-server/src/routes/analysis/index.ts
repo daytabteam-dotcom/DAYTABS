@@ -20,6 +20,7 @@ import {
   ExportVideoBody,
 } from "@workspace/api-zod";
 import { optionalAuth } from "../../middlewares/auth";
+import { signalAnalysisCancellation } from "../../lib/analysisCancellation";
 import { normalizePlan, getLimits, buildFileTooLargeError } from "../../lib/planLimits";
 import { buildVideoTooLongError } from "../../lib/planLimits";
 import { checkVideoAnalysisLimit, incrementVideoAnalysis, getOrCreateUsage } from "../../lib/usageService";
@@ -412,6 +413,50 @@ router.get("/recover", async (req, res) => {
 });
 
 // ── Cancel an in-progress analysis ───────────────────────────────────────────
+router.post("/cancel-active", async (req, res) => {
+  try {
+    const userId = req.auth?.user_id;
+    if (!userId) {
+      res.status(401).json({ error: "Sign in to cancel active analyses" });
+      return;
+    }
+
+    const jobs = await db
+      .select()
+      .from(analysisJobsTable)
+      .where(sql`${analysisJobsTable.userId} = ${userId} AND ${analysisJobsTable.status} NOT IN ('complete', 'error', 'cancelled')`);
+
+    const cancelledJobIds: string[] = [];
+    for (const job of jobs) {
+      await db
+        .update(analysisJobsTable)
+        .set({
+          status: "cancelled",
+          progress: 0,
+          currentStep: "Analysis cancelled",
+          error: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(analysisJobsTable.id, job.id));
+
+      forgetQueuedJob(job.id);
+      signalAnalysisCancellation(job.id);
+      cancelledJobIds.push(job.id);
+
+      if (job.b2Key) {
+        await deleteFromB2(job.b2Key).catch((err) => {
+          req.log.warn({ err, jobId: job.id, b2Key: job.b2Key }, "Failed to delete cancelled analysis source video");
+        });
+      }
+    }
+
+    res.json({ cancelled: cancelledJobIds.length, jobIds: cancelledJobIds });
+  } catch (err) {
+    req.log.error({ err }, "Cancel active analyses error");
+    res.status(500).json({ error: "Failed to cancel active analyses" });
+  }
+});
+
 router.post("/:jobId/cancel", async (req, res) => {
   try {
     const userId = req.auth?.user_id;
@@ -451,6 +496,7 @@ router.post("/:jobId/cancel", async (req, res) => {
         .where(eq(analysisJobsTable.id, params.jobId));
 
       forgetQueuedJob(job.id);
+      signalAnalysisCancellation(job.id);
 
       if (job.b2Key) {
         await deleteFromB2(job.b2Key).catch((err) => {

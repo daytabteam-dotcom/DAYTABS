@@ -66,7 +66,14 @@ function shouldTryLegacyFallback(err: unknown) {
   );
 }
 
-async function uploadViaLegacyEndpoint(file: File, options: VideoUploadOptions) {
+async function uploadViaLegacyEndpoint(
+  file: File,
+  options: VideoUploadOptions,
+  onAbortReady: (abort: () => void) => void
+) {
+  const controller = new AbortController();
+  onAbortReady(() => controller.abort());
+
   const formData = new FormData();
   formData.append("video", file);
   formData.append("mode", options.mode);
@@ -91,6 +98,12 @@ async function uploadViaLegacyEndpoint(file: File, options: VideoUploadOptions) 
     method: "POST",
     headers: authHeaders(),
     body: formData,
+    signal: controller.signal,
+  }).catch((err) => {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new Error("Upload cancelled");
+    }
+    throw err;
   });
 
   if (!res.ok) {
@@ -115,14 +128,18 @@ async function fetchWithTimeout(
   onAbortReady: (abort: () => void) => void
 ) {
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+  let timedOut = false;
+  const timeout = window.setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
   onAbortReady(() => controller.abort());
 
   try {
     return await fetch(input, { ...init, signal: controller.signal });
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") {
-      throw new Error(timeoutMessage);
+      throw new Error(timedOut ? timeoutMessage : "Upload cancelled");
     }
     throw err;
   } finally {
@@ -388,7 +405,9 @@ export function useVideoUpload() {
               etaSec: null,
               retrying: true,
             });
-            const fallback = await uploadViaLegacyEndpoint(file, options);
+            const fallback = await uploadViaLegacyEndpoint(file, options, (abort) => {
+              abortUploadRef.current = abort;
+            });
             setError(null);
             return fallback;
           } catch (fallbackErr) {

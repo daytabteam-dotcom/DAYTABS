@@ -1,6 +1,6 @@
 import app from "./app";
 import { logger } from "./lib/logger";
-import { analysisQueue } from "./lib/analysisQueue";
+import { enqueueAnalysisJob } from "./lib/analysisQueue";
 import { runAnalysisPipeline, type PipelineOptions } from "./routes/analysis/pipeline";
 import { db, analysisJobsTable, usersTable } from "@workspace/db";
 import { eq, sql } from "drizzle-orm";
@@ -157,15 +157,23 @@ async function recoverInterruptedAnalysisJobs() {
         error = 'Analysis was interrupted by a server restart. Please upload the video again.',
         updated_at = NOW()
       WHERE status NOT IN ('complete', 'error')
+        AND status <> 'cancelled'
         AND (b2_key IS NULL OR b2_key = '')
     `);
 
     const jobs = await db
       .select()
       .from(analysisJobsTable)
-      .where(sql`${analysisJobsTable.status} NOT IN ('complete', 'error') AND ${analysisJobsTable.b2Key} <> ''`);
+      .where(sql`${analysisJobsTable.status} NOT IN ('complete', 'error', 'cancelled') AND ${analysisJobsTable.b2Key} <> ''`);
 
     for (const job of jobs) {
+      const storedOptions = readStoredAnalysisOptions(job.result);
+      let plan = storedOptions.plan;
+      if (!plan && job.userId) {
+        const user = await db.select({ plan: usersTable.plan }).from(usersTable).where(eq(usersTable.id, job.userId)).limit(1);
+        plan = user[0]?.plan;
+      }
+
       await db.update(analysisJobsTable)
         .set({
           status: "queued",
@@ -175,15 +183,9 @@ async function recoverInterruptedAnalysisJobs() {
         })
         .where(eq(analysisJobsTable.id, job.id));
 
-      analysisQueue
-        .add(async () => {
-          const storedOptions = readStoredAnalysisOptions(job.result);
-          let plan = storedOptions.plan;
-          if (!plan && job.userId) {
-            const user = await db.select({ plan: usersTable.plan }).from(usersTable).where(eq(usersTable.id, job.userId)).limit(1);
-            plan = user[0]?.plan;
-          }
-
+      enqueueAnalysisJob(
+        job.id,
+        async () => {
           const completed = await runAnalysisPipeline(job.id, job.b2Key, {
             mode: "video-analyzer",
             platform: storedOptions.platform ?? job.platform ?? "youtube_long",
@@ -198,7 +200,9 @@ async function recoverInterruptedAnalysisJobs() {
             maxDurationSeconds: storedOptions.maxDurationSeconds,
           });
           if (completed && job.userId) await incrementVideoAnalysis(job.userId, storedOptions.durationSeconds);
-        }) 
+        },
+        plan,
+      )
         .catch((err) => {
           logger.error({ err, jobId: job.id }, "Recovered pipeline error");
         });

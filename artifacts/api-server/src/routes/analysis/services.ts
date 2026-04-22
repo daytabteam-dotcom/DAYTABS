@@ -9,6 +9,7 @@ import { logger } from "../../lib/logger";
 import { openai } from "../../lib/openai";
 import { logTokenUsage, usageTokens } from "../../lib/logTokens";
 import { toFile } from "openai";
+import { registerAnalysisCancelHandler } from "../../lib/analysisCancellation";
 
 export const execAsync = promisify(exec);
 
@@ -543,19 +544,35 @@ async function runMediaCommand(
   command: string,
   args: string[],
   timeoutMs: number,
-  label: string
+  label: string,
+  jobId?: string
 ): Promise<void> {
   return new Promise((resolve, reject) => {
+    const startedAt = Date.now();
+    logger.info({ command, args, timeoutMs, label }, "Starting media command");
     const child = spawn(command, args, { stdio: ["ignore", "ignore", "pipe"] });
     const stderrChunks: Buffer[] = [];
     let stderrBytes = 0;
     let settled = false;
+    const unregisterCancelHandler = jobId
+      ? registerAnalysisCancelHandler(jobId, () => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          unregisterCancelHandler?.();
+          child.kill("SIGKILL");
+          logger.info({ command, label, jobId, durationMs: Date.now() - startedAt }, "Media command cancelled");
+          reject(new Error("Analysis cancelled"));
+        })
+      : undefined;
 
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
+      unregisterCancelHandler?.();
       child.kill("SIGKILL");
       const stderr = Buffer.concat(stderrChunks).toString("utf8").trim();
+      logger.error({ command, label, timeoutMs, durationMs: Date.now() - startedAt, stderr }, "Media command timed out");
       reject(new Error(`${label} timed out after ${timeoutMs}ms${stderr ? `: ${stderr}` : ""}`));
     }, timeoutMs);
 
@@ -572,9 +589,12 @@ async function runMediaCommand(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      unregisterCancelHandler?.();
       if (err.code === "ENOENT") {
+        logger.error({ command, label, err }, "Media command missing");
         reject(new Error("ffmpeg is not installed on this server. Please install ffmpeg to process videos."));
       } else {
+        logger.error({ command, label, err }, "Media command failed to start");
         reject(err);
       }
     });
@@ -583,8 +603,14 @@ async function runMediaCommand(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      if (code === 0) { resolve(); return; }
+      unregisterCancelHandler?.();
+      if (code === 0) {
+        logger.info({ command, label, durationMs: Date.now() - startedAt }, "Media command completed");
+        resolve();
+        return;
+      }
       const stderr = Buffer.concat(stderrChunks).toString("utf8").trim();
+      logger.error({ command, label, code, signal, durationMs: Date.now() - startedAt, stderr }, "Media command failed");
       reject(new Error(`${label} failed${signal ? ` with signal ${signal}` : ` with code ${code}`}${stderr ? `: ${stderr}` : ""}`));
     });
   });
@@ -886,16 +912,17 @@ async function transcribeAudioSingleFile(
   return { text: "", segments: [], whisperConfidence: 0 };
 }
 
-export async function extractAudio(videoPath: string, outputPath: string): Promise<void> {
+export async function extractAudio(videoPath: string, outputPath: string, jobId?: string): Promise<void> {
   await runMediaCommand(
     "ffmpeg",
     ["-nostdin", "-hide_banner", "-loglevel", "error", "-threads", "1", "-i", videoPath, "-vn", "-ar", "16000", "-ac", "1", "-c:a", "libmp3lame", "-q:a", "4", outputPath, "-y"],
     getConfiguredTimeoutMs("FFMPEG_AUDIO_EXTRACTION_TIMEOUT_MS", 30 * 60 * 1000),
-    "ffmpeg audio extraction"
+    "ffmpeg audio extraction",
+    jobId
   );
 }
 
-export async function extractFrames(videoPath: string, framesDir: string, count = 5, maxWidth = 640): Promise<string[]> {
+export async function extractFrames(videoPath: string, framesDir: string, count = 5, maxWidth = 640, jobId?: string): Promise<string[]> {
   const duration = await getMediaDuration(videoPath);
   const safeWidth = Math.max(320, Math.floor(maxWidth));
   const frameScaleFilter = `scale='min(${safeWidth},iw)':-2`;
@@ -907,7 +934,8 @@ export async function extractFrames(videoPath: string, framesDir: string, count 
       "ffmpeg",
       ["-nostdin", "-hide_banner", "-loglevel", "error", "-threads", "1", "-i", videoPath, "-vf", `select=lt(n\\,${count}),${frameScaleFilter}`, "-vsync", "vfr", "-q:v", "8", path.join(framesDir, "frame_%03d.jpg"), "-y"],
       fallbackTimeoutMs,
-      "ffmpeg frame extraction select"
+      "ffmpeg frame extraction select",
+      jobId
     );
   } else {
     const interval = duration / (count + 1);
@@ -919,7 +947,8 @@ export async function extractFrames(videoPath: string, framesDir: string, count 
           "ffmpeg",
           ["-nostdin", "-hide_banner", "-loglevel", "error", "-threads", "1", "-ss", ts, "-i", videoPath, "-frames:v", "1", "-vf", frameScaleFilter, "-q:v", "8", outPath, "-y"],
           seekTimeoutMs,
-          `ffmpeg frame extraction ${i}`
+          `ffmpeg frame extraction ${i}`,
+          jobId
         );
       } catch {
         try {
@@ -927,7 +956,8 @@ export async function extractFrames(videoPath: string, framesDir: string, count 
             "ffmpeg",
             ["-nostdin", "-hide_banner", "-loglevel", "error", "-threads", "1", "-i", videoPath, "-ss", ts, "-frames:v", "1", "-vf", frameScaleFilter, "-q:v", "8", outPath, "-y"],
             fallbackTimeoutMs,
-            `ffmpeg accurate frame extraction ${i}`
+            `ffmpeg accurate frame extraction ${i}`,
+            jobId
           );
         } catch (accurateSeekErr) {
           logger.warn({ err: accurateSeekErr, i, ts, outPath }, "Frame extraction retry failed");

@@ -215,6 +215,18 @@ async function cancelAnalysisRequest(jobId: string) {
   }
 }
 
+async function cancelActiveAnalysesRequest() {
+  const res = await fetch("/api/analysis/cancel-active", {
+    method: "POST",
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({})) as { error?: string };
+    throw new Error(body.error ?? "Failed to cancel active analyses");
+  }
+  return await res.json() as { cancelled: number; jobIds: string[] };
+}
+
 function formatAnalysisDate(value: string | null) {
   if (!value) return "Recent";
   const date = new Date(value);
@@ -2111,16 +2123,14 @@ function AnalyzingScreen({
           </div>
         </div>
 
-        {!isAssembling && (
-          <div className="flex justify-center">
-            <button
-              onClick={onCancel}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold text-white/40 border border-white/10 hover:border-white/25 hover:text-white/60 transition-all"
-            >
-              <X className="w-3.5 h-3.5" />Cancel upload
-            </button>
-          </div>
-        )}
+        <div className="flex justify-center">
+          <button
+            onClick={onCancel}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold text-white/40 border border-white/10 hover:border-white/25 hover:text-white/60 transition-all"
+          >
+            <X className="w-3.5 h-3.5" />Cancel upload
+          </button>
+        </div>
 
         <p className="text-xs text-white/20 text-center mt-6">Do not close this tab during upload</p>
       </div>
@@ -2862,6 +2872,39 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
     }
   }
 
+  async function handleCancelActiveAnalyses() {
+    setCancellingJobId(jobId ?? "active");
+    try {
+      const result = await cancelActiveAnalysesRequest();
+      clearPendingUploadRecovery();
+      setAnalysisHistory((items) =>
+        items.map((item) =>
+          result.jobIds.includes(item.jobId)
+            ? { ...item, status: "cancelled", progress: 0, currentStep: "Analysis cancelled", error: undefined }
+            : item
+        )
+      );
+      setJobId(null);
+      setHistoryResult(null);
+      setOpenedHistoryJobId(null);
+      toast({
+        title: result.cancelled ? "Active analyses cancelled" : "No active analyses found",
+        description: result.cancelled
+          ? `${result.cancelled} active request${result.cancelled === 1 ? " was" : "s were"} stopped.`
+          : "There were no queued or running analyses for this account.",
+      });
+      loadAnalysisHistory();
+    } catch (err) {
+      toast({
+        title: "Could not cancel active analyses",
+        description: err instanceof Error ? err.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setCancellingJobId(null);
+    }
+  }
+
   function handleReset() {
     clearPendingUploadRecovery();
     setFile(null);
@@ -2875,10 +2918,11 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
 
   function handleCancel() {
     clearPendingUploadRecovery();
+    cancelUpload();
     if (jobId) {
       void handleCancelAnalysisJob(jobId);
-    } else {
-      cancelUpload();
+    } else if (getStoredAuthToken()) {
+      void handleCancelActiveAnalyses();
     }
   }
 
