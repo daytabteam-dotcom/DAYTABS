@@ -1287,6 +1287,23 @@ export async function getYoutubeStatus(userId: number) {
     }
   }
 
+  const newestCompetitorFetch = competitors[0]?.fetchedAt?.getTime?.() ?? 0;
+  const shouldAutoRefreshCompetitors = Boolean(
+    connection && profile && (
+      competitors.length === 0
+      || !newestCompetitorFetch
+      || (Date.now() - newestCompetitorFetch) > (15 * 60 * 1000)
+    ),
+  );
+
+  if (shouldAutoRefreshCompetitors && profile) {
+    try {
+      competitors = await discoverCompetitors(userId, profile);
+    } catch {
+      // Fall back to the saved competitor snapshot if live refresh fails.
+    }
+  }
+
   const competitorsMissingImages = competitors.filter((competitor) => competitor.channelId && !competitor.thumbnailUrl);
   if (connection && competitorsMissingImages.length) {
     try {
