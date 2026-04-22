@@ -21,4 +21,4 @@ RUN ls -la artifacts/api-server/dist/ || (echo "ERROR: api-server dist missing" 
 
 EXPOSE 3000
 
-CMD ["sh", "-c", "node /app/scripts/wait-for-db.js && pnpm --filter @workspace/db run push && node --enable-source-maps artifacts/api-server/dist/index.mjs"]
+CMD ["sh", "-c", "node /app/scripts/wait-for-db.js && pnpm --filter @workspace/db run push && sh /app/scripts/start-api-and-worker.sh"]
