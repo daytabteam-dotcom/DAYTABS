@@ -102,6 +102,7 @@ async function isAnalysisCancelled(jobId: string) {
 
 async function stopIfCancelled(jobId: string) {
   if (await isAnalysisCancelled(jobId)) {
+    logger.info({ jobId }, "Pipeline detected analysis cancellation");
     throw new Error("Analysis cancelled");
   }
 }
@@ -202,6 +203,11 @@ export async function runAnalysisPipeline(
       }).catch((updateErr) => {
         logger.error({ err: updateErr, jobId }, "Failed to mark analysis job as errored");
       });
+    } else {
+      logger.info({
+        jobId,
+        currentStatus: job[0]?.status ?? null,
+      }, "Pipeline error handler left terminal/cancelled job status unchanged");
     }
 
     throw err;
@@ -525,6 +531,9 @@ async function runVideoAnalyzer(
     await fs.rm(framesDir, { recursive: true, force: true }).catch(() => {});
   } catch (err) {
     logger.error({ err, jobId }, "Video analyzer pipeline error");
+    if (err instanceof Error && err.message === "Analysis cancelled") {
+      logger.info({ jobId }, "Video analyzer exiting because analysis was cancelled");
+    }
     if (isAnalysisTimeoutError(err)) {
       await updateJob(jobId, {
         status: "error",

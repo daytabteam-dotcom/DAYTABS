@@ -209,6 +209,19 @@ router.post("/init", async (req, res) => {
       durationSeconds: hasDuration ? parsedDurationSeconds : null,
     });
 
+    logger.info({
+      uploadId,
+      userId,
+      recoveryId: typeof recoveryId === "string" ? recoveryId : null,
+      filename: filename ?? "upload.mp4",
+      fileSize: size,
+      totalChunks: Number(totalChunks),
+      mode: mode ?? "video-analyzer",
+      platforms: validatedPlatforms,
+      modules: validatedModules,
+      activeUploadSessions: sessions.size,
+    }, "Upload session initialized");
+
     res.json({ uploadId, ...uploadTarget });
   } catch (err) {
     logger.error({ err }, "Upload init error");
@@ -335,6 +348,18 @@ router.post("/complete", async (req, res) => {
     const userId = session.userId;
     const validatedMode: PipelineMode = "video-analyzer";
 
+    logger.info({
+      uploadId,
+      jobId,
+      userId,
+      recoveryId: session.recoveryId,
+      fileSize: session.fileSize,
+      uploadedSize: metadata.contentLength,
+      mode: validatedMode,
+      platforms: session.platforms,
+      modules: session.modules,
+    }, "Upload complete confirmed; creating queued analysis job");
+
     await db.insert(analysisJobsTable).values({
       id: jobId,
       userId: userId ?? undefined,
@@ -370,6 +395,13 @@ router.post("/complete", async (req, res) => {
 
     sessions.delete(uploadId);
 
+    logger.info({
+      uploadId,
+      jobId,
+      userId,
+      activeUploadSessions: sessions.size,
+    }, "Queued analysis job created from upload session");
+
     res.json({ jobId, filePath: b2Key });
     await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
   } catch (err) {
@@ -384,6 +416,12 @@ router.delete("/:uploadId", async (req, res) => {
     const { uploadId } = req.params;
     const session = sessions.get(uploadId);
     if (session) {
+      logger.info({
+        uploadId,
+        userId: session.userId,
+        recoveryId: session.recoveryId,
+        r2Key: session.r2Key,
+      }, "Cancelling upload session");
       sessions.delete(uploadId);
       await deleteFromB2(session.r2Key).catch((err) => {
         logger.warn({ err, r2Key: session.r2Key }, "Failed to delete cancelled R2 upload");
@@ -391,6 +429,11 @@ router.delete("/:uploadId", async (req, res) => {
       const dir = path.join(UPLOAD_BASE, uploadId);
       await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
     }
+    logger.info({
+      uploadId,
+      hadSession: Boolean(session),
+      activeUploadSessions: sessions.size,
+    }, "Upload session cancellation finished");
     res.json({ cancelled: true });
   } catch (err) {
     logger.error({ err }, "Upload cancel error");

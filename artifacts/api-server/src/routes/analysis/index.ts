@@ -413,6 +413,12 @@ router.post("/cancel-active", async (req, res) => {
       .from(analysisJobsTable)
       .where(sql`${analysisJobsTable.userId} = ${userId} AND ${analysisJobsTable.status} NOT IN ('complete', 'error', 'cancelled')`);
 
+    req.log.info({
+      userId,
+      candidateJobIds: jobs.map((job) => job.id),
+      candidateStatuses: jobs.map((job) => ({ jobId: job.id, status: job.status })),
+    }, "Cancelling all active analyses for user");
+
     const cancelledJobIds: string[] = [];
     for (const job of jobs) {
       await db
@@ -436,6 +442,7 @@ router.post("/cancel-active", async (req, res) => {
       }
     }
 
+    req.log.info({ userId, cancelledJobIds }, "Finished cancelling active analyses for user");
     res.json({ cancelled: cancelledJobIds.length, jobIds: cancelledJobIds });
   } catch (err) {
     req.log.error({ err }, "Cancel active analyses error");
@@ -464,6 +471,12 @@ router.post("/:jobId/cancel", async (req, res) => {
     }
 
     const job = jobs[0];
+    req.log.info({
+      userId,
+      jobId: job.id,
+      previousStatus: job.status,
+      createdAt: job.createdAt,
+    }, "Single analysis cancellation requested");
     if (job.status === "complete") {
       res.status(409).json({ error: "Completed analyses cannot be cancelled" });
       return;
@@ -490,6 +503,7 @@ router.post("/:jobId/cancel", async (req, res) => {
       }
     }
 
+    req.log.info({ userId, jobId: job.id }, "Single analysis cancellation finished");
     res.json({ cancelled: true, jobId: job.id });
   } catch (err) {
     req.log.error({ err }, "Cancel analysis error");
@@ -525,13 +539,22 @@ router.get("/:jobId/status", async (req, res) => {
     const job = await db.select().from(analysisJobsTable).where(eq(analysisJobsTable.id, params.jobId)).limit(1);
     if (!job.length) { res.status(404).json({ error: "Job not found" }); return; }
     const j = job[0];
+    const queue = ["complete", "error", "cancelled"].includes(j.status) ? undefined : await getDbJobQueueStatus(j.id);
+    req.log.info({
+      jobId: j.id,
+      status: j.status,
+      progress: j.progress,
+      currentStep: j.currentStep,
+      createdAt: j.createdAt,
+      queue,
+    }, "Analysis status requested");
     res.json({
       jobId: j.id,
       status: j.status,
       progress: j.progress,
       currentStep: j.currentStep,
       error: j.error || undefined,
-      queue: ["complete", "error", "cancelled"].includes(j.status) ? undefined : await getDbJobQueueStatus(j.id),
+      queue,
     });
   } catch (err) {
     req.log.error({ err }, "Status error");

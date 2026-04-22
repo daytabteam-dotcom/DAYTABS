@@ -38,7 +38,13 @@ async function getPlan(job: ClaimedAnalysisJob, storedOptions: Partial<PipelineO
 }
 
 async function processJob(job: ClaimedAnalysisJob) {
-  logger.info({ jobId: job.id, workerId }, "Worker claimed analysis job");
+  logger.info({
+    jobId: job.id,
+    workerId,
+    userId: job.userId,
+    platform: job.platform,
+    b2Key: job.b2Key,
+  }, "Worker claimed analysis job");
   const heartbeat = setInterval(() => {
     heartbeatAnalysisJob(job.id, workerId).catch((err) => {
       logger.warn({ err, jobId: job.id, workerId }, "Analysis worker heartbeat failed");
@@ -51,7 +57,10 @@ async function processJob(job: ClaimedAnalysisJob) {
       .from(analysisJobsTable)
       .where(eq(analysisJobsTable.id, job.id))
       .limit(1);
-    if (fresh[0]?.status === "cancelled") return;
+    if (fresh[0]?.status === "cancelled") {
+      logger.info({ jobId: job.id, workerId }, "Worker skipping job because it was already cancelled before pipeline start");
+      return;
+    }
 
     const storedOptions = readStoredAnalysisOptions(job.result);
     const plan = await getPlan(job, storedOptions);
@@ -75,6 +84,7 @@ async function processJob(job: ClaimedAnalysisJob) {
     logger.error({ err, jobId: job.id, workerId }, "Worker analysis job failed");
   } finally {
     clearInterval(heartbeat);
+    logger.info({ jobId: job.id, workerId }, "Worker releasing analysis job lock");
     await releaseAnalysisJob(job.id, workerId).catch((err) => {
       logger.warn({ err, jobId: job.id, workerId }, "Failed to release analysis job lock");
     });
