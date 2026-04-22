@@ -493,12 +493,6 @@ function Dashboard({
               desc: "Optimized titles, descriptions, and tags",
               locked: !plan.isPaid,
             },
-            {
-              icon: Zap,
-              label: "Short Clip Ideas",
-              desc: "Best moments for Shorts, TikTok, and Reels",
-              locked: !plan.isPaid,
-            },
           ].map((feat, i) => (
             <div
               key={i}

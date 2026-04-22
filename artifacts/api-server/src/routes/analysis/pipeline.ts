@@ -7,8 +7,8 @@ import { eq } from "drizzle-orm";
 import { deleteFromB2, downloadFromB2 } from "../../lib/b2";
 import {
   updateJob, transcribeAudio, extractAudio, extractFrames,
-  analyzeVisuals, analyzeVisualsHybrid, analyzeAudio, analyzeEditingPoints,
-  generateSeo, generateShortClipIdeas, generateSrt, translateSegments,
+  analyzeVisuals, analyzeVisualsHybrid, analyzeAudio, analyzeContentAndPackaging,
+  generateSrt, translateSegments,
   computeQualityScore, getMediaDuration, getMediaMetadata, logger, generateVideoName, getTotalAnalysisScore,
   analyzePacing, analyzeSpeechPattern, buildRetentionForecast, scorePacing,
 } from "./services";
@@ -266,8 +266,6 @@ async function runVideoAnalyzer(
     const mediaMetadata = await getMediaMetadata(videoPath);
     const durationSec = mediaMetadata.durationSec || await getMediaDuration(audioPath);
     const platforms = inferPlatformsFromMedia(mediaMetadata);
-    const shortClipEligible = !mediaMetadata.isShortForm && !mediaMetadata.isVertical;
-    const runShortClips = plan !== "free" && shortClipEligible;
     await stopIfCancelled(jobId);
     await stopIfMemoryHigh(jobId, "duration check");
     if (durationSec > maxDuration) {
@@ -347,7 +345,6 @@ async function runVideoAnalyzer(
         maxDurationSeconds: maxDuration,
         durationSeconds: durationSec,
         mediaMetadata,
-        shortClipEligible,
       },
     };
     await updateJob(jobId, { result: { videoName, analysisProfile: speechAnalysis, analysisOptions: result.analysisOptions } });
@@ -469,96 +466,70 @@ async function runVideoAnalyzer(
       progress = 55;
     }
 
-    // Step 6: Editing module
-    if (runEditing) {
-      await updateJob(jobId, { status: "analyzing_content", progress, currentStep: "Analyzing editing points" });
-      const editingData = await withTimeout(
-        analyzeEditingPoints(transcriptText, transcriptSegments, audioPath, plan, speechAnalysis, videoName, formatProfile, userId),
+    // Step 6+: Editing and publish share one conditional semantic pass.
+    if (runEditing || runPublish) {
+      await updateJob(jobId, {
+        status: runPublish ? "generating_seo" : "analyzing_content",
+        progress,
+        currentStep: runPublish ? "Generating editing notes and publish package" : "Analyzing editing points",
+      });
+      const merged = await withTimeout(
+        analyzeContentAndPackaging(
+          transcriptText,
+          transcriptSegments,
+          platforms,
+          { includeEditing: runEditing, includePublish: runPublish },
+          audioPath,
+          plan,
+          speechAnalysis,
+          videoName,
+          formatProfile,
+          userId,
+        ),
         90000,
-        "editing analysis",
+        "content and packaging analysis",
         jobId,
       );
       await stopIfCancelled(jobId);
-      await stopIfMemoryHigh(jobId, "editing analysis");
-      result.editing = editingData;
-      await updateJob(jobId, { result: { editing: editingData } });
-      progress = 68;
-    }
+      await stopIfMemoryHigh(jobId, "content and packaging analysis");
 
-    // Step 7: Publish module (SEO per platform)
-    if (runPublish) {
-      await updateJob(jobId, { status: "generating_seo", progress, currentStep: "Generating SEO content" });
-      const publishResults: Record<string, unknown> = {};
-      for (const platform of platforms) {
-        try {
-          const seoResult = await withTimeout(
-            generateSeo(
-              transcriptText,
-              platform,
-              transcriptSegments,
-              plan,
-              speechAnalysis,
-              videoName,
-              formatProfile,
-              userId,
-            ),
-            90000,
-            `SEO generation for ${platform}`,
-            jobId,
-          );
-          await stopIfCancelled(jobId);
-          await stopIfMemoryHigh(jobId, `SEO generation for ${platform}`);
-          publishResults[platform] = seoResult;
-        } catch (err) {
-          logger.warn({ err, platform, jobId }, "SEO generation failed for platform");
-          publishResults[platform] = { titles: [], description: "", hashtags: [], timestamps: [] };
-        }
+      if (runEditing && merged.editing) {
+        result.editing = merged.editing;
+        await updateJob(jobId, { result: { editing: merged.editing } });
       }
 
-      result.publish = publishResults;
-      await updateJob(jobId, { result: { publish: publishResults } });
+      if (runPublish && merged.seo) {
+        result.publish = merged.seo;
+        await updateJob(jobId, { result: { publish: merged.seo } });
 
-      // SRT only for paid users
-      if (!isFree) {
-        let subtitleSegments = transcriptSegments;
-        if (options.translateSubtitles && options.subtitleLanguage) {
-          try {
-            subtitleSegments = await withTimeout(
-              translateSegments(transcriptSegments, options.subtitleLanguage, userId),
-              90000,
-              "subtitle translation",
-              jobId,
-            );
-            await stopIfCancelled(jobId);
-            await stopIfMemoryHigh(jobId, "subtitle translation");
-          } catch (err) {
-            logger.warn({ err, jobId }, "Subtitle translation failed");
+        // SRT only for paid users
+        if (!isFree) {
+          let subtitleSegments = transcriptSegments;
+          if (options.translateSubtitles && options.subtitleLanguage) {
+            try {
+              subtitleSegments = await withTimeout(
+                translateSegments(transcriptSegments, options.subtitleLanguage, userId),
+                90000,
+                "subtitle translation",
+                jobId,
+              );
+              await stopIfCancelled(jobId);
+              await stopIfMemoryHigh(jobId, "subtitle translation");
+            } catch (err) {
+              logger.warn({ err, jobId }, "Subtitle translation failed");
+            }
           }
+          const srtContent = generateSrt(subtitleSegments);
+          result.subtitleFile = {
+            format: "srt",
+            language: options.translateSubtitles && options.subtitleLanguage ? options.subtitleLanguage : "original",
+            content: srtContent,
+          };
         }
-        const srtContent = generateSrt(subtitleSegments);
-        result.subtitleFile = {
-          format: "srt",
-          language: options.translateSubtitles && options.subtitleLanguage ? options.subtitleLanguage : "original",
-          content: srtContent,
-        };
+        progress = 82;
+      } else if (runEditing) {
+        progress = 68;
       }
-      progress = 82;
-    }
-
-    // Step 8: Short clips module
-    if (runShortClips) {
-      await updateJob(jobId, { status: "analyzing_content", progress, currentStep: "Finding best short clip moments" });
-      const shortClipsData = await withTimeout(
-        generateShortClipIdeas(transcriptText, transcriptSegments, platforms, plan, speechAnalysis, formatProfile, userId),
-        90000,
-        "short clip generation",
-        jobId,
-      );
-      await stopIfCancelled(jobId);
-      await stopIfMemoryHigh(jobId, "short clip generation");
-      result.shortClips = shortClipsData;
-      await updateJob(jobId, { result: { shortClips: shortClipsData } });
-      progress = 95;
     }
 
     if (!(await isAnalysisCancelled(jobId))) {

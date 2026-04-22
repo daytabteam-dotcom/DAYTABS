@@ -50,7 +50,6 @@ const RESULT_TABS = [
   { id: "quality",    label: "Fix First",         icon: Shield },
   { id: "editing",    label: "Timeline And Edit", icon: Scissors },
   { id: "publish",    label: "Publish Package",   icon: TrendingUp },
-  { id: "shortClips", label: "Clip Ideas",        icon: Sparkles },
   { id: "transcript", label: "Transcript",        icon: AlignLeft },
 ];
 
@@ -637,7 +636,6 @@ function buildTimelineMoments(results: any) {
   const hooks = Array.isArray(results?.editing?.hooks) ? results.editing.hooks : [];
   const dropOffs = Array.isArray(results?.quality?.retention?.dropOffMoments) ? results.quality.retention.dropOffMoments : [];
   const removeSections = Array.isArray(results?.editing?.removeSections) ? results.editing.removeSections : [];
-  const clips = Array.isArray(results?.shortClips?.clips) ? results.shortClips.clips : Array.isArray(results?.shortClips) ? results.shortClips : [];
 
   return [
     ...hooks.slice(0, 2).map((hook: any, index: number) => ({
@@ -660,13 +658,6 @@ function buildTimelineMoments(results: any) {
       title: "Cut or tighten",
       detail: section?.reason ?? section?.description ?? "Trim this section to keep the pace moving.",
       tone: "amber" as const,
-    })),
-    ...clips.slice(0, 2).map((clip: any) => ({
-      time: clip?.start ? `${clip.start}${clip?.end ? `-${clip.end}` : ""}` : "Clip",
-      sortTime: parseTimestampToSeconds(clip?.start),
-      title: "Best clip moment",
-      detail: clip?.whyItWorks ?? clip?.hook ?? clip?.title ?? "Strong repurposing moment",
-      tone: "sky" as const,
     })),
   ]
     .sort((a, b) => a.sortTime - b.sortTime)
@@ -1900,81 +1891,6 @@ function PublishPanel({ data, platforms, isPaid, subtitleFile, videoFileName, pr
   );
 }
 
-function ShortClipsPanel({ data, isPaid }: { data: any; isPaid: boolean }) {
-  const clips = data?.clips ?? data ?? [];
-  if (!clips.length) return <p className="text-white/40 text-sm">No short clip ideas generated.</p>;
-
-  if (!isPaid) {
-    return (
-      <BlurSection blur feature="short-clips" label="Unlock full breakdown">
-        <div className="grid gap-4 md:grid-cols-2">
-          <div className="rounded-xl border border-white/8 bg-background/60 p-4">
-            <p className="text-xs uppercase tracking-wider text-white/35">Clip ideas</p>
-            <p className="mt-2 text-sm text-white/60">Suggested moments for Shorts, Reels, and TikTok.</p>
-          </div>
-          <div className="rounded-xl border border-white/8 bg-background/60 p-4">
-            <p className="text-xs uppercase tracking-wider text-white/35">Tactical notes</p>
-            <p className="mt-2 text-sm text-white/60">Hooks, platform fit, and engagement potential for each clip.</p>
-          </div>
-        </div>
-      </BlurSection>
-    );
-  }
-
-  function ClipCard({ clip, index }: { clip: any; index: number }) {
-    return (
-      <div className="p-4 rounded-xl bg-background/60 border border-white/8 hover:border-primary/20 transition-all">
-        <div className="flex items-start justify-between gap-3 mb-3">
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-violet-500/20 border border-violet-500/30 flex items-center justify-center">
-              <span className="text-xs font-bold text-violet-300">{index + 1}</span>
-            </div>
-            <h4 className="text-sm font-semibold text-white/90">{clip.title ?? `Clip ${index + 1}`}</h4>
-          </div>
-          {(clip.start || clip.end) && (
-            <span className="text-xs font-mono text-white/40 bg-white/5 px-2 py-0.5 rounded">
-              {clip.start} – {clip.end}
-            </span>
-          )}
-        </div>
-        {clip.hook && <p className="text-sm text-violet-300/80 mb-2 pl-9 italic">"{clip.hook}"</p>}
-        {clip.whyItWorks && <p className="text-xs text-white/50 pl-9 mb-2">{clip.whyItWorks}</p>}
-        {clip.platforms?.length > 0 && (
-          <div className="flex gap-1.5 pl-9 mb-2 flex-wrap">
-            {clip.platforms.map((p: string, pi: number) => {
-              const pl = PLATFORMS.find(x => x.label === p || x.id === p);
-              return <span key={pi} className="text-xs px-2 py-0.5 bg-white/5 border border-white/10 rounded text-white/50">{pl?.shortLabel ?? p}</span>;
-            })}
-            {clip.platformReason && <span className="text-xs text-white/30 self-center">{clip.platformReason}</span>}
-          </div>
-        )}
-        {isPaid && clip.tacticalNote && (
-          <div className="flex items-start gap-2 pl-9 mt-2 p-2 rounded-lg bg-white/3 border border-white/8">
-            <ChevronRight className="w-3.5 h-3.5 text-primary/60 mt-0.5 shrink-0" />
-            <p className="text-xs text-white/60">{clip.tacticalNote}</p>
-          </div>
-        )}
-        {isPaid && clip.engagementPotential && (
-          <div className="pl-9 mt-2">
-            <span className={`text-xs px-2 py-0.5 rounded font-semibold border ${clip.engagementPotential === "High" ? "bg-green-500/10 border-green-500/20 text-green-400" : clip.engagementPotential === "Medium" ? "bg-yellow-500/10 border-yellow-500/20 text-yellow-400" : "bg-white/5 border-white/15 text-white/40"}`}>
-              {clip.engagementPotential} Engagement
-            </span>
-            {clip.engagementReason && <span className="text-xs text-white/30 ml-2">{clip.engagementReason}</span>}
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-3">
-      {clips.map((clip: any, i: number) => (
-        <ClipCard key={i} clip={clip} index={i} />
-      ))}
-    </div>
-  );
-}
-
 const FILLER_WORDS_RX = /\b(um+|uh+|er+|ah+|hmm+|like|you know|basically|literally|actually|so|right)\b/gi;
 
 function TranscriptPanel({ data, isPaid, profile }: { data: any; isPaid: boolean; profile?: any }) {
@@ -2960,7 +2876,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
               <div className="flex gap-3 rounded-lg border border-amber-500/20 bg-amber-500/8 px-4 py-3 text-left">
                 <AlertTriangle className="w-4 h-4 text-amber-300 mt-0.5 shrink-0" />
                 <p className="text-xs leading-relaxed text-white/55">
-                  DayTabs now auto-detects where speech appears, whether the upload is long or short, and whether the frame is horizontal or vertical. Short clip ideas are generated automatically only when the video format actually supports them.
+                  DayTabs now auto-detects where speech appears and whether the upload should be judged as talking-first, visual-first, or mixed before generating your report.
                 </p>
               </div>
             </div>
@@ -3128,7 +3044,6 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
                   {activeResultTab === "quality"    && <QualityPanel    data={(displayedResults as any).quality}    isPaid={isPaid} profile={analysisProfile} />}
                   {activeResultTab === "editing"    && <EditingPanel    data={(displayedResults as any).editing}    isPaid={isPaid} profile={analysisProfile} />}
                   {activeResultTab === "publish"    && <PublishPanel    data={(displayedResults as any).publish}    platforms={resultPlatforms} isPaid={isPaid} subtitleFile={(displayedResults as any).subtitleFile} videoFileName={file?.name} profile={analysisProfile} />}
-                  {activeResultTab === "shortClips" && <ShortClipsPanel data={(displayedResults as any).shortClips} isPaid={isPaid} />}
                   {activeResultTab === "transcript" && <TranscriptPanel data={(displayedResults as any).transcript} isPaid={isPaid} profile={analysisProfile} />}
                 </motion.div>
               </AnimatePresence>
@@ -3161,7 +3076,6 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
                   {tab.id === "quality" && <QualityPanel data={(displayedResults as any).quality} isPaid={isPaid} profile={analysisProfile} />}
                   {tab.id === "editing" && <EditingPanel data={(displayedResults as any).editing} isPaid={isPaid} profile={analysisProfile} />}
                   {tab.id === "publish" && <PublishPanel data={(displayedResults as any).publish} platforms={resultPlatforms} isPaid={isPaid} subtitleFile={(displayedResults as any).subtitleFile} videoFileName={file?.name ?? fileNameRef.current} profile={analysisProfile} />}
-                  {tab.id === "shortClips" && <ShortClipsPanel data={(displayedResults as any).shortClips} isPaid={isPaid} />}
                   {tab.id === "transcript" && <TranscriptPanel data={(displayedResults as any).transcript} isPaid={isPaid} profile={analysisProfile} />}
                 </section>
               ))}

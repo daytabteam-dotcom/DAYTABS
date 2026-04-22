@@ -172,7 +172,7 @@ router.post("/init", async (req, res) => {
     } catch {}
     if (validatedPlatforms.length === 0) validatedPlatforms = ["youtube_long"];
 
-    const validModuleList = ["quality", "editing", "publish", "shortClips"];
+    const validModuleList = ["quality", "editing", "publish"];
     let validatedModules: string[] = ["quality", "editing"];
     try {
       const parsed =

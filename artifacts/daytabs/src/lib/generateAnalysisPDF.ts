@@ -409,36 +409,6 @@ export async function generateAnalysisPDF(
     }
   }
 
-  // ─── Short Clip Ideas ─────────────────────────────────────────────────────
-  const shortClips = results.shortClips ?? {};
-  const clips: any[] = shortClips.clips ?? (Array.isArray(shortClips) ? shortClips : []);
-  if (clips.length) {
-    sectionHeader(state, "Short Clip Ideas");
-    for (const [i, clip] of clips.entries()) {
-      ensureSpace(state, 18);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(9);
-      doc.setTextColor(...COL.purple);
-      doc.text(`${i + 1}. ${clip.title ?? `Clip ${i + 1}`}`, MARGIN, state.y);
-
-      const ts = (clip.start && clip.end) ? `, ${clip.start} → ${clip.end}` : "";
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(7.5);
-      doc.setTextColor(...COL.muted);
-      doc.text(ts, MARGIN + doc.getTextWidth(`${i + 1}. ${clip.title ?? ""}`), state.y);
-      state.y += 5;
-
-      if (clip.hook) bodyText(state, `"${clip.hook}"`, 3, [100, 80, 180]);
-      if (clip.whyItWorks) bodyText(state, clip.whyItWorks, 3);
-      if (clip.tacticalNote) bodyText(state, `Tip: ${clip.tacticalNote}`, 3, COL.muted);
-      if (clip.platforms?.length) {
-        bodyText(state, `Platforms: ${(clip.platforms as string[]).join(", ")}`, 3, COL.muted);
-      }
-      state.y += 2;
-    }
-    drawHRule(state);
-  }
-
   // ─── Transcript ───────────────────────────────────────────────────────────
   const transcript = results.transcript ?? {};
   const fullText: string = transcript.fullText ?? "";

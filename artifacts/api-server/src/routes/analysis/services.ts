@@ -1081,6 +1081,15 @@ const BASE_SYSTEM_PROMPT = `You are an expert content strategist and video consu
 
 Never use: "Great job!", "Consider trying", "You might want to", "As a content creator", "In conclusion", or any filler phrase. Every sentence must contain a specific observation or action. Write in second person ("your video", "you open with"). Be direct but not harsh. Lead every section with the most important insight first. If something is genuinely good, say so in one word and move on.`;
 
+const EDITING_SYSTEM_PROMPT = `You are a senior video editor and YouTube strategist with 10 years experience. You give feedback like a professional editor reviewing a client's rough cut: specific, direct, actionable.
+
+Rules:
+- Always reference exact timestamps or quote exact words
+- Only suggest cutting genuinely redundant content
+- When suggesting a cut, explain what value is lost vs gained in one sentence
+- Reference platform-specific best practices
+- Never say "consider" or "you might want to"`;
+
 // UPDATED: Now asks the AI for context-aware background judgment and engagement signals
 const VISUAL_OBSERVATIONS_SCHEMA = `
 Return STRICT JSON only (no markdown). Do NOT include any numeric scores — only the observations below.
@@ -1441,7 +1450,7 @@ ${VISUAL_OBSERVATIONS_SCHEMA}`;
   const defaultFormatProfile = getDefaultFormatProfile();
 
   const response = await callOpenAI({
-    model: "gpt-4o",
+    model: isFree ? "gpt-4o-mini" : "gpt-4o",
     max_completion_tokens: isFree ? 1200 : 2500,
     messages: [{ role: "user", content: [{ type: "text", text: prompt }, ...imageContent] }],
   }, userId);
@@ -1754,6 +1763,316 @@ export function getTotalAnalysisScore(result: Record<string, unknown>): number |
   return Number.isFinite(score) ? Math.max(0, Math.min(100, Math.round(score))) : undefined;
 }
 
+export async function analyzeContentAndPackaging(
+  transcript: string,
+  segments: Array<{ start: number; end: number; text: string }>,
+  platforms: string[],
+  requestedSections: { includeEditing: boolean; includePublish: boolean },
+  audioPath?: string,
+  plan = "free",
+  speechAnalysis?: SpeechAnalysis,
+  videoName?: string,
+  formatProfile?: Partial<FormatProfile> | null,
+  userId?: number,
+): Promise<{ editing?: Record<string, unknown>; seo?: Record<string, Record<string, unknown>> }> {
+  const includeEditing = requestedSections.includeEditing;
+  const includePublish = requestedSections.includePublish;
+  if (!includeEditing && !includePublish) return {};
+
+  const lastSeg = segments[segments.length - 1];
+  const totalDuration = lastSeg?.end ?? 0;
+  const isFree = plan === "free";
+  const isVisualFirst = speechAnalysis?.mode === "visual_first" || !speechAnalysis?.hasMeaningfulSpeech;
+  const languageInstruction = buildOutputLanguageInstruction(transcript, speechAnalysis);
+  const strategyContext = segments.length
+    ? segments
+        .slice(0, Math.min(segments.length, 10))
+        .map((seg) => `${fmtSecs(seg.start)}-${fmtSecs(seg.end)} ${seg.text}`)
+        .join("\n")
+    : transcript.substring(0, 1200);
+  const formatHint = formatProfile
+    ? `Detected format: ${formatProfile.contentFormat ?? "general_visual"}.
+Primary subject: ${formatProfile.primarySubject ?? "the main subject on screen"}.
+Visual summary: ${formatProfile.contentSummary ?? "A visual-first video centered on the main subject and payoff"}.
+Viewer intent: ${formatProfile.viewerIntent ?? "get the promised payoff quickly"}.
+Success factors: ${(formatProfile.successFactors ?? []).join(", ") || "clarity, pacing, payoff"}.
+Ignored signals: ${(formatProfile.ignoredSignals ?? []).join(", ") || "none"}.`
+    : "";
+
+  const defaultEditing = {
+    mode: isVisualFirst ? "visual_first" : speechAnalysis?.mode ?? "talking_first",
+    topic: videoName ?? (isVisualFirst ? "Visual process / payoff video" : "Speaker-led informational video"),
+    audienceGoal: isVisualFirst
+      ? "See the visual payoff quickly and understand why the result is worth staying for."
+      : "Get the main idea quickly and stay because the delivery feels tight, useful, and easy to follow.",
+    viewPotential: isVisualFirst
+      ? "This can earn views if the payoff becomes obvious early and the middle keeps showing visible progress."
+      : "This can earn views if the value proposition lands early and the pacing stays tighter than the average niche upload.",
+    editingStyle: isVisualFirst
+      ? "Use progression-first editing: open on the strongest visual state, cut repetition hard, and let each cut reveal clear progress."
+      : "Use clarity-first editing: remove throat-clearing, open on the strongest claim, and keep every cut moving the viewer toward the takeaway.",
+    introGuidance: "Skip a long branded intro. Open on the strongest promise, result, or tension point before any setup.",
+    pacingGuidance: isVisualFirst
+      ? "Keep visual momentum high. If progress is not visible for more than a few seconds, add a cut, zoom, overlay, or time jump."
+      : "Front-load the point, cut pauses aggressively, and treat every slow sentence as a candidate for tightening or visual support.",
+    motionGuidance: isVisualFirst
+      ? "Use motion only when it helps the viewer read progress: punch-ins, speed ramps, reframes, and overlays should clarify the work, not decorate it."
+      : "Use moderate motion. Podcasts, commentary, and educational videos usually perform better with intentional punch-ins, angle swaps, captions, and selective B-roll than with constant movement.",
+    hookApproach: "Make the first 5-15 seconds prove why this video is worth a click by showing the payoff, conflict, or strongest line immediately.",
+    packagingAngle: "Package the video around the clearest viewer outcome, not a vague summary of what happens on screen.",
+    nowFixes: [
+      "Trim the slowest setup lines before the main payoff or thesis appears.",
+      "Move the clearest outcome, strongest quote, or best visual moment into the opening.",
+      "Use pattern breaks where attention is likely to dip: B-roll, punch-ins, captions, or a cleaner cut point.",
+    ],
+    nextVideoFixes: [
+      "Plan the opening around the payoff before recording so the first 10 seconds do more work.",
+      "Record cleaner pickup lines or alternate angles for sections that usually drag.",
+      "Design the shoot so every minute creates a visible change, proof point, or emotional turn.",
+    ],
+    editorNotes: [
+      "Match editing intensity to the format. Podcasts and educational videos usually want restraint plus clarity, not hyperactive motion.",
+      "If the topic is niche or technical, on-screen text should clarify the takeaway rather than repeat every spoken sentence.",
+    ],
+    rewrittenHook: undefined,
+    editingSuggestions: isVisualFirst
+      ? [
+          "Open on the strongest visual change before any slow setup so the first three seconds communicate the payoff immediately.",
+        ]
+      : [
+          "Cut pauses longer than 1.5 seconds for tighter pacing",
+        ],
+  };
+
+  const defaultSeoForPlatform = (platform: string) => ({
+    titles: [platform === "youtube_shorts" ? "Short-form title" : "Your Video Title"],
+    description: platform === "youtube_shorts" ? "Two sentences." : "Description.",
+    hashtags: [],
+    timestamps: [{ time: "0:00", label: "Introduction" }],
+    titleStrategies: platform === "youtube_long" || platform === "youtube_shorts"
+      ? ["curiosity gap", "how-to", "number-based", "problem/solution", "bold claim"]
+      : undefined,
+    algorithmFit: "",
+    packagingStrategy: "",
+    nicheReferences: [],
+    audiencePromise: "",
+  });
+
+  const chapterPoints = buildChapterPoints(segments, 10);
+  const platformGuide: Record<string, string> = {
+    youtube_long: "YouTube long-form: titles 60-70 chars, curiosity gap required, keyword in first 3 words.",
+    youtube_shorts: "YouTube Shorts: punchy titles under 50 chars, high-energy action verbs",
+    tiktok: "TikTok: trend-aware, conversational, 3-5 hashtags from trending niches",
+    instagram: "Instagram Reels: lifestyle-forward, mix of niche and broad hashtags",
+    linkedin: "LinkedIn: professional framing, thought leadership angle, low hashtag count",
+    x: "X/Twitter: max 2-3 hashtags, punchy and opinionated",
+  };
+
+  const sectionList = [
+    includeEditing ? `"editing"` : null,
+    includePublish ? `"seo"` : null,
+  ].filter(Boolean).join(", ");
+
+  const editingInstructions = includeEditing
+    ? `
+[EDITING SECTION]
+Video name: "${videoName ?? "Video analysis"}"
+Speech profile: ${speechAnalysis?.summary ?? "Speech data not available."}
+${formatHint}
+
+Return an "editing" object only if editing was requested.
+- Name the topic or angle as specifically as the evidence allows.
+- Explain the editing style this format actually wants.
+- Say whether this video needs an intro, how fast the pacing should feel, and whether the edit should be simple, moderate, or motion-heavy.
+- Separate "fix now on this cut" from "fix in the next shoot".
+- Ground every recommendation in real editing techniques, not generic motivation.
+- Include a blunt viewPotential sentence.
+- Identify the strongest hook moments that would stop a scroll. Copy exact transcript text when speech is available.
+- Give specific editing suggestions referencing actual content and platform best practices.
+- If you return a rewritten hook, it must be a complete sentence, max 30 words, natural, direct, and confident.`
+    : "";
+
+  const publishInstructions = includePublish
+    ? `
+[PUBLISH SECTION]
+Return a "seo" object keyed by requested platform id only.
+- Generate packaging using the platform rules below and the same transcript evidence.
+- If transcript signal is limited, prefer accurate format-aware packaging over specific nouns from sparse or noisy transcript fragments.
+- Never infer cooking, food, dessert, recipe, or kitchen themes unless the detected format or transcript clearly supports that topic.
+- Only include fields the UI uses: titles, description, hashtags, timestamps, titleStrategies, algorithmFit, packagingStrategy, nicheReferences, audiencePromise.`
+    : "";
+
+  const responseShape = `{
+${includeEditing ? `  "editing": {
+    "topic": "specific topic or angle",
+    "audienceGoal": "what the viewer wants from this video",
+    "viewPotential": "one sentence",
+    "editingStyle": "best editing style for this format and topic",
+    "introGuidance": "does this need an intro or should it cold open",
+    "pacingGuidance": "how fast or restrained the pacing should be",
+    "motionGuidance": "how much motion, punch-ins, captions, or visual movement this format wants",
+    "hookApproach": "what the opening should do",
+    "packagingAngle": "what the title/thumbnail/packaging should sell",
+    "nowFixes": ["3 direct instructions for this current cut"],
+    "nextVideoFixes": ["3 direct instructions for the next shoot"],
+    "editorNotes": ["2 to 4 short format-aware editing truths for this creator"],
+    "hookTexts": ["exact sentence from transcript"],
+    "editingSuggestions": ["specific tip referencing actual content"],
+    "rewrittenHook": "optional rewritten opening"
+  }${includePublish ? "," : ""}` : ""}
+${includePublish ? `  "seo": {
+    "${platforms[0] ?? "youtube_long"}": {
+      "titles": ["title options"],
+      "description": "full description",
+      "hashtags": [{"tag":"Tag","effect":"audience"}],
+      "timestamps": [{"time":"0:00","label":"complete label"}],
+      "titleStrategies": ["curiosity gap","how-to","number-based","problem/solution","bold claim"],
+      "algorithmFit": "why this packaging matches platform behavior",
+      "packagingStrategy": "what audience promise these titles are selling",
+      "nicheReferences": ["notes"],
+      "audiencePromise": "core promise"
+    }
+  }` : ""}
+}`;
+
+  try {
+    const response = await callOpenAI({
+      model: isFree ? "gpt-4o-mini" : "gpt-4o",
+      response_format: { type: "json_object" },
+      max_completion_tokens: isFree ? 1800 : 4200,
+      messages: [{
+        role: "system",
+        content: `${BASE_SYSTEM_PROMPT}
+
+${EDITING_SYSTEM_PROMPT}
+
+${languageInstruction}
+
+You are analyzing one video transcript and must return a single JSON object with only these top-level key(s): ${sectionList}.
+
+${editingInstructions}
+${publishInstructions}
+
+Return STRICT JSON only.`,
+      }, {
+        role: "user",
+        content: `Transcript / timed context:
+${strategyContext}
+
+Full transcript:
+${transcript || "(no transcript)"}
+
+Requested platforms:
+${platforms.map((platform) => `- ${platform}: ${platformGuide[platform] ?? ""}`).join("\n") || "none"}
+
+Real chapter timestamps:
+${chapterPoints.map((c) => `${c.time} - context: "${c.text}"`).join("\n") || "none"}
+
+Return JSON in this shape:
+${responseShape}`,
+      }],
+    }, userId);
+
+    const parsed = parseJson<{
+      editing?: Partial<typeof defaultEditing> & { hookTexts?: string[]; editingSuggestions?: string[] };
+      seo?: Record<string, Record<string, unknown>>;
+    }>(response.choices[0]?.message?.content ?? "{}", {});
+
+    const output: { editing?: Record<string, unknown>; seo?: Record<string, Record<string, unknown>> } = {};
+
+    if (includeEditing) {
+      const editingFields = { ...(parsed.editing ?? {}) } as Record<string, unknown>;
+      delete editingFields.hookTexts;
+      delete editingFields.editingSuggestions;
+      const hookTexts = Array.isArray(parsed.editing?.hookTexts) ? parsed.editing?.hookTexts : [];
+      const hooks = hookTexts
+        .map((hookText) => {
+          const match = matchTextToSegment(hookText, segments);
+          if (!match) return null;
+          return {
+            text: hookText,
+            start: fmtSecs(match.segment.start),
+            end: fmtSecs(match.segment.end),
+            reason: "High-value hook moment",
+            confidence: match.confidence,
+          };
+        })
+        .filter(Boolean);
+
+      const removeSections: Array<{ start: string; end: string; reason: string }> = [];
+      const fillerRx = /\b(um+|uh+|er+|ah+|hmm+|like|you know|basically)\b/gi;
+      for (const seg of segments) {
+        fillerRx.lastIndex = 0;
+        if (fillerRx.test(seg.text) && seg.end - seg.start <= 4) {
+          removeSections.push({
+            start: fmtSecs(seg.start),
+            end: fmtSecs(seg.end),
+            reason: `Filler words: "${seg.text.trim()}"`,
+          });
+        }
+      }
+      if (audioPath) {
+        const silences = await detectSilences(audioPath);
+        for (const silence of silences) {
+          if (!removeSections.some((section) => section.start === fmtSecs(silence.start))) {
+            removeSections.push({
+              start: fmtSecs(silence.start),
+              end: fmtSecs(silence.end),
+              reason: `Dead air / silence gap (${(silence.end - silence.start).toFixed(1)}s) — viewer likely to disengage`,
+            });
+          }
+        }
+      }
+
+      output.editing = {
+        ...defaultEditing,
+        ...editingFields,
+        hooks,
+        removeSections: removeSections.slice(0, 12),
+        shortVideos: [],
+        editingSuggestions: Array.isArray(parsed.editing?.editingSuggestions) && parsed.editing.editingSuggestions.length
+          ? parsed.editing.editingSuggestions.slice(0, isFree ? 1 : 5)
+          : defaultEditing.editingSuggestions,
+      };
+    }
+
+    if (includePublish) {
+      const seo: Record<string, Record<string, unknown>> = {};
+      for (const platform of platforms) {
+        const base = defaultSeoForPlatform(platform);
+        const merged: any = { ...base, ...(parsed.seo?.[platform] ?? {}) };
+        const hashtags = Array.isArray(merged.hashtags)
+          ? merged.hashtags as Array<{ tag?: string; effect?: string }>
+          : [];
+        merged.hashtags = hashtags
+          .map((tag) => ({ ...tag, tag: typeof tag.tag === "string" ? tag.tag.replace(/^#+/, "") : "" }))
+          .filter((tag) => tag.tag);
+        if (chapterPoints.length) {
+          merged.timestamps = (merged.timestamps ?? base.timestamps).map((timestamp: { time: string; label: string }, index: number) => ({
+            time: chapterPoints[index]?.time ?? timestamp.time,
+            label: timestamp.label,
+          }));
+        }
+        seo[platform] = merged as unknown as Record<string, unknown>;
+      }
+      output.seo = seo;
+    }
+
+    return output;
+  } catch (err) {
+    logger.warn({ err }, "Merged content and packaging analysis failed");
+    const fallback: { editing?: Record<string, unknown>; seo?: Record<string, Record<string, unknown>> } = {};
+    if (includeEditing) fallback.editing = { ...defaultEditing, hooks: [], removeSections: [], shortVideos: [] };
+    if (includePublish) {
+      fallback.seo = {};
+      for (const platform of platforms) {
+        fallback.seo[platform] = defaultSeoForPlatform(platform) as unknown as Record<string, unknown>;
+      }
+    }
+    return fallback;
+  }
+}
+
 export async function analyzeScriptFeedback(
   transcript: string,
   segments: Array<{ start: number; end: number; text: string }>,
@@ -1983,7 +2302,7 @@ Rules:
   let editingStrategy = defaultStrategy;
   try {
     const strategyResponse = await callOpenAI({
-      model: "gpt-4o",
+      model: isFree ? "gpt-4o-mini" : "gpt-4o",
       max_completion_tokens: isFree ? 700 : 1400,
       messages: [{
         role: "user",
@@ -2046,7 +2365,7 @@ Return STRICT JSON only:
 
   if (!isVisualFirst) {
     const hookResponse = await callOpenAI({
-      model: "gpt-4o",
+      model: isFree ? "gpt-4o-mini" : "gpt-4o",
       max_completion_tokens: isFree ? 600 : 1200,
       messages: [{
         role: "user",
@@ -2337,7 +2656,7 @@ Ignored signals: ${(formatProfile.ignoredSignals ?? []).join(", ") || "none"}.`
 
   if (isFree) {
     const response = await callOpenAI({
-      model: "gpt-4o",
+      model: "gpt-4o-mini",
       max_completion_tokens: 500,
       messages: [{ role: "user", content: `${BASE_SYSTEM_PROMPT}
 

@@ -202,7 +202,7 @@ router.post("/upload", (req, res, next) => {
     if (req.body.modules) {
       try {
         const parsed = JSON.parse(req.body.modules as string);
-        const validModuleList = ["quality", "editing", "publish", "shortClips", "transcript"];
+        const validModuleList = ["quality", "editing", "publish", "transcript"];
         validatedModules = Array.isArray(parsed) ? parsed.filter((m: string) => validModuleList.includes(m)) : ["quality", "editing"];
       } catch {
         validatedModules = ["quality", "editing"];
