@@ -11,7 +11,7 @@ import { analysisJobsTable } from "@workspace/db";
 import { desc, eq, sql } from "drizzle-orm";
 import { runAnalysisPipeline, type PipelineMode } from "./pipeline";
 import { updateJob } from "./services";
-import { analysisQueue, getQueueStatus } from "../../lib/analysisQueue";
+import { analysisQueue, enqueueAnalysisJob, forgetQueuedJob, getJobQueueStatus, getQueueStatus } from "../../lib/analysisQueue";
 import { openai } from "../../lib/openai";
 import {
   GetAnalysisStatusParams,
@@ -291,9 +291,10 @@ router.post("/upload", (req, res, next) => {
     res.json({ jobId, message: "Video uploaded. Analysis queued." });
 
     const uploadedVideoPath = req.file.path;
-    analysisQueue
-      .add(async () => {
+    enqueueAnalysisJob(jobId, async () => {
         try {
+          const [freshJob] = await db.select().from(analysisJobsTable).where(eq(analysisJobsTable.id, jobId)).limit(1);
+          if (freshJob?.status === "cancelled") return;
           await updateJob(jobId, { status: "queued", progress: 5, currentStep: "Starting analysis" });
           const completed = await runAnalysisPipeline(jobId, b2Key, {
             mode: validatedMode,
@@ -313,7 +314,7 @@ router.post("/upload", (req, res, next) => {
         } finally {
           await fs.unlink(uploadedVideoPath).catch(() => {});
         }
-      })
+      }, rawPlan)
       .catch((err) => {
         req.log.error({ err, jobId }, "Queued pipeline error");
       });
@@ -449,6 +450,8 @@ router.post("/:jobId/cancel", async (req, res) => {
         })
         .where(eq(analysisJobsTable.id, params.jobId));
 
+      forgetQueuedJob(job.id);
+
       if (job.b2Key) {
         await deleteFromB2(job.b2Key).catch((err) => {
           req.log.warn({ err, jobId: job.id, b2Key: job.b2Key }, "Failed to delete cancelled analysis source video");
@@ -492,7 +495,14 @@ router.get("/:jobId/status", async (req, res) => {
     const job = await db.select().from(analysisJobsTable).where(eq(analysisJobsTable.id, params.jobId)).limit(1);
     if (!job.length) { res.status(404).json({ error: "Job not found" }); return; }
     const j = job[0];
-    res.json({ jobId: j.id, status: j.status, progress: j.progress, currentStep: j.currentStep, error: j.error || undefined });
+    res.json({
+      jobId: j.id,
+      status: j.status,
+      progress: j.progress,
+      currentStep: j.currentStep,
+      error: j.error || undefined,
+      queue: j.status === "queued" ? getJobQueueStatus(j.id) : undefined,
+    });
   } catch (err) {
     req.log.error({ err }, "Status error");
     res.status(500).json({ error: "Failed to get status" });

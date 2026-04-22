@@ -45,6 +45,7 @@ const PLAN_META = [
       "Up to 25 min per video",
       "1 GB upload limit",
       "Full analysis across quality, editing, SEO, and clips",
+      "Priority queue over free users",
       "Teleprompter",
       "20 script generations",
       "YouTube Growth tools (Coming Soon)",
@@ -67,7 +68,7 @@ const PLAN_META = [
       "5 GB upload limit",
       "All Creator features",
       "Subtitle export",
-      "Priority processing",
+      "Higher priority processing for less waiting",
       "60 script generations",
     ],
     ctaClass:
@@ -88,6 +89,7 @@ const PLAN_META = [
       "100 GB upload limit",
       "All Pro features",
       "200 script generations",
+      "Highest queue priority",
       "Priority support",
     ],
     ctaClass:

@@ -2701,7 +2701,7 @@ ${isYouTube ? `Generate exactly 5 title options (curiosity gap, how-to, number-b
 
 Description: First 2 lines state what the video is about. Use primary keyword naturally. Include ## Chapters. End with ONE CTA. 150-400 words. No hype.
 
-TAGS: No # symbols. 25-30 tags.
+TAGS: No # symbols. Generate 10-15 focused tags.
 
 Return STRICT JSON:
 {"titles":["t1","t2","t3","t4","t5"],"description":"full description","hashtags":[{"tag":"Tag","effect":"audience"}],"timestamps":[{"time":"0:00","label":"complete label"}],"titleStrategies":["curiosity gap","how-to","number-based","problem/solution","bold claim"],"algorithmFit":"2 sentences on why this packaging matches platform behavior and niche click patterns","packagingStrategy":"2 sentences on what audience promise these titles are selling","nicheReferences":["3 short notes describing the kind of viral packaging patterns being used"],"audiencePromise":"one sentence on the core promise that should win the click"}` }],
@@ -2716,7 +2716,10 @@ Return STRICT JSON:
     parsed.timestamps = parsed.timestamps.map((t, i) => ({ time: chapterPoints[i]?.time ?? t.time, label: t.label }));
   }
 
-  parsed.hashtags = (parsed.hashtags ?? []).map((h: any) => ({ ...h, tag: typeof h.tag === "string" ? h.tag.replace(/^#+/, "") : h.tag }));
+  parsed.hashtags = (parsed.hashtags ?? [])
+    .map((h: any) => ({ ...h, tag: typeof h.tag === "string" ? h.tag.replace(/^#+/, "") : h.tag }))
+    .filter((h: any) => typeof h.tag === "string" && h.tag.trim())
+    .slice(0, 15);
   return parsed;
 }
 

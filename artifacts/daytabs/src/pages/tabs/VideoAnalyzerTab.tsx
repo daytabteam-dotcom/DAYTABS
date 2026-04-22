@@ -19,6 +19,7 @@ import { PlanPickerModal } from "@/components/PlanPickerModal";
 import { UpgradeErrorModal, type LimitError } from "@/components/UpgradeErrorModal";
 import { PanelPage, PanelHeader, PanelTitle, PanelSubtitle, PanelCard, PanelCardSoft } from "@/components/panel-system";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ToastAction } from "@/components/ui/toast";
 
 interface TabProps {
   onDataReady: () => void;
@@ -54,14 +55,14 @@ const RESULT_TABS = [
 ];
 
 const PROGRESS_STEPS = [
-  { label: "Uploading video",             statuses: [] as string[],          threshold: 10  },
-  { label: "Extracting audio & frames",   statuses: ["extracting_audio"],    threshold: 25  },
-  { label: "Transcribing with Whisper",   statuses: ["transcribing"],        threshold: 32  },
-  { label: "Detecting speech pattern",    statuses: ["detecting_speech"],    threshold: 40  },
-  { label: "Analyzing quality",           statuses: ["analyzing_visual"],    threshold: 58  },
-  { label: "Generating suggestions",      statuses: ["analyzing_content"],   threshold: 82  },
-  { label: "Building publish package",    statuses: ["generating_seo"],      threshold: 92  },
-  { label: "Finalizing report",           statuses: [],                      threshold: 100 },
+  { label: "Uploading your video",         statuses: [] as string[],          threshold: 10  },
+  { label: "Preparing your video",         statuses: ["extracting_audio"],    threshold: 25  },
+  { label: "Understanding the words",      statuses: ["transcribing"],        threshold: 32  },
+  { label: "Understanding the style",      statuses: ["detecting_speech"],    threshold: 40  },
+  { label: "Reviewing video quality",      statuses: ["analyzing_visual"],    threshold: 58  },
+  { label: "Creating your action plan",    statuses: ["analyzing_content"],   threshold: 82  },
+  { label: "Preparing publishing ideas",   statuses: ["generating_seo"],      threshold: 92  },
+  { label: "Finalizing your report",       statuses: [],                      threshold: 100 },
 ];
 
 const TERMINAL_STATUSES = new Set(["complete", "successful", "success", "error", "failed", "cancelled"]);
@@ -102,6 +103,15 @@ interface AnalysisHistoryItem {
   error?: string;
   createdAt: string | null;
   updatedAt: string | null;
+}
+
+interface AnalysisQueueStatus {
+  state: "waiting" | "running" | "unknown";
+  position: number | null;
+  ahead: number | null;
+  running: number;
+  waiting: number;
+  concurrency: number;
 }
 
 function readPendingUploadRecovery(): PendingUploadRecovery | null {
@@ -229,6 +239,20 @@ function getHistoryStatusLabel(status: string) {
   if (status === "generating_seo") return "Publishing";
   if (status === "extracting_audio") return "Extracting audio";
   return "Processing";
+}
+
+function getFriendlyAnalysisStep(status?: string, fallback?: string) {
+  if (status === "queued") return "Waiting for your turn";
+  if (status === "extracting_audio") return "Preparing your video";
+  if (status === "transcribing") return "Understanding the words";
+  if (status === "detecting_speech") return "Understanding the style";
+  if (status === "analyzing_visual") return "Reviewing video quality";
+  if (status === "analyzing_content") return "Creating your action plan";
+  if (status === "generating_seo") return "Preparing publishing ideas";
+  if (status === "complete") return "Finalizing your report";
+  if (!fallback || /[_/]/.test(fallback)) return "Working on your report";
+  if (fallback.toLowerCase().includes("analysis")) return "Working on your report";
+  return fallback;
 }
 
 function getHistoryStatusClasses(status: string) {
@@ -1646,8 +1670,9 @@ function PublishPanel({ data, platforms, isPaid, subtitleFile, videoFileName, pr
   const priorityTitles = titles.slice(0, 3);
   const extraTitles = titles.slice(3);
   const hashtags: Array<{ tag: string; effect?: string }> = pData?.hashtags ?? [];
-  const firstTags = hashtags.slice(0, 8);
-  const extraTags = hashtags.slice(8);
+  const visibleTagCount = isPaid ? 15 : 8;
+  const firstTags = hashtags.slice(0, visibleTagCount);
+  const extraTags = hashtags.slice(visibleTagCount);
 
   const titleStrategies: string[] = pData?.titleStrategies ?? ["Curiosity gap", "How-to", "Number-based", "Problem/solution", "Bold claim"];
 
@@ -2008,21 +2033,45 @@ function AnalyzingScreen({
   currentStep,
   isSubmitting,
   uploadInfo,
+  queueStatus,
+  isPaid,
   onCancel,
 }: {
   progress: number;
   currentStep: string;
   isSubmitting: boolean;
   uploadInfo: UploadProgressInfo | null;
+  queueStatus?: AnalysisQueueStatus;
+  isPaid: boolean;
   onCancel: () => void;
 }) {
   const isUploading = isSubmitting && uploadInfo !== null;
   const activeIdx = isSubmitting ? 0
     : PROGRESS_STEPS.findIndex(step => step.threshold > progress) - 1;
+  const [displayedUploadPct, setDisplayedUploadPct] = useState(1);
+
+  useEffect(() => {
+    if (!uploadInfo) {
+      setDisplayedUploadPct(1);
+      return undefined;
+    }
+
+    const targetPct = uploadInfo.phase === "assembling" ? 100 : Math.max(1, Math.min(100, uploadInfo.pct));
+    const timer = window.setInterval(() => {
+      setDisplayedUploadPct((current) => {
+        if (current >= targetPct) return current;
+        const step = Math.max(1, Math.ceil((targetPct - current) * 0.18));
+        return Math.min(targetPct, current + step);
+      });
+    }, 180);
+
+    return () => window.clearInterval(timer);
+  }, [uploadInfo?.pct, uploadInfo?.phase]);
 
   if (isUploading && uploadInfo) {
-    const { phase, pct, mbUploaded, totalMb, etaSec, retrying } = uploadInfo;
+    const { phase, mbUploaded, totalMb, etaSec, retrying } = uploadInfo;
     const isAssembling = phase === "assembling";
+    const visiblePct = Math.round(displayedUploadPct);
 
     let etaLabel = "";
     if (!isAssembling && etaSec !== null) {
@@ -2040,7 +2089,9 @@ function AnalyzingScreen({
             {isAssembling ? "Assembling video..." : "Uploading video"}
           </h2>
           <p className="text-white/40 text-sm mt-1">
-            {isAssembling
+            {retrying
+              ? "Checking the upload and reconnecting if needed..."
+              : isAssembling
               ? "Finalizing your upload, almost ready..."
               : `${mbUploaded.toFixed(1)} MB of ${totalMb.toFixed(1)} MB${etaLabel ? " - " + etaLabel : ""}`}
           </p>
@@ -2049,11 +2100,11 @@ function AnalyzingScreen({
         <div className="mb-6">
           <div className="flex justify-between text-xs text-white/40 mb-2">
             <span>{isAssembling ? "Processing upload..." : "Uploading..."}</span>
-            {!isAssembling && <span>{pct}%</span>}
+            {!isAssembling && <span>{visiblePct}%</span>}
           </div>
           <div className="h-2 bg-white/8 rounded-full overflow-hidden">
             <motion.div
-              animate={{ width: `${isAssembling ? 100 : pct}%` }}
+              animate={{ width: `${isAssembling ? 100 : visiblePct}%` }}
               transition={{ duration: 0.4, ease: "easeOut" }}
               className="h-full rounded-full bg-primary"
             />
@@ -2076,6 +2127,10 @@ function AnalyzingScreen({
     );
   }
 
+  const isWaiting = queueStatus?.state === "waiting";
+  const isStarting = queueStatus?.state === "running" && progress <= 8;
+  const ahead = typeof queueStatus?.ahead === "number" ? queueStatus.ahead : null;
+
   return (
     <div className="max-w-lg mx-auto py-12">
       <div className="text-center mb-10">
@@ -2085,6 +2140,37 @@ function AnalyzingScreen({
         <h2 className="text-xl font-semibold text-white">Analyzing your video</h2>
         <p className="text-white/40 text-sm mt-1">This takes 1-3 minutes depending on length</p>
       </div>
+
+      {(isWaiting || isStarting) && (
+        <div className="mb-6 rounded-2xl border border-primary/20 bg-primary/8 p-4">
+          <div className="flex items-start gap-3">
+            <Clock3 className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+            <div>
+              <p className="text-sm font-semibold text-white">
+                {isWaiting ? "You're in line" : "Your analysis is starting"}
+              </p>
+              <p className="mt-1 text-xs leading-relaxed text-white/55">
+                {isWaiting
+                  ? ahead === 0
+                    ? "You're next. We'll start as soon as a slot opens."
+                    : ahead === 1
+                      ? "1 person is ahead of you. This updates automatically."
+                      : `${ahead ?? queueStatus?.waiting ?? "A few"} people are ahead of you. This updates automatically.`
+                  : "A processing slot opened. We're getting your report ready now."}
+              </p>
+              {isWaiting && !isPaid && (
+                <button
+                  type="button"
+                  onClick={() => navigateToPricing("priority-queue")}
+                  className="mt-3 rounded-lg border border-primary/30 bg-primary/10 px-3 py-2 text-xs font-semibold text-primary transition-all hover:bg-primary/20"
+                >
+                  Upgrade to Creator to wait less
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="mb-8">
         <div className="flex justify-between text-xs text-white/40 mb-2">
@@ -2414,7 +2500,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
 
   const { uploadAsync: uploadVideo, isPending: isUploading, uploadInfo, cancelUpload } = useVideoUpload();
   const { data: pollData } = useAnalysisPolling(jobId);
-  const statusData = pollData as { status?: string; progress?: number; currentStep?: string } | undefined;
+  const statusData = pollData as { status?: string; progress?: number; currentStep?: string; queue?: AnalysisQueueStatus } | undefined;
   const { data: results } = useAnalysisResults(jobId, statusData?.status === "complete");
 
   const limits = getModeLimits("video-analyzer");
@@ -2433,6 +2519,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
   // Keep the latest filename around so history/recovered reports export with a stable name.
   const fileNameRef = useRef<string>("analysis");
   const completedJobSoundRef = useRef<string | null>(null);
+  const queueUpgradeToastJobRef = useRef<string | null>(null);
   const exportBaseName = (file?.name ?? fileNameRef.current ?? "analysis").replace(/\.[^.]+$/, "") || "analysis";
   const { ref: pdfExportRef, exportPdf, isExporting: isPdfExporting } = usePdfExport(`${exportBaseName}-daytabs-report.pdf`);
 
@@ -2550,6 +2637,23 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
       clearPendingUploadRecovery();
     }
   }, [statusData?.status]);
+
+  useEffect(() => {
+    const ahead = statusData?.queue?.ahead;
+    if (!jobId || isPaid || statusData?.queue?.state !== "waiting" || typeof ahead !== "number" || ahead <= 0) return;
+    if (queueUpgradeToastJobRef.current === jobId) return;
+    queueUpgradeToastJobRef.current = jobId;
+
+    toast({
+      title: "Want a shorter wait?",
+      description: "Creator and higher plans get priority in the analysis queue.",
+      action: (
+        <ToastAction altText="Upgrade to Creator" onClick={() => navigateToPricing("priority-queue")}>
+          Upgrade
+        </ToastAction>
+      ),
+    });
+  }, [jobId, isPaid, statusData?.queue?.ahead, statusData?.queue?.state, toast]);
 
   // Show the processing screen as soon as a jobId exists, even before first poll
   const showAnalyzing = isAnalyzing || (!!jobId && !isDone && !isError);
@@ -2779,7 +2883,9 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
   }
 
   const progress = statusData?.progress ?? (isSubmitting ? 5 : 0);
-  const currentStepLabel = statusData?.currentStep ?? (isSubmitting ? "Uploading video..." : "");
+  const currentStepLabel = isSubmitting
+    ? "Uploading your video..."
+    : getFriendlyAnalysisStep(statusData?.status, statusData?.currentStep);
   const errorMessage = (pollData as any)?.error ?? "An unexpected error occurred during analysis.";
   const analysisProfile = getAnalysisProfile(displayedResults);
   const resultModules = getResultModules(displayedResults);
@@ -2985,7 +3091,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
       ) : isError ? (
         <ErrorScreen error={errorMessage} onReset={handleReset} />
       ) : showAnalyzing ? (
-        <AnalyzingScreen progress={progress} currentStep={currentStepLabel} isSubmitting={isSubmitting} uploadInfo={uploadInfo} onCancel={handleCancel} />
+        <AnalyzingScreen progress={progress} currentStep={currentStepLabel} isSubmitting={isSubmitting} uploadInfo={uploadInfo} queueStatus={statusData?.queue} isPaid={isPaid} onCancel={handleCancel} />
       ) : hasResults ? (
         <div className="space-y-6">
           <div className="flex items-center justify-between gap-3 flex-wrap">

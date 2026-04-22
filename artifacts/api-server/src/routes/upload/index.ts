@@ -3,6 +3,7 @@ import multer from "multer";
 import { v4 as uuidv4 } from "uuid";
 import path from "path";
 import fs from "fs/promises";
+import { eq } from "drizzle-orm";
 import { db } from "@workspace/db";
 import { analysisJobsTable } from "@workspace/db";
 import { runAnalysisPipeline, type PipelineMode } from "../analysis/pipeline";
@@ -19,7 +20,7 @@ import {
   incrementVideoAnalysis,
 } from "../../lib/usageService";
 import { logger } from "../../lib/logger";
-import { analysisQueue } from "../../lib/analysisQueue";
+import { enqueueAnalysisJob } from "../../lib/analysisQueue";
 import {
   buildR2ObjectKey,
   createR2UploadUrl,
@@ -172,7 +173,7 @@ router.post("/init", async (req, res) => {
     } catch {}
     if (validatedPlatforms.length === 0) validatedPlatforms = ["youtube_long"];
 
-    const validModuleList = ["quality", "editing", "publish"];
+    const validModuleList = ["quality", "editing", "publish", "transcript"];
     let validatedModules: string[] = ["quality", "editing"];
     try {
       const parsed =
@@ -371,9 +372,10 @@ router.post("/complete", async (req, res) => {
 
     res.json({ jobId, filePath: b2Key });
 
-    analysisQueue
-      .add(async () => {
+    enqueueAnalysisJob(jobId, async () => {
         try {
+          const [freshJob] = await db.select().from(analysisJobsTable).where(eq(analysisJobsTable.id, jobId)).limit(1);
+          if (freshJob?.status === "cancelled") return;
           await updateJob(jobId, { status: "queued", progress: 5, currentStep: "Starting analysis" });
           const completed = await runAnalysisPipeline(jobId, b2Key, {
             mode: validatedMode,
@@ -393,7 +395,7 @@ router.post("/complete", async (req, res) => {
         } finally {
           await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
         }
-      })
+      }, rawPlan)
       .catch(async (err) => {
         logger.error({ err, jobId }, "Queued pipeline error after chunked upload");
         await fs.rm(dir, { recursive: true, force: true }).catch(() => {});

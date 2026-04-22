@@ -291,6 +291,15 @@ export function useVideoUpload() {
         if (cancelledRef.current) throw new Error("Upload cancelled");
 
         const startTime = Date.now();
+        setUploadInfo({
+          phase: "uploading",
+          pct: 1,
+          mbUploaded: 0,
+          totalMb,
+          etaSec: null,
+          retrying: false,
+        });
+
         await uploadToSignedUrl({
           uploadUrl,
           file,
