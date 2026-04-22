@@ -13,11 +13,13 @@ import {
   ChevronDown,
   ChevronUp,
   Clock,
+  Download,
   ExternalLink,
   Flame,
   GripVertical,
   Hash,
   Heart,
+  ImagePlus,
   Lightbulb,
   LayoutGrid,
   ListChecks,
@@ -36,6 +38,7 @@ import {
   ThumbsUp,
   TrendingDown,
   Type,
+  X,
   Youtube,
 } from "lucide-react";
 import {
@@ -156,6 +159,17 @@ interface PlanDay {
   deletedAt?: string | null;
   createdAt?: string | null;
   updatedAt?: string | null;
+  generatedThumbnail?: {
+    imageDataUrl: string;
+    prompt?: string;
+    requestedText?: string | null;
+    createdAt?: string | null;
+  } | null;
+}
+
+interface ThumbnailSourceImage {
+  name: string;
+  dataUrl: string;
 }
 
 interface CustomIdeaDraft {
@@ -374,6 +388,39 @@ async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((data as { error?: string }).error || "Request failed");
   return data as T;
+}
+
+async function resizeImageFileToDataUrl(file: File) {
+  return await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error(`Could not read ${file.name}`));
+    reader.onload = () => {
+      const src = typeof reader.result === "string" ? reader.result : "";
+      if (!src) {
+        reject(new Error(`Could not read ${file.name}`));
+        return;
+      }
+      const image = new window.Image();
+      image.onerror = () => reject(new Error(`Could not process ${file.name}`));
+      image.onload = () => {
+        const maxWidth = 1600;
+        const maxHeight = 1600;
+        const scale = Math.min(maxWidth / image.width, maxHeight / image.height, 1);
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(image.width * scale));
+        canvas.height = Math.max(1, Math.round(image.height * scale));
+        const context = canvas.getContext("2d");
+        if (!context) {
+          reject(new Error(`Could not process ${file.name}`));
+          return;
+        }
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", 0.88));
+      };
+      image.src = src;
+    };
+    reader.readAsDataURL(file);
+  });
 }
 
 function parseNumber(value: unknown) {
@@ -1671,6 +1718,7 @@ function CalendarPreviewCard({
   onOpen,
   onDelete,
   onQuickPublish,
+  onCreateThumbnail,
 }: {
   day: PlanDay;
   linked?: boolean;
@@ -1678,6 +1726,7 @@ function CalendarPreviewCard({
   onOpen: (day: PlanDay) => void;
   onDelete: (day: PlanDay) => void;
   onQuickPublish: (day: PlanDay) => void;
+  onCreateThumbnail: (day: PlanDay) => void;
 }) {
   const origin = ideaOriginMeta(day);
   return (
@@ -1718,6 +1767,11 @@ function CalendarPreviewCard({
             </PopoverContent>
           </Popover>
           <div className="p-4">
+            {day.generatedThumbnail?.imageDataUrl ? (
+              <div className="mb-3 overflow-hidden rounded-xl border border-white/10 bg-black/20">
+                <img src={day.generatedThumbnail.imageDataUrl} alt={`${day.contentIdea} thumbnail`} className="h-28 w-full object-cover" />
+              </div>
+            ) : null}
             <div className="mb-3 flex items-center justify-between gap-2">
               <div className="min-w-0 flex-1">
                 <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/35">{formatIsoDate(day.date, { month: "short", day: "numeric" })}</p>
@@ -1752,6 +1806,19 @@ function CalendarPreviewCard({
                 {linked ? "Linked" : "Publish"}
               </Button>
             </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              className="mt-2 w-full rounded-lg"
+              onClick={(event) => {
+                event.stopPropagation();
+                onCreateThumbnail(day);
+              }}
+            >
+              <ImagePlus className="mr-2 h-4 w-4" />
+              {day.generatedThumbnail?.imageDataUrl ? "Regenerate thumbnail" : "Create thumbnail"}
+            </Button>
           </div>
         </div>
       </HoverCardTrigger>
@@ -1932,7 +1999,7 @@ function CurrentWeekConsistencyChart({ rows }: { rows: Array<{ iso: string; day:
   );
 }
 
-function PlannerIdeaCard({ day, onDragStart, onDelete, onOpen }: { day: PlanDay; onDragStart: (day: PlanDay) => void; onDelete: (day: PlanDay) => void; onOpen: (day: PlanDay) => void }) {
+function PlannerIdeaCard({ day, onDragStart, onDelete, onOpen, onCreateThumbnail }: { day: PlanDay; onDragStart: (day: PlanDay) => void; onDelete: (day: PlanDay) => void; onOpen: (day: PlanDay) => void; onCreateThumbnail: (day: PlanDay) => void }) {
   const origin = ideaOriginMeta(day);
   return (
     <div
@@ -1954,10 +2021,25 @@ function PlannerIdeaCard({ day, onDragStart, onDelete, onOpen }: { day: PlanDay;
       <div className="flex items-start gap-2">
         <GripVertical className="mt-1 h-4 w-4 shrink-0 text-white/25" />
         <div className="min-w-0">
+          {day.generatedThumbnail?.imageDataUrl ? (
+            <div className="mb-3 overflow-hidden rounded-xl border border-white/10 bg-black/20">
+              <img src={day.generatedThumbnail.imageDataUrl} alt={`${day.contentIdea} thumbnail`} className="h-24 w-full object-cover" />
+            </div>
+          ) : null}
           <span className={cn("inline-flex rounded-full border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]", origin.chipClassName)}>
             {origin.label}
           </span>
           <IdeaPackageFields day={day} compact />
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            className="mt-3 rounded-lg"
+            onClick={() => onCreateThumbnail(day)}
+          >
+            <ImagePlus className="mr-2 h-4 w-4" />
+            {day.generatedThumbnail?.imageDataUrl ? "Regenerate thumbnail" : "Create thumbnail"}
+          </Button>
         </div>
       </div>
     </div>
@@ -2492,6 +2574,9 @@ export default function YouTubeGrowthPlannerV2Tab() {
   const [postingFrequencyInput, setPostingFrequencyInput] = useState("3");
   const [savingSettings, setSavingSettings] = useState(false);
   const [manualCompetitorUrl, setManualCompetitorUrl] = useState("");
+  const [thumbnailDay, setThumbnailDay] = useState<PlanDay | null>(null);
+  const [thumbnailTextPreference, setThumbnailTextPreference] = useState("");
+  const [thumbnailSourceImages, setThumbnailSourceImages] = useState<ThumbnailSourceImage[]>([]);
 
   const latestPlan = status?.latestPlan ?? null;
   const planPayload = latestPlan?.plan ?? {};
@@ -2651,7 +2736,20 @@ export default function YouTubeGrowthPlannerV2Tab() {
     setDays(hydrateVisiblePlanDays(nextPlan.plan.days ?? []));
     if (nextDay) {
       setDetailDay((current) => current && current.day === nextDay.day ? { ...current, ...nextDay } : current);
+      setThumbnailDay((current) => current && current.day === nextDay.day ? { ...current, ...nextDay } : current);
     }
+  }
+
+  function openThumbnailDialog(day: PlanDay) {
+    setThumbnailDay(day);
+    setThumbnailTextPreference(day.generatedThumbnail?.requestedText || "");
+    setThumbnailSourceImages([]);
+  }
+
+  function closeThumbnailDialog() {
+    setThumbnailDay(null);
+    setThumbnailTextPreference("");
+    setThumbnailSourceImages([]);
   }
 
   async function deleteDay(day: PlanDay) {
@@ -2800,6 +2898,41 @@ export default function YouTubeGrowthPlannerV2Tab() {
       } : current);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not remove competitor");
+    } finally {
+      setWorking(null);
+    }
+  }
+
+  async function handleThumbnailSourceFiles(files: FileList | null) {
+    const nextFiles = Array.from(files ?? []).filter((file) => file.type.startsWith("image/")).slice(0, 4);
+    if (!nextFiles.length) return;
+    setError(null);
+    try {
+      const processed = await Promise.all(nextFiles.map(async (file) => ({
+        name: file.name,
+        dataUrl: await resizeImageFileToDataUrl(file),
+      })));
+      setThumbnailSourceImages((current) => [...current, ...processed].slice(0, 4));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not read source images");
+    }
+  }
+
+  async function generateThumbnailForDay() {
+    if (!latestPlan || !thumbnailDay) return;
+    setWorking("thumbnail");
+    setError(null);
+    try {
+      const data = await jsonFetch<{ plan: YoutubeWeeklyPlan; day: PlanDay }>(`/api/youtube/plans/${latestPlan.id}/days/${thumbnailDay.day}/thumbnail`, {
+        method: "POST",
+        body: JSON.stringify({
+          textPreference: thumbnailTextPreference.trim() || null,
+          sourceImages: thumbnailSourceImages.map((image) => image.dataUrl),
+        }),
+      });
+      applyServerPlanUpdate(data.plan, data.day);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not generate thumbnail");
     } finally {
       setWorking(null);
     }
@@ -3074,6 +3207,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
                         onDragStart={handleDragStart}
                         onOpen={setDetailDay}
                         onDelete={deleteDay}
+                        onCreateThumbnail={openThumbnailDialog}
                         onQuickPublish={(targetDay) => {
                           setDetailDay(targetDay);
                           setLinkingDay(targetDay.day);
@@ -3114,7 +3248,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
             <div key={stage.id} onDragOver={(event) => event.preventDefault()} onDrop={() => handleDropOnStage(stage.id)} className="min-h-[260px] rounded-lg border border-white/10 bg-white/[0.025] p-3">
               <p className="mb-3 text-sm font-semibold text-white">{stage.label}</p>
               <div className="space-y-3">
-                {days.filter((day) => effectivePlannerStage(day, resultsByDay, recentVideoById) === stage.id).map((day) => <PlannerIdeaCard key={toCardId(day)} day={day} onDragStart={handleDragStart} onDelete={deleteDay} onOpen={setDetailDay} />)}
+                {days.filter((day) => effectivePlannerStage(day, resultsByDay, recentVideoById) === stage.id).map((day) => <PlannerIdeaCard key={toCardId(day)} day={day} onDragStart={handleDragStart} onDelete={deleteDay} onOpen={setDetailDay} onCreateThumbnail={openThumbnailDialog} />)}
               </div>
             </div>
           ))}
@@ -3838,8 +3972,19 @@ export default function YouTubeGrowthPlannerV2Tab() {
                     <PanelCardSoft className="p-4">
                       <div className="flex items-center justify-between gap-3">
                         <p className="text-xs uppercase tracking-[0.16em] text-white/40">Publish package</p>
-                        <p className="text-xs text-white/45">{detailDay.contentIdea.length} chars · Sweet spot: {titleRange}</p>
+                        <div className="flex items-center gap-2">
+                          <p className="text-xs text-white/45">{detailDay.contentIdea.length} chars · Sweet spot: {titleRange}</p>
+                          <Button type="button" size="sm" variant="secondary" className="rounded-lg" onClick={() => openThumbnailDialog(detailDay)}>
+                            <ImagePlus className="mr-2 h-4 w-4" />
+                            {detailDay.generatedThumbnail?.imageDataUrl ? "Regenerate thumbnail" : "Create thumbnail"}
+                          </Button>
+                        </div>
                       </div>
+                      {detailDay.generatedThumbnail?.imageDataUrl ? (
+                        <div className="mt-4 overflow-hidden rounded-xl border border-white/10 bg-black/20">
+                          <img src={detailDay.generatedThumbnail.imageDataUrl} alt={`${detailDay.contentIdea} thumbnail`} className="w-full object-cover" />
+                        </div>
+                      ) : null}
                       <IdeaPackageFields day={detailDay} />
                     </PanelCardSoft>
                     {(detailDay.outline ?? []).length ? (
@@ -3989,6 +4134,99 @@ export default function YouTubeGrowthPlannerV2Tab() {
               >
                 Delete idea
               </Button>
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(thumbnailDay)} onOpenChange={(open) => !open && closeThumbnailDialog()}>
+        <DialogContent className="max-h-[85vh] max-w-3xl overflow-y-auto pt-10">
+          <DialogHeader>
+            <DialogTitle>Create Thumbnail</DialogTitle>
+            <DialogDescription>Upload optional source images, set optional text, and generate a saved thumbnail for this idea card.</DialogDescription>
+          </DialogHeader>
+          {thumbnailDay ? (
+            <div className="space-y-4">
+              <PanelCardSoft className="p-4">
+                <p className="text-xs uppercase tracking-[0.16em] text-white/40">Idea</p>
+                <p className="mt-2 text-base font-semibold text-white">{thumbnailDay.contentIdea}</p>
+                {thumbnailDay.descriptionSuggestion ? <p className="mt-2 text-sm text-white/55">{thumbnailDay.descriptionSuggestion}</p> : null}
+              </PanelCardSoft>
+
+              <PanelCardSoft className="p-4">
+                <p className="text-xs uppercase tracking-[0.16em] text-white/40">Source images</p>
+                <p className="mt-2 text-sm text-white/55">Add up to 4 images. These are optional reference inputs for the AI.</p>
+                <div className="mt-3 flex flex-wrap gap-3">
+                  {thumbnailSourceImages.map((image, index) => (
+                    <div key={`${image.name}-${index}`} className="relative overflow-hidden rounded-xl border border-white/10 bg-black/20">
+                      <img src={image.dataUrl} alt={image.name} className="h-28 w-40 object-cover" />
+                      <button
+                        type="button"
+                        onClick={() => setThumbnailSourceImages((current) => current.filter((_, itemIndex) => itemIndex !== index))}
+                        className="absolute right-2 top-2 rounded-full border border-white/10 bg-black/50 p-1 text-white/70 hover:text-white"
+                        aria-label={`Remove ${image.name}`}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                  {thumbnailSourceImages.length < 4 ? (
+                    <label className="flex h-28 w-40 cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-white/10 bg-white/[0.03] text-center text-sm text-white/45 hover:border-white/20 hover:text-white/70">
+                      <ImagePlus className="mb-2 h-5 w-5" />
+                      Add image
+                      <input
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        className="hidden"
+                        onChange={(event) => void handleThumbnailSourceFiles(event.target.files)}
+                      />
+                    </label>
+                  ) : null}
+                </div>
+              </PanelCardSoft>
+
+              <PanelCardSoft className="p-4">
+                <p className="text-xs uppercase tracking-[0.16em] text-white/40">Text on thumbnail</p>
+                <Textarea
+                  value={thumbnailTextPreference}
+                  onChange={(event) => setThumbnailTextPreference(event.target.value)}
+                  placeholder="Optional. Leave empty and AI will generate the strongest thumbnail text."
+                  className="mt-3 min-h-24"
+                />
+              </PanelCardSoft>
+
+              {thumbnailDay.generatedThumbnail?.imageDataUrl ? (
+                <PanelCardSoft className="p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs uppercase tracking-[0.16em] text-white/40">Generated thumbnail</p>
+                      <p className="mt-2 text-sm text-white/55">Saved on this idea card and ready to download.</p>
+                    </div>
+                    <a
+                      href={thumbnailDay.generatedThumbnail.imageDataUrl}
+                      download={`${thumbnailDay.contentIdea.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "youtube-thumbnail"}.png`}
+                      className="inline-flex items-center rounded-lg border border-white/10 px-3 py-2 text-sm text-white/75 transition-colors hover:bg-white/[0.06] hover:text-white"
+                    >
+                      <Download className="mr-2 h-4 w-4" />
+                      Download thumbnail
+                    </a>
+                  </div>
+                  <div className="mt-4 overflow-hidden rounded-xl border border-white/10 bg-black/20">
+                    <img src={thumbnailDay.generatedThumbnail.imageDataUrl} alt={`${thumbnailDay.contentIdea} generated thumbnail`} className="w-full object-cover" />
+                  </div>
+                </PanelCardSoft>
+              ) : null}
+
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button type="button" variant="secondary" className="rounded-lg" onClick={closeThumbnailDialog}>
+                  Close
+                </Button>
+                <Button type="button" className="rounded-lg" onClick={() => void generateThumbnailForDay()} disabled={working === "thumbnail"}>
+                  {working === "thumbnail" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+                  {thumbnailDay.generatedThumbnail?.imageDataUrl ? "Generate again" : "Generate thumbnail"}
+                </Button>
+              </div>
             </div>
           ) : null}
         </DialogContent>

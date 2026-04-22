@@ -97,7 +97,15 @@ type PlanDayPatch = Partial<{
   aiFeedback: IdeaFeedback;
   isDeleted: boolean;
   deletedAt: string | null;
+  generatedThumbnail: JsonRecord | null;
 }>;
+
+interface GeneratedThumbnailRecord {
+  imageDataUrl: string;
+  prompt: string;
+  requestedText: string | null;
+  createdAt: string;
+}
 
 interface StoredLikedIdeaFeedback {
   topic: string;
@@ -467,6 +475,8 @@ function asPlanDays(value: unknown[]) {
 }
 
 function normalizePlanDayRecord(day: JsonRecord, fallbackIndex: number) {
+  const generatedThumbnail = asRecord(day.generatedThumbnail);
+  const imageDataUrl = asString(generatedThumbnail.imageDataUrl);
   return {
     ...day,
     day: parsePlanDayIndex(day.day, fallbackIndex),
@@ -486,7 +496,146 @@ function normalizePlanDayRecord(day: JsonRecord, fallbackIndex: number) {
     aiFeedback: normalizeIdeaFeedback(day.aiFeedback),
     isDeleted: Boolean(day.isDeleted),
     deletedAt: asString(day.deletedAt),
+    generatedThumbnail: imageDataUrl ? {
+      imageDataUrl,
+      prompt: asString(generatedThumbnail.prompt) || "",
+      requestedText: asString(generatedThumbnail.requestedText),
+      createdAt: asString(generatedThumbnail.createdAt) || new Date().toISOString(),
+    } satisfies GeneratedThumbnailRecord : null,
   };
+}
+
+function sanitizeSourceImageDataUrls(value: unknown) {
+  return asArray(value)
+    .map((item) => asString(item)?.trim() || "")
+    .filter((item) => /^data:image\/(?:png|jpeg|jpg|webp);base64,/i.test(item))
+    .slice(0, 4);
+}
+
+async function buildYoutubeThumbnailPrompt(
+  userId: number,
+  payload: {
+    title: string;
+    description: string;
+    tags: string[];
+    textPreference: string | null;
+    sourceImages: string[];
+  },
+) {
+  const userContent: Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }> = [
+    {
+      type: "text",
+      text: `Title: ${payload.title}
+Description: ${payload.description}
+Tags: ${payload.tags.join(", ")}
+User Text Preference: ${payload.textPreference?.trim() || "auto-generate"}
+Image Inputs: ${payload.sourceImages.length ? `The attached ${payload.sourceImages.length} source image(s) are reference inputs provided by the user.` : "No source images provided."}`,
+    },
+  ];
+
+  for (const sourceImage of payload.sourceImages) {
+    userContent.push({
+      type: "image_url",
+      image_url: { url: sourceImage },
+    });
+  }
+
+  const completion = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [
+      {
+        role: "system",
+        content: `You are an expert YouTube thumbnail designer and viral content strategist.
+
+Your goal is NOT just to create a beautiful image, but to maximize click-through-rate (CTR).
+
+Analyze the provided YouTube metadata and design a thumbnail that:
+- Creates curiosity or emotional tension
+- Is instantly understandable in less than 1 second
+- Uses strong visual hierarchy (clear subject, background, contrast)
+- Works well on mobile (small size clarity)
+- Avoids clutter and unnecessary elements
+
+Thumbnail style should match top-performing YouTube thumbnails:
+- Bold composition
+- High contrast lighting
+- Clean background (or intentionally blurred)
+- Expressive subject (if applicable)
+- Minimal but powerful text (3–5 words max)
+
+STEP 1: Analyze intent
+- What is the core idea of the video?
+- What emotion should the viewer feel? (curiosity, shock, urgency, excitement)
+
+STEP 2: Thumbnail concept
+Generate 3 different thumbnail concepts:
+Each should include:
+- Scene description
+- Subject placement
+- Background style
+- Emotion conveyed
+- Suggested text (if needed)
+
+STEP 3: Select best concept
+Pick the strongest concept based on CTR potential.
+
+STEP 4: Final image generation instructions
+Create a highly detailed image prompt with:
+- Composition (foreground/background)
+- Lighting (dramatic, soft, high contrast, etc.)
+- Colors (vibrant, contrasting palette)
+- Camera framing (close-up, medium, zoomed face, etc.)
+- Style (photorealistic, cinematic, YouTube style)
+- Text placement (if any)
+- Facial expression (if human present)
+- Depth of field
+
+IMPORTANT RULES:
+- Do NOT overcrowd the image
+- Focus on ONE clear idea
+- Ensure subject stands out strongly from background
+- Use visual contrast to guide attention
+- Keep text readable on small screens
+- If the user gave source images, use them as visual references for subject, style, or assets when helpful
+- If the user did not specify text, generate the strongest 3-5 word text yourself
+- Return ONLY the final image generation prompt`,
+      },
+      {
+        role: "user",
+        content: userContent,
+      },
+    ],
+    max_completion_tokens: 900,
+  });
+
+  await logTokenUsage({
+    userId,
+    feature: "youtubeThumbnailPrompt",
+    model: "gpt-4o-mini",
+    ...usageTokens(completion.usage),
+  });
+
+  return (completion.choices[0]?.message?.content || "").trim();
+}
+
+async function generateYoutubeThumbnailImage(userId: number, prompt: string) {
+  const response = await openai.images.generate({
+    model: "gpt-image-1",
+    prompt,
+    size: "1536x1024",
+  });
+  const base64 = response.data?.[0]?.b64_json;
+  if (!base64) {
+    throw new Error("Thumbnail generation did not return an image");
+  }
+  await logTokenUsage({
+    userId,
+    feature: "youtubeThumbnailImage",
+    model: "gpt-image-1",
+    inputTokens: 0,
+    outputTokens: 0,
+  });
+  return `data:image/png;base64,${base64}`;
 }
 
 function normalizeStoredIdeaFeedbackSummary(value: unknown): StoredIdeaFeedbackSummary {
@@ -2437,6 +2586,42 @@ export async function patchYoutubePlanDay(userId: number, planId: number, dayInd
     aiFeedback: patch.aiFeedback === undefined ? normalizeIdeaFeedback(day.aiFeedback) : normalizeIdeaFeedback(patch.aiFeedback),
     isDeleted: patch.isDeleted === undefined ? Boolean(day.isDeleted) : Boolean(patch.isDeleted),
     deletedAt: patch.deletedAt === undefined ? asString(day.deletedAt) : patch.deletedAt,
+    updatedAt: new Date().toISOString(),
+  }));
+}
+
+export async function generateYoutubeIdeaThumbnail(
+  userId: number,
+  planId: number,
+  dayIndex: number,
+  input: { textPreference?: string | null; sourceImages?: unknown },
+) {
+  const plan = await loadPlanForUpdate(userId, planId);
+  const rawDays = asPlanDays(asArray(asRecord(plan.plan).days));
+  const existingDay = rawDays.find((day) => parsePlanDayIndex(day.day, -1) === dayIndex);
+  if (!existingDay) throw new Error("Idea not found");
+
+  const normalizedDay = normalizePlanDayRecord(existingDay, dayIndex);
+  const prompt = await buildYoutubeThumbnailPrompt(userId, {
+    title: normalizedDay.contentIdea,
+    description: normalizedDay.descriptionSuggestion,
+    tags: asArray(normalizedDay.tags).map((item) => String(item)).filter(Boolean),
+    textPreference: asString(input.textPreference)?.trim() || null,
+    sourceImages: sanitizeSourceImageDataUrls(input.sourceImages),
+  });
+  if (!prompt) throw new Error("Thumbnail prompt generation failed");
+
+  const imageDataUrl = await generateYoutubeThumbnailImage(userId, prompt);
+  const generatedThumbnail: GeneratedThumbnailRecord = {
+    imageDataUrl,
+    prompt,
+    requestedText: asString(input.textPreference)?.trim() || null,
+    createdAt: new Date().toISOString(),
+  };
+
+  return updatePlanDay(userId, planId, dayIndex, (day) => ({
+    ...day,
+    generatedThumbnail,
     updatedAt: new Date().toISOString(),
   }));
 }

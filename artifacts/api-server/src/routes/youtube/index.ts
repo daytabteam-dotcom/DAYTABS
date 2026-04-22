@@ -11,6 +11,7 @@ import {
   deleteYoutubePlanDay,
   discoverCompetitors,
   generateYoutubeWeeklyPlan,
+  generateYoutubeIdeaThumbnail,
   getYoutubeAppRedirect,
   getYoutubeRedirectUri,
   getYoutubeStatus,
@@ -294,6 +295,25 @@ router.post("/plans/:planId/days/:dayIndex/regenerate", requireAuth, async (req,
   } catch (err) {
     req.log.error({ err }, "YouTube idea regenerate error");
     res.status(500).json({ error: err instanceof Error ? err.message : "Failed to regenerate idea" });
+  }
+});
+
+router.post("/plans/:planId/days/:dayIndex/thumbnail", requireAuth, async (req, res) => {
+  try {
+    const planId = Number(req.params.planId);
+    const dayIndex = Number(req.params.dayIndex);
+    if (!Number.isInteger(planId) || planId <= 0 || !Number.isInteger(dayIndex) || dayIndex <= 0) {
+      res.status(400).json({ error: "Valid plan ID and day index are required" });
+      return;
+    }
+    const result = await generateYoutubeIdeaThumbnail(req.auth!.user_id, planId, dayIndex, {
+      textPreference: typeof req.body?.textPreference === "string" ? req.body.textPreference : null,
+      sourceImages: req.body?.sourceImages,
+    });
+    res.json(result);
+  } catch (err) {
+    req.log.error({ err }, "YouTube thumbnail generation error");
+    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to generate thumbnail" });
   }
 });
 
