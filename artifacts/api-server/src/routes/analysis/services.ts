@@ -357,71 +357,6 @@ export interface FormatProfile {
   backgroundFocus: string;
 }
 
-interface ContentAnalysisResult {
-  formatProfile: FormatProfile;
-  semanticObservations: Pick<VisualObservations, "facialEngagement" | "presenceOnCamera" | "visualVariety">;
-  semanticAssessments: Pick<Record<string, string>, "presenceFeedback" | "presenceSuggestion" | "hookStrength" | "hookStrengthReason">;
-}
-
-interface QualityAnalysisResult {
-  observations: VisualObservations;
-  assessments: Record<string, string>;
-}
-
-interface EditingAnalysisResult {
-  mode: string;
-  topic: string;
-  audienceGoal: string;
-  viewPotential: string;
-  editingStyle: string;
-  introGuidance: string;
-  pacingGuidance: string;
-  motionGuidance: string;
-  hookApproach: string;
-  packagingAngle: string;
-  nowFixes: string[];
-  nextVideoFixes: string[];
-  editorNotes: string[];
-  hooks: Array<{ text: string; start: string; end: string; reason: string; confidence: string }>;
-  removeSections: Array<{ start: string; end: string; reason: string }>;
-  shortVideos: Array<{ start: string; end: string; title?: string; reason: string; confidence: string }>;
-  rewrittenHook?: string;
-  editingSuggestions: string[];
-}
-
-interface PublishPlatformResult {
-  titles: string[];
-  description: string;
-  hashtags: Array<{ tag: string; effect?: string }>;
-  timestamps: Array<{ time: string; label: string }>;
-  titleStrategies?: string[];
-  algorithmFit?: string;
-  packagingStrategy?: string;
-  nicheReferences?: string[];
-  audiencePromise?: string;
-}
-
-interface ShortClipsResult {
-  clips: Array<{
-    start: string;
-    end: string;
-    title: string;
-    hook: string;
-    whyItWorks: string;
-    platforms: string[];
-    platformReason: string;
-    tacticalNote: string;
-    engagementPotential: string;
-    engagementReason: string;
-  }>;
-}
-
-interface MergedContentAndPackagingResult {
-  editing: EditingAnalysisResult;
-  seo: Record<string, PublishPlatformResult>;
-  shortClips: ShortClipsResult;
-}
-
 function fmtSecs(s: number): string {
   const m = Math.floor(s / 60);
   const sec = Math.floor(s % 60);
@@ -1146,15 +1081,6 @@ const BASE_SYSTEM_PROMPT = `You are an expert content strategist and video consu
 
 Never use: "Great job!", "Consider trying", "You might want to", "As a content creator", "In conclusion", or any filler phrase. Every sentence must contain a specific observation or action. Write in second person ("your video", "you open with"). Be direct but not harsh. Lead every section with the most important insight first. If something is genuinely good, say so in one word and move on.`;
 
-const EDITING_SYSTEM_PROMPT = `You are a senior video editor and YouTube strategist with 10 years experience. You give feedback like a professional editor reviewing a client's rough cut: specific, direct, actionable.
-
-Rules:
-- Always reference exact timestamps or quote exact words
-- Only suggest cutting genuinely redundant content
-- When suggesting a cut, explain what value is lost vs gained in one sentence
-- Reference platform-specific best practices
-- Never say "consider" or "you might want to"`;
-
 // UPDATED: Now asks the AI for context-aware background judgment and engagement signals
 const VISUAL_OBSERVATIONS_SCHEMA = `
 Return STRICT JSON only (no markdown). Do NOT include any numeric scores — only the observations below.
@@ -1235,88 +1161,6 @@ CRITICAL for FORMAT DETECTION:
     "presenceSuggestion": "one specific actionable improvement for on-camera presence",
     "hookStrength": "strong" | "moderate" | "weak",
     "hookStrengthReason": "why the hook is or isn't working — reference the actual opening seconds"
-  }
-}`;
-
-const CONTENT_ANALYSIS_SCHEMA = `
-Return STRICT JSON only (no markdown).
-
-{
-  "formatProfile": {
-    "contentFormat": "one of the allowed values",
-    "formatConfidence": "high" | "medium" | "low",
-    "primarySubject": "what the viewer is mainly supposed to watch",
-    "contentSummary": "one sentence on what this video is actually about based on visuals, not noisy transcript fragments",
-    "viewerIntent": "why someone would choose to watch this type of video",
-    "successFactors": ["3 to 5 concrete things that matter most for this format"],
-    "ignoredSignals": ["signals that should NOT be emphasized for this format"],
-    "framingFocus": "how framing should be judged for this format",
-    "backgroundFocus": "how environment fit should be judged for this format"
-  },
-  "semanticObservations": {
-    "facialEngagement": "high" | "medium" | "low",
-    "presenceOnCamera": "commanding" | "adequate" | "weak",
-    "visualVariety": "high" | "medium" | "low"
-  },
-  "semanticAssessments": {
-    "presenceFeedback": "direct feedback on eye contact, energy, confidence on camera or subject presence",
-    "presenceSuggestion": "one specific actionable improvement for visible subject presence",
-    "hookStrength": "strong" | "moderate" | "weak",
-    "hookStrengthReason": "why the hook is or isn't working — reference the actual opening seconds"
-  }
-}`;
-
-const QUALITY_ANALYSIS_SCHEMA = `
-Return STRICT JSON only (no markdown). Do NOT include numeric scores — only the observations below.
-
-{
-  "observations": {
-    "lightSourceVisible": true/false,
-    "lightSourceSide": "front" | "side" | "back" | "overhead" | "unknown",
-    "catchLightsVisible": true/false,
-    "hardShadowsOnFace": true/false,
-    "colorTemperatureMismatch": true/false,
-    "skinExposure": "clipped" | "correct" | "underexposed",
-    "blownRegions": true/false,
-    "blacksCrushed": true/false,
-    "highlightsClipped": true/false,
-    "imageLooksFlat": true/false,
-    "backgroundObjects": "none" | "minimal" | "moderate" | "cluttered",
-    "backgroundDistractsFromSubject": true/false,
-    "backgroundColorClashesWithSubject": true/false,
-    "depthOfFieldSeparation": "strong" | "moderate" | "weak" | "none",
-    "backgroundContextAppropriate": "yes" | "neutral" | "no",
-    "backgroundContextIssue": "describe exactly what is wrong with background context, or empty string if fine",
-    "eyeLinePosition": "upper-third" | "center" | "lower-third" | "off-frame",
-    "excessiveHeadroom": true/false,
-    "shouldersCutAwkwardly": true/false,
-    "focusOnEyes": true/false,
-    "motionBlurPresent": true/false,
-    "microJitterVisible": true/false,
-    "driftVisible": true/false,
-    "stabilizationArtifacts": true/false,
-    "colorCast": "none" | "warm" | "cool" | "green" | "mixed",
-    "colorCastSeverity": "none" | "slight" | "moderate" | "strong"
-  },
-  "assessments": {
-    "overallTopFix": "the single most impactful technical fix — specific and measurable",
-    "colorGradingRecommendation": "one specific color grading suggestion with a concrete value",
-    "lighting": "specific observation referencing light source, shadows, catch lights",
-    "lightingSuggestion": "Fix now: exact post-production or edit fix. Next video: exact production fix.",
-    "brightness": "specific note on skin exposure, blown regions, or underexposed areas",
-    "brightnessSuggestion": "Fix now: exact exposure adjustment in editing software. Next video: exact production fix.",
-    "contrast": "specific note on crushed blacks, clipped highlights, or flat image — reference face, background, clothing",
-    "contrastSuggestion": "Fix now: exact contrast fix in post. Next video: exact production fix.",
-    "colorTemperature": "name the specific cast and where it is most visible",
-    "colorTemperatureSuggestion": "Fix now: specific color correction value. Next video: exact lighting or white balance fix.",
-    "background": "describe exactly what objects are visible and whether they are appropriate for the visible topic",
-    "backgroundSuggestion": "Fix now: contextual post or crop fix that references what is visible. Next video: what background to shoot against instead.",
-    "framing": "headroom, eye-line position, shoulder crop — be exact",
-    "framingSuggestion": "Fix now: exact crop or reframe adjustment. Next video: exact camera or posture adjustment.",
-    "sharpness": "focus plane location, any motion blur, background sharpness relative to subject",
-    "sharpnessSuggestion": "Fix now: exact sharpening or cleanup move. Next video: exact focus, shutter, or lens fix.",
-    "stability": "note micro-jitter, drift, or stabilization artifacts and when they occur",
-    "stabilitySuggestion": "Fix now: exact stabilization edit fix. Next video: exact support or camera movement fix."
   }
 }`;
 
@@ -1449,6 +1293,17 @@ function getDefaultFormatProfile(): FormatProfile {
   };
 }
 
+interface VisualAnalysisRequestOptions {
+  detail?: "low" | "high";
+  focus?: "understanding" | "quality" | "balanced";
+}
+
+interface VisualAnalysisParts {
+  observations: VisualObservations;
+  assessments: Record<string, string>;
+  formatProfile: FormatProfile;
+}
+
 function getDefaultVisualObservations(): VisualObservations {
   return {
     lightSourceVisible: true,
@@ -1527,149 +1382,80 @@ function normalizeFormatProfile(
   };
 }
 
-function buildTranscriptContext(transcript?: string) {
-  return transcript
-    ? `\n\nVIDEO TOPIC CONTEXT (secondary evidence only): "${transcript.substring(0, 400)}"\nUse transcript text only as weak context. If sparse words conflict with the visuals, trust the visuals.`
-    : "";
-}
-
-function buildImageContent(frameBase64List: string[], detail: "low" | "high") {
-  return frameBase64List.map((b64) => ({
-    type: "image_url",
-    image_url: { url: `data:image/jpeg;base64,${b64}`, detail },
-  }));
-}
-
-export async function analyzeContent(
-  frameBase64List: string[],
-  platform: string,
-  transcript?: string,
-  userId?: number,
-): Promise<ContentAnalysisResult> {
-  const transcriptContext = buildTranscriptContext(transcript);
-  const defaultFormatProfile = getDefaultFormatProfile();
-  const defaultSemanticObservations: ContentAnalysisResult["semanticObservations"] = {
-    facialEngagement: "medium",
-    presenceOnCamera: "adequate",
-    visualVariety: "low",
-  };
-  const defaultSemanticAssessments: ContentAnalysisResult["semanticAssessments"] = {
-    presenceFeedback: "Evaluate whether the visible subject has enough visual energy and clarity to hold attention.",
-    presenceSuggestion: "Increase visual intention in the opening so the main subject reads instantly.",
-    hookStrength: "moderate",
-    hookStrengthReason: "The opening needs to create more urgency in the first 5 seconds.",
-  };
-
-  try {
-    const response = await callOpenAI({
-      model: "gpt-4o-mini",
-      max_completion_tokens: 1200,
-      messages: [{
-        role: "user",
-        content: [
-          {
-            type: "text",
-            text: `${BASE_SYSTEM_PROMPT}
-
-Analyze these ${frameBase64List.length} low-detail frame(s) from a ${platform} video.${transcriptContext}
-
-PRIMARY GOAL: Understand what this video is actually about from visuals across the timeline.
-- Identify the real format, primary subject, progression, and payoff.
-- Confirm whether the footage reads as vertical, horizontal, or square and let that inform your judgment.
-- Call out visual variety and whether there is evidence of b-roll, cutaways, or scene changes.
-- Write contentSummary from what is visibly happening, not from noisy transcript fragments.
-- If this looks like art, craft, cooking, ambience, process, or screen-demo content, say so directly.
-- Do not overclaim fine-detail issues unless they are obvious across the set of frames.
-
-FORMAT RULE: If this is not mainly a face-to-camera presenter video, avoid presenter-specific language like eye-line, headroom, and on-camera presence unless it is genuinely relevant to what the viewer is watching.
-
-TOPIC LOCK RULE: Never invent a different niche just because a sparse transcript fragment mentions unrelated words. Packaging and summary must stay anchored to what is visibly happening in the frames.
-
-${CONTENT_ANALYSIS_SCHEMA}`,
-          },
-          ...buildImageContent(frameBase64List, "low"),
-        ],
-      }],
-    }, userId);
-
-    const raw = parseJson<{
-      formatProfile?: Partial<FormatProfile>;
-      semanticObservations?: Partial<ContentAnalysisResult["semanticObservations"]>;
-      semanticAssessments?: Partial<ContentAnalysisResult["semanticAssessments"]>;
-    }>(response.choices[0]?.message?.content ?? "{}", {});
-
-    return {
-      formatProfile: normalizeFormatProfile(raw.formatProfile, defaultFormatProfile),
-      semanticObservations: { ...defaultSemanticObservations, ...(raw.semanticObservations ?? {}) },
-      semanticAssessments: { ...defaultSemanticAssessments, ...(raw.semanticAssessments ?? {}) },
-    };
-  } catch (err) {
-    logger.warn({ err }, "Content analysis failed, using defaults");
-    return {
-      formatProfile: defaultFormatProfile,
-      semanticObservations: defaultSemanticObservations,
-      semanticAssessments: defaultSemanticAssessments,
-    };
-  }
-}
-
-export async function analyzeQuality(
+async function requestVisualAnalysisParts(
   frameBase64List: string[],
   platform: string,
   plan = "free",
   transcript?: string,
   userId?: number,
-): Promise<QualityAnalysisResult> {
-  const transcriptContext = buildTranscriptContext(transcript);
-  const defaultObs = getDefaultVisualObservations();
-  const defaultAssessments = getDefaultVisualAssessments();
-
-  try {
-    const response = await callOpenAI({
-      model: "gpt-4o",
-      max_completion_tokens: plan === "free" ? 1200 : 2200,
-      messages: [{
-        role: "user",
-        content: [
-          {
-            type: "text",
-            text: `${BASE_SYSTEM_PROMPT}
-
-Analyze these ${frameBase64List.length} high-detail frame(s) from a ${platform} video.${transcriptContext}
-
-PRIMARY GOAL: Judge quality-critical details only.
-- Focus on sharpness, lighting, framing, color accuracy, texture detail, motion blur, and text readability.
+  options: VisualAnalysisRequestOptions = {},
+): Promise<VisualAnalysisParts> {
+  const detail = options.detail ?? "high";
+  const focus = options.focus ?? "balanced";
+  const imageContent = frameBase64List.map((b64) => ({
+    type: "image_url",
+    image_url: { url: `data:image/jpeg;base64,${b64}`, detail },
+  }));
+  const isFree = plan === "free";
+  const transcriptContext = transcript
+    ? `\n\nVIDEO TOPIC CONTEXT (secondary evidence only): "${transcript.substring(0, 400)}"\nUse transcript text only as weak context. If sparse words conflict with the visuals, trust the visuals.`
+    : "";
+  const focusInstruction = focus === "understanding"
+    ? `PRIMARY GOAL: Understand what this video is actually about from visuals across the timeline.
+- Identify the real format, primary subject, progression, and payoff.
+- Write contentSummary from what is visibly happening, not from noisy transcript fragments.
+- If this looks like art, craft, cooking, ambience, or process content, say so directly.
+- Do not overclaim fine-detail issues unless they are obvious across the set of frames.`
+    : focus === "quality"
+    ? `PRIMARY GOAL: Judge quality-critical details using these higher-resolution frames.
+- Focus on sharpness, lighting, framing, color accuracy, texture detail, and text readability.
 - Keep the video topic aligned with the visible subject already understood from the broader visual pass.
-- Do not rename the topic based on isolated transcript words or random objects in the frame.
+- Do not rename the topic based on isolated transcript words or random objects in the frame.`
+    : `PRIMARY GOAL: Balance topic understanding with quality judgment, but keep packaging aligned with the visible subject.`;
+
+  const prompt = `${BASE_SYSTEM_PROMPT}
+
+Analyze these ${frameBase64List.length} ${detail}-detail frame(s) from a ${platform} video.${transcriptContext}
+
+${focusInstruction}
+
+For EACH dimension, write exactly as a professional video producer giving paid notes:
+- Reference where in the frame or when in the video the issue occurs
+- Never use vague praise without a specific physical observation
+- If something scores above 85, name the ONE thing that would push it to 100
+- Suggest a concrete, measurable fix
 - Every suggestion field must use this format exactly: "Fix now: ... Next video: ..."
 
 CRITICAL RULE: Never reference frame numbers. Reference approximate time positions.
 
-BACKGROUND CONTEXT RULE: Judge background against the visible topic. If the creator is discussing a business app but is standing in a kitchen with appliances visible, that is "no" for backgroundContextAppropriate even if the shot is technically clean.
+BACKGROUND CONTEXT RULE: Judge background against the VIDEO'S TOPIC. If the creator is discussing a business app but is standing in a kitchen with appliances visible — that is "no" for backgroundContextAppropriate, even if the shot is technically clean. Explain what is wrong and suggest a specific alternative that fits the topic.
 
-${QUALITY_ANALYSIS_SCHEMA}`,
-          },
-          ...buildImageContent(frameBase64List, "high"),
-        ],
-      }],
-    }, userId);
+FORMAT RULE: If this is not mainly a face-to-camera presenter video, avoid presenter-specific language like eye-line, headroom, and on-camera presence unless it is genuinely relevant to what the viewer is watching.
 
-    const raw = parseJson<{
-      observations?: Partial<VisualObservations>;
-      assessments?: Record<string, string>;
-    }>(response.choices[0]?.message?.content ?? "{}", {});
+TOPIC LOCK RULE: Never invent a different niche just because a sparse transcript fragment mentions unrelated words. Packaging and summary must stay anchored to what is visibly happening in the frames.
 
-    return {
-      observations: { ...defaultObs, ...(raw.observations ?? {}) },
-      assessments: { ...defaultAssessments, ...(raw.assessments ?? {}) },
-    };
-  } catch (err) {
-    logger.warn({ err }, "Quality analysis failed, using defaults");
-    return {
-      observations: defaultObs,
-      assessments: defaultAssessments,
-    };
-  }
+${VISUAL_OBSERVATIONS_SCHEMA}`;
+
+  const defaultObs = getDefaultVisualObservations();
+  const defaultAssessments = getDefaultVisualAssessments();
+  const defaultFormatProfile = getDefaultFormatProfile();
+
+  const response = await callOpenAI({
+    model: "gpt-4o",
+    max_completion_tokens: isFree ? 1200 : 2500,
+    messages: [{ role: "user", content: [{ type: "text", text: prompt }, ...imageContent] }],
+  }, userId);
+
+  const raw = parseJson<{ formatProfile?: Partial<FormatProfile>; observations?: Partial<VisualObservations>; assessments?: Record<string, string> }>(
+    response.choices[0]?.message?.content ?? "{}",
+    {},
+  );
+
+  return {
+    observations: { ...defaultObs, ...(raw.observations ?? {}) },
+    assessments: { ...defaultAssessments, ...(raw.assessments ?? {}) },
+    formatProfile: normalizeFormatProfile(raw.formatProfile, defaultFormatProfile),
+  };
 }
 
 const HIGH_DETAIL_ASSESSMENT_KEYS = [
@@ -1721,18 +1507,25 @@ export async function analyzeVisualsHybrid(
   transcript?: string,
   userId?: number,
 ): Promise<object> {
+  const fallbackProfile = getDefaultFormatProfile();
   const defaultObs = getDefaultVisualObservations();
   const defaultAssessments = getDefaultVisualAssessments();
 
   try {
-    const [content, quality] = await Promise.all([
-      analyzeContent(lowDetailFrames, platform, transcript, userId),
-      analyzeQuality(highDetailFrames, platform, plan, transcript, userId),
-    ]);
+    const understandingPromise = requestVisualAnalysisParts(lowDetailFrames, platform, plan, transcript, userId, {
+      detail: "low",
+      focus: "understanding",
+    });
+    const qualityPromise = requestVisualAnalysisParts(highDetailFrames, platform, plan, transcript, userId, {
+      detail: "high",
+      focus: "quality",
+    });
+
+    const [understanding, quality] = await Promise.all([understandingPromise, qualityPromise]);
 
     const mergedObservations: VisualObservations = {
       ...defaultObs,
-      ...content.semanticObservations,
+      ...understanding.observations,
     };
     for (const key of HIGH_DETAIL_OBSERVATION_KEYS) {
       if (quality.observations[key] !== undefined) {
@@ -1742,7 +1535,7 @@ export async function analyzeVisualsHybrid(
 
     const mergedAssessments: Record<string, string> = {
       ...defaultAssessments,
-      ...content.semanticAssessments,
+      ...understanding.assessments,
     };
     for (const key of HIGH_DETAIL_ASSESSMENT_KEYS) {
       if (quality.assessments[key] !== undefined) {
@@ -1758,11 +1551,14 @@ export async function analyzeVisualsHybrid(
       mergedObservations,
       mergedAssessments,
       plan,
-      content.formatProfile,
+      understanding.formatProfile ?? fallbackProfile,
     );
   } catch (err) {
     logger.warn({ err }, "Hybrid visual analysis failed, falling back to single-pass visual analysis");
-    return analyzeVisuals(highDetailFrames.length ? highDetailFrames : lowDetailFrames, platform, plan, transcript, userId);
+    return analyzeVisuals(highDetailFrames.length ? highDetailFrames : lowDetailFrames, platform, plan, transcript, userId, {
+      detail: "high",
+      focus: "balanced",
+    });
   }
 }
 
@@ -1772,18 +1568,11 @@ export async function analyzeVisuals(
   plan = "free",
   transcript?: string,
   userId?: number,
+  options: VisualAnalysisRequestOptions = {},
 ): Promise<object> {
   try {
-    const [content, quality] = await Promise.all([
-      analyzeContent(frameBase64List, platform, transcript, userId),
-      analyzeQuality(frameBase64List, platform, plan, transcript, userId),
-    ]);
-    return buildVisualResult(
-      { ...quality.observations, ...content.semanticObservations },
-      { ...quality.assessments, ...content.semanticAssessments },
-      plan,
-      content.formatProfile,
-    );
+    const parts = await requestVisualAnalysisParts(frameBase64List, platform, plan, transcript, userId, options);
+    return buildVisualResult(parts.observations, parts.assessments, plan, parts.formatProfile);
   } catch (err) {
     logger.warn({ err }, "Visual analysis failed, using defaults");
     return buildVisualResult(getDefaultVisualObservations(), getDefaultVisualAssessments(), plan, getDefaultFormatProfile());
@@ -2503,346 +2292,6 @@ function buildChapterPoints(
     chapters.unshift({ start: 0, time: "0:00", text: segments[0]!.text.trim().substring(0, 80) });
   }
   return chapters;
-}
-
-export async function analyzeContentAndPackaging(
-  transcript: string,
-  segments: Array<{ start: number; end: number; text: string }>,
-  platforms: string[],
-  audioPath?: string,
-  plan = "free",
-  speechAnalysis?: SpeechAnalysis,
-  videoName?: string,
-  formatProfile?: Partial<FormatProfile> | null,
-  userId?: number,
-): Promise<MergedContentAndPackagingResult> {
-  const lastSeg = segments[segments.length - 1];
-  const totalDuration = lastSeg?.end ?? 0;
-  const isFree = plan === "free";
-  const isVisualFirst = speechAnalysis?.mode === "visual_first" || !speechAnalysis?.hasMeaningfulSpeech;
-  const languageInstruction = buildOutputLanguageInstruction(transcript, speechAnalysis);
-  const strategyContext = segments.length
-    ? segments
-        .slice(0, Math.min(segments.length, 10))
-        .map((seg) => `${fmtSecs(seg.start)}-${fmtSecs(seg.end)} ${seg.text}`)
-        .join("\n")
-    : transcript.substring(0, 1200);
-  const formatHint = formatProfile
-    ? `Detected format: ${formatProfile.contentFormat ?? "general_visual"}.
-Primary subject: ${formatProfile.primarySubject ?? "the main subject on screen"}.
-Visual summary: ${formatProfile.contentSummary ?? "A visual-first video centered on the main subject and payoff"}.
-Viewer intent: ${formatProfile.viewerIntent ?? "get the promised payoff quickly"}.
-Success factors: ${(formatProfile.successFactors ?? []).join(", ") || "clarity, pacing, payoff"}.
-Ignored signals: ${(formatProfile.ignoredSignals ?? []).join(", ") || "none"}.`
-    : "";
-
-  const defaultEditing: EditingAnalysisResult = {
-    mode: isVisualFirst ? "visual_first" : speechAnalysis?.mode ?? "talking_first",
-    topic: videoName ?? (isVisualFirst ? "Visual process / payoff video" : "Speaker-led informational video"),
-    audienceGoal: isVisualFirst
-      ? "See the visual payoff quickly and understand why the result is worth staying for."
-      : "Get the main idea quickly and stay because the delivery feels tight, useful, and easy to follow.",
-    viewPotential: isVisualFirst
-      ? "This can earn views if the payoff becomes obvious early and the middle keeps showing visible progress."
-      : "This can earn views if the value proposition lands early and the pacing stays tighter than the average niche upload.",
-    editingStyle: isVisualFirst
-      ? "Use progression-first editing: open on the strongest visual state, cut repetition hard, and let each cut reveal clear progress."
-      : "Use clarity-first editing: remove throat-clearing, open on the strongest claim, and keep every cut moving the viewer toward the takeaway.",
-    introGuidance: "Skip a long branded intro. Open on the strongest promise, result, or tension point before any setup.",
-    pacingGuidance: isVisualFirst
-      ? "Keep visual momentum high. If progress is not visible for more than a few seconds, add a cut, zoom, overlay, or time jump."
-      : "Front-load the point, cut pauses aggressively, and treat every slow sentence as a candidate for tightening or visual support.",
-    motionGuidance: isVisualFirst
-      ? "Use motion only when it helps the viewer read progress: punch-ins, speed ramps, reframes, and overlays should clarify the work, not decorate it."
-      : "Use moderate motion. Podcasts, commentary, and educational videos usually perform better with intentional punch-ins, angle swaps, captions, and selective B-roll than with constant movement.",
-    hookApproach: "Make the first 5-15 seconds prove why this video is worth a click by showing the payoff, conflict, or strongest line immediately.",
-    packagingAngle: "Package the video around the clearest viewer outcome, not a vague summary of what happens on screen.",
-    nowFixes: [
-      "Trim the slowest setup lines before the main payoff or thesis appears.",
-      "Move the clearest outcome, strongest quote, or best visual moment into the opening.",
-      "Use pattern breaks where attention is likely to dip: B-roll, punch-ins, captions, or a cleaner cut point.",
-    ],
-    nextVideoFixes: [
-      "Plan the opening around the payoff before recording so the first 10 seconds do more work.",
-      "Record cleaner pickup lines or alternate angles for sections that usually drag.",
-      "Design the shoot so every minute creates a visible change, proof point, or emotional turn.",
-    ],
-    editorNotes: [
-      "Match editing intensity to the format. Podcasts and educational videos usually want restraint plus clarity, not hyperactive motion.",
-      "If the topic is niche or technical, on-screen text should clarify the takeaway rather than repeat every spoken sentence.",
-    ],
-    hooks: [],
-    removeSections: [],
-    shortVideos: [],
-    rewrittenHook: undefined,
-    editingSuggestions: isVisualFirst
-      ? [
-          "Open on the strongest visual change before any slow setup so the first three seconds communicate the payoff immediately.",
-        ]
-      : [
-          "Cut pauses longer than 1.5 seconds for tighter pacing",
-        ],
-  };
-
-  const defaultSeoForPlatform = (platform: string): PublishPlatformResult => ({
-    titles: [platform === "youtube_shorts" ? "Short-form title" : "Your Video Title"],
-    description: platform === "youtube_shorts" ? "Two sentences." : "Description.",
-    hashtags: [],
-    timestamps: [{ time: "0:00", label: "Introduction" }],
-    titleStrategies: platform === "youtube_long" || platform === "youtube_shorts"
-      ? ["curiosity gap", "how-to", "number-based", "problem/solution", "bold claim"]
-      : undefined,
-    algorithmFit: "",
-    packagingStrategy: "",
-    nicheReferences: [],
-    audiencePromise: "",
-  });
-
-  const defaultShortClips: ShortClipsResult = { clips: [] };
-
-  const chapterPoints = buildChapterPoints(segments, 10);
-  const platformGuide: Record<string, string> = {
-    youtube_long: "YouTube long-form: titles 60-70 chars, curiosity gap required, keyword in first 3 words.",
-    youtube_shorts: "YouTube Shorts: punchy titles under 50 chars, high-energy action verbs",
-    tiktok: "TikTok: trend-aware, conversational, 3-5 hashtags from trending niches",
-    instagram: "Instagram Reels: lifestyle-forward, mix of niche and broad hashtags",
-    linkedin: "LinkedIn: professional framing, thought leadership angle, low hashtag count",
-    x: "X/Twitter: max 2-3 hashtags, punchy and opinionated",
-  };
-
-  const clipChunks = (() => {
-    if (!segments.length) return [] as Array<{ index: number; start: number; end: number; preview: string; durationSec: number }>;
-    const chunks: Array<{ index: number; start: number; end: number; preview: string; durationSec: number }> = [];
-    const CHUNK_SEC = 90;
-    let chunkStart = segments[0]!.start;
-    let chunkEnd = segments[0]!.start;
-    let chunkText = "";
-    for (const seg of segments) {
-      if (seg.start - chunkStart >= CHUNK_SEC && chunkText) {
-        chunks.push({ index: chunks.length, start: chunkStart, end: chunkEnd, preview: isVisualFirst ? "" : chunkText.trim().substring(0, 250), durationSec: Math.round(chunkEnd - chunkStart) });
-        chunkStart = seg.start;
-        chunkEnd = seg.start;
-        chunkText = "";
-      }
-      chunkText += ` ${seg.text}`;
-      chunkEnd = seg.end;
-    }
-    if (chunkText) {
-      chunks.push({ index: chunks.length, start: chunkStart, end: chunkEnd, preview: isVisualFirst ? "" : chunkText.trim().substring(0, 250), durationSec: Math.round(chunkEnd - chunkStart) });
-    }
-    return chunks;
-  })();
-
-  try {
-    const response = await callOpenAI({
-      model: "gpt-4o",
-      response_format: { type: "json_object" },
-      max_completion_tokens: isFree ? 2600 : 5200,
-      messages: [{
-        role: "system",
-        content: `${BASE_SYSTEM_PROMPT}
-
-${EDITING_SYSTEM_PROMPT}
-
-${languageInstruction}
-
-You are analyzing one video transcript and must return a single JSON object with exactly three top-level keys:
-- "editing"
-- "seo"
-- "shortClips"
-
-[EDITING SECTION]
-You are building an editor brief for this specific video.
-
-Video name: "${videoName ?? "Video analysis"}"
-Speech profile: ${speechAnalysis?.summary ?? "Speech data not available."}
-${formatHint}
-
-Use only what is supported by the transcript, timing, and detected format. Write this like a working editor telling a creator how to make this cut more watchable and more competitive for views.
-
-Requirements:
-- Name the topic or angle as specifically as the evidence allows.
-- Explain the editing style this format actually wants.
-- Say whether this video needs an intro, how fast the pacing should feel, and whether the edit should be simple, moderate, or motion-heavy.
-- Separate "fix now on this cut" from "fix in the next shoot".
-- Ground every recommendation in real editing techniques, not generic motivation.
-- Include a blunt viewPotential sentence that answers whether the current structure gives this a chance to pull views.
-- Identify the strongest hook moments that would stop a scroll. Copy exact transcript text when speech is available.
-- Give specific editing suggestions referencing actual content and platform best practices.
-- If you return a rewritten hook, it must be a complete sentence, max 30 words, natural, direct, and confident.
-
-[SEO/PUBLISH SECTION]
-For each requested platform, generate packaging using the corresponding platform rules and the same transcript evidence.
-- If transcript signal is limited, prefer accurate format-aware packaging over specific nouns from sparse or noisy transcript fragments.
-- Never infer cooking, food, dessert, recipe, or kitchen themes unless the detected format or transcript clearly supports that topic.
-- Return SEO as an object keyed by platform id.
-
-[SHORT CLIPS SECTION]
-Identify the best clip moments for short-form repurposing.
-- Use the supplied chunk indexes only.
-- Return timestamp windows, hook, why it works, platform fit, and${isFree ? "" : " tactical and engagement notes."}
-
-Return STRICT JSON only.`,
-      }, {
-        role: "user",
-        content: `Transcript / timed context:
-${strategyContext}
-
-Full transcript:
-${transcript || "(no transcript)"}
-
-Requested platforms:
-${platforms.map((platform) => `- ${platform}: ${platformGuide[platform] ?? ""}`).join("\n")}
-
-Real chapter timestamps:
-${chapterPoints.map((c) => `${c.time} - context: "${c.text}"`).join("\n") || "none"}
-
-Short clip chunk candidates:
-${JSON.stringify(clipChunks)}
-
-Return JSON in this shape:
-{
-  "editing": {
-    "topic": "specific topic or angle",
-    "audienceGoal": "what the viewer wants from this video",
-    "viewPotential": "one sentence",
-    "editingStyle": "best editing style for this format and topic",
-    "introGuidance": "does this need an intro or should it cold open",
-    "pacingGuidance": "how fast or restrained the pacing should be",
-    "motionGuidance": "how much motion, punch-ins, captions, or visual movement this format wants",
-    "hookApproach": "what the opening should do",
-    "packagingAngle": "what the title/thumbnail/packaging should sell",
-    "nowFixes": ["3 direct instructions for this current cut"],
-    "nextVideoFixes": ["3 direct instructions for the next shoot"],
-    "editorNotes": ["2 to 4 short format-aware editing truths for this creator"],
-    "hookTexts": ["exact sentence from transcript"],
-    "editingSuggestions": ["specific tip referencing actual content"],
-    "rewrittenHook": "optional rewritten opening"
-  },
-  "seo": {
-    "${platforms[0] ?? "youtube_long"}": {
-      "titles": ["title options"],
-      "description": "full description",
-      "hashtags": [{"tag":"Tag","effect":"audience"}],
-      "timestamps": [{"time":"0:00","label":"complete label"}],
-      "titleStrategies": ["curiosity gap","how-to","number-based","problem/solution","bold claim"],
-      "algorithmFit": "why this packaging matches platform behavior",
-      "packagingStrategy": "what audience promise these titles are selling",
-      "nicheReferences": ["notes"],
-      "audiencePromise": "core promise"
-    }
-  },
-  "shortClips": {
-    "clips": [{"chunkIndex":0,"startSec":0,"endSec":30,"title":"title","hook":"exact opening words","whyItWorks":"one sentence","platforms":["TikTok"],"platformReason":"why"${isFree ? "" : ",\"tacticalNote\":\"one tip\",\"engagementPotential\":\"High\",\"engagementReason\":\"why\""}}]
-  }
-}`,
-      }],
-    }, userId);
-
-    const parsed = parseJson<{
-      editing?: Partial<EditingAnalysisResult> & { hookTexts?: string[]; editingSuggestions?: string[] };
-      seo?: Record<string, Partial<PublishPlatformResult>>;
-      shortClips?: { clips?: Array<Record<string, unknown>> };
-    }>(response.choices[0]?.message?.content ?? "{}", {});
-
-    const editing = { ...defaultEditing, ...(parsed.editing ?? {}) };
-    const hookTexts = Array.isArray(parsed.editing?.hookTexts) ? parsed.editing?.hookTexts : [];
-    const hooks = hookTexts
-      .map((hookText) => {
-        const match = matchTextToSegment(hookText, segments);
-        if (!match) return null;
-        return {
-          text: hookText,
-          start: fmtSecs(match.segment.start),
-          end: fmtSecs(match.segment.end),
-          reason: "High-value hook moment",
-          confidence: match.confidence,
-        };
-      })
-      .filter(Boolean) as EditingAnalysisResult["hooks"];
-
-    const removeSections: EditingAnalysisResult["removeSections"] = [];
-    const fillerRx = /\b(um+|uh+|er+|ah+|hmm+|like|you know|basically)\b/gi;
-    for (const seg of segments) {
-      fillerRx.lastIndex = 0;
-      if (fillerRx.test(seg.text) && seg.end - seg.start <= 4) {
-        removeSections.push({
-          start: fmtSecs(seg.start),
-          end: fmtSecs(seg.end),
-          reason: `Filler words: "${seg.text.trim()}"`,
-        });
-      }
-    }
-    if (audioPath) {
-      const silences = await detectSilences(audioPath);
-      for (const silence of silences) {
-        if (!removeSections.some((section) => section.start === fmtSecs(silence.start))) {
-          removeSections.push({
-            start: fmtSecs(silence.start),
-            end: fmtSecs(silence.end),
-            reason: `Dead air / silence gap (${(silence.end - silence.start).toFixed(1)}s) — viewer likely to disengage`,
-          });
-        }
-      }
-    }
-
-    const seo: Record<string, PublishPlatformResult> = {};
-    for (const platform of platforms) {
-      const base = defaultSeoForPlatform(platform);
-      const merged = { ...base, ...(parsed.seo?.[platform] ?? {}) };
-      merged.hashtags = (merged.hashtags ?? []).map((tag) => ({ ...tag, tag: typeof tag.tag === "string" ? tag.tag.replace(/^#+/, "") : "" })).filter((tag) => tag.tag);
-      if (chapterPoints.length) {
-        merged.timestamps = (merged.timestamps ?? base.timestamps).map((timestamp, index) => ({
-          time: chapterPoints[index]?.time ?? timestamp.time,
-          label: timestamp.label,
-        }));
-      }
-      seo[platform] = merged;
-    }
-
-    const shortClips: ShortClipsResult = {
-      clips: (parsed.shortClips?.clips ?? []).map((clip) => {
-        const chunk = clipChunks[typeof clip.chunkIndex === "number" ? clip.chunkIndex : 0];
-        const startSec = typeof clip.startSec === "number" ? Math.max(chunk?.start ?? 0, clip.startSec) : (chunk?.start ?? 0);
-        const endSec = typeof clip.endSec === "number" ? Math.min(chunk?.end ?? totalDuration, clip.endSec) : (chunk?.end ?? totalDuration);
-        return {
-          start: fmtSecs(Math.min(startSec, totalDuration || startSec)),
-          end: fmtSecs(Math.min(endSec, totalDuration || endSec)),
-          title: String(clip.title ?? ""),
-          hook: String(clip.hook ?? ""),
-          whyItWorks: String(clip.whyItWorks ?? ""),
-          platforms: Array.isArray(clip.platforms) ? clip.platforms.map((item) => String(item)) : [],
-          platformReason: String(clip.platformReason ?? ""),
-          tacticalNote: String(clip.tacticalNote ?? ""),
-          engagementPotential: String(clip.engagementPotential ?? ""),
-          engagementReason: String(clip.engagementReason ?? ""),
-        };
-      }).slice(0, isFree ? 1 : 3),
-    };
-
-    return {
-      editing: {
-        ...editing,
-        hooks,
-        removeSections: removeSections.slice(0, 12),
-        shortVideos: [],
-        editingSuggestions: Array.isArray(parsed.editing?.editingSuggestions) && parsed.editing?.editingSuggestions.length
-          ? parsed.editing.editingSuggestions.slice(0, isFree ? 1 : 5)
-          : defaultEditing.editingSuggestions,
-      },
-      seo,
-      shortClips,
-    };
-  } catch (err) {
-    logger.warn({ err }, "Merged content and packaging analysis failed");
-    const seo: Record<string, PublishPlatformResult> = {};
-    for (const platform of platforms) seo[platform] = defaultSeoForPlatform(platform);
-    return {
-      editing: defaultEditing,
-      seo,
-      shortClips: defaultShortClips,
-    };
-  }
 }
 
 export async function generateSeo(
