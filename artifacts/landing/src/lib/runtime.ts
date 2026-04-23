@@ -30,10 +30,8 @@ export function getCoreAppUrl(token?: string) {
 }
 
 export function getWakePageUrl(token?: string, target?: string) {
-  const url = new URL("/wake", window.location.origin);
-  if (token) url.searchParams.set("token", token);
-  if (target) url.searchParams.set("target", target);
-  return `${url.pathname}${url.search}${url.hash}`;
+  if (target) return target;
+  return getCoreAppUrl(token);
 }
 
 export function getApiHealthUrl() {
