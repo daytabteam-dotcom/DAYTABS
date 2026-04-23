@@ -94,7 +94,7 @@ export default function RefundPolicyPage() {
           content="Read the DayTabs refund policy, billing terms, renewal rules, and how to request a refund for a paid subscription."
         />
         <meta name="robots" content="index, follow" />
-        <link rel="canonical" href="https://www.daytabs.com/refund-policy" />
+        <link rel="canonical" href="https://daytabs.com/refund-policy" />
       </Helmet>
 
       <Navbar />

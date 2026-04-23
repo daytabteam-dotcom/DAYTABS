@@ -273,7 +273,7 @@ export default function LandingPage() {
           content="Upload your video and get instant AI feedback on quality, editing, SEO titles, tags, and short clip ideas. Built for YouTube, TikTok, and Instagram creators."
         />
         <meta name="robots" content="index, follow" />
-        <link rel="canonical" href="https://www.daytabs.com/" />
+        <link rel="canonical" href="https://daytabs.com/" />
         <meta name="author" content="DayTabs" />
         <meta
           name="keywords"
@@ -284,8 +284,8 @@ export default function LandingPage() {
           property="og:description"
           content="Upload your video and get instant AI feedback on quality, editing, SEO titles, tags, and short clip ideas. Built for YouTube, TikTok, and Instagram creators."
         />
-        <meta property="og:image" content="https://www.daytabs.com/opengraph.jpg" />
-        <meta property="og:url" content="https://www.daytabs.com/" />
+        <meta property="og:image" content="https://daytabs.com/opengraph.jpg" />
+        <meta property="og:url" content="https://daytabs.com/" />
         <meta property="og:type" content="website" />
         <meta property="og:site_name" content="DayTabs" />
         <meta name="twitter:card" content="summary_large_image" />
@@ -294,7 +294,7 @@ export default function LandingPage() {
           name="twitter:description"
           content="Upload your video and get instant AI feedback on quality, editing, SEO titles, tags, and short clip ideas. Built for YouTube, TikTok, and Instagram creators."
         />
-        <meta name="twitter:image" content="https://www.daytabs.com/opengraph.jpg" />
+        <meta name="twitter:image" content="https://daytabs.com/opengraph.jpg" />
         <script type="application/ld+json">{JSON.stringify(softwareSchema)}</script>
       </Helmet>
 

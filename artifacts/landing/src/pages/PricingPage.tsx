@@ -173,15 +173,15 @@ export default function PricingPage() {
           content="Start free with 1 video analysis per month. Upgrade for more analyses, publish packages, and script planning. No contracts."
         />
         <meta name="robots" content="index, follow" />
-        <link rel="canonical" href="https://www.daytabs.com/pricing" />
+        <link rel="canonical" href="https://daytabs.com/pricing" />
         <meta name="author" content="DayTabs" />
         <meta property="og:title" content="DayTabs Pricing - Free, Creator, Pro &amp; Studio Plans" />
         <meta
           property="og:description"
           content="Start free with 1 video analysis per month. Upgrade for more analyses, publish packages, and script planning. No contracts."
         />
-        <meta property="og:image" content="https://www.daytabs.com/opengraph.jpg" />
-        <meta property="og:url" content="https://www.daytabs.com/pricing" />
+        <meta property="og:image" content="https://daytabs.com/opengraph.jpg" />
+        <meta property="og:url" content="https://daytabs.com/pricing" />
         <meta property="og:type" content="website" />
         <meta property="og:site_name" content="DayTabs" />
         <meta name="twitter:card" content="summary_large_image" />
@@ -190,7 +190,7 @@ export default function PricingPage() {
           name="twitter:description"
           content="Start free with 1 video analysis per month. Upgrade for more analyses, publish packages, and script planning. No contracts."
         />
-        <meta name="twitter:image" content="https://www.daytabs.com/opengraph.jpg" />
+        <meta name="twitter:image" content="https://daytabs.com/opengraph.jpg" />
         <script type="application/ld+json">{JSON.stringify(faqSchema)}</script>
       </Helmet>
       <Navbar />
