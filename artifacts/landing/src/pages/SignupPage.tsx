@@ -3,7 +3,7 @@ import { Link, useLocation } from "wouter";
 import { motion } from "framer-motion";
 import { Mail, Lock, User, UserPlus, AlertCircle, CheckCircle } from "lucide-react";
 import { authApi } from "../lib/api";
-import { getWakePageUrl } from "@/lib/runtime";
+import { getCoreAppUrl } from "@/lib/runtime";
 
 export default function SignupPage() {
   const [, navigate] = useLocation();
@@ -27,7 +27,7 @@ export default function SignupPage() {
     setLoading(true);
     try {
       const { token } = await authApi.signup(email, password, name);
-      navigate(getWakePageUrl(token));
+      navigate(getCoreAppUrl(token));
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Signup failed");
     } finally {
