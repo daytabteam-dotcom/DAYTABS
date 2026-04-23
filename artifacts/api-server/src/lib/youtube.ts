@@ -1889,10 +1889,12 @@ export async function discoverCompetitors(userId: number, profile: typeof youtub
       .from(youtubeCompetitorsTable)
       .where(eq(youtubeCompetitorsTable.userId, userId))
       .orderBy(desc(youtubeCompetitorsTable.fetchedAt));
-    return existingCompetitors.filter((competitor) => {
+    if (userSubscribers <= 0) return existingCompetitors.slice(0, 6);
+    const filtered = existingCompetitors.filter((competitor) => {
       const subscribers = parseNumber(competitor.subscriberCount);
-      return userSubscribers > 0 && subscribers > 0 && subscribers <= userSubscribers * 5;
+      return subscribers > 0 && subscribers <= userSubscribers * 5;
     });
+    return filtered.length ? filtered : existingCompetitors.slice(0, 6);
   };
 
   try {
@@ -1970,7 +1972,13 @@ export async function discoverCompetitors(userId: number, profile: typeof youtub
       }
     }
 
-    const selected = tier1
+    const candidatePool = tier1.length
+      ? tier1
+      : withTiers
+        .filter((item) => item.subscribers > 0)
+        .sort((a, b) => Math.abs(a.ratio - 1) - Math.abs(b.ratio - 1));
+
+    const selected = candidatePool
       .sort((a, b) => a.subscribers - b.subscribers)
       .slice(0, 6)
       .filter((item, index, list) => list.findIndex((candidate) => asString(candidate.item.id) === asString(item.item.id)) === index);
@@ -2024,10 +2032,12 @@ export async function discoverCompetitors(userId: number, profile: typeof youtub
       .where(eq(youtubeCompetitorsTable.userId, userId))
       .orderBy(desc(youtubeCompetitorsTable.fetchedAt));
 
-    return savedCompetitors.filter((competitor) => {
+    if (userSubscribers <= 0) return savedCompetitors.slice(0, 6);
+    const filtered = savedCompetitors.filter((competitor) => {
       const subscribers = parseNumber(competitor.subscriberCount);
-      return userSubscribers > 0 && subscribers > 0 && subscribers <= userSubscribers * 5;
+      return subscribers > 0 && subscribers <= userSubscribers * 5;
     });
+    return filtered.length ? filtered : savedCompetitors.slice(0, 6);
   } catch {
     return fallbackToSavedCompetitors();
   }
