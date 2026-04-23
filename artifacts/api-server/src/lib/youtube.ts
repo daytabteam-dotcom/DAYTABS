@@ -1890,17 +1890,45 @@ export async function discoverCompetitors(userId: number, profile: typeof youtub
     `${query} tutorial`,
     `${query} process`,
   ];
-  const ids = [...new Set((await Promise.all(searchQueries.map((item) => searchChannelIds(userId, item, 25)))).flat())]
+  const searchResults = await Promise.allSettled(searchQueries.map((item) => searchChannelIds(userId, item, 25)));
+  const ids = [...new Set(
+    searchResults
+      .filter((result): result is PromiseFulfilledResult<string[]> => result.status === "fulfilled")
+      .flatMap((result) => result.value),
+  )]
     .filter((id) => id !== profile.channelId);
-  if (!ids.length) return [];
+  if (!ids.length) {
+    const existingCompetitors = await db
+      .select()
+      .from(youtubeCompetitorsTable)
+      .where(eq(youtubeCompetitorsTable.userId, userId))
+      .orderBy(desc(youtubeCompetitorsTable.fetchedAt));
+    return existingCompetitors.filter((competitor) => {
+      const subscribers = parseNumber(competitor.subscriberCount);
+      return userSubscribers > 0 && subscribers > 0 && subscribers <= userSubscribers * 5;
+    });
+  }
 
-  const channels = await youtubeJson<{ items?: unknown[] }>(userId, dataApiUrl("channels", {
-    part: "snippet,statistics",
-    id: ids.join(","),
-    maxResults: String(Math.min(ids.length, 50)),
-  }), { cacheKey: `competitor-channels:${ids.join(",")}`, quotaCost: 1, ttlMs: 24 * 60 * 60 * 1000 });
+  let channelItems: unknown[] = [];
+  try {
+    const channels = await youtubeJson<{ items?: unknown[] }>(userId, dataApiUrl("channels", {
+      part: "snippet,statistics",
+      id: ids.join(","),
+      maxResults: String(Math.min(ids.length, 50)),
+    }), { cacheKey: `competitor-channels:${ids.join(",")}`, quotaCost: 1, ttlMs: 24 * 60 * 60 * 1000 });
+    channelItems = asArray(channels.items);
+  } catch {
+    const existingCompetitors = await db
+      .select()
+      .from(youtubeCompetitorsTable)
+      .where(eq(youtubeCompetitorsTable.userId, userId))
+      .orderBy(desc(youtubeCompetitorsTable.fetchedAt));
+    return existingCompetitors.filter((competitor) => {
+      const subscribers = parseNumber(competitor.subscriberCount);
+      return userSubscribers > 0 && subscribers > 0 && subscribers <= userSubscribers * 5;
+    });
+  }
 
-  const channelItems = asArray(channels.items);
   const withTiers = channelItems.map((item) => {
     const channel = asRecord(item);
     const stats = asRecord(channel.statistics);
@@ -1912,27 +1940,36 @@ export async function discoverCompetitors(userId: number, profile: typeof youtub
 
   let tier1 = withTiers.filter((item) => item.tier === 1);
   if (!tier1.length) {
-    const fallbackIds = [...new Set((await Promise.all([
+    const fallbackSearchResults = await Promise.allSettled([
       searchChannelIds(userId, `${query} beginner`, 25),
       searchChannelIds(userId, `${query} small channel`, 25),
-    ])).flat())]
+    ]);
+    const fallbackIds = [...new Set(
+      fallbackSearchResults
+        .filter((result): result is PromiseFulfilledResult<string[]> => result.status === "fulfilled")
+        .flatMap((result) => result.value),
+    )]
       .filter((id) => id !== profile.channelId && !ids.includes(id));
     if (fallbackIds.length) {
-      const fallbackChannels = await youtubeJson<{ items?: unknown[] }>(userId, dataApiUrl("channels", {
-        part: "snippet,statistics",
-        id: fallbackIds.join(","),
-        maxResults: String(Math.min(fallbackIds.length, 50)),
-      }), { cacheKey: `competitor-fallback:${fallbackIds.join(",")}`, quotaCost: 1, ttlMs: 24 * 60 * 60 * 1000 });
-      const fallbackTiered = asArray(fallbackChannels.items).map((item) => {
-        const channel = asRecord(item);
-        const stats = asRecord(channel.statistics);
-        const subscribers = parseNumber(stats.subscriberCount);
-        const ratio = userSubscribers > 0 && subscribers > 0 ? subscribers / userSubscribers : Infinity;
-        const tier = ratio <= 5 ? 1 : ratio <= 30 ? 2 : 3;
-        return { item: channel, subscribers, ratio, tier };
-      });
-      tier1 = fallbackTiered.filter((item) => item.tier === 1);
-      withTiers.push(...fallbackTiered);
+      try {
+        const fallbackChannels = await youtubeJson<{ items?: unknown[] }>(userId, dataApiUrl("channels", {
+          part: "snippet,statistics",
+          id: fallbackIds.join(","),
+          maxResults: String(Math.min(fallbackIds.length, 50)),
+        }), { cacheKey: `competitor-fallback:${fallbackIds.join(",")}`, quotaCost: 1, ttlMs: 24 * 60 * 60 * 1000 });
+        const fallbackTiered = asArray(fallbackChannels.items).map((item) => {
+          const channel = asRecord(item);
+          const stats = asRecord(channel.statistics);
+          const subscribers = parseNumber(stats.subscriberCount);
+          const ratio = userSubscribers > 0 && subscribers > 0 ? subscribers / userSubscribers : Infinity;
+          const tier = ratio <= 5 ? 1 : ratio <= 30 ? 2 : 3;
+          return { item: channel, subscribers, ratio, tier };
+        });
+        tier1 = fallbackTiered.filter((item) => item.tier === 1);
+        withTiers.push(...fallbackTiered);
+      } catch {
+        // Fallback discovery is optional; keep going with what we already found.
+      }
     }
   }
 
@@ -1971,13 +2008,17 @@ export async function discoverCompetitors(userId: number, profile: typeof youtub
     const channel = asRecord(entry.item);
     const channelId = asString(channel.id);
     if (!channelId) continue;
-    const competitor = await upsertYoutubeCompetitor(userId, profile, channelId, {
-      source: "discovered",
-      existingCompetitor: existingByChannelId.get(channelId) ?? null,
-      preserveManualSource: true,
-      generateAiReport: false,
-    });
-    saved.push(competitor);
+    try {
+      const competitor = await upsertYoutubeCompetitor(userId, profile, channelId, {
+        source: "discovered",
+        existingCompetitor: existingByChannelId.get(channelId) ?? null,
+        preserveManualSource: true,
+        generateAiReport: false,
+      });
+      saved.push(competitor);
+    } catch {
+      // Skip one broken competitor rather than failing the whole discovery request.
+    }
   }
 
   const savedCompetitors = await db
@@ -2324,12 +2365,36 @@ export async function generateYoutubeWeeklyPlan(userId: number) {
   const plans = await db.select().from(youtubeWeeklyPlansTable).where(eq(youtubeWeeklyPlansTable.userId, userId)).orderBy(desc(youtubeWeeklyPlansTable.weekNumber));
   const nicheProfile = asRecord(profile.nicheProfile) as unknown as YoutubeNicheProfile;
   const preferredPostsPerWeek = Math.max(1, parseNumber(connection?.preferredPostsPerWeek) || 3);
-  const trends = await fetchTrendingVideos(userId, nicheProfile);
-  const competitors = await discoverCompetitors(userId, profile);
-  const analytics = await analyticsSummary(userId);
-  const analyticsTimeline = await channelAnalyticsTimeline(userId);
-  const hydratedResults = await hydrateStoredResultMetrics(userId);
-  const pastPerformance = await previousPerformanceSummary(userId);
+  const [
+    trendsResult,
+    competitorsResult,
+    analyticsResult,
+    analyticsTimelineResult,
+    hydratedResultsResult,
+    pastPerformanceResult,
+  ] = await Promise.allSettled([
+    fetchTrendingVideos(userId, nicheProfile),
+    discoverCompetitors(userId, profile),
+    analyticsSummary(userId),
+    channelAnalyticsTimeline(userId),
+    hydrateStoredResultMetrics(userId),
+    previousPerformanceSummary(userId),
+  ]);
+  const trends = trendsResult.status === "fulfilled" ? trendsResult.value : [];
+  const competitors = competitorsResult.status === "fulfilled" ? competitorsResult.value : [];
+  const analytics = analyticsResult.status === "fulfilled" ? analyticsResult.value : {};
+  const analyticsTimeline = analyticsTimelineResult.status === "fulfilled"
+    ? analyticsTimelineResult.value
+    : { daily: [], byWeekday: [], bestPostingTimeByDay: [], topWindows: [] };
+  const hydratedResults = hydratedResultsResult.status === "fulfilled" ? hydratedResultsResult.value : [];
+  const pastPerformance = pastPerformanceResult.status === "fulfilled"
+    ? pastPerformanceResult.value
+    : {
+        summary: "Limited historical performance data was available during this run.",
+        whatWorked: [],
+        whatMissed: [],
+        recommendations: [],
+      };
   const [lastPlan] = plans;
   const lastPlanResults = lastPlan
     ? await db.select().from(youtubePlanResultsTable).where(eq(youtubePlanResultsTable.planId, lastPlan.id)).limit(1)
