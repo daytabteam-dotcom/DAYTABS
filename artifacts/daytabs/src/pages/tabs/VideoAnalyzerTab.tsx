@@ -2346,17 +2346,36 @@ function UploadZone({ onFile, currentFile, isPending, maxSizeLabel, durationLabe
   durationLabel?: string;
 }) {
   const [preview, setPreview] = useState<string | null>(null);
+  const previewUrlRef = useRef<string | null>(null);
 
   // Sync preview with the controlled file
   useEffect(() => {
     if (currentFile) {
       const url = URL.createObjectURL(currentFile);
+      if (previewUrlRef.current) {
+        URL.revokeObjectURL(previewUrlRef.current);
+      }
+      previewUrlRef.current = url;
       setPreview(url);
-      return () => URL.revokeObjectURL(url);
+      return undefined;
+    }
+
+    if (previewUrlRef.current) {
+      URL.revokeObjectURL(previewUrlRef.current);
+      previewUrlRef.current = null;
     }
     setPreview(null);
     return undefined;
   }, [currentFile]);
+
+  useEffect(() => {
+    return () => {
+      if (previewUrlRef.current) {
+        URL.revokeObjectURL(previewUrlRef.current);
+        previewUrlRef.current = null;
+      }
+    };
+  }, []);
 
   const onDrop = useCallback((accepted: File[]) => {
     const f = accepted[0]; if (!f) return;

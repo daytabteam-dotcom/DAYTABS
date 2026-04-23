@@ -1,8 +1,5 @@
 import { Router, type IRouter } from "express";
-import multer from "multer";
 import { v4 as uuidv4 } from "uuid";
-import path from "path";
-import fs from "fs/promises";
 import { db } from "@workspace/db";
 import { analysisJobsTable } from "@workspace/db";
 import { type PipelineMode } from "../analysis/pipeline";
@@ -19,17 +16,16 @@ import {
 import { logger } from "../../lib/logger";
 import {
   buildR2ObjectKey,
-  createR2UploadUrl,
+  createR2MultipartPartUploadUrl,
+  createR2MultipartUpload,
   deleteFromB2,
   getR2ObjectMetadata,
+  completeR2MultipartUpload,
+  abortR2MultipartUpload,
 } from "../../lib/b2";
 
 const router: IRouter = Router();
 router.use(optionalAuth);
-
-const UPLOAD_BASE = "/tmp/uploads";
-
-fs.mkdir(UPLOAD_BASE, { recursive: true }).catch(() => {});
 
 interface UploadSession {
   uploadId: string;
@@ -40,7 +36,6 @@ interface UploadSession {
   fileSize: number;
   mimeType: string;
   totalChunks: number;
-  chunksReceived: Set<number>;
   createdAt: number;
   mode: string;
   platforms: string[];
@@ -51,6 +46,8 @@ interface UploadSession {
   audioVoice: string;
   r2Key: string;
   durationSeconds: number | null;
+  multipartUploadId: string;
+  uploadedParts: Map<number, string>;
 }
 
 const sessions = new Map<string, UploadSession>();
@@ -64,11 +61,10 @@ setInterval(async () => {
   for (const [id, session] of sessions) {
     if (now - session.createdAt > SESSION_MAX_AGE_MS) {
       sessions.delete(id);
-      await deleteFromB2(session.r2Key).catch((err) => {
-        logger.warn({ err, r2Key: session.r2Key }, "Failed to delete abandoned R2 upload");
+      await abortR2MultipartUpload(session.r2Key, session.multipartUploadId).catch((err) => {
+        logger.warn({ err, r2Key: session.r2Key }, "Failed to abort abandoned multipart upload");
       });
-      const dir = path.join(UPLOAD_BASE, id);
-      await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
+      await deleteFromB2(session.r2Key).catch(() => {});
       cleaned++;
     }
   }
@@ -147,7 +143,7 @@ router.post("/init", async (req, res) => {
 
     const uploadId = uuidv4();
     const r2Key = buildR2ObjectKey(uploadId, filename ?? "upload.mp4", userId);
-    const uploadTarget = await createR2UploadUrl(r2Key, mimeType || "video/mp4");
+    const uploadTarget = await createR2MultipartUpload(r2Key, mimeType || "video/mp4");
 
     const validPlatforms = [
       "youtube_long",
@@ -195,7 +191,6 @@ router.post("/init", async (req, res) => {
       fileSize: size,
       mimeType,
       totalChunks: Number(totalChunks),
-      chunksReceived: new Set(),
       createdAt: Date.now(),
       mode: mode ?? "video-analyzer",
       platforms: validatedPlatforms,
@@ -207,6 +202,8 @@ router.post("/init", async (req, res) => {
       audioVoice: audioVoice ?? "alloy",
       r2Key,
       durationSeconds: hasDuration ? parsedDurationSeconds : null,
+      multipartUploadId: uploadTarget.uploadId,
+      uploadedParts: new Map(),
     });
 
     logger.info({
@@ -222,93 +219,44 @@ router.post("/init", async (req, res) => {
       activeUploadSessions: sessions.size,
     }, "Upload session initialized");
 
-    res.json({ uploadId, ...uploadTarget });
+    res.json({ uploadId, fileKey: uploadTarget.fileKey, fileUrl: uploadTarget.fileUrl });
   } catch (err) {
     logger.error({ err }, "Upload init error");
     res.status(500).json({ error: "Failed to initialize upload" });
   }
 });
 
-// ── POST /api/upload/chunk ─────────────────────────────────────────────────────
-const chunkStorage = multer.diskStorage({
-  destination: async (req, _file, cb) => {
-    const { uploadId } = req.body;
-    if (!uploadId) {
-      cb(new Error("Missing uploadId"), "");
+// ── POST /api/upload/part-url ──────────────────────────────────────────────────
+router.post("/part-url", async (req, res) => {
+  try {
+    const { uploadId, partNumber } = req.body as { uploadId?: string; partNumber?: number };
+    if (!uploadId || !partNumber || !Number.isInteger(Number(partNumber)) || Number(partNumber) < 1) {
+      res.status(400).json({ error: "Missing or invalid uploadId or partNumber" });
       return;
     }
-    const dir = path.join(UPLOAD_BASE, uploadId);
-    await fs.mkdir(dir, { recursive: true });
-    cb(null, dir);
-  },
-  filename: (req, _file, cb) => {
-    const idx = Number(req.body.chunkIndex ?? 0);
-    cb(null, `chunk_${idx}`);
-  },
-});
 
-const chunkUpload = multer({
-  storage: chunkStorage,
-  limits: { fileSize: 6 * 1024 * 1024 },
-});
-
-router.post(
-  "/chunk",
-  (req, res, next) => {
-    req.setTimeout(60_000);
-    chunkUpload.single("chunk")(req, res, (err: any) => {
-      if (err) {
-        if (err.code === "LIMIT_FILE_SIZE") {
-          res
-            .status(413)
-            .json({ error: "Chunk too large. Maximum chunk size is 6 MB." });
-        } else {
-          res
-            .status(400)
-            .json({ error: err.message ?? "Chunk upload error" });
-        }
-        return;
-      }
-      next();
-    });
-  },
-  async (req, res) => {
-    try {
-      const { uploadId, chunkIndex } = req.body;
-      if (!uploadId || chunkIndex === undefined) {
-        res.status(400).json({ error: "Missing uploadId or chunkIndex" });
-        return;
-      }
-
-      const session = sessions.get(uploadId);
-      if (!session) {
-        res.status(404).json({
-          error: "Upload session not found or expired. Please restart the upload.",
-        });
-        return;
-      }
-
-      if (!req.file) {
-        res.status(400).json({ error: "No chunk data received" });
-        return;
-      }
-
-      const idx = Number(chunkIndex);
-      session.chunksReceived.add(idx);
-
-      res.json({ received: idx, total: session.totalChunks });
-    } catch (err) {
-      logger.error({ err }, "Chunk upload error");
-      res.status(500).json({ error: "Failed to store chunk" });
+    const session = sessions.get(uploadId);
+    if (!session) {
+      res.status(404).json({ error: "Upload session not found or expired. Please restart the upload." });
+      return;
     }
+
+    const payload = await createR2MultipartPartUploadUrl(session.r2Key, session.multipartUploadId, Number(partNumber));
+    res.json(payload);
+  } catch (err) {
+    logger.error({ err }, "Multipart part URL init error");
+    res.status(500).json({ error: "Failed to initialize multipart upload part" });
   }
-);
+});
 
 // ── POST /api/upload/complete ──────────────────────────────────────────────────
 router.post("/complete", async (req, res) => {
   req.setTimeout(120_000);
   try {
-    const { uploadId } = req.body;
+    const { uploadId, parts } = req.body as {
+      uploadId?: string;
+      parts?: Array<{ partNumber?: number; etag?: string }>;
+    };
     if (!uploadId) {
       res.status(400).json({ error: "Missing uploadId" });
       return;
@@ -322,7 +270,29 @@ router.post("/complete", async (req, res) => {
       return;
     }
 
-    const dir = path.join(UPLOAD_BASE, uploadId);
+    const uploadedParts = Array.isArray(parts)
+      ? parts
+          .map((part) => ({
+            partNumber: Number(part.partNumber),
+            etag: typeof part.etag === "string" ? part.etag.trim() : "",
+          }))
+          .filter((part) => Number.isInteger(part.partNumber) && part.partNumber > 0 && part.etag)
+      : [];
+
+    if (uploadedParts.length === 0) {
+      res.status(400).json({ error: "No uploaded parts were provided" });
+      return;
+    }
+
+    for (const part of uploadedParts) {
+      session.uploadedParts.set(part.partNumber, part.etag);
+    }
+
+    await completeR2MultipartUpload(
+      session.r2Key,
+      session.multipartUploadId,
+      Array.from(session.uploadedParts.entries()).map(([partNumber, etag]) => ({ partNumber, etag })),
+    );
 
     const rawPlan = session.rawPlan;
     const planLimits = getLimits(rawPlan);
@@ -403,7 +373,6 @@ router.post("/complete", async (req, res) => {
     }, "Queued analysis job created from upload session");
 
     res.json({ jobId, filePath: b2Key });
-    await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
   } catch (err) {
     logger.error({ err }, "Upload complete error");
     res.status(500).json({ error: "Failed to assemble upload" });
@@ -426,8 +395,7 @@ router.delete("/:uploadId", async (req, res) => {
       await deleteFromB2(session.r2Key).catch((err) => {
         logger.warn({ err, r2Key: session.r2Key }, "Failed to delete cancelled R2 upload");
       });
-      const dir = path.join(UPLOAD_BASE, uploadId);
-      await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
+      await abortR2MultipartUpload(session.r2Key, session.multipartUploadId).catch(() => {});
     }
     logger.info({
       uploadId,

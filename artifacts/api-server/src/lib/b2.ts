@@ -1,4 +1,14 @@
-import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
+import {
+  S3Client,
+  PutObjectCommand,
+  GetObjectCommand,
+  DeleteObjectCommand,
+  HeadObjectCommand,
+  CreateMultipartUploadCommand,
+  UploadPartCommand,
+  CompleteMultipartUploadCommand,
+  AbortMultipartUploadCommand,
+} from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import fs from "fs";
 import { createReadStream } from "fs";
@@ -120,6 +130,77 @@ export async function createR2UploadUrl(key: string, contentType: string) {
     fileKey: key,
     fileUrl: config.publicUrl ? `${config.publicUrl}/${key}` : undefined,
   };
+}
+
+export async function createR2MultipartUpload(key: string, contentType: string) {
+  const response = await getR2Client().send(
+    new CreateMultipartUploadCommand({
+      Bucket: getR2Bucket(),
+      Key: key,
+      ContentType: contentType,
+    }),
+  );
+
+  if (!response.UploadId) {
+    throw new Error("R2 multipart upload could not be created");
+  }
+
+  return {
+    uploadId: response.UploadId,
+    fileKey: key,
+    fileUrl: readR2Config().publicUrl ? `${readR2Config().publicUrl}/${key}` : undefined,
+  };
+}
+
+export async function createR2MultipartPartUploadUrl(key: string, multipartUploadId: string, partNumber: number) {
+  const command = new UploadPartCommand({
+    Bucket: getR2Bucket(),
+    Key: key,
+    UploadId: multipartUploadId,
+    PartNumber: partNumber,
+  });
+
+  const uploadUrl = await getSignedUrl(getR2Client(), command, { expiresIn: 6 * 60 * 60 });
+  return { uploadUrl };
+}
+
+export async function completeR2MultipartUpload(
+  key: string,
+  multipartUploadId: string,
+  parts: Array<{ partNumber: number; etag: string }>,
+) {
+  const sortedParts = [...parts]
+    .filter((part) => part.etag.trim())
+    .sort((a, b) => a.partNumber - b.partNumber)
+    .map((part) => ({
+      ETag: part.etag,
+      PartNumber: part.partNumber,
+    }));
+
+  if (sortedParts.length === 0) {
+    throw new Error("R2 multipart upload cannot be completed without uploaded parts");
+  }
+
+  await getR2Client().send(
+    new CompleteMultipartUploadCommand({
+      Bucket: getR2Bucket(),
+      Key: key,
+      UploadId: multipartUploadId,
+      MultipartUpload: {
+        Parts: sortedParts,
+      },
+    }),
+  );
+}
+
+export async function abortR2MultipartUpload(key: string, multipartUploadId: string) {
+  await getR2Client().send(
+    new AbortMultipartUploadCommand({
+      Bucket: getR2Bucket(),
+      Key: key,
+      UploadId: multipartUploadId,
+    }),
+  );
 }
 
 export async function getR2ObjectMetadata(key: string) {

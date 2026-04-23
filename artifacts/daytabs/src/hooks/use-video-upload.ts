@@ -32,6 +32,7 @@ function authHeaders(): Record<string, string> {
 }
 
 const CHUNK_SIZE = 5 * 1024 * 1024;
+const MULTIPART_CONCURRENCY = 4;
 const INIT_TIMEOUT_MS = 20_000;
 const COMPLETE_TIMEOUT_MS = 90_000;
 const UPLOAD_STALL_TIMEOUT_MS = 90_000;
@@ -152,18 +153,18 @@ async function fetchWithTimeout(
   }
 }
 
-function uploadToSignedUrl({
+function uploadPartToSignedUrl({
   uploadUrl,
-  file,
+  filePart,
   onProgress,
   onAbortReady,
 }: {
   uploadUrl: string;
-  file: File;
+  filePart: Blob;
   onProgress: (loaded: number) => void;
   onAbortReady: (abort: () => void) => void;
 }) {
-  return new Promise<void>((resolve, reject) => {
+  return new Promise<string>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     let settled = false;
     let stallTimer: number | undefined;
@@ -177,7 +178,12 @@ function uploadToSignedUrl({
       if (settled) return;
       settled = true;
       cleanup();
-      resolve();
+      const etag = xhr.getResponseHeader("ETag") ?? xhr.getResponseHeader("etag");
+      if (!etag) {
+        reject(new Error("Upload completed but no ETag was returned by storage."));
+        return;
+      }
+      resolve(etag);
     };
 
     const rejectOnce = (err: Error) => {
@@ -208,7 +214,7 @@ function uploadToSignedUrl({
     };
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
-        onProgress(file.size);
+        onProgress(filePart.size);
         resolveOnce();
       } else {
         rejectOnce(new Error(getHttpErrorMessage(xhr.status, `Cloudflare upload failed (HTTP ${xhr.status})`)));
@@ -219,9 +225,9 @@ function uploadToSignedUrl({
     xhr.onabort = () => rejectOnce(new Error(abortedByUser ? "Upload cancelled" : "Upload aborted before completion. Please retry."));
     xhr.open("PUT", uploadUrl);
     xhr.timeout = UPLOAD_HARD_TIMEOUT_MS;
-    xhr.setRequestHeader("Content-Type", file.type || "video/mp4");
+    xhr.setRequestHeader("Content-Type", "application/octet-stream");
     resetStallTimer();
-    xhr.send(file);
+    xhr.send(filePart);
   });
 }
 
@@ -310,8 +316,7 @@ export function useVideoUpload() {
           throw err;
         }
 
-        const { uploadId, uploadUrl } = await initRes.json();
-        if (!uploadUrl) throw new Error("Upload URL was not returned by the server");
+        const { uploadId } = await initRes.json();
         uploadIdRef.current = uploadId;
 
         if (cancelledRef.current) throw new Error("Upload cancelled");
@@ -326,31 +331,92 @@ export function useVideoUpload() {
           retrying: false,
         });
 
-        await uploadToSignedUrl({
-          uploadUrl,
-          file,
-          onAbortReady: (abort) => {
-            abortUploadRef.current = abort;
-          },
-          onProgress: (bytesUploaded) => {
-            const pct = Math.max(1, Math.min(100, Math.round((bytesUploaded / file.size) * 100)));
-            setUploadProgress(pct);
+        const totalParts = Math.ceil(file.size / CHUNK_SIZE);
+        const bytesByPart = new Map<number, number>();
+        const aborters = new Set<() => void>();
+        abortUploadRef.current = () => {
+          cancelledRef.current = true;
+          for (const abort of aborters) abort();
+        };
 
-            const elapsed = (Date.now() - startTime) / 1000;
-            const speed = elapsed > 0 ? bytesUploaded / elapsed : 0;
-            const remaining = file.size - bytesUploaded;
-            const etaSec = speed > 0 ? Math.round(remaining / speed) : null;
+        const updateAggregateProgress = () => {
+          const bytesUploaded = Array.from(bytesByPart.values()).reduce((sum, value) => sum + value, 0);
+          const pct = Math.max(1, Math.min(100, Math.round((bytesUploaded / file.size) * 100)));
+          setUploadProgress(pct);
 
-            setUploadInfo({
-              phase: "uploading",
-              pct,
-              mbUploaded: bytesUploaded / (1024 * 1024),
-              totalMb,
-              etaSec,
-              retrying: false,
-            });
-          },
-        });
+          const elapsed = (Date.now() - startTime) / 1000;
+          const speed = elapsed > 0 ? bytesUploaded / elapsed : 0;
+          const remaining = file.size - bytesUploaded;
+          const etaSec = speed > 0 ? Math.round(remaining / speed) : null;
+
+          setUploadInfo({
+            phase: "uploading",
+            pct,
+            mbUploaded: bytesUploaded / (1024 * 1024),
+            totalMb,
+            etaSec,
+            retrying: false,
+          });
+        };
+
+        const completedParts: Array<{ partNumber: number; etag: string }> = [];
+        let nextPartIndex = 0;
+
+        const uploadOnePart = async (partNumber: number) => {
+          const start = (partNumber - 1) * CHUNK_SIZE;
+          const end = Math.min(file.size, start + CHUNK_SIZE);
+          const filePart = file.slice(start, end);
+
+          const partUrlRes = await fetch("/api/upload/part-url", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", ...authHeaders() },
+            body: JSON.stringify({ uploadId, partNumber }),
+          });
+
+          if (!partUrlRes.ok) {
+            const body = await readErrorBody(partUrlRes);
+            throw new Error(body.message ?? body.error ?? `Failed to prepare upload part ${partNumber}.`);
+          }
+
+          const { uploadUrl } = await partUrlRes.json();
+          if (!uploadUrl) throw new Error(`Upload URL was not returned for part ${partNumber}`);
+
+          let lastLoaded = 0;
+          let registeredAbort: (() => void) | null = null;
+          const etag = await uploadPartToSignedUrl({
+            uploadUrl,
+            filePart,
+            onAbortReady: (partAbort) => {
+              registeredAbort = partAbort;
+              aborters.add(partAbort);
+            },
+            onProgress: (loaded) => {
+              const deltaLoaded = Math.max(0, loaded - lastLoaded);
+              lastLoaded = loaded;
+              bytesByPart.set(partNumber, loaded);
+              if (deltaLoaded >= 0) updateAggregateProgress();
+            },
+          }).finally(() => {
+            if (registeredAbort) aborters.delete(registeredAbort);
+          });
+
+          bytesByPart.set(partNumber, filePart.size);
+          updateAggregateProgress();
+          completedParts.push({ partNumber, etag });
+        };
+
+        const worker = async () => {
+          while (nextPartIndex < totalParts) {
+            if (cancelledRef.current) throw new Error("Upload cancelled");
+            const partNumber = nextPartIndex + 1;
+            nextPartIndex += 1;
+            await uploadOnePart(partNumber);
+          }
+        };
+
+        await Promise.all(
+          Array.from({ length: Math.min(MULTIPART_CONCURRENCY, totalParts) }, () => worker())
+        );
 
         if (cancelledRef.current) throw new Error("Upload cancelled");
 
@@ -370,7 +436,10 @@ export function useVideoUpload() {
           {
             method: "POST",
             headers: { "Content-Type": "application/json", ...authHeaders() },
-            body: JSON.stringify({ uploadId }),
+            body: JSON.stringify({
+              uploadId,
+              parts: completedParts,
+            }),
           },
           COMPLETE_TIMEOUT_MS,
           "Upload finished, but the server did not confirm it in time. Please refresh the page to reconnect to the analysis.",
