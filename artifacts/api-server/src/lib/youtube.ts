@@ -1882,22 +1882,8 @@ function postingFrequency(videos: YoutubeRecentVideo[]) {
 }
 
 export async function discoverCompetitors(userId: number, profile: typeof youtubeChannelProfilesTable.$inferSelect) {
-  const niche = asRecord(profile.nicheProfile) as Partial<YoutubeNicheProfile>;
-  const query = (Array.isArray(niche.keywords) && niche.keywords.length ? niche.keywords.slice(0, 3).join(" ") : niche.niche) || profile.channelName;
   const userSubscribers = parseNumber(profile.subscriberCount);
-  const searchQueries = [
-    query,
-    `${query} tutorial`,
-    `${query} process`,
-  ];
-  const searchResults = await Promise.allSettled(searchQueries.map((item) => searchChannelIds(userId, item, 25)));
-  const ids = [...new Set(
-    searchResults
-      .filter((result): result is PromiseFulfilledResult<string[]> => result.status === "fulfilled")
-      .flatMap((result) => result.value),
-  )]
-    .filter((id) => id !== profile.channelId);
-  if (!ids.length) {
+  const fallbackToSavedCompetitors = async () => {
     const existingCompetitors = await db
       .select()
       .from(youtubeCompetitorsTable)
@@ -1907,130 +1893,144 @@ export async function discoverCompetitors(userId: number, profile: typeof youtub
       const subscribers = parseNumber(competitor.subscriberCount);
       return userSubscribers > 0 && subscribers > 0 && subscribers <= userSubscribers * 5;
     });
-  }
+  };
 
-  let channelItems: unknown[] = [];
   try {
-    const channels = await youtubeJson<{ items?: unknown[] }>(userId, dataApiUrl("channels", {
-      part: "snippet,statistics",
-      id: ids.join(","),
-      maxResults: String(Math.min(ids.length, 50)),
-    }), { cacheKey: `competitor-channels:${ids.join(",")}`, quotaCost: 1, ttlMs: 24 * 60 * 60 * 1000 });
-    channelItems = asArray(channels.items);
-  } catch {
-    const existingCompetitors = await db
-      .select()
-      .from(youtubeCompetitorsTable)
-      .where(eq(youtubeCompetitorsTable.userId, userId))
-      .orderBy(desc(youtubeCompetitorsTable.fetchedAt));
-    return existingCompetitors.filter((competitor) => {
-      const subscribers = parseNumber(competitor.subscriberCount);
-      return userSubscribers > 0 && subscribers > 0 && subscribers <= userSubscribers * 5;
-    });
-  }
-
-  const withTiers = channelItems.map((item) => {
-    const channel = asRecord(item);
-    const stats = asRecord(channel.statistics);
-    const subscribers = parseNumber(stats.subscriberCount);
-    const ratio = userSubscribers > 0 && subscribers > 0 ? subscribers / userSubscribers : Infinity;
-    const tier = ratio <= 5 ? 1 : ratio <= 30 ? 2 : 3;
-    return { item: channel, subscribers, ratio, tier };
-  });
-
-  let tier1 = withTiers.filter((item) => item.tier === 1);
-  if (!tier1.length) {
-    const fallbackSearchResults = await Promise.allSettled([
-      searchChannelIds(userId, `${query} beginner`, 25),
-      searchChannelIds(userId, `${query} small channel`, 25),
-    ]);
-    const fallbackIds = [...new Set(
-      fallbackSearchResults
+    const niche = asRecord(profile.nicheProfile) as Partial<YoutubeNicheProfile>;
+    const query = (Array.isArray(niche.keywords) && niche.keywords.length ? niche.keywords.slice(0, 3).join(" ") : niche.niche) || profile.channelName;
+    const searchQueries = [
+      query,
+      `${query} tutorial`,
+      `${query} process`,
+    ];
+    const searchResults = await Promise.allSettled(searchQueries.map((item) => searchChannelIds(userId, item, 25)));
+    const ids = [...new Set(
+      searchResults
         .filter((result): result is PromiseFulfilledResult<string[]> => result.status === "fulfilled")
         .flatMap((result) => result.value),
     )]
-      .filter((id) => id !== profile.channelId && !ids.includes(id));
-    if (fallbackIds.length) {
-      try {
-        const fallbackChannels = await youtubeJson<{ items?: unknown[] }>(userId, dataApiUrl("channels", {
-          part: "snippet,statistics",
-          id: fallbackIds.join(","),
-          maxResults: String(Math.min(fallbackIds.length, 50)),
-        }), { cacheKey: `competitor-fallback:${fallbackIds.join(",")}`, quotaCost: 1, ttlMs: 24 * 60 * 60 * 1000 });
-        const fallbackTiered = asArray(fallbackChannels.items).map((item) => {
-          const channel = asRecord(item);
-          const stats = asRecord(channel.statistics);
-          const subscribers = parseNumber(stats.subscriberCount);
-          const ratio = userSubscribers > 0 && subscribers > 0 ? subscribers / userSubscribers : Infinity;
-          const tier = ratio <= 5 ? 1 : ratio <= 30 ? 2 : 3;
-          return { item: channel, subscribers, ratio, tier };
-        });
-        tier1 = fallbackTiered.filter((item) => item.tier === 1);
-        withTiers.push(...fallbackTiered);
-      } catch {
-        // Fallback discovery is optional; keep going with what we already found.
+      .filter((id) => id !== profile.channelId);
+    if (!ids.length) {
+      return fallbackToSavedCompetitors();
+    }
+
+    let channelItems: unknown[] = [];
+    try {
+      const channels = await youtubeJson<{ items?: unknown[] }>(userId, dataApiUrl("channels", {
+        part: "snippet,statistics",
+        id: ids.join(","),
+        maxResults: String(Math.min(ids.length, 50)),
+      }), { cacheKey: `competitor-channels:${ids.join(",")}`, quotaCost: 1, ttlMs: 24 * 60 * 60 * 1000 });
+      channelItems = asArray(channels.items);
+    } catch {
+      return fallbackToSavedCompetitors();
+    }
+
+    const withTiers = channelItems.map((item) => {
+      const channel = asRecord(item);
+      const stats = asRecord(channel.statistics);
+      const subscribers = parseNumber(stats.subscriberCount);
+      const ratio = userSubscribers > 0 && subscribers > 0 ? subscribers / userSubscribers : Infinity;
+      const tier = ratio <= 5 ? 1 : ratio <= 30 ? 2 : 3;
+      return { item: channel, subscribers, ratio, tier };
+    });
+
+    let tier1 = withTiers.filter((item) => item.tier === 1);
+    if (!tier1.length) {
+      const fallbackSearchResults = await Promise.allSettled([
+        searchChannelIds(userId, `${query} beginner`, 25),
+        searchChannelIds(userId, `${query} small channel`, 25),
+      ]);
+      const fallbackIds = [...new Set(
+        fallbackSearchResults
+          .filter((result): result is PromiseFulfilledResult<string[]> => result.status === "fulfilled")
+          .flatMap((result) => result.value),
+      )]
+        .filter((id) => id !== profile.channelId && !ids.includes(id));
+      if (fallbackIds.length) {
+        try {
+          const fallbackChannels = await youtubeJson<{ items?: unknown[] }>(userId, dataApiUrl("channels", {
+            part: "snippet,statistics",
+            id: fallbackIds.join(","),
+            maxResults: String(Math.min(fallbackIds.length, 50)),
+          }), { cacheKey: `competitor-fallback:${fallbackIds.join(",")}`, quotaCost: 1, ttlMs: 24 * 60 * 60 * 1000 });
+          const fallbackTiered = asArray(fallbackChannels.items).map((item) => {
+            const channel = asRecord(item);
+            const stats = asRecord(channel.statistics);
+            const subscribers = parseNumber(stats.subscriberCount);
+            const ratio = userSubscribers > 0 && subscribers > 0 ? subscribers / userSubscribers : Infinity;
+            const tier = ratio <= 5 ? 1 : ratio <= 30 ? 2 : 3;
+            return { item: channel, subscribers, ratio, tier };
+          });
+          tier1 = fallbackTiered.filter((item) => item.tier === 1);
+          withTiers.push(...fallbackTiered);
+        } catch {
+          // Fallback discovery is optional; keep going with what we already found.
+        }
       }
     }
-  }
 
-  const selected = tier1
-    .sort((a, b) => a.subscribers - b.subscribers)
-    .slice(0, 6)
-    .filter((item, index, list) => list.findIndex((candidate) => asString(candidate.item.id) === asString(item.item.id)) === index);
+    const selected = tier1
+      .sort((a, b) => a.subscribers - b.subscribers)
+      .slice(0, 6)
+      .filter((item, index, list) => list.findIndex((candidate) => asString(candidate.item.id) === asString(item.item.id)) === index);
 
-  const existingCompetitors = await db
-    .select()
-    .from(youtubeCompetitorsTable)
-    .where(eq(youtubeCompetitorsTable.userId, userId));
-  const existingByChannelId = new Map(
-    existingCompetitors
-      .filter((competitor) => competitor.channelId)
-      .map((competitor) => [competitor.channelId, competitor] as const),
-  );
-  const selectedChannelIds = new Set(
-    selected
-      .map((item) => asString(asRecord(item.item).id))
-      .filter((id): id is string => Boolean(id)),
-  );
-  const staleDiscoveredIds = existingCompetitors
-    .filter((competitor) => {
-      const meta = readCompetitorMeta(competitor.niche);
-      return meta.source !== "manual" && !selectedChannelIds.has(competitor.channelId);
-    })
-    .map((competitor) => competitor.id);
+    const existingCompetitors = await db
+      .select()
+      .from(youtubeCompetitorsTable)
+      .where(eq(youtubeCompetitorsTable.userId, userId));
+    const existingByChannelId = new Map(
+      existingCompetitors
+        .filter((competitor) => competitor.channelId)
+        .map((competitor) => [competitor.channelId, competitor] as const),
+    );
+    const selectedChannelIds = new Set(
+      selected
+        .map((item) => asString(asRecord(item.item).id))
+        .filter((id): id is string => Boolean(id)),
+    );
+    const staleDiscoveredIds = existingCompetitors
+      .filter((competitor) => {
+        const meta = readCompetitorMeta(competitor.niche);
+        return meta.source !== "manual" && !selectedChannelIds.has(competitor.channelId);
+      })
+      .map((competitor) => competitor.id);
 
-  for (const competitorId of staleDiscoveredIds) {
-    await db.delete(youtubeCompetitorsTable).where(eq(youtubeCompetitorsTable.id, competitorId));
-  }
-
-  const saved = [];
-  for (const entry of selected) {
-    const channel = asRecord(entry.item);
-    const channelId = asString(channel.id);
-    if (!channelId) continue;
-    try {
-      const competitor = await upsertYoutubeCompetitor(userId, profile, channelId, {
-        source: "discovered",
-        existingCompetitor: existingByChannelId.get(channelId) ?? null,
-        preserveManualSource: true,
-        generateAiReport: false,
-      });
-      saved.push(competitor);
-    } catch {
-      // Skip one broken competitor rather than failing the whole discovery request.
+    for (const competitorId of staleDiscoveredIds) {
+      await db.delete(youtubeCompetitorsTable).where(eq(youtubeCompetitorsTable.id, competitorId));
     }
+
+    const saved = [];
+    for (const entry of selected) {
+      const channel = asRecord(entry.item);
+      const channelId = asString(channel.id);
+      if (!channelId) continue;
+      try {
+        const competitor = await upsertYoutubeCompetitor(userId, profile, channelId, {
+          source: "discovered",
+          existingCompetitor: existingByChannelId.get(channelId) ?? null,
+          preserveManualSource: true,
+          generateAiReport: false,
+        });
+        saved.push(competitor);
+      } catch {
+        // Skip one broken competitor rather than failing the whole discovery request.
+      }
+    }
+
+    const savedCompetitors = await db
+      .select()
+      .from(youtubeCompetitorsTable)
+      .where(eq(youtubeCompetitorsTable.userId, userId))
+      .orderBy(desc(youtubeCompetitorsTable.fetchedAt));
+
+    return savedCompetitors.filter((competitor) => {
+      const subscribers = parseNumber(competitor.subscriberCount);
+      return userSubscribers > 0 && subscribers > 0 && subscribers <= userSubscribers * 5;
+    });
+  } catch {
+    return fallbackToSavedCompetitors();
   }
-
-  const savedCompetitors = await db
-    .select()
-    .from(youtubeCompetitorsTable)
-    .where(eq(youtubeCompetitorsTable.userId, userId))
-    .orderBy(desc(youtubeCompetitorsTable.fetchedAt));
-
-  return savedCompetitors.filter((competitor) => {
-    const subscribers = parseNumber(competitor.subscriberCount);
-    return userSubscribers > 0 && subscribers > 0 && subscribers <= userSubscribers * 5;
-  });
 }
 
 export async function addYoutubeCompetitorByUrl(userId: number, channelUrl: string) {
