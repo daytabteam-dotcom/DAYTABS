@@ -3,6 +3,8 @@ import { type FormEvent, useEffect, useMemo, useState } from "react";
 const ADMIN_BASE_PATH = (import.meta.env.BASE_URL || "/").replace(/\/$/, "") || "/";
 const ADMIN_LOGIN_PATH = ADMIN_BASE_PATH === "/" ? "/" : `${ADMIN_BASE_PATH}/`;
 const ADMIN_APP_PATH = `${ADMIN_BASE_PATH}/app`;
+const ADMIN_AUTH_LOGIN_URL = new URL("/api/auth/admin-login", window.location.origin).toString();
+const ADMIN_AUTH_LOGOUT_URL = new URL("/api/auth/admin-logout", window.location.origin).toString();
 
 type Period = "week" | "month" | "all";
 
@@ -139,7 +141,7 @@ function LoginView() {
     setError("");
     setLoading(true);
     try {
-      const response = await fetch("/api/auth/admin-login", {
+      const response = await fetch(ADMIN_AUTH_LOGIN_URL, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -280,7 +282,7 @@ function DashboardView() {
   );
 
   async function logout() {
-    await fetch("/api/auth/admin-logout", { method: "POST", credentials: "include" }).catch(() => null);
+    await fetch(ADMIN_AUTH_LOGOUT_URL, { method: "POST", credentials: "include" }).catch(() => null);
     window.location.assign(ADMIN_LOGIN_PATH);
   }
 
