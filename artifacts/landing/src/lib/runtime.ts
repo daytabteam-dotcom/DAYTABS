@@ -29,11 +29,6 @@ export function getCoreAppUrl(token?: string) {
   return url.toString();
 }
 
-export function getWakePageUrl(token?: string, target?: string) {
-  if (target) return target;
-  return getCoreAppUrl(token);
-}
-
 export function getApiHealthUrl() {
   return withApiBase("/api/healthz");
 }

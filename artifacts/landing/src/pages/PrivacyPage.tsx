@@ -126,7 +126,7 @@ const sections: Section[] = [
   {
     title: "5. Data Storage & Security",
     bullets: [
-      "Your data is stored on secure servers hosted by Render: https://render.com/privacy",
+      "Your data is stored on secure cloud infrastructure operated through Railway and Cloudflare R2",
       "Connected platform tokens used to access your social accounts are stored encrypted",
       "We take reasonable technical measures to protect your data",
       "No system is 100% secure and you use the service at your own risk",
@@ -142,7 +142,7 @@ const sections: Section[] = [
       "Meta, for Instagram API access",
       "TikTok, for TikTok API access",
       "LinkedIn, for LinkedIn API access",
-      "Render, for hosting and infrastructure",
+      "Railway and Cloudflare R2, for hosting, storage, and infrastructure",
       "Legal authorities if required by law",
     ],
     after: [

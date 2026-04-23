@@ -173,15 +173,15 @@ export default function PricingPage() {
           content="Start free with 1 video analysis per month. Upgrade for more analyses, publish packages, and script planning. No contracts."
         />
         <meta name="robots" content="index, follow" />
-        <link rel="canonical" href="https://daytabs.com/pricing" />
+        <link rel="canonical" href="https://www.daytabs.com/pricing" />
         <meta name="author" content="DayTabs" />
         <meta property="og:title" content="DayTabs Pricing - Free, Creator, Pro &amp; Studio Plans" />
         <meta
           property="og:description"
           content="Start free with 1 video analysis per month. Upgrade for more analyses, publish packages, and script planning. No contracts."
         />
-        <meta property="og:image" content="https://daytabs.com/opengraph.jpg" />
-        <meta property="og:url" content="https://daytabs.com/pricing" />
+        <meta property="og:image" content="https://www.daytabs.com/opengraph.jpg" />
+        <meta property="og:url" content="https://www.daytabs.com/pricing" />
         <meta property="og:type" content="website" />
         <meta property="og:site_name" content="DayTabs" />
         <meta name="twitter:card" content="summary_large_image" />
@@ -190,7 +190,7 @@ export default function PricingPage() {
           name="twitter:description"
           content="Start free with 1 video analysis per month. Upgrade for more analyses, publish packages, and script planning. No contracts."
         />
-        <meta name="twitter:image" content="https://daytabs.com/opengraph.jpg" />
+        <meta name="twitter:image" content="https://www.daytabs.com/opengraph.jpg" />
         <script type="application/ld+json">{JSON.stringify(faqSchema)}</script>
       </Helmet>
       <Navbar />
@@ -300,6 +300,50 @@ export default function PricingPage() {
               Questions? <button onClick={() => navigate("/contact")} className="text-violet-400 hover:text-violet-300 transition-colors cursor-pointer">Contact us</button>
             </p>
           </motion.div>
+
+          <div className="grid lg:grid-cols-2 gap-6 mt-12">
+            <motion.div
+              initial={{ opacity: 0, y: 24 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.7 }}
+              className="glass rounded-3xl border border-white/10 p-8"
+            >
+              <p className="text-xs uppercase tracking-[0.24em] text-violet-300/70 mb-3">What You Get</p>
+              <h2 className="text-2xl font-bold mb-4">Every paid analysis includes a deliverable report you can act on</h2>
+              <div className="space-y-3 text-sm text-white/65">
+                <p>Each video analysis generates a report inside your DayTabs workspace with quality feedback, editing notes, content feedback, and platform-focused SEO recommendations.</p>
+                <p>Creator and higher plans also include publish package output such as title ideas, descriptions, tags, and short clip ideas when available for the selected workflow.</p>
+                <p>Your monthly plan determines how many videos you can analyze, the upload limits per video, and how much planning capacity you receive.</p>
+              </div>
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 24 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.8 }}
+              className="glass rounded-3xl border border-white/10 p-8"
+            >
+              <p className="text-xs uppercase tracking-[0.24em] text-violet-300/70 mb-3">Billing Terms</p>
+              <h2 className="text-2xl font-bold mb-4">Clear subscription terms before checkout</h2>
+              <ul className="space-y-3 text-sm text-white/65">
+                <li>Paid plans renew automatically every month until cancelled.</li>
+                <li>You can cancel anytime and keep access through the end of the current billing cycle.</li>
+                <li>Refund requests can be submitted within 7 days of a charge. Review details on our refund policy page.</li>
+                <li>All pricing is shown in USD unless stated otherwise.</li>
+              </ul>
+              <div className="flex flex-wrap gap-4 mt-6 text-sm">
+                <button onClick={() => navigate("/refund-policy")} className="text-violet-400 hover:text-violet-300 transition-colors cursor-pointer">
+                  View refund policy
+                </button>
+                <button onClick={() => navigate("/terms")} className="text-violet-400 hover:text-violet-300 transition-colors cursor-pointer">
+                  View terms
+                </button>
+                <button onClick={() => navigate("/contact")} className="text-violet-400 hover:text-violet-300 transition-colors cursor-pointer">
+                  Contact support
+                </button>
+              </div>
+            </motion.div>
+          </div>
         </div>
       </section>
     </div>

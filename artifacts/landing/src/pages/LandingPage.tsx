@@ -273,7 +273,7 @@ export default function LandingPage() {
           content="Upload your video and get instant AI feedback on quality, editing, SEO titles, tags, and short clip ideas. Built for YouTube, TikTok, and Instagram creators."
         />
         <meta name="robots" content="index, follow" />
-        <link rel="canonical" href="https://daytabs.com/" />
+        <link rel="canonical" href="https://www.daytabs.com/" />
         <meta name="author" content="DayTabs" />
         <meta
           name="keywords"
@@ -284,8 +284,8 @@ export default function LandingPage() {
           property="og:description"
           content="Upload your video and get instant AI feedback on quality, editing, SEO titles, tags, and short clip ideas. Built for YouTube, TikTok, and Instagram creators."
         />
-        <meta property="og:image" content="https://daytabs.com/opengraph.jpg" />
-        <meta property="og:url" content="https://daytabs.com/" />
+        <meta property="og:image" content="https://www.daytabs.com/opengraph.jpg" />
+        <meta property="og:url" content="https://www.daytabs.com/" />
         <meta property="og:type" content="website" />
         <meta property="og:site_name" content="DayTabs" />
         <meta name="twitter:card" content="summary_large_image" />
@@ -294,7 +294,7 @@ export default function LandingPage() {
           name="twitter:description"
           content="Upload your video and get instant AI feedback on quality, editing, SEO titles, tags, and short clip ideas. Built for YouTube, TikTok, and Instagram creators."
         />
-        <meta name="twitter:image" content="https://daytabs.com/opengraph.jpg" />
+        <meta name="twitter:image" content="https://www.daytabs.com/opengraph.jpg" />
         <script type="application/ld+json">{JSON.stringify(softwareSchema)}</script>
       </Helmet>
 
@@ -511,6 +511,43 @@ export default function LandingPage() {
         </div>
       </section>
 
+      <section className="py-20 px-6">
+        <div className="max-w-5xl mx-auto">
+          <FadeIn className="text-center mb-12">
+            <h2 className="text-4xl md:text-5xl font-bold mb-4">
+              What You <span className="gradient-text">Receive</span>
+            </h2>
+            <p className="text-white/50 text-lg max-w-2xl mx-auto">
+              DayTabs is a web-based subscription product for creators who want analysis reports, publish assets, and ongoing planning help.
+            </p>
+          </FadeIn>
+
+          <div className="grid md:grid-cols-3 gap-6">
+            {[
+              {
+                title: "Per-video analysis report",
+                desc: "A structured report in your DayTabs dashboard covering quality, editing, pacing, content feedback, and platform-ready recommendations.",
+              },
+              {
+                title: "Publish package outputs",
+                desc: "Depending on your plan, DayTabs can generate title ideas, descriptions, tags, and short clip ideas to speed up publishing.",
+              },
+              {
+                title: "Monthly usage limits by plan",
+                desc: "Each subscription clearly states how many videos you can analyze, your file-size limits, duration limits, and planning capacity.",
+              },
+            ].map((item, i) => (
+              <FadeIn key={item.title} delay={i * 0.1}>
+                <div className="glass rounded-2xl p-6 border border-white/8 h-full">
+                  <h3 className="text-xl font-semibold mb-3">{item.title}</h3>
+                  <p className="text-sm text-white/55 leading-relaxed">{item.desc}</p>
+                </div>
+              </FadeIn>
+            ))}
+          </div>
+        </div>
+      </section>
+
       {/* PLATFORM SECTION */}
       <section className="py-16 px-6">
         <div className="max-w-4xl mx-auto text-center">
@@ -634,6 +671,7 @@ export default function LandingPage() {
             <Link href="/pricing" className="hover:text-white transition-colors">Pricing</Link>
             <Link href="/contact" className="hover:text-white transition-colors">Contact</Link>
             <Link href="/privacy" className="hover:text-white transition-colors">Privacy Policy</Link>
+            <Link href="/refund-policy" className="hover:text-white transition-colors">Refund Policy</Link>
             <Link href="/terms" className="hover:text-white transition-colors">Terms</Link>
           </div>
         </div>

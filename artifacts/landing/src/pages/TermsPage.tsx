@@ -131,11 +131,12 @@ const sections: Section[] = [
         ],
       },
       {
-        heading: "No Refund Policy",
+        heading: "Refunds",
         bullets: [
-          "All payments are final and non-refundable",
-          "We do not provide refunds for partial usage, unused time, or accidental purchases",
-          "If you believe you were charged in error, contact us within 7 days at hello@daytabs.com",
+          "Refund requests may be submitted within 7 days of the charge date by contacting hello@daytabs.com",
+          "Refund eligibility is reviewed based on account activity, service availability, and whether the purchase was materially different from what was advertised",
+          "We do not guarantee refunds for partial usage, change of mind after substantial use, or failure to cancel before the next billing date",
+          "Additional details are available in our Refund Policy",
         ],
       },
       {
