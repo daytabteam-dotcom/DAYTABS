@@ -2193,18 +2193,6 @@ function AnalyzingScreen({
         <p className="text-white/40 text-sm mt-1">This can take a little while depending on your video size and the queue.</p>
       </div>
 
-      <div className="mb-6 rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-4">
-        <div className="flex items-start gap-3">
-          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />
-          <div>
-            <p className="text-sm font-semibold text-white">Your report will be emailed to you</p>
-            <p className="mt-1 text-xs leading-relaxed text-white/60">
-              We&apos;ll send an email with a direct link to this report in DayTabs as soon as it&apos;s ready.
-            </p>
-          </div>
-        </div>
-      </div>
-
       {(isWaiting || isStarting) && (
         <div className="mb-6 rounded-2xl border border-primary/20 bg-primary/8 p-4">
           <div className="flex items-start gap-3">
@@ -2862,8 +2850,8 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
       setOpenedHistoryJobId(null);
       setJobId(id);
       toast({
-        title: "We’ll email your report",
-        description: "Your report will be sent to your email with a direct link as soon as it’s ready. This can take some time depending on your video size and the queue.",
+        title: "Analysis started",
+        description: "We’ll keep this report here in DayTabs while it processes.",
       });
     } catch (err: any) {
       // Silently reset if the user cancelled

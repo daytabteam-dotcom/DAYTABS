@@ -3,12 +3,6 @@ import { db, analysisJobsTable, usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { logger } from "./lib/logger";
 import {
-  CONTACT_EMAIL,
-  assertMailConfigured,
-  createMailTransport,
-  escapeHtml,
-} from "./lib/email";
-import {
   claimNextAnalysisJob,
   ensureAnalysisJobQueueColumns,
   heartbeatAnalysisJob,
@@ -38,144 +32,6 @@ function buildVideoAnalyzerReportUrl(jobId: string) {
   const url = new URL("/?tab=video-analyzer", CANONICAL_APP_ORIGIN);
   url.searchParams.set("jobId", jobId);
   return url.toString();
-}
-
-async function sendVideoAnalyzerOutcomeEmail(jobId: string, userId: number) {
-  const mailStatus = assertMailConfigured();
-  if (!mailStatus.configured) {
-    logger.warn({ jobId, missing: mailStatus.missing }, "Skipping analysis outcome email because SMTP is not configured");
-    return;
-  }
-
-  const [jobRecord] = await db
-    .select({
-      status: analysisJobsTable.status,
-      currentStep: analysisJobsTable.currentStep,
-      error: analysisJobsTable.error,
-      result: analysisJobsTable.result,
-    })
-    .from(analysisJobsTable)
-    .where(eq(analysisJobsTable.id, jobId))
-    .limit(1);
-
-  if (!jobRecord || jobRecord.status === "cancelled") {
-    return;
-  }
-
-  const existingResult =
-    jobRecord.result && typeof jobRecord.result === "object"
-      ? (jobRecord.result as Record<string, unknown>)
-      : {};
-
-  if (typeof existingResult.outcomeEmailSentAt === "string" && existingResult.outcomeEmailSentAt.trim()) {
-    return;
-  }
-
-  const [user] = await db
-    .select({
-      email: usersTable.email,
-      name: usersTable.name,
-    })
-    .from(usersTable)
-    .where(eq(usersTable.id, userId))
-    .limit(1);
-
-  if (!user?.email) {
-    logger.warn({ jobId, userId }, "Skipping analysis report email because the user email is missing");
-    return;
-  }
-
-  const reportUrl = buildVideoAnalyzerReportUrl(jobId);
-  const originalFileName =
-    typeof existingResult.analysisOptions === "object" &&
-    existingResult.analysisOptions &&
-    typeof (existingResult.analysisOptions as Record<string, unknown>).originalFileName === "string"
-      ? String((existingResult.analysisOptions as Record<string, unknown>).originalFileName)
-      : "your video";
-  const fallbackReason = "We hit an issue while processing the video. Please try again with a shorter or cleaner file.";
-  const failureReason = (jobRecord.error || jobRecord.currentStep || fallbackReason).trim();
-  const isSuccess = jobRecord.status === "complete";
-  const safeFileName = escapeHtml(originalFileName);
-  const safeName = escapeHtml((user.name || user.email.split("@")[0] || "there").trim());
-  const safeReportUrl = escapeHtml(reportUrl);
-  const safeFailureReason = escapeHtml(failureReason);
-  const transport = createMailTransport();
-  const subject = isSuccess
-    ? "Your DayTabs video report is ready"
-    : "Your DayTabs video analysis needs attention";
-  const text = isSuccess
-    ? [
-        `Hi ${user.name || user.email.split("@")[0] || "there"},`,
-        "",
-        `Your DayTabs report for ${originalFileName} is ready.`,
-        "Open it here:",
-        reportUrl,
-        "",
-        "Thanks,",
-        "DayTabs",
-      ].join("\n")
-    : [
-        `Hi ${user.name || user.email.split("@")[0] || "there"},`,
-        "",
-        `We couldn't finish your DayTabs analysis for ${originalFileName}.`,
-        `Reason: ${failureReason}`,
-        "",
-        "You can review the analysis page here:",
-        reportUrl,
-        "",
-        "Thanks,",
-        "DayTabs",
-      ].join("\n");
-  const html = isSuccess
-    ? `
-      <div style="font-family:Arial,sans-serif;line-height:1.6;color:#111827">
-        <p>Hi ${safeName},</p>
-        <p>Your DayTabs report for <strong>${safeFileName}</strong> is ready.</p>
-        <p>
-          <a href="${safeReportUrl}" style="display:inline-block;padding:10px 16px;border-radius:10px;background:#111827;color:#ffffff;text-decoration:none;font-weight:600">
-            Open your report
-          </a>
-        </p>
-        <p>If the button does not work, use this link:<br /><a href="${safeReportUrl}">${safeReportUrl}</a></p>
-        <p>Thanks,<br />DayTabs</p>
-      </div>
-    `
-    : `
-      <div style="font-family:Arial,sans-serif;line-height:1.6;color:#111827">
-        <p>Hi ${safeName},</p>
-        <p>We couldn&apos;t finish your DayTabs analysis for <strong>${safeFileName}</strong>.</p>
-        <p><strong>Reason:</strong> ${safeFailureReason}</p>
-        <p>
-          <a href="${safeReportUrl}" style="display:inline-block;padding:10px 16px;border-radius:10px;background:#111827;color:#ffffff;text-decoration:none;font-weight:600">
-            Open the analysis page
-          </a>
-        </p>
-        <p>If the button does not work, use this link:<br /><a href="${safeReportUrl}">${safeReportUrl}</a></p>
-        <p>Thanks,<br />DayTabs</p>
-      </div>
-    `;
-
-  await transport.sendMail({
-    from: CONTACT_EMAIL,
-    to: user.email,
-    subject,
-    text,
-    html,
-  });
-
-  await db
-    .update(analysisJobsTable)
-    .set({
-      result: {
-        ...existingResult,
-        outcomeEmailSentAt: new Date().toISOString(),
-        outcomeEmailSentTo: user.email,
-        outcomeEmailStatus: jobRecord.status,
-        reportUrl,
-      },
-      updatedAt: new Date(),
-    })
-    .where(eq(analysisJobsTable.id, jobId));
 }
 
 function readStoredAnalysisOptions(result: unknown): Partial<PipelineOptions> {
@@ -235,23 +91,9 @@ async function processJob(job: ClaimedAnalysisJob) {
       durationSeconds: storedOptions.durationSeconds,
     });
     if (completed && job.userId) await incrementVideoAnalysis(job.userId, storedOptions.durationSeconds);
-    if (job.userId) {
-      try {
-        await sendVideoAnalyzerOutcomeEmail(job.id, job.userId);
-      } catch (err) {
-        logger.error({ err, jobId: job.id, workerId, userId: job.userId }, "Failed to send analysis outcome email");
-      }
-    }
     logger.info({ jobId: job.id, workerId, completed }, "Worker finished analysis job");
   } catch (err) {
     logger.error({ err, jobId: job.id, workerId }, "Worker analysis job failed");
-    if (job.userId) {
-      try {
-        await sendVideoAnalyzerOutcomeEmail(job.id, job.userId);
-      } catch (mailErr) {
-        logger.error({ err: mailErr, jobId: job.id, workerId, userId: job.userId }, "Failed to send analysis failure email");
-      }
-    }
   } finally {
     clearInterval(heartbeat);
     logger.info({ jobId: job.id, workerId }, "Worker releasing analysis job lock");
