@@ -50,10 +50,14 @@ function isAdminAuthPath(path: string) {
 export async function adminHostMiddleware(req: Request, res: Response, next: NextFunction) {
   const adminHost = process.env.ADMIN_HOST?.trim();
   const adminPath = normalizeAdminPath(process.env.ADMIN_PATH);
-  if (!adminHost) {
-    const isAdminPathRequest = req.path === adminPath || req.path.startsWith(`${adminPath}/`);
-    const isAdminAssetPath = req.path.startsWith(`${adminPath}/assets/`);
+  const isAdminPathRequest = req.path === adminPath || req.path.startsWith(`${adminPath}/`);
+  const isAdminAssetPath = req.path.startsWith(`${adminPath}/assets/`);
+  const hostname = getAdminHostname(req);
+  const isAdminHost = Boolean(adminHost) && hostname === adminHost;
+  const isAdminApiPath = req.path.startsWith("/api/admin") || req.path === "/api/auth/admin-login" || req.path === "/api/auth/admin-logout";
+  const isAllowedPathBasedAdminRequest = isAdminPathRequest || req.path === "/api/auth/admin-login" || req.path === "/api/auth/admin-logout" || req.path.startsWith("/api/admin");
 
+  if (!adminHost) {
     if (!isAdminPathRequest) {
       next();
       return;
@@ -76,30 +80,31 @@ export async function adminHostMiddleware(req: Request, res: Response, next: Nex
     return;
   }
 
-  const hostname = getAdminHostname(req);
-  const isAdminHost = hostname === adminHost;
-  const isAdminApiPath = req.path.startsWith("/api/admin") || req.path === "/api/auth/admin-login" || req.path === "/api/auth/admin-logout";
-
-  if (!isAdminHost && isAdminApiPath) {
+  if (!isAdminHost && isAdminApiPath && !isAllowedPathBasedAdminRequest) {
     res.status(404).end();
     return;
   }
 
-  if (!isAdminHost) {
+  if (!isAdminHost && !isAdminPathRequest) {
     next();
     return;
   }
 
   applyAdminSecurityHeaders(res);
 
-  if (isAdminAuthPath(req.path)) {
+  if (isAdminHost && isAdminAuthPath(req.path)) {
+    next();
+    return;
+  }
+
+  if (isAdminPathRequest && (req.path === adminPath || req.path === `${adminPath}/` || isAdminAssetPath)) {
     next();
     return;
   }
 
   const token = req.cookies?.[ADMIN_SESSION_COOKIE];
   if (!token || !(await verifySession(token))) {
-    res.redirect(302, "/");
+    res.redirect(302, isAdminHost ? "/" : `${adminPath}/`);
     return;
   }
 
