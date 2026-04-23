@@ -4,7 +4,7 @@
     "buildCommand": "pnpm run build:prod"
   },
   "deploy": {
-    "startCommand": "pnpm run start",
+    "startCommand": "sh -c \"node ./scripts/wait-for-db.js && pnpm --filter @workspace/db run push && pnpm run start\"",
     "healthcheckPath": "/api/healthz"
   }
 }
