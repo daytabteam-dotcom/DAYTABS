@@ -1297,37 +1297,14 @@ function deriveWeeklyComparisonData(
   const scheduledEnd = new Date(`${latestPlan.endDate}T23:59:59Z`);
   const inWindow = (value: string | null | undefined, start: Date, end: Date) => {
     if (!value) return false;
-    const time = new Date(value).getTime();
-    return Number.isFinite(time) && time >= start.getTime() && time <= end.getTime();
+      const time = new Date(value).getTime();
+      return Number.isFinite(time) && time >= start.getTime() && time <= end.getTime();
   };
 
-  const scheduledCompetitorRows = competitors.map((competitor) => ({
-    competitor,
-    videos: (competitor.mostViewedRecentVideos ?? []).filter((video) => inWindow(video.publishedAt, scheduledStart, scheduledEnd)),
-  }));
-  const scheduledHasCompetitorActivity = scheduledCompetitorRows.some((row) => row.videos.length > 0);
-
-  let comparisonStart = scheduledStart;
-  let comparisonEnd = scheduledEnd;
-  let windowLabel = "Current scheduled week";
-  let windowDescription = "Published videos from your current plan week.";
-
-  if (!scheduledHasCompetitorActivity) {
-    const allPublishedTimes = competitors
-      .flatMap((competitor) => competitor.mostViewedRecentVideos ?? [])
-      .map((video) => video.publishedAt ? new Date(video.publishedAt).getTime() : Number.NaN)
-      .filter((time) => Number.isFinite(time));
-
-    if (allPublishedTimes.length) {
-      const latestPublishedTime = Math.max(...allPublishedTimes);
-      comparisonEnd = new Date(latestPublishedTime);
-      comparisonEnd.setUTCHours(23, 59, 59, 999);
-      comparisonStart = new Date(comparisonEnd.getTime() - 6 * 24 * 60 * 60 * 1000);
-      comparisonStart.setUTCHours(0, 0, 0, 0);
-      windowLabel = "Latest live competitor week";
-      windowDescription = "Latest 7-day window with live competitor publishes.";
-    }
-  }
+  const comparisonStart = scheduledStart;
+  const comparisonEnd = scheduledEnd;
+  const windowLabel = "Current scheduled week";
+  const windowDescription = "Published videos from the current plan week for you and your competitors.";
 
   const yourVideos = recentVideos.filter((video) => inWindow(video.publishedAt, comparisonStart, comparisonEnd));
 
@@ -1344,8 +1321,7 @@ function deriveWeeklyComparisonData(
         isYou: false,
         videos: weeklyVideos,
       } satisfies WeeklyComparisonCompetitorRow;
-    })
-    .filter((row) => row.uploads > 0 || row.views > 0);
+    });
 
   const youRow = {
     key: "you",
