@@ -1,5 +1,9 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 
+const ADMIN_BASE_PATH = (import.meta.env.BASE_URL || "/").replace(/\/$/, "") || "/";
+const ADMIN_LOGIN_PATH = ADMIN_BASE_PATH === "/" ? "/" : `${ADMIN_BASE_PATH}/`;
+const ADMIN_APP_PATH = `${ADMIN_BASE_PATH}/app`;
+
 type Period = "week" | "month" | "all";
 
 interface StatsResponse {
@@ -117,7 +121,7 @@ function formatDate(value: string) {
 async function apiFetch<T>(path: string): Promise<T> {
   const response = await fetch(path, { credentials: "include" });
   if (response.status === 401) {
-    window.location.assign("/");
+    window.location.assign(ADMIN_LOGIN_PATH);
     throw new Error("Unauthorized");
   }
   if (!response.ok) throw new Error(`Request failed: ${response.status}`);
@@ -146,7 +150,7 @@ function LoginView() {
         setError(body.error || "Login failed");
         return;
       }
-      window.location.assign("/app");
+      window.location.assign(ADMIN_APP_PATH);
     } catch {
       setError("Could not reach the admin gateway");
     } finally {
@@ -277,7 +281,7 @@ function DashboardView() {
 
   async function logout() {
     await fetch("/api/auth/admin-logout", { method: "POST", credentials: "include" }).catch(() => null);
-    window.location.assign("/");
+    window.location.assign(ADMIN_LOGIN_PATH);
   }
 
   return (
@@ -528,6 +532,16 @@ function DashboardView() {
 }
 
 export default function App() {
-  const isLogin = window.location.pathname === "/";
+  const currentPath = window.location.pathname.replace(/\/$/, "") || "/";
+  const loginPath = ADMIN_LOGIN_PATH.replace(/\/$/, "") || "/";
+  const appPath = ADMIN_APP_PATH.replace(/\/$/, "");
+  const isLogin = currentPath === loginPath;
+  const isApp = currentPath === appPath || currentPath.startsWith(`${appPath}/`);
+
+  if (!isLogin && !isApp) {
+    window.location.replace(ADMIN_LOGIN_PATH);
+    return null;
+  }
+
   return isLogin ? <LoginView /> : <DashboardView />;
 }

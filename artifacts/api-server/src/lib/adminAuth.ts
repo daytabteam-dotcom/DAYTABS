@@ -17,6 +17,13 @@ function adminJwtSecret() {
   return new TextEncoder().encode(secret);
 }
 
+function normalizeAdminPath(value: string | undefined) {
+  const raw = value?.trim() || "/_daytabs_ops_7m4k9x2q/";
+  const withLeadingSlash = raw.startsWith("/") ? raw : `/${raw}`;
+  if (withLeadingSlash === "/") return "/";
+  return withLeadingSlash.endsWith("/") ? withLeadingSlash.slice(0, -1) : withLeadingSlash;
+}
+
 export async function verifySession(token: string): Promise<boolean> {
   try {
     await jwtVerify(token, adminJwtSecret());
@@ -42,7 +49,29 @@ function isAdminAuthPath(path: string) {
 
 export async function adminHostMiddleware(req: Request, res: Response, next: NextFunction) {
   const adminHost = process.env.ADMIN_HOST?.trim();
+  const adminPath = normalizeAdminPath(process.env.ADMIN_PATH);
   if (!adminHost) {
+    const isAdminPathRequest = req.path === adminPath || req.path.startsWith(`${adminPath}/`);
+    const isAdminAssetPath = req.path.startsWith(`${adminPath}/assets/`);
+
+    if (!isAdminPathRequest) {
+      next();
+      return;
+    }
+
+    applyAdminSecurityHeaders(res);
+
+    if (req.path === adminPath || req.path === `${adminPath}/` || isAdminAssetPath || req.path === "/api/auth/admin-login") {
+      next();
+      return;
+    }
+
+    const token = req.cookies?.[ADMIN_SESSION_COOKIE];
+    if (!token || !(await verifySession(token))) {
+      res.redirect(302, `${adminPath}/`);
+      return;
+    }
+
     next();
     return;
   }

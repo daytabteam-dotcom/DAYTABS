@@ -19,6 +19,12 @@ const CANONICAL_APP_ORIGIN = (
 ).replace(/\/$/, "");
 const RENDER_HOST = "daytabs.onrender.com";
 const ADMIN_HOST = process.env.ADMIN_HOST?.trim();
+const ADMIN_PATH = (() => {
+  const raw = process.env.ADMIN_PATH?.trim() || "/_daytabs_ops_7m4k9x2q/";
+  const withLeadingSlash = raw.startsWith("/") ? raw : `/${raw}`;
+  if (withLeadingSlash === "/") return "/";
+  return withLeadingSlash.endsWith("/") ? withLeadingSlash.slice(0, -1) : withLeadingSlash;
+})();
 
 function requestHostname(req: express.Request) {
   return (req.get("x-forwarded-host") || req.get("host") || "").split(",")[0].trim().split(":")[0];
@@ -123,27 +129,41 @@ const adminDist = path.join(projectRoot, 'artifacts/admin/dist/public');
 const adminStatic = express.static(adminDist);
 
 app.use((req, res, next) => {
-  if (!ADMIN_HOST || requestHostname(req) !== ADMIN_HOST) {
+  const isAdminHostRequest = !!ADMIN_HOST && requestHostname(req) === ADMIN_HOST;
+  const isAdminPathRequest = req.path === ADMIN_PATH || req.path.startsWith(`${ADMIN_PATH}/`);
+
+  if (!isAdminHostRequest && !isAdminPathRequest) {
     next();
     return;
   }
 
-  if (req.path === "/") {
+  if (isAdminHostRequest && req.path === "/") {
     res.sendFile(path.join(adminDist, "index.html"));
     return;
   }
 
-  if (req.path.startsWith("/assets/")) {
+  if (isAdminHostRequest && req.path.startsWith("/assets/")) {
     adminStatic(req, res, next);
     return;
   }
 
-  if (req.path === "/app" || req.path.startsWith("/app/")) {
+  if (isAdminHostRequest && (req.path === "/app" || req.path.startsWith("/app/"))) {
     res.sendFile(path.join(adminDist, "index.html"));
     return;
   }
 
-  res.redirect(302, "/");
+  if (isAdminPathRequest && req.path.startsWith(`${ADMIN_PATH}/assets/`)) {
+    req.url = req.originalUrl.slice(ADMIN_PATH.length) || "/";
+    adminStatic(req, res, next);
+    return;
+  }
+
+  if (isAdminPathRequest && (req.path === ADMIN_PATH || req.path === `${ADMIN_PATH}/` || req.path === `${ADMIN_PATH}/app` || req.path.startsWith(`${ADMIN_PATH}/app/`))) {
+    res.sendFile(path.join(adminDist, "index.html"));
+    return;
+  }
+
+  res.redirect(302, isAdminHostRequest ? "/" : `${ADMIN_PATH}/`);
 });
 
 app.use('/', express.static(path.join(projectRoot, 'artifacts/landing/dist/public')));

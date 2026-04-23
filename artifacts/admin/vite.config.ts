@@ -4,9 +4,15 @@ import path from "path";
 
 const rawPort = process.env.PORT;
 const port = rawPort ? Number(rawPort) : 3000;
+const rawAdminPath = process.env.ADMIN_PATH?.trim() || "/_daytabs_ops_7m4k9x2q/";
+
+function normalizeBasePath(value: string) {
+  const withLeadingSlash = value.startsWith("/") ? value : `/${value}`;
+  return withLeadingSlash.endsWith("/") ? withLeadingSlash : `${withLeadingSlash}/`;
+}
 
 export default defineConfig({
-  base: "/login/",
+  base: normalizeBasePath(rawAdminPath),
   plugins: [react()],
   root: path.resolve(import.meta.dirname),
   build: {
