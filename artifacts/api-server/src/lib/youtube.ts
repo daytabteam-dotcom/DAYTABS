@@ -2570,6 +2570,10 @@ Every card needs all four publish assets: title, videoDescription, tags, thumbna
 Study which previous videos earned the most views/CTR/subscriber lift. Reuse their winning title structure, topic framing, tag clusters, and thumbnail logic where it honestly fits.
 If the channel's data is thin on a given day, set confidence to "low" and explain why in lowSignalNote.
 Never suggest a topic concept the user deleted in the past. Flag it if you're unsure whether a concept is too similar.
+If a day uses a short-form or vertical format like YouTube Shorts, the hook must be the exact first spoken line or first on-screen phrase, not a generic summary.
+For short-form or vertical ideas, describe the first visual beat too: what the viewer sees in the opening frame and what changes in the next second or two.
+For short-form or vertical ideas, thumbnailIdea should behave like cover-direction or opening-frame direction: specific composition, subject action, text if any, and why it stops the scroll.
+For short-form or vertical ideas, avoid vague notes like "make it punchier" or "show value fast." Say what the creator should literally say or show.
 
 POSTING STRATEGY:
 
@@ -2711,6 +2715,8 @@ Write a ready-to-paste description in the creator's voice: 2-4 sentences, natura
 Suggest 8-12 tags that come from evidence in this order: proven tags from the creator's strong videos, exact-topic phrases visible in strong titles/descriptions, rising niche tags when they honestly fit, then a few long-tail search phrases. Do not pad the list with generic filler.
 Suggest a thumbnail concept that is visually distinct — describe the actual image, not just "bold text."
 Suggest 1 alternative angle on the same topic if the original framing has weak search volume potential.
+If this idea would work best as a Short or other vertical video, make the hook the exact first spoken line and make the thumbnailIdea describe the opening frame or cover direction in concrete terms.
+For short-form ideas, never give vague advice. Say exactly what to open on, what to say first, and what visual change creates the scroll-stop.
 Do not pad the response with explanations. Return JSON only.
 
 Return shape:
@@ -2935,6 +2941,8 @@ Title must be specific and creator-voiced. No hollow clickbait phrases.
 Description must be ready-to-paste: 2-4 sentences in the creator's voice, with niche keywords naturally included.
 Tags must include 8-12 real search phrases that fit this category and come from evidence: winning tags already on the channel, exact-topic phrases from strong titles, rising trend tags if they honestly match, and a few long-tail searches a viewer would really type.
 Thumbnail idea must describe the actual image composition and emotional contrast.
+If the regenerated idea is short-form or vertical, the hook must be the literal first line or first on-screen phrase, and thumbnailIdea must describe the opening frame or cover in exact visual terms.
+For short-form ideas, avoid generic notes like "make it more punchy." Specify what the creator should show first and what they should say first.
 Explain in whyDifferent how this idea is distinct from the one it replaces.
 Return JSON only.
 

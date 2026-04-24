@@ -36,6 +36,9 @@ CONTENT STRATEGY RULES:
 - Never use the same hook style across platforms.
 - For each post, specify hook, format, call-to-action, rationale, best posting time, and source inspirations.
 - posts_per_week must exactly match the user's selected cadence per platform.
+- For short-form or vertical ideas, the hook must be concrete enough to use as the exact opening line or on-screen phrase, not just a vague concept.
+- For TikTok, Instagram Reels, and YouTube Shorts ideas, think in first-frame terms: what the viewer sees immediately, what changes in the next second, and why that earns the stop.
+- Do not write vague short-form guidance like "make it punchy" or "open stronger." Say what the creator should literally say or show first.
 
 REALISM REQUIREMENTS:
 - engagement_estimate must be based on the actual follower count extracted from profileData when available, using typical platform benchmarks: Instagram about 3-5% reach, TikTok about 5-20% reach on trend-tied content, LinkedIn about 2-6% reach, YouTube Shorts about 5-15% reach, X about 1-5% reach.

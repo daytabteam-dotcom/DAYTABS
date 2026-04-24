@@ -12,6 +12,107 @@ export interface BlogPost {
 
 export const blogPosts: BlogPost[] = [
   {
+    slug: "how-to-fix-short-video-hooks-before-you-post",
+    title: "How to Fix Weak Short Video Hooks Before You Post",
+    category: "Short-Form",
+    excerpt:
+      "Most weak short videos do not fail because the idea is bad. They fail because the first second is vague. Here is how to rewrite the opening and fix the setup before you post.",
+    readTime: "8 min read",
+    publishedAt: "2026-04-25",
+    metaDescription:
+      "Learn how to fix weak hooks, vague openings, and sloppy lighting in short vertical videos before you post to Shorts, Reels, or TikTok.",
+    keywords: ["short video hooks", "YouTube Shorts hook", "TikTok hook", "Instagram Reels hook", "vertical video lighting"],
+    content: `<h2>Why most weak short videos fail instantly</h2>
+<p>Most short videos do not lose viewers because the topic is bad. They lose viewers because the opening is not specific enough. A weak first second makes the viewer do too much work: what is this about, why should I care, and what am I about to get? If those answers are delayed, the swipe happens before the payoff ever arrives.</p>
+<p>That is why good short-form feedback has to be concrete. "Make the hook stronger" is not enough. A creator needs to know what the stronger version actually is, what the first spoken line should be, what the first frame should show, and how the setup should support that moment visually.</p>
+
+<h2>What a weak opening usually sounds like</h2>
+<p>Weak short-form openings are usually too abstract, too polite, or too slow. They describe the topic instead of creating immediate tension.</p>
+<table>
+  <thead>
+    <tr>
+      <th>Weak version</th>
+      <th>Why it loses viewers</th>
+      <th>Stronger version</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>"Today I want to talk about why my videos were underperforming."</td>
+      <td>It explains the topic, but there is no immediate stake, number, or surprise.</td>
+      <td>"I spent two days editing this video, and it got 11 views."</td>
+    </tr>
+    <tr>
+      <td>"Here are some tips for better captions."</td>
+      <td>Too broad. No reason to stop scrolling right now.</td>
+      <td>"Bad captions are killing your retention in the first three seconds."</td>
+    </tr>
+    <tr>
+      <td>"Let me show you how I edit my Shorts."</td>
+      <td>Too generic and too familiar.</td>
+      <td>"This one edit made my Shorts stop looking cheap."</td>
+    </tr>
+  </tbody>
+</table>
+<p>The difference is not hype. It is clarity. The better version gives the viewer a reason to stay because it names a result, failure, or tension immediately.</p>
+
+<h2>What the first second should actually do</h2>
+<p>A strong short-video opening should do at least one of these immediately:</p>
+<ul>
+  <li>Show a surprising result</li>
+  <li>Name a specific failure or cost</li>
+  <li>Reveal a visible before/after contrast</li>
+  <li>Start with a sentence the viewer already feels</li>
+</ul>
+<p>On short-form platforms, the opening frame matters almost as much as the opening line. If the visual is flat or confusing, even a decent script underperforms. The viewer should know what matters in the frame without searching for it.</p>
+
+<h2>How to fix the setup, not just the script</h2>
+<p>Vertical video feedback also has to be physically actionable. If the lighting is bad, the creator should know what to change, not just that it looks off.</p>
+<table>
+  <thead>
+    <tr>
+      <th>Problem</th>
+      <th>What to change now</th>
+      <th>What to change next shoot</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Hard shadows on one side of the face</td>
+      <td>Lift shadows slightly in post and reduce highlight contrast so the face reads evenly.</td>
+      <td>Move the key light about 30-45 degrees off-center and slightly above eye level so the face keeps shape without harsh shadow lines.</td>
+    </tr>
+    <tr>
+      <td>Face blends into the background</td>
+      <td>Mask the subject slightly brighter and darken the background a touch.</td>
+      <td>Increase subject-to-background distance and use a softer key light so the subject separates naturally.</td>
+    </tr>
+    <tr>
+      <td>Phone-shot framing feels loose and unfocused</td>
+      <td>Crop tighter so eyes or the main object sit in the upper half of the frame.</td>
+      <td>Place the phone at eye level, keep the subject large enough to read instantly, and remove dead space above the head.</td>
+    </tr>
+    <tr>
+      <td>Warm and cool light sources are fighting each other</td>
+      <td>Correct white balance and tint until skin and neutral surfaces stop drifting.</td>
+      <td>Use one dominant light temperature, ideally around daylight balance, instead of mixing a window with random room bulbs.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>How to review a short video before you publish</h2>
+<ol>
+  <li>Mute the video and watch the first second. Is the subject obvious immediately?</li>
+  <li>Listen to the first spoken line only. Does it create tension, surprise, or payoff?</li>
+  <li>Pause on the opening frame. Is the lighting helping the subject stand out?</li>
+  <li>Ask whether the opening is literal enough to copy. If the note is too vague, the feedback is not finished.</li>
+</ol>
+
+<h2>The rule that changes everything</h2>
+<p>If a note cannot be turned into an immediate action, it is too vague. "Make the hook stronger" should become a better first line. "Fix the lighting" should become a clear subject-light-background setup change. The best short-form feedback removes guesswork.</p>
+<p>If you want that kind of detailed review before you post, <a href="/signup">upload your video on DayTabs</a> and get clearer hook rewrites, stronger packaging, and more actionable short-form fixes for free.</p>`,
+  },
+  {
     slug: "how-to-use-youtube-tags-for-better-discovery",
     title: "How to Use YouTube Tags for Better Discovery",
     category: "YouTube SEO",

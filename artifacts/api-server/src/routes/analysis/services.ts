@@ -1471,6 +1471,9 @@ DETAIL RULES:
 - If you mention shadows, say where they fall and what change would soften or reshape them.
 - If you mention exposure, say whether skin, hands, product surfaces, or background are too bright or too dark.
 - Every note should help a creator act immediately without guessing what you meant.
+- If the video is vertical or clearly short-form, prioritize the opening frame, the first 1-2 seconds, and phone-shot practicality.
+- For vertical short videos, hook guidance must include a stronger opening line or on-screen phrase that fits this exact clip.
+- For vertical short videos, framing and lighting guidance should assume a creator may be filming on a phone and should name specific subject placement, light placement, and background choices.
 
 CRITICAL RULE: Never reference frame numbers. Reference approximate time positions.
 
@@ -2547,6 +2550,13 @@ Return STRICT JSON only:
           role: "user",
           content: `You are a short-form video strategist. Which of these chunks work as standalone short videos?
 
+Rules:
+- Think like native vertical-video packaging, not long-form chapter summaries.
+- Favor chunks where the payoff or tension is obvious in the first 1-2 seconds.
+- Titles should sound like real Shorts, Reels, or TikTok packaging, not generic topic labels.
+- Reasons must be concrete: say what the viewer sees or hears immediately and why that creates a scroll-stop.
+- Do not use vague phrases like "good hook" or "strong energy" without naming the actual mechanism.
+
 Chunks: ${JSON.stringify(chunkSummaries)}
 
 Return STRICT JSON using ONLY the provided index numbers:
@@ -2736,6 +2746,8 @@ Rules:
 - Write 3 tags. Each tag is a phrase real viewers would type into the search bar — not keywords, not hashtags, not SEO jargon. Think: what does someone type right before clicking a video like this?
 - The tone must match the content's natural register. A casual creator = casual language. A tutorial = clear and direct. Do not inject urgency that isn't there.
 - Never infer cooking, food, dessert, recipe, or kitchen themes unless the detected format or transcript clearly supports that topic.
+- If the platform is YouTube Shorts, TikTok, or Instagram Reels, optimize for the first 1-2 seconds: the title should feel immediate, the description should support the payoff quickly, and the tags should reflect short-form viewer intent.
+- For short-form platforms, avoid long-form YouTube phrasing. Write like native vertical-video packaging.
 
 Return ONLY valid JSON:
 {
@@ -2805,6 +2817,7 @@ Step 4 — Generate 12–15 tags.
 - No hashtags. No "#". Just the phrase.
 - Avoid generic tags like "2024", "viral", "trending" — they add no signal.
 - Never infer cooking, food, dessert, recipe, or kitchen themes unless the detected format or transcript clearly supports that topic.
+- If the platform is YouTube Shorts, TikTok, or Instagram Reels, the titles must feel native to short-form discovery and the tags should reflect short-form search language instead of long-form keyword stuffing.
 
 Return ONLY valid JSON:
 {
