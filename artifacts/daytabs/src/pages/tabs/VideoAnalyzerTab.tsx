@@ -1702,8 +1702,15 @@ function PublishPanel({ data, platforms, isPaid, subtitleFile, videoFileName, pr
   const publishKeys = data ? Object.keys(data) : [];
 
   useEffect(() => {
-    if (publishKeys.length > 0 && !activePlatform) setActivePlatform(publishKeys[0]);
-  }, [publishKeys.length]);
+    if (!publishKeys.length) {
+      if (activePlatform) setActivePlatform("");
+      return;
+    }
+    if (!activePlatform || !publishKeys.includes(activePlatform)) {
+      const preferredPlatform = platforms.find((platform) => publishKeys.includes(platform));
+      setActivePlatform(preferredPlatform ?? publishKeys[0]);
+    }
+  }, [activePlatform, platforms, publishKeys]);
 
   if (!data || publishKeys.length === 0) return <p className="text-white/40 text-sm">No publish data.</p>;
 
@@ -2715,7 +2722,6 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
     if (hasResults) {
       clearPendingUploadRecovery();
       onDataReady();
-      setActiveResultTab("overview");
 
       // Refresh plan usage so the Home page counter updates immediately
       window.dispatchEvent(new CustomEvent("daytabs:plan-updated"));
@@ -3035,11 +3041,21 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
   const analysisProfile = getAnalysisProfile(displayedResults);
   const resultModules = getResultModules(displayedResults);
   const resultPlatforms = getResultPlatforms(displayedResults);
+  const hasOverviewData = Boolean(
+    (resultModules.includes("quality") && (displayedResults as any)?.quality) ||
+    (resultModules.includes("editing") && (displayedResults as any)?.editing)
+  );
   const availableResultTabs = RESULT_TABS.filter(t => {
-    if (t.id === "overview") return true;
+    if (t.id === "overview") return hasOverviewData;
     if (t.id === "transcript") return resultModules.includes("transcript") && !!(displayedResults as any)?.transcript && analysisProfile?.hasMeaningfulSpeech !== false;
     return resultModules.includes(t.id) && !!(displayedResults as any)?.[t.id];
   });
+  useEffect(() => {
+    if (!hasResults || !availableResultTabs.length) return;
+    if (!availableResultTabs.some((tab) => tab.id === activeResultTab)) {
+      setActiveResultTab(availableResultTabs[0]!.id);
+    }
+  }, [hasResults, availableResultTabs, activeResultTab]);
   const hasHistory = analysisHistory.length > 0;
   const showHistoryLanding = !hasResults && !showAnalyzing && !isError && hasHistory && !showUploadForm;
   const isBootstrapping = planLoading || !historyBootstrapped || !recoveryBootstrapped;

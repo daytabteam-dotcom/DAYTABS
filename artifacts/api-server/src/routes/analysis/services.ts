@@ -1888,6 +1888,21 @@ Ignored signals: ${(formatProfile.ignoredSignals ?? []).join(", ") || "none"}.`
     audiencePromise: "",
   });
 
+  const isWeakSeoPackage = (value: Record<string, unknown> | undefined) => {
+    if (!value) return true;
+    const titles = Array.isArray(value.titles)
+      ? value.titles.map((item) => String(item).trim()).filter(Boolean)
+      : [];
+    const description = typeof value.description === "string" ? value.description.trim() : "";
+    const hashtags = Array.isArray(value.hashtags)
+      ? value.hashtags
+          .map((item) => (typeof item === "object" && item && "tag" in item ? String((item as { tag?: unknown }).tag ?? "").trim() : ""))
+          .filter(Boolean)
+      : [];
+    const placeholderDescriptions = new Set(["Description.", "Your video content.", "Two sentences."]);
+    return titles.length === 0 || !description || placeholderDescriptions.has(description) || hashtags.length < 5;
+  };
+
   const chapterPoints = buildChapterPoints(segments, 10);
   const platformGuide: Record<string, string> = {
     youtube_long: "YouTube long-form: titles 60-70 chars, curiosity gap required, keyword in first 3 words.",
@@ -2070,7 +2085,26 @@ ${responseShape}`,
       const seo: Record<string, Record<string, unknown>> = {};
       for (const platform of platforms) {
         const base = defaultSeoForPlatform(platform);
-        const merged: any = { ...base, ...(parsed.seo?.[platform] ?? {}) };
+        let merged: any = { ...base, ...(parsed.seo?.[platform] ?? {}) };
+        if (isWeakSeoPackage(merged)) {
+          try {
+            merged = {
+              ...base,
+              ...await generateSeo(
+                transcript,
+                platform,
+                segments,
+                plan,
+                speechAnalysis,
+                videoName,
+                formatProfile,
+                userId,
+              ),
+            };
+          } catch (err) {
+            logger.warn({ err, platform }, "Per-platform SEO fallback generation failed");
+          }
+        }
         const hashtags = Array.isArray(merged.hashtags)
           ? merged.hashtags as Array<{ tag?: string; effect?: string }>
           : [];
@@ -2697,7 +2731,7 @@ Platform: ${guide}
 Context: ${contentHint}
 Transcript: "${transcript.substring(0, 800)}"
 Hard rule: never infer cooking, food, dessert, recipe, or kitchen themes unless the detected format or transcript clearly supports that topic.
-Make the packaging algorithm-aware for this platform: strong topic clarity, clear audience promise, and wording that matches how high-performing creators in this niche package similar videos without copying anyone directly.
+Make the packaging algorithm-aware for this platform: strong topic clarity, clear audience promise, and wording that matches how high-performing creators in this niche package similar videos without copying anyone directly. Infer the likely niche from the transcript and favor concrete outcomes, clearer YouTube search intent, and phrases that feel competitive without sounding copied.
 TAGS: No # symbol.
 
 Return STRICT JSON:
@@ -2725,13 +2759,13 @@ Context: ${contentHint}
 Transcript: "${transcript.substring(0, 2000)}"${chapterHint}
 Hard rule: never infer cooking, food, dessert, recipe, or kitchen themes unless the detected format or transcript clearly supports that topic.
 If transcript signal is limited, prefer accurate format-aware packaging over specific nouns from sparse or noisy transcript fragments.
-Act like a strategist who studies viral creators in the same niche. Do not copy them or name them unless the evidence is obvious. Instead, extract the style patterns that make similar videos clickable: audience promise, tension, payoff clarity, specificity, and search intent.
+Act like a strategist who studies viral creators in the same niche. Do not copy them or name them unless the evidence is obvious. Instead, extract the style patterns that make similar videos clickable: audience promise, tension, payoff clarity, specificity, search intent, and the language patterns that show up on winning niche uploads.
 
-${isYouTube ? `Generate exactly 5 title options (curiosity gap, how-to, number-based, problem/solution, bold claim). Under 70 chars each.` : `Generate 3 title options.`}
+${isYouTube ? `Generate exactly 7 title options for YouTube. Make them noticeably different from each other and cover these angles: curiosity gap, how-to, number-based, problem/solution, bold claim, search-intent-first, and contrarian insight. Keep them under 70 characters each.` : `Generate 3 title options.`}
 
-Description: First 2 lines state what the video is about. Use primary keyword naturally. Include ## Chapters. End with ONE CTA. 150-400 words. No hype.
+Description: First 2 lines state what the video is about and why it matters. Use the primary keyword naturally. Include ## Chapters. End with ONE CTA. 150-400 words. No hype.
 
-TAGS: No # symbols. Generate 10-15 focused tags.
+TAGS: No # symbols. Generate 12-15 focused tags that combine likely winning niche phrases, direct search intent, and terms similar creators would realistically use on YouTube.
 
 Return STRICT JSON:
 {"titles":["t1","t2","t3","t4","t5"],"description":"full description","hashtags":[{"tag":"Tag","effect":"audience"}],"timestamps":[{"time":"0:00","label":"complete label"}],"titleStrategies":["curiosity gap","how-to","number-based","problem/solution","bold claim"],"algorithmFit":"2 sentences on why this packaging matches platform behavior and niche click patterns","packagingStrategy":"2 sentences on what audience promise these titles are selling","nicheReferences":["3 short notes describing the kind of viral packaging patterns being used"],"audiencePromise":"one sentence on the core promise that should win the click"}` }],
