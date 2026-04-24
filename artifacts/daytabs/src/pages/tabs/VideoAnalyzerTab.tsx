@@ -353,7 +353,16 @@ function getResultPlatforms(result: any): string[] {
 
 function getResultModules(result: any): string[] {
   const modules = result?.analysisOptions?.modules;
-  return Array.isArray(modules) && modules.length ? modules : ["quality", "editing"];
+  if (Array.isArray(modules) && modules.length) return modules;
+
+  const inferred = [
+    result?.quality ? "quality" : null,
+    result?.editing ? "editing" : null,
+    result?.publish ? "publish" : null,
+    result?.transcript ? "transcript" : null,
+  ].filter((value): value is string => Boolean(value));
+
+  return inferred.length ? inferred : ["quality", "editing"];
 }
 
 function navigateToPricing(feature?: string) {
@@ -3050,12 +3059,9 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
     if (t.id === "transcript") return resultModules.includes("transcript") && !!(displayedResults as any)?.transcript && analysisProfile?.hasMeaningfulSpeech !== false;
     return resultModules.includes(t.id) && !!(displayedResults as any)?.[t.id];
   });
-  useEffect(() => {
-    if (!hasResults || !availableResultTabs.length) return;
-    if (!availableResultTabs.some((tab) => tab.id === activeResultTab)) {
-      setActiveResultTab(availableResultTabs[0]!.id);
-    }
-  }, [hasResults, availableResultTabs, activeResultTab]);
+  const resolvedActiveResultTab = availableResultTabs.some((tab) => tab.id === activeResultTab)
+    ? activeResultTab
+    : (availableResultTabs[0]?.id ?? activeResultTab);
   const hasHistory = analysisHistory.length > 0;
   const showHistoryLanding = !hasResults && !showAnalyzing && !isError && hasHistory && !showUploadForm;
   const isBootstrapping = planLoading || !historyBootstrapped || !recoveryBootstrapped;
@@ -3290,7 +3296,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
                 <div className="flex gap-1 min-w-max">
                 {availableResultTabs.map(tab => {
                   const Icon = tab.icon;
-                  const isActive = activeResultTab === tab.id;
+                  const isActive = resolvedActiveResultTab === tab.id;
                   return (
                     <button
                       key={tab.id}
@@ -3304,14 +3310,14 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
                 </div>
               </div>
               <AnimatePresence mode="wait">
-                <motion.div key={activeResultTab} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
-                  {activeResultTab === "overview"   && (
+                <motion.div key={resolvedActiveResultTab} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
+                  {resolvedActiveResultTab === "overview"   && (
                     <CreatorReportIntro results={displayedResults} profile={analysisProfile} isPaid={isPaid} />
                   )}
-                  {activeResultTab === "quality"    && <QualityPanel    data={(displayedResults as any).quality}    isPaid={isPaid} profile={analysisProfile} />}
-                  {activeResultTab === "editing"    && <EditingPanel    data={(displayedResults as any).editing}    isPaid={isPaid} profile={analysisProfile} />}
-                  {activeResultTab === "publish"    && <PublishPanel    data={(displayedResults as any).publish}    platforms={resultPlatforms} isPaid={isPaid} subtitleFile={(displayedResults as any).subtitleFile} videoFileName={file?.name} profile={analysisProfile} />}
-                  {activeResultTab === "transcript" && <TranscriptPanel data={(displayedResults as any).transcript} isPaid={isPaid} profile={analysisProfile} />}
+                  {resolvedActiveResultTab === "quality"    && <QualityPanel    data={(displayedResults as any).quality}    isPaid={isPaid} profile={analysisProfile} />}
+                  {resolvedActiveResultTab === "editing"    && <EditingPanel    data={(displayedResults as any).editing}    isPaid={isPaid} profile={analysisProfile} />}
+                  {resolvedActiveResultTab === "publish"    && <PublishPanel    data={(displayedResults as any).publish}    platforms={resultPlatforms} isPaid={isPaid} subtitleFile={(displayedResults as any).subtitleFile} videoFileName={file?.name} profile={analysisProfile} />}
+                  {resolvedActiveResultTab === "transcript" && <TranscriptPanel data={(displayedResults as any).transcript} isPaid={isPaid} profile={analysisProfile} />}
                 </motion.div>
               </AnimatePresence>
             </>
