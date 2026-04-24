@@ -1181,25 +1181,25 @@ CRITICAL for FORMAT DETECTION:
     "overallTopFix": "the single most impactful fix — specific, measurable",
     "colorGradingRecommendation": "one specific color grading suggestion with a concrete value",
     "lighting": "specific observation referencing light source, shadows, catch lights",
-    "lightingSuggestion": "Fix now: exact post-production or edit fix. Next video: exact production fix.",
+    "lightingSuggestion": "Fix now: exact post-production fix with concrete values if possible. Next video: exact light placement, light type, brightness level, and color temperature to use.",
     "brightness": "specific note on skin exposure, blown regions, or underexposed areas",
-    "brightnessSuggestion": "Fix now: exact exposure adjustment in editing software. Next video: exact production fix.",
+    "brightnessSuggestion": "Fix now: exact exposure adjustment in editing software. Next video: exact exposure setup or camera setting to use.",
     "contrast": "specific note on crushed blacks, clipped highlights, or flat image — reference face, background, clothing",
-    "contrastSuggestion": "Fix now: exact contrast fix in post. Next video: exact production fix.",
+    "contrastSuggestion": "Fix now: exact contrast fix in post. Next video: exact lighting or camera setup change.",
     "colorTemperature": "name the specific cast and where it is most visible",
     "colorTemperatureSuggestion": "Fix now: specific color correction value. Next video: exact lighting or white balance fix.",
     "background": "describe exactly what objects are visible AND whether they are appropriate for the video topic — name the topic explicitly",
     "backgroundSuggestion": "Fix now: contextual post or crop fix that references what is visible. Next video: what background to shoot against instead.",
     "framing": "headroom, eye-line position, shoulder crop — be exact",
-    "framingSuggestion": "Fix now: exact crop or reframe adjustment. Next video: exact camera or posture adjustment.",
+    "framingSuggestion": "Fix now: exact crop or reframe adjustment. Next video: exact camera height, lens distance, and subject placement.",
     "sharpness": "focus plane location, any motion blur, background sharpness relative to subject",
     "sharpnessSuggestion": "Fix now: exact sharpening or cleanup move. Next video: exact focus, shutter, or lens fix.",
     "stability": "note micro-jitter, drift, or stabilization artifacts and when they occur",
     "stabilitySuggestion": "Fix now: exact stabilization edit fix. Next video: exact support or camera movement fix.",
     "presenceFeedback": "direct feedback on eye contact, energy, confidence on camera",
-    "presenceSuggestion": "one specific actionable improvement for on-camera presence",
+    "presenceSuggestion": "one specific actionable improvement for on-camera presence with an example of what to do differently",
     "hookStrength": "strong" | "moderate" | "weak",
-    "hookStrengthReason": "why the hook is or isn't working — reference the actual opening seconds"
+    "hookStrengthReason": "why the hook is or isn't working — reference the actual opening seconds and say what kind of opener would work better for this exact video"
   }
 }`;
 
@@ -1464,6 +1464,13 @@ For EACH dimension, write exactly as a professional video producer giving paid n
 - If something scores above 85, name the ONE thing that would push it to 100
 - Suggest a concrete, measurable fix
 - Every suggestion field must use this format exactly: "Fix now: ... Next video: ..."
+
+DETAIL RULES:
+- Do not say "improve the hook" without giving a stronger version of the opening idea that fits this exact video.
+- Do not say "fix the lighting" without naming light direction, approximate angle, subject distance, and color temperature when you can infer them.
+- If you mention shadows, say where they fall and what change would soften or reshape them.
+- If you mention exposure, say whether skin, hands, product surfaces, or background are too bright or too dark.
+- Every note should help a creator act immediately without guessing what you meant.
 
 CRITICAL RULE: Never reference frame numbers. Reference approximate time positions.
 

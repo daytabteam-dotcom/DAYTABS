@@ -609,6 +609,31 @@ function overallScoreFromResults(results: any) {
   );
 }
 
+type FixCardData = {
+  title: string;
+  detail?: string;
+  betterVersion?: string;
+  howTo?: string;
+};
+
+function splitFixSuggestion(value?: string | null) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return { fixNow: "", nextVideo: "" };
+  const fixNowMatch = raw.match(/Fix now:\s*(.*?)(?=\s*Next video:|$)/i);
+  const nextVideoMatch = raw.match(/Next video:\s*(.*)$/i);
+  return {
+    fixNow: (fixNowMatch?.[1] ?? "").trim(),
+    nextVideo: (nextVideoMatch?.[1] ?? "").trim(),
+  };
+}
+
+function firstMeaningfulLine(value?: string | null) {
+  return String(value ?? "")
+    .split("\n")
+    .map((line) => line.trim())
+    .find(Boolean) ?? "";
+}
+
 function strongestMetric(data: any, profile?: any) {
   const candidates = [
     { key: "lighting", label: "Lighting", metric: data?.lighting },
@@ -628,18 +653,82 @@ function strongestMetric(data: any, profile?: any) {
 }
 
 function collectTopFixes(results: any) {
-  const fixes = [
-    results?.quality?.topFix,
-    results?.quality?.retention?.dropOffMoments?.[0]?.fix,
-    results?.editing?.editingSuggestions?.[0],
-    results?.quality?.background?.suggestions?.[0],
-    results?.quality?.framing?.suggestions?.[0],
-    results?.quality?.sharpness?.suggestions?.[0],
-  ]
-    .filter((value): value is string => Boolean(value?.trim()))
-    .filter((value, index, array) => array.findIndex((item) => item.toLowerCase() === value.toLowerCase()) === index);
+  const quality = results?.quality ?? {};
+  const editing = results?.editing ?? {};
+  const cards: FixCardData[] = [];
 
-  return fixes.slice(0, 3);
+  const hookStrength = quality?.hookStrength;
+  const rewrittenHook = firstMeaningfulLine(editing?.rewrittenHook);
+  const alternateHook = firstMeaningfulLine(editing?.hooks?.[0]?.text ?? editing?.hookApproach);
+  const hookFix = firstMeaningfulLine(quality?.retention?.dropOffMoments?.[0]?.fix);
+  const hookReason = firstMeaningfulLine(quality?.hookStrengthReason ?? quality?.retention?.dropOffMoments?.[0]?.reason);
+
+  if (hookStrength === "weak" || hookStrength === "moderate" || rewrittenHook || alternateHook) {
+    cards.push({
+      title: hookStrength === "weak" ? "Rewrite the opening so the payoff lands immediately" : "Sharpen the opening so it creates urgency faster",
+      detail: hookReason || hookFix || "The current opening explains too much before the viewer has a reason to care.",
+      betterVersion: rewrittenHook || alternateHook || undefined,
+      howTo: hookFix || undefined,
+    });
+  }
+
+  const weakestQualityMetrics = [
+    { key: "lighting", label: "lighting", metric: quality?.lighting },
+    { key: "brightness", label: "exposure", metric: quality?.brightness },
+    { key: "contrast", label: "contrast", metric: quality?.contrast },
+    { key: "background", label: "background", metric: quality?.background },
+    { key: "framing", label: "framing", metric: quality?.framing },
+    { key: "sharpness", label: "sharpness", metric: quality?.sharpness },
+    { key: "stability", label: "stability", metric: quality?.stability },
+  ]
+    .filter((item) => typeof item.metric?.numeric === "number" && item.metric.numeric < 80)
+    .sort((a, b) => (a.metric.numeric ?? 0) - (b.metric.numeric ?? 0));
+
+  for (const item of weakestQualityMetrics) {
+    if (cards.length >= 3) break;
+    const assessment = firstMeaningfulLine(item.metric?.assessment);
+    const { fixNow, nextVideo } = splitFixSuggestion(item.metric?.suggestions?.[0]);
+    const title = item.key === "lighting"
+      ? "Fix the lighting so the subject separates from the background"
+      : item.key === "brightness"
+      ? "Correct the exposure before publishing"
+      : item.key === "contrast"
+      ? "Add separation so the image feels less flat"
+      : item.key === "background"
+      ? "Clean up the background so it supports the topic"
+      : item.key === "framing"
+      ? "Reframe the shot so the viewer knows where to look"
+      : item.key === "sharpness"
+      ? "Recover detail so the subject looks intentional"
+      : "Stabilize the shot so it stops feeling shaky";
+
+    cards.push({
+      title,
+      detail: assessment || `The ${item.label} is one of the weakest parts of this cut right now.`,
+      betterVersion: fixNow || undefined,
+      howTo: nextVideo || undefined,
+    });
+  }
+
+  if (cards.length < 3) {
+    const fallback = [
+      quality?.topFix,
+      editing?.editingSuggestions?.[0],
+      quality?.background?.suggestions?.[0],
+      quality?.framing?.suggestions?.[0],
+      quality?.sharpness?.suggestions?.[0],
+    ]
+      .map((value) => firstMeaningfulLine(value))
+      .filter(Boolean);
+
+    for (const value of fallback) {
+      if (cards.length >= 3) break;
+      if (cards.some((card) => card.title.toLowerCase() === value.toLowerCase())) continue;
+      cards.push({ title: value });
+    }
+  }
+
+  return cards.slice(0, 3);
 }
 
 function compactTags(tags: Array<{ tag?: string }> = [], max = 8) {
@@ -764,11 +853,15 @@ function ActionCard({
   index,
   title,
   detail,
+  betterVersion,
+  howTo,
   tone = "amber",
 }: {
   index: number;
   title: string;
   detail?: string;
+  betterVersion?: string;
+  howTo?: string;
   tone?: "amber" | "blue" | "emerald";
 }) {
   const tones = {
@@ -790,6 +883,18 @@ function ActionCard({
           </div>
           <p className="mt-1 text-sm font-semibold text-white">{title}</p>
           {detail ? <p className="mt-2 text-xs leading-relaxed text-white/70">{detail}</p> : null}
+          {betterVersion ? (
+            <div className="mt-3 rounded-xl border border-white/10 bg-black/15 p-3">
+              <p className="text-[10px] uppercase tracking-[0.14em] text-white/45">Better version</p>
+              <p className="mt-1 text-xs leading-relaxed text-white/85">{betterVersion}</p>
+            </div>
+          ) : null}
+          {howTo ? (
+            <div className="mt-3 rounded-xl border border-white/10 bg-black/15 p-3">
+              <p className="text-[10px] uppercase tracking-[0.14em] text-white/45">How to do it</p>
+              <p className="mt-1 text-xs leading-relaxed text-white/85">{howTo}</p>
+            </div>
+          ) : null}
         </div>
       </div>
     </div>
@@ -835,7 +940,7 @@ function CreatorReportIntro({ results, profile, isPaid }: { results: any; profil
             <p className="mt-3 text-sm text-white/60">{scoreReasonSummary(results, profile)}</p>
             <div className="mt-5 grid gap-3 sm:grid-cols-3">
               {[
-                { label: "Fix first", value: visibleFixes[0] ?? "Tighten the opening before publishing." },
+                { label: "Fix first", value: visibleFixes[0]?.title ?? "Tighten the opening before publishing." },
                 { label: "Hook insight", value: hookInsight ?? "Lead with the strongest payoff or most unresolved question first." },
                 { label: "Packaging promise", value: primaryPromise },
               ].map((item) => {
@@ -880,13 +985,15 @@ function CreatorReportIntro({ results, profile, isPaid }: { results: any; profil
           </div>
           <div className="mt-4 grid gap-3 md:grid-cols-3">
             {visibleFixes.map((fix, index) => (
-              <ActionCard
-                key={`${index}-${fix}`}
-                index={index + 1}
-                title={fix}
-                detail={index === 0 ? "Highest impact on this cut." : index === 1 ? "Next best improvement after the main fix." : "Finish with this if you want the strongest export."}
-              />
-            ))}
+                    <ActionCard
+                      key={`${index}-${fix.title}`}
+                      index={index + 1}
+                      title={fix.title}
+                      betterVersion={fix.betterVersion}
+                      howTo={fix.howTo}
+                      detail={index === 0 ? "Highest impact on this cut." : index === 1 ? "Next best improvement after the main fix." : "Finish with this if you want the strongest export."}
+                    />
+                  ))}
           </div>
           {hiddenFixes.length > 0 && (
             <div className="mt-3">
@@ -894,9 +1001,11 @@ function CreatorReportIntro({ results, profile, isPaid }: { results: any; profil
                 <div className="grid gap-3 md:grid-cols-3">
                   {hiddenFixes.map((fix, index) => (
                     <ActionCard
-                      key={`hidden-${index}-${fix}`}
+                      key={`hidden-${index}-${fix.title}`}
                       index={index + 2}
-                      title={fix}
+                      title={fix.title}
+                      betterVersion={fix.betterVersion}
+                      howTo={fix.howTo}
                       detail="More of the full breakdown."
                     />
                   ))}
@@ -1087,7 +1196,8 @@ function DecisionBar({ results, profile }: { results: any; profile?: any }) {
   const publishData = results?.publish ? Object.values(results.publish)[0] as any : null;
   const score = overallScoreFromResults(results);
   const verdict = scoreVerdict(score);
-  const topBlocker = collectTopFixes(results)[0] ?? qualityData?.topFix ?? editingData?.nowFixes?.[0] ?? "Review the detailed recommendations below.";
+  const topFixSummary = collectTopFixes(results)[0];
+  const topBlocker = topFixSummary?.title ?? qualityData?.topFix ?? editingData?.nowFixes?.[0] ?? "Review the detailed recommendations below.";
   const topOpportunity = editingData?.packagingAngle ?? publishData?.audiencePromise ?? editingData?.editingStyle ?? "Tighten the first 10 seconds and sharpen the promise.";
   const actionLabel = score >= 85 ? "Publish after a quick pass" : score >= 60 ? "Fix the opening, then publish" : "Rework before publishing";
 
