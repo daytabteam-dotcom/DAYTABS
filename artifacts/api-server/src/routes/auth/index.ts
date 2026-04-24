@@ -11,7 +11,7 @@ import { requireAuth } from "../../middlewares/auth";
 import { ADMIN_SESSION_COOKIE } from "../../lib/adminAuth";
 import { normalizePlan, PLAN_LIMITS } from "../../lib/planLimits";
 import { getOrCreateUsage } from "../../lib/usageService";
-import { CONTACT_EMAIL, SMTP_USER, assertMailConfigured, createMailTransport, escapeHtml } from "../../lib/email";
+import { CONTACT_EMAIL, EMAIL_FROM, assertMailConfigured, escapeHtml, sendEmail } from "../../lib/email";
 import { syncUserPlanFromPaddle } from "../../lib/paddlePlanSync";
 
 const router = Router();
@@ -280,16 +280,15 @@ router.post("/contact", async (req, res) => {
       return;
     }
 
-    const transport = createMailTransport();
-    const info = await transport.sendMail({
-      from: `"DayTabs Contact" <${SMTP_USER}>`,
+    const info = await sendEmail({
+      from: `"DayTabs Contact" <${EMAIL_FROM}>`,
       to: CONTACT_EMAIL,
       replyTo: `"${name}" <${email}>`,
       subject: `New contact message from ${name}`,
       text: `Name: ${name}\nEmail: ${email}\n\nMessage:\n${message}`,
       html: `<div style="font-family:sans-serif;max-width:600px;margin:0 auto"><h2 style="color:#7c3aed">New Contact Message - DayTabs</h2><table style="width:100%;border-collapse:collapse"><tr><td style="padding:8px;font-weight:bold;color:#555">Name</td><td style="padding:8px">${escapeHtml(name)}</td></tr><tr><td style="padding:8px;font-weight:bold;color:#555">Email</td><td style="padding:8px"><a href="mailto:${escapeHtml(email)}">${escapeHtml(email)}</a></td></tr></table><div style="margin-top:16px;padding:16px;background:#f5f5f5;border-radius:8px;white-space:pre-wrap">${escapeHtml(message)}</div></div>`,
     });
-    req.log.info({ messageId: info.messageId, accepted: info.accepted, rejected: info.rejected }, "Contact email sent");
+    req.log.info({ emailId: info.id }, "Contact email sent");
 
     res.json({ success: true, message: "Message received. We'll get back to you soon!" });
   } catch (err) {

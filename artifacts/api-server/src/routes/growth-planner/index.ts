@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { requireAuth } from "../../middlewares/auth";
-import { CONTACT_EMAIL, SMTP_USER, assertMailConfigured, createMailTransport, escapeHtml } from "../../lib/email";
+import { CONTACT_EMAIL, EMAIL_FROM, assertMailConfigured, escapeHtml, sendEmail } from "../../lib/email";
 import { fetchTrendingTopics, findCompetitors, scrapePublicProfile, type PublicProfileData, type TrendData } from "../../lib/enrichment";
 import { GROWTH_PLANNER_JSON_SHAPE, GROWTH_PLANNER_SYSTEM_PROMPT } from "../../lib/growthPlannerPrompts";
 import { openai } from "../../lib/openai";
@@ -238,9 +238,8 @@ router.post("/notify", async (req, res) => {
       return;
     }
 
-    const transport = createMailTransport();
-    const info = await transport.sendMail({
-      from: `"DayTabs" <${SMTP_USER}>`,
+    const info = await sendEmail({
+      from: `"DayTabs" <${EMAIL_FROM}>`,
       to: CONTACT_EMAIL,
       subject: "Growth Planner Request",
       text: `A user has requested to be notified when Growth Planner launches.\n\nEmail: ${email}\n\nThis was submitted from the DayTabs Growth Planner waitlist.`,
@@ -255,7 +254,7 @@ router.post("/notify", async (req, res) => {
         </div>
       `,
     });
-    req.log.info({ email, messageId: info.messageId, accepted: info.accepted, rejected: info.rejected }, "Growth Planner notification email sent");
+    req.log.info({ email, emailId: info.id }, "Growth Planner notification email sent");
 
     res.json({ success: true });
   } catch (err) {

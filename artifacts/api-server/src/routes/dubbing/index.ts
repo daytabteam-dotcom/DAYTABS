@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { CONTACT_EMAIL, SMTP_USER, assertMailConfigured, createMailTransport, escapeHtml } from "../../lib/email";
+import { CONTACT_EMAIL, EMAIL_FROM, assertMailConfigured, escapeHtml, sendEmail } from "../../lib/email";
 
 const router = Router();
 
@@ -18,9 +18,8 @@ router.post("/notify", async (req, res) => {
       return;
     }
 
-    const transport = createMailTransport();
-    const info = await transport.sendMail({
-      from: `"DayTabs" <${SMTP_USER}>`,
+    const info = await sendEmail({
+      from: `"DayTabs" <${EMAIL_FROM}>`,
       to: CONTACT_EMAIL,
       subject: "AI Dubbing Request",
       text: `A user has requested to be notified when AI Dubbing launches.\n\nEmail: ${email}\n\nThis was submitted from the DayTabs AI Dubbing waitlist.`,
@@ -35,7 +34,7 @@ router.post("/notify", async (req, res) => {
         </div>
       `,
     });
-    req.log.info({ email, messageId: info.messageId, accepted: info.accepted, rejected: info.rejected }, "Dubbing notification email sent");
+    req.log.info({ email, emailId: info.id }, "Dubbing notification email sent");
 
     res.json({ success: true });
   } catch (err) {
