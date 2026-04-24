@@ -38,6 +38,12 @@ function injectIds(html: string): string {
   });
 }
 
+function enhanceTables(html: string): string {
+  return html
+    .replace(/<table>/gi, '<div class="blog-table-wrap"><table class="blog-table">')
+    .replace(/<\/table>/gi, "</table></div>");
+}
+
 function TableOfContentsMobile({ headings }: { headings: { id: string; text: string }[] }) {
   const [open, setOpen] = useState(false);
 
@@ -99,7 +105,7 @@ export default function BlogPostPage() {
   }
 
   const headings = extractHeadings(post.content);
-  const contentWithIds = injectIds(post.content);
+  const contentWithIds = enhanceTables(injectIds(post.content));
   const postUrl = `${SITE_URL}/blog/${post.slug}`;
 
   const articleSchema = {
