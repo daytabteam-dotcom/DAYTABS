@@ -1162,6 +1162,64 @@ function derivePerformanceSignals(
   };
 }
 
+function buildYoutubeTagEvidenceSummary(
+  recentVideos: Array<YoutubeRecentVideo | JsonRecord>,
+  competitors: Array<typeof youtubeCompetitorsTable.$inferSelect>,
+  performanceSignals: PerformanceSignalSummary,
+) {
+  const normalizedRecent = recentVideos.map((video) => {
+    const record = asRecord(video);
+    return {
+      title: asString(record.title),
+      description: asString(record.description),
+      tags: asArray(record.tags).map((tag) => String(tag)).filter(Boolean),
+      viewCount: parseNumber(record.viewCount),
+    };
+  });
+
+  const topChannelVideos = [...normalizedRecent]
+    .sort((a, b) => b.viewCount - a.viewCount)
+    .slice(0, 8)
+    .map((video) => ({
+      title: video.title,
+      tags: video.tags.slice(0, 8),
+    }));
+
+  const competitorTitleExamples = competitors
+    .flatMap((competitor) => asArray(competitor.mostViewedRecentVideos).map((video) => asRecord(video)))
+    .map((video) => asString(video.title))
+    .filter(Boolean)
+    .slice(0, 12);
+
+  const provenTags = (performanceSignals.tagInsight?.topPerformingTags ?? [])
+    .slice(0, 10)
+    .map((tag) => ({
+      tag: tag.tag,
+      averageViews: tag.averageViews,
+      relativeToMedian: tag.relativeToMedian,
+    }));
+
+  const risingTags = (performanceSignals.tagInsight?.trendingTags ?? [])
+    .slice(0, 8)
+    .map((tag) => ({
+      tag: tag.tag,
+      why: tag.why,
+    }));
+
+  return {
+    provenTags,
+    risingTags,
+    topChannelVideos,
+    competitorTitleExamples,
+    guardrails: [
+      "Use a small, precise set of real search phrases instead of stuffing variants.",
+      "Prefer tags already supported by the creator's winning videos, niche trends, or strong competitor title language.",
+      "Avoid generic tags like viral, trending, or broad year-based filler unless the evidence strongly supports them.",
+      "Treat these as YouTube-style search terms, not hashtags.",
+    ],
+  };
+}
+
 function parseAiJson(raw: string) {
   return JSON.parse(extractJSON(raw));
 }
@@ -2301,7 +2359,7 @@ function normalizeGeneratedYoutubePlan(
       outline: [],
       bestPostingTime: selected.slot.suggestedTime || (asString(source.bestPostingTime) || "20:00"),
       rationale: whyThisIdea || asString(source.rationale) || `${selected.weekday} ${selected.slot.slotLabel} is one of your strongest available windows from the heatmap, so this idea is scheduled to ride that signal.`,
-      tags: asArray(source.tags).map((item) => String(item)).filter(Boolean).slice(0, 10),
+      tags: asArray(source.tags).map((item) => String(item)).filter(Boolean).slice(0, 12),
       soundSuggestion: asString(source.estimatedLength) || asString(source.soundSuggestion) || "",
       competitorReference: asString(source.signalSource) || asString(source.competitorReference) || "",
       descriptionSuggestion: asString(source.videoDescription) || asString(source.descriptionSuggestion) || asString(source.targetKeyword) || "",
@@ -2454,6 +2512,7 @@ export async function generateYoutubeWeeklyPlan(userId: number) {
     .sort((a, b) => b.averageViews - a.averageViews)
     .slice(0, Math.max(1, preferredPostsPerWeek))
     .map((item) => item.day);
+  const tagEvidence = buildYoutubeTagEvidenceSummary(recentVideos, competitors, performanceSignals);
   const context = {
     profile,
     channelProfile: profile,
@@ -2470,6 +2529,7 @@ export async function generateYoutubeWeeklyPlan(userId: number) {
     },
     analyticsTimeline,
     performanceSignals,
+    tagEvidence,
     performanceSummary: pastPerformance,
     ideaFeedbackSummary,
     pastPerformance,
@@ -2504,6 +2564,7 @@ Titles must be specific, direct, with a clear payoff implied. Never use hollow p
 Hook must name a specific tension or question the video answers in the first 10 seconds. Not a vague teaser.
 Thumbnail concept must be visually distinct from competitors. Describe the specific visual — not "bold text + face."
 Tags must be actual search terms a real viewer would type — not keyword-stuffed variations of the title.
+Build tags from evidence in this order: proven tags from the creator's better-performing videos, exact-topic phrases visible in strong titles/descriptions, rising niche tags from trend data, then only a few long-tail search phrases that fit the same topic. Do not invent unsupported tags.
 Descriptions must be ready-to-paste YouTube descriptions in the creator's own voice: 2-4 sentences, clear promise, niche keywords woven naturally, no fake stats.
 Every card needs all four publish assets: title, videoDescription, tags, thumbnailIdea.
 Study which previous videos earned the most views/CTR/subscriber lift. Reuse their winning title structure, topic framing, tag clusters, and thumbnail logic where it honestly fits.
@@ -2621,6 +2682,15 @@ export async function improveYoutubeIdea(userId: number, idea: { title?: string;
       };
     }).filter((video) => video.title).slice(0, 5),
   }));
+  const performanceSignals = derivePerformanceSignals(
+    recentVideos.map((video) => normalizeVideo(video)),
+    [],
+    [],
+    competitors,
+    parseNumber(profile.subscriberCount),
+    [],
+  );
+  const tagEvidence = buildYoutubeTagEvidenceSummary(recentVideos, competitors, performanceSignals);
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
@@ -2638,7 +2708,7 @@ Read their feedback history. If this idea direction was previously disliked or d
 Improve the title: make it more specific, cut filler words, front-load the payoff.
 Sharpen the hook: name the exact tension or question the viewer will care about in the first 10 seconds.
 Write a ready-to-paste description in the creator's voice: 2-4 sentences, natural niche keywords, clear promise, no fake claims.
-Suggest 8-10 tags that combine the creator's proven tags, niche search phrases, and category language.
+Suggest 8-12 tags that come from evidence in this order: proven tags from the creator's strong videos, exact-topic phrases visible in strong titles/descriptions, rising niche tags when they honestly fit, then a few long-tail search phrases. Do not pad the list with generic filler.
 Suggest a thumbnail concept that is visually distinct — describe the actual image, not just "bold text."
 Suggest 1 alternative angle on the same topic if the original framing has weak search volume potential.
 Do not pad the response with explanations. Return JSON only.
@@ -2669,6 +2739,7 @@ Return shape:
           recentLanguageSamples,
           topVideos,
           competitorExamples,
+          tagEvidence,
         }),
       },
     ],
@@ -2693,7 +2764,7 @@ Return shape:
     hook: improvedHook,
     outline: alternativeAngle ? [alternativeAngle] : [],
     rationale: rationaleParts.join(" "),
-    tags: asArray(improved.tags).map((item) => String(item)).filter(Boolean).slice(0, 10),
+    tags: asArray(improved.tags).map((item) => String(item)).filter(Boolean).slice(0, 12),
     thumbnailConcept: asString(improved.thumbnailIdea)?.trim() || asString(improved.thumbnailConcept)?.trim() || "",
     descriptionSuggestion: asString(improved.videoDescription)?.trim() || asString(improved.descriptionSuggestion)?.trim() || asString(improved.targetKeyword)?.trim() || "",
   };
@@ -2862,7 +2933,7 @@ The new idea must trace to a real signal: past performance, a competitor gap, a 
 Title, description, tags, and thumbnail idea must match the creator's own language from previous uploads and the channel niche.
 Title must be specific and creator-voiced. No hollow clickbait phrases.
 Description must be ready-to-paste: 2-4 sentences in the creator's voice, with niche keywords naturally included.
-Tags must include 8-10 real search phrases/tags that fit this category and echo tags that worked before.
+Tags must include 8-12 real search phrases that fit this category and come from evidence: winning tags already on the channel, exact-topic phrases from strong titles, rising trend tags if they honestly match, and a few long-tail searches a viewer would really type.
 Thumbnail idea must describe the actual image composition and emotional contrast.
 Explain in whyDifferent how this idea is distinct from the one it replaces.
 Return JSON only.
@@ -2898,6 +2969,7 @@ Return shape:
             deleted: ideaFeedbackSummary.deleted,
           },
           performanceSignals: latestSignals,
+          tagEvidence: buildYoutubeTagEvidenceSummary(Array.isArray(profile.recentVideos) ? profile.recentVideos : [], [], latestSignals),
         }),
       },
     ],
@@ -2920,7 +2992,7 @@ Return shape:
     outline: [],
     bestPostingTime: asString(day.bestPostingTime) || "",
     rationale: [asString(raw.whyThisIdea)?.trim(), asString(raw.whyDifferent)?.trim()].filter(Boolean).join(" ").trim() || asString(day.rationale) || "",
-    tags: asArray(raw.tags).map((item) => String(item)).filter(Boolean).slice(0, 10),
+    tags: asArray(raw.tags).map((item) => String(item)).filter(Boolean).slice(0, 12),
     soundSuggestion: asString(raw.format) || "",
     competitorReference: asString(raw.signalSource) || "",
     descriptionSuggestion: asString(raw.videoDescription) || asString(raw.descriptionSuggestion) || asString(raw.targetKeyword) || "",
