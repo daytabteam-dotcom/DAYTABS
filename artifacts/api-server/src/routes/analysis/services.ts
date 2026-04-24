@@ -2085,24 +2085,26 @@ ${responseShape}`,
       const seo: Record<string, Record<string, unknown>> = {};
       for (const platform of platforms) {
         const base = defaultSeoForPlatform(platform);
-        let merged: any = { ...base, ...(parsed.seo?.[platform] ?? {}) };
-        if (isWeakSeoPackage(merged)) {
-          try {
-            merged = {
-              ...base,
-              ...await generateSeo(
-                transcript,
-                platform,
-                segments,
-                plan,
-                speechAnalysis,
-                videoName,
-                formatProfile,
-                userId,
-              ),
-            };
-          } catch (err) {
-            logger.warn({ err, platform }, "Per-platform SEO fallback generation failed");
+        let merged: any = { ...base };
+        try {
+          merged = {
+            ...base,
+            ...await generateSeo(
+              transcript,
+              platform,
+              segments,
+              plan,
+              speechAnalysis,
+              videoName,
+              formatProfile,
+              userId,
+            ),
+          };
+        } catch (err) {
+          logger.warn({ err, platform }, "Per-platform SEO generation failed");
+          merged = { ...base, ...(parsed.seo?.[platform] ?? {}) };
+          if (isWeakSeoPackage(merged)) {
+            merged = { ...base };
           }
         }
         const hashtags = Array.isArray(merged.hashtags)
@@ -2688,7 +2690,6 @@ export async function generateSeo(
   userId?: number,
 ): Promise<object> {
   const isFree = plan === "free";
-  const chapterPoints = buildChapterPoints(segments, 10);
   const isVisualFirst = speechAnalysis?.mode === "visual_first" || !speechAnalysis?.hasMeaningfulSpeech;
   const languageInstruction = buildOutputLanguageInstruction(transcript, speechAnalysis);
   const formatHint = formatProfile
@@ -2699,24 +2700,12 @@ Viewer intent: ${formatProfile.viewerIntent ?? "stay for the core payoff"}.
 Success factors: ${(formatProfile.successFactors ?? []).join(", ") || "clear subject visibility, strong payoff"}.
 Ignored signals: ${(formatProfile.ignoredSignals ?? []).join(", ") || "none"}.`
     : "";
-
-  const chapterHint = !isVisualFirst && chapterPoints.length
-    ? `\n\nReal chapter timestamps:\n${chapterPoints.map(c => `${c.time} - context: "${c.text}"`).join("\n")}`
-    : "";
-
-  const platformGuide: Record<string, string> = {
-    youtube_long: "YouTube long-form: titles 60-70 chars, curiosity gap required, keyword in first 3 words.",
-    youtube_shorts: "YouTube Shorts: punchy titles under 50 chars, high-energy action verbs",
-    tiktok: "TikTok: trend-aware, conversational, 3-5 hashtags from trending niches",
-    instagram: "Instagram Reels: lifestyle-forward, mix of niche and broad hashtags",
-    linkedin: "LinkedIn: professional framing, thought leadership angle, low hashtag count",
-    x: "X/Twitter: max 2-3 hashtags, punchy and opinionated",
-  };
-
-  const guide = platformGuide[platform] ?? "";
+  const normalizedPlatform = platform === "youtube_shorts" ? "youtube shorts" : platform.replaceAll("_", " ");
+  const normalizedFormat = formatProfile?.contentFormat ?? (isVisualFirst ? "visual-first video" : "spoken video");
+  const transcriptWindow = transcript.substring(0, isFree ? 1800 : 3000);
   const contentHint = isVisualFirst
-    ? `Transcript signal is limited for this upload. Build packaging from the visual premise and detected format, not from sparse transcript fragments. Video name: "${videoName ?? "Video analysis"}". ${speechAnalysis?.summary ?? ""} ${formatHint}`
-    : `Transcript signal is strong enough to drive platform packaging. ${speechAnalysis?.summary ?? ""}`;
+    ? `Transcript signal is limited for this upload. Use the transcript as weak support and rely on the detected format when needed. Video name: "${videoName ?? "Video analysis"}". ${speechAnalysis?.summary ?? ""} ${formatHint}`
+    : `Transcript signal is strong enough to drive packaging. Video name: "${videoName ?? "Video analysis"}". ${speechAnalysis?.summary ?? ""} ${formatHint}`;
 
   if (isFree) {
     const response = await callOpenAI({
@@ -2726,27 +2715,44 @@ Ignored signals: ${(formatProfile.ignoredSignals ?? []).join(", ") || "none"}.`
 
 ${languageInstruction}
 
-Generate ONE strong title, TWO description sentences, and 3 tags.
-Platform: ${guide}
-Context: ${contentHint}
-Transcript: "${transcript.substring(0, 800)}"
-Hard rule: never infer cooking, food, dessert, recipe, or kitchen themes unless the detected format or transcript clearly supports that topic.
-Make the packaging algorithm-aware for this platform: strong topic clarity, clear audience promise, and wording that matches how high-performing creators in this niche package similar videos without copying anyone directly. Infer the likely niche from the transcript and favor concrete outcomes, clearer YouTube search intent, and phrases that feel competitive without sounding copied.
-TAGS: No # symbol.
+You are a YouTube SEO specialist. Your job is to produce packaging for a video that makes real humans click — not packaging that reads like a bot wrote it.
 
-Return STRICT JSON:
-{"titles":["one title"],"description":"Two sentences.","hashtags":[{"tag":"Tag","effect":"why"},{"tag":"Tag2","effect":"..."},{"tag":"Tag3","effect":"..."}],"timestamps":[{"time":"0:00","label":"Intro"}],"algorithmFit":"one sentence on why this packaging can attract clicks in this niche","packagingStrategy":"one sentence on the angle this title and description are selling"}` }],
+Platform: ${normalizedPlatform}
+Format: ${normalizedFormat}
+Additional context: ${contentHint}
+Transcript: """${transcriptWindow}"""
+
+Rules:
+- Read the transcript carefully. Infer the real topic, niche, and audience from it. Do not assume cooking, fitness, or any default niche.
+- Write ONE title. It must be under 65 characters. It must feel written by a person, not generated. No colons followed by a generic second clause. No "This Is Why..." or "The Truth About..." openers unless the content genuinely earns it. Prefer specificity over hype.
+- Write TWO description sentences. First sentence: what the video covers and why it matters to someone searching for it. Second sentence: a supporting detail or hook that keeps them reading. Total: 40–70 words. No "In this video..." opener.
+- Write 3 tags. Each tag is a phrase real viewers would type into the search bar — not keywords, not hashtags, not SEO jargon. Think: what does someone type right before clicking a video like this?
+- The tone must match the content's natural register. A casual creator = casual language. A tutorial = clear and direct. Do not inject urgency that isn't there.
+- Never infer cooking, food, dessert, recipe, or kitchen themes unless the detected format or transcript clearly supports that topic.
+
+Return ONLY valid JSON:
+{
+  "titles": [""],
+  "description": "",
+  "hashtags": ["", "", ""],
+  "timestamps": [],
+  "algorithmFit": "",
+  "packagingStrategy": ""
+}` }],
     }, userId);
 
-    const parsed = parseJson<{ titles: string[]; description: string; hashtags: Array<{ tag: string; effect?: string }>; timestamps: Array<{ time: string; label: string }>; algorithmFit?: string; packagingStrategy?: string }>(
+    const parsed = parseJson<{ titles: string[]; description: string; hashtags: string[]; timestamps: Array<{ time: string; label: string }>; algorithmFit?: string; packagingStrategy?: string }>(
       response.choices[0]?.message?.content ?? "{}",
-      { titles: ["Your Video Title"], description: "Your video content.", hashtags: [{ tag: "VideoContent", effect: "Broad reach" }], timestamps: [{ time: "0:00", label: "Introduction" }], algorithmFit: "", packagingStrategy: "" }
+      { titles: ["Your Video Title"], description: "Your video content.", hashtags: ["Video topic", "Audience problem", "How to do it"], timestamps: [], algorithmFit: "", packagingStrategy: "" }
     );
-    parsed.hashtags = (parsed.hashtags ?? []).map(h => ({ ...h, tag: typeof h.tag === "string" ? h.tag.replace(/^#+/, "") : h.tag }));
-    return parsed;
+    return {
+      ...parsed,
+      hashtags: (parsed.hashtags ?? [])
+        .map((tag) => ({ tag: typeof tag === "string" ? tag.replace(/^#+/, "").trim() : "", effect: "" }))
+        .filter((tag) => tag.tag),
+    };
   }
 
-  const isYouTube = platform === "youtube_long" || platform === "youtube_shorts";
   const response = await callOpenAI({
     model: "gpt-4o",
     max_completion_tokens: 2500,
@@ -2754,37 +2760,78 @@ Return STRICT JSON:
 
 ${languageInstruction}
 
-You are a ${platform} SEO expert. Platform rules: ${guide}
-Context: ${contentHint}
-Transcript: "${transcript.substring(0, 2000)}"${chapterHint}
-Hard rule: never infer cooking, food, dessert, recipe, or kitchen themes unless the detected format or transcript clearly supports that topic.
-If transcript signal is limited, prefer accurate format-aware packaging over specific nouns from sparse or noisy transcript fragments.
-Act like a strategist who studies viral creators in the same niche. Do not copy them or name them unless the evidence is obvious. Instead, extract the style patterns that make similar videos clickable: audience promise, tension, payoff clarity, specificity, search intent, and the language patterns that show up on winning niche uploads.
+You are a YouTube SEO strategist who works with creators in the same niche as this video. You have studied what makes real thumbnails and titles perform — not what sounds clever, but what gets clicked by an actual person mid-scroll.
 
-${isYouTube ? `Generate exactly 7 title options for YouTube. Make them noticeably different from each other and cover these angles: curiosity gap, how-to, number-based, problem/solution, bold claim, search-intent-first, and contrarian insight. Keep them under 70 characters each.` : `Generate 3 title options.`}
+Platform: ${normalizedPlatform}
+Format: ${normalizedFormat}
+Additional context: ${contentHint}
+Transcript: """${transcriptWindow}"""
 
-Description: First 2 lines state what the video is about and why it matters. Use the primary keyword naturally. Include ## Chapters. End with ONE CTA. 150-400 words. No hype.
+Step 1 — Read the transcript. Identify:
+- The real topic and niche (do not assume)
+- The intended audience and their level
+- What the video delivers: information, entertainment, a walkthrough, a take, a reveal
+- The emotional register: calm and instructional, punchy and energetic, dry and analytical, etc.
 
-TAGS: No # symbols. Generate 12-15 focused tags that combine likely winning niche phrases, direct search intent, and terms similar creators would realistically use on YouTube.
+Step 2 — Generate exactly 7 title options. Each must be under 65 characters. No two titles can use the same angle. Use exactly these angles, in order:
+1. Search-intent first — lead with what someone types when they want this video
+2. Curiosity gap — withhold the answer just enough to force a click, without being deceptive
+3. How-to or step-based — "How to..." or a numbered frame ("3 ways to...")
+4. Problem/solution — name the pain, imply the fix
+5. Bold claim — a confident, specific assertion the content can back up
+6. Contrarian or reframe — a take that challenges the expected view of the topic
+7. Specificity anchor — use a number, name, timeframe, or concrete detail to signal credibility
 
-Return STRICT JSON:
-{"titles":["t1","t2","t3","t4","t5"],"description":"full description","hashtags":[{"tag":"Tag","effect":"audience"}],"timestamps":[{"time":"0:00","label":"complete label"}],"titleStrategies":["curiosity gap","how-to","number-based","problem/solution","bold claim"],"algorithmFit":"2 sentences on why this packaging matches platform behavior and niche click patterns","packagingStrategy":"2 sentences on what audience promise these titles are selling","nicheReferences":["3 short notes describing the kind of viral packaging patterns being used"],"audiencePromise":"one sentence on the core promise that should win the click"}` }],
+Rules for all titles:
+- No colons unless the second clause is genuinely surprising or adds clarity
+- No "This Is Why...", "The Truth About...", "You Need To...", or other tired YouTube formulas
+- Write like a person who knows this niche, not like someone following a template
+- If the content is instructional, clarity > cleverness. If it's entertainment, energy > accuracy.
+
+Step 3 — Write a description between 150 and 400 words.
+- Lines 1–2 (visible before "Show more"): State exactly what the video covers and why it matters to someone searching for it. No "In this video..." opener.
+- Body: Expand on the topic. Include 2–3 search-relevant phrases naturally — do not keyword-stuff. Write in the same register as the content.
+- Close: One sentence that invites action (subscribe, comment, try the thing) without using "smash that like button" or similar clichés.
+
+Step 4 — Generate 12–15 tags.
+- Mix: 3–4 broad niche terms, 4–5 specific to this video's exact topic, 3–4 long-tail phrases a viewer would actually type, 1–2 creator-style or format tags (e.g. "beginner tutorial", "full walkthrough")
+- No hashtags. No "#". Just the phrase.
+- Avoid generic tags like "2024", "viral", "trending" — they add no signal.
+- Never infer cooking, food, dessert, recipe, or kitchen themes unless the detected format or transcript clearly supports that topic.
+
+Return ONLY valid JSON:
+{
+  "titles": ["", "", "", "", "", "", ""],
+  "description": "",
+  "hashtags": ["", "", "", "", "", "", "", "", "", "", "", ""],
+  "timestamps": [],
+  "algorithmFit": "<2–3 sentences on why this packaging matches platform behavior for this niche>",
+  "packagingStrategy": "<2–3 sentences on the dominant angle, why it fits this content, and what viewer intent it targets>"
+}` }],
   }, userId);
 
-  const parsed = parseJson<{ titles: string[]; description: string; hashtags: object[]; timestamps: Array<{ time: string; label: string }>; titleStrategies?: string[]; algorithmFit?: string; packagingStrategy?: string; nicheReferences?: string[]; audiencePromise?: string }>(
+  const parsed = parseJson<{ titles: string[]; description: string; hashtags: string[]; timestamps: Array<{ time: string; label: string }>; algorithmFit?: string; packagingStrategy?: string }>(
     response.choices[0]?.message?.content ?? "{}",
-    { titles: ["Engaging title"], description: "Description.", hashtags: [], timestamps: [{ time: "0:00", label: "Introduction" }], algorithmFit: "", packagingStrategy: "", nicheReferences: [], audiencePromise: "" }
+    { titles: ["Engaging title"], description: "Description.", hashtags: [], timestamps: [], algorithmFit: "", packagingStrategy: "" }
   );
-
-  if (chapterPoints.length) {
-    parsed.timestamps = parsed.timestamps.map((t, i) => ({ time: chapterPoints[i]?.time ?? t.time, label: t.label }));
-  }
-
-  parsed.hashtags = (parsed.hashtags ?? [])
-    .map((h: any) => ({ ...h, tag: typeof h.tag === "string" ? h.tag.replace(/^#+/, "") : h.tag }))
-    .filter((h: any) => typeof h.tag === "string" && h.tag.trim())
-    .slice(0, 15);
-  return parsed;
+  return {
+    ...parsed,
+    titleStrategies: [
+      "Search-intent first",
+      "Curiosity gap",
+      "How-to or step-based",
+      "Problem/solution",
+      "Bold claim",
+      "Contrarian or reframe",
+      "Specificity anchor",
+    ],
+    nicheReferences: [],
+    audiencePromise: "",
+    hashtags: (parsed.hashtags ?? [])
+      .map((tag) => ({ tag: typeof tag === "string" ? tag.replace(/^#+/, "").trim() : "", effect: "" }))
+      .filter((tag) => tag.tag)
+      .slice(0, 15),
+  };
 }
 
 export async function generateShortClipIdeas(
