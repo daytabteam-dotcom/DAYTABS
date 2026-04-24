@@ -12,6 +12,50 @@ export interface BlogPost {
 
 export const blogPosts: BlogPost[] = [
   {
+    slug: "ai-video-analysis-for-youtube-creators",
+    title: "AI Video Analysis for YouTube Creators: What to Measure Before You Publish",
+    category: "AI Tools",
+    excerpt:
+      "Most creators only judge a video by feel. Here is how AI video analysis can catch pacing, clarity, hook, and quality problems before a weak upload goes live.",
+    readTime: "8 min read",
+    publishedAt: "2026-04-24",
+    metaDescription:
+      "Learn how AI video analysis helps YouTube creators improve hooks, pacing, editing, clarity, and retention before publishing.",
+    keywords: ["AI video analysis", "YouTube creators", "video analysis tool", "improve YouTube retention", "creator workflow"],
+    content: `<h2>Why creators need AI video analysis now</h2>
+<p>Most creators still review their own upload with the least reliable system possible: intuition. You watch the video back, feel that it is good enough, and hit publish. Then the retention graph tells a different story. AI video analysis closes that gap by checking the parts of a video that usually get missed when you are too close to your own work.</p>
+<p>For YouTube creators especially, the difference between a strong upload and an average one often lives in details: how quickly the hook lands, where the pacing slows down, whether your value is obvious in the first thirty seconds, and whether technical issues like audio or visual clarity reduce trust.</p>
+
+<h2>The five signals worth measuring before publish</h2>
+<p>A useful AI video analysis workflow should not just produce a score. It should tell you where the score comes from and what to fix. The most helpful signals usually fall into five buckets.</p>
+<ul>
+  <li><strong>Hook strength:</strong> Does the opening make a clear promise fast enough?</li>
+  <li><strong>Pacing:</strong> Are there long stretches without a new payoff, reveal, example, or pattern break?</li>
+  <li><strong>Clarity:</strong> Is the viewer forced to work too hard to understand the point?</li>
+  <li><strong>Editing quality:</strong> Do cuts, captions, and on-screen elements support the story or distract from it?</li>
+  <li><strong>Technical quality:</strong> Are lighting, framing, and audio hurting trust before the message even lands?</li>
+</ul>
+
+<h2>Why this matters for retention, not just polish</h2>
+<p>Creators often think video quality is separate from performance, but on YouTube it is directly tied to retention. If the first impression feels low-quality, viewers leave before the algorithm ever gets enough positive watch data to keep pushing the video.</p>
+<p>That is why AI video analysis is valuable before publish. It catches friction before viewers do. A slow opening, muddy explanation, or flat edit does not just make the video less elegant. It can reduce impressions, average view duration, and conversion to subscriber.</p>
+
+<h2>How to use analysis without becoming robotic</h2>
+<p>The goal is not to let a tool replace your creative judgment. The goal is to use feedback to spot weak points faster. The best workflow is simple: create the video with your own taste, run analysis, fix the obvious weak spots, then publish with more confidence.</p>
+<p>If the report says the hook is unclear, rewrite the first line. If it says the middle section drags, cut repetition. If it says the publish assets are weak, improve the title and tag suggestions before upload. Small corrections compound over time.</p>
+
+<h2>What a strong pre-publish workflow looks like</h2>
+<ol>
+  <li>Upload the near-final edit.</li>
+  <li>Review quality, content, and SEO feedback together.</li>
+  <li>Fix the top two or three issues instead of endlessly polishing.</li>
+  <li>Generate stronger publish assets from the actual transcript and topic.</li>
+  <li>Publish once the opening, pacing, and metadata all support the same promise.</li>
+</ol>
+
+<p>For creators trying to publish consistently, this is where AI video analysis becomes a real advantage. It turns vague self-review into a repeatable system. If you also want the metadata side dialed in, read our guide on <a href="/blog/youtube-title-and-tag-suggestions-guide">writing better YouTube title and tag suggestions</a>.</p>`,
+  },
+  {
     slug: "youtube-seo-guide-2026",
     title: "YouTube SEO in 2026: What Actually Works (And What to Stop Doing)",
     category: "YouTube SEO",
@@ -111,6 +155,52 @@ export const blogPosts: BlogPost[] = [
   <li>✓ Opening 30 seconds optimized to hook retention</li>
 </ul>
 <p>Want to go deeper on the metadata side? Read our guide on <a href="/blog/how-to-write-youtube-descriptions-that-rank">writing YouTube descriptions that actually rank</a>.</p>`,
+  },
+  {
+    slug: "youtube-title-and-tag-suggestions-guide",
+    title: "How to Write Better YouTube Title and Tag Suggestions From One Video",
+    category: "YouTube SEO",
+    excerpt:
+      "Good metadata is not guesswork. Here is a practical system for turning one finished video into stronger YouTube title and tag suggestions without keyword stuffing.",
+    readTime: "7 min read",
+    publishedAt: "2026-04-22",
+    metaDescription:
+      "A practical guide to YouTube title and tag suggestions. Learn how to turn one finished video into stronger metadata without keyword stuffing.",
+    keywords: ["YouTube title suggestions", "tag suggestions", "YouTube SEO titles", "YouTube metadata", "video tags"],
+    content: `<h2>Why most title and tag suggestions fail</h2>
+<p>Most creators write metadata too early or too generically. They know the topic of the video, but they have not yet looked at the exact phrasing, examples, and outcomes that ended up inside the final cut. That is why titles sound broad and tags sound copied.</p>
+<p>Better title and tag suggestions come from the finished video itself. When you look at the transcript, the hook, and the real promise the video delivers, the right metadata gets much easier to write.</p>
+
+<h2>Start with the real promise of the upload</h2>
+<p>Before writing any title, answer one question: what exact outcome does this video help the viewer get? Not the topic, the outcome. A topic is "YouTube SEO." An outcome is "rank videos without keyword stuffing" or "write better titles that still get clicks."</p>
+<p>Your title should reflect that outcome clearly. If the title is broad but the outcome is specific, you attract the wrong click and lose retention. If the title is specific and the video delivers, you get a better match between click and watch time.</p>
+
+<h2>A simple title workflow that works</h2>
+<ol>
+  <li>Pull one clear keyword phrase from the topic.</li>
+  <li>Pair it with a specific outcome, contrast, or curiosity trigger.</li>
+  <li>Keep the structure natural enough that a human would actually say it.</li>
+  <li>Write five versions before choosing one.</li>
+</ol>
+<p>For example, "YouTube SEO in 2026" is the keyword frame. The stronger version becomes "YouTube SEO in 2026: What Actually Works" because it adds a real viewer promise.</p>
+
+<h2>How to think about tags now</h2>
+<p>Tags are not where most ranking wins happen anymore, but they still help YouTube understand the topical neighborhood your video belongs to. The right approach is to use a focused set, not dozens of weak variations.</p>
+<ul>
+  <li>Use one primary exact phrase.</li>
+  <li>Add close topic variations.</li>
+  <li>Add related problem phrases your audience might search.</li>
+  <li>Use tags to clarify context, not to spam keywords.</li>
+</ul>
+<p>A video about better hooks might include tags for hook writing, YouTube hooks, creator retention tips, and audience retention strategy. That gives context without turning metadata into a pile of repeats.</p>
+
+<h2>Why transcript-based suggestions are stronger</h2>
+<p>If you generate title and tag suggestions from the actual transcript, you get language that already matches the content. That is more useful than brainstorming in the abstract because the examples, terminology, and promise already exist inside the video.</p>
+<p>This is especially helpful when your video covers more than one subtopic. A transcript makes it easier to see what the real center of gravity is, so you can choose a title that fits what the viewer will actually watch.</p>
+
+<h2>Metadata should support the thumbnail, not fight it</h2>
+<p>Your title, thumbnail, and opening line should feel like one system. If the title promises one thing and the thumbnail hints at another, viewers get mixed signals. The best YouTube title and tag suggestions come from a single clear positioning angle that carries through the entire package.</p>
+<p>Want the broader search strategy too? Read our full guide to <a href="/blog/youtube-seo-guide-2026">YouTube SEO in 2026</a>.</p>`,
   },
   {
     slug: "how-to-repurpose-youtube-videos-for-tiktok",
@@ -213,6 +303,48 @@ export const blogPosts: BlogPost[] = [
   <li>✓ Format to each platform's spec before export</li>
   <li>✓ Use transcript to find clips in 5 minutes instead of 20</li>
 </ul>`,
+  },
+  {
+    slug: "weekly-content-planning-for-creators",
+    title: "Weekly Content Planning for YouTube, TikTok, and Instagram Creators",
+    category: "AI Tools",
+    excerpt:
+      "Weekly content planning gets easier when you stop guessing and build around format balance, trend timing, and what your audience already responds to.",
+    readTime: "8 min read",
+    publishedAt: "2026-04-20",
+    metaDescription:
+      "A practical weekly content planning system for YouTube, TikTok, and Instagram creators who want to publish more consistently without burning out.",
+    keywords: ["content planning", "weekly content planning", "YouTube content planning", "TikTok content calendar", "Instagram creator workflow"],
+    content: `<h2>Why most content planning systems fall apart</h2>
+<p>Most creators do not fail because they lack ideas. They fail because they try to plan content in giant bursts of motivation and then execute it in isolation. Weekly content planning works better because it is small enough to keep repeating and structured enough to reduce decision fatigue.</p>
+<p>Instead of asking "what should I post this month?" every few weeks, ask "what should I publish this week, on which platform, and why?" That change makes consistency much easier.</p>
+
+<h2>Plan around formats, not just topics</h2>
+<p>A useful weekly plan balances different kinds of content. One post might target reach. Another might build trust. Another might convert followers into leads or customers. If every piece of content tries to do the same job, performance becomes unstable.</p>
+<p>For YouTube, TikTok, and Instagram creators, a balanced week often includes:</p>
+<ul>
+  <li>One search-driven or evergreen topic</li>
+  <li>One timely reaction, trend, or opinion angle</li>
+  <li>One proof-driven post, breakdown, or case study</li>
+  <li>One short-form repurposed clip from a larger asset</li>
+</ul>
+
+<h2>Use recent performance to guide the next week</h2>
+<p>Weekly content planning gets stronger when it looks backward before it looks forward. Which hooks held attention? Which topics earned saves or click-through? Which format underperformed? A plan based on live feedback is always more reliable than a blank creative brainstorm.</p>
+<p>This is where creator tools become useful. When you can see trend signals, competitor activity, and your own recent performance in one place, planning turns into pattern recognition instead of random ideation.</p>
+
+<h2>A simple weekly planning workflow</h2>
+<ol>
+  <li>Review last week’s top signals: retention, clicks, saves, replies, or watch time.</li>
+  <li>List the formats and platforms you need to support this week.</li>
+  <li>Choose ideas that fit both your audience and your actual publishing capacity.</li>
+  <li>Decide the first hook and angle for each post before production begins.</li>
+  <li>Leave room for one flexible slot if something timely appears midweek.</li>
+</ol>
+
+<h2>Planning should reduce burnout, not add more admin</h2>
+<p>The best weekly content planning system is the one you can repeat while still making good work. If your plan requires fifteen new concepts and nine hours of admin every Monday, it will not last. A good plan makes creative decisions easier and protects time for execution.</p>
+<p>If you want to connect planning to better metadata and publish assets too, pair your calendar process with our guide to <a href="/blog/ai-tools-for-content-creators-2026">AI tools for content creators</a>.</p>`,
   },
   {
     slug: "video-quality-checklist-for-creators",

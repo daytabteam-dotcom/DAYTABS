@@ -379,9 +379,8 @@ export default function LandingPage() {
             transition={{ duration: 0.7, delay: 0.2 }}
             className="text-lg md:text-xl text-white/60 max-w-2xl mx-auto mb-10"
           >
-            Upload your video and get instant feedback on quality, editing, SEO optimization,
-            and short clip ideas, all in one place. Built for YouTube, TikTok, Instagram,
-            LinkedIn, and Twitter.
+            DayTabs gives YouTube, TikTok, and Instagram creators AI video analysis, YouTube SEO help,
+            title and tag suggestions, short clip ideas, and content planning in one workflow.
           </motion.p>
 
           <motion.div
@@ -523,7 +522,8 @@ export default function LandingPage() {
               <span className="gradient-text">Grow Your Channel</span>
             </h2>
             <p className="text-white/50 text-lg max-w-2xl mx-auto">
-              A complete toolkit for serious content creators.{" "}
+              A complete toolkit for serious YouTube, TikTok, and Instagram creators, with AI video analysis,
+              YouTube SEO guidance, title and tag suggestions, and content planning built into one dashboard.{" "}
               <button onClick={() => navigate("/pricing")} className="text-violet-400 hover:text-violet-300 transition-colors cursor-pointer">
                 See all features →
               </button>
@@ -553,7 +553,8 @@ export default function LandingPage() {
               What You <span className="gradient-text">Receive</span>
             </h2>
             <p className="text-white/50 text-lg max-w-2xl mx-auto">
-              DayTabs is a web-based subscription product for creators who want analysis reports, publish assets, and ongoing planning help.
+              DayTabs is a web-based subscription product for creators who want visible, actionable AI video analysis,
+              publish-ready title and tag suggestions, and ongoing content planning help.
             </p>
           </FadeIn>
 
@@ -565,7 +566,7 @@ export default function LandingPage() {
               },
               {
                 title: "Publish package outputs",
-                desc: "Depending on your plan, DayTabs can generate title ideas, descriptions, tags, and short clip ideas to speed up publishing.",
+                desc: "Depending on your plan, DayTabs can generate title and tag suggestions, descriptions, hooks, and short clip ideas to speed up publishing.",
               },
               {
                 title: "Monthly usage limits by plan",
@@ -592,7 +593,7 @@ export default function LandingPage() {
             </h2>
             <p className="text-white/50 text-lg max-w-2xl mx-auto mb-8">
               Whether you publish long-form on YouTube or short-form on TikTok, Instagram Reels, LinkedIn, or Twitter,
-              DayTabs gives you tailored recommendations for each platform in a single analysis.
+              DayTabs adapts AI video analysis, YouTube SEO recommendations, and content planning to each platform in a single report.
             </p>
             <div className="flex flex-wrap items-center justify-center gap-6">
               {platforms.map((p) => (
@@ -603,6 +604,48 @@ export default function LandingPage() {
               ))}
             </div>
           </FadeIn>
+        </div>
+      </section>
+
+      <section className="py-20 px-6">
+        <div className="max-w-5xl mx-auto">
+          <FadeIn className="text-center mb-12">
+            <h2 className="text-4xl md:text-5xl font-bold mb-4">
+              Built Around the <span className="gradient-text">Terms Creators Search For</span>
+            </h2>
+            <p className="text-white/50 text-lg max-w-3xl mx-auto">
+              If you are looking for AI video analysis, YouTube SEO, title and tag suggestions, or content planning for
+              YouTube, TikTok, and Instagram creators, DayTabs brings those workflows together in one creator dashboard.
+            </p>
+          </FadeIn>
+
+          <div className="grid md:grid-cols-2 gap-6">
+            {[
+              {
+                title: "AI video analysis for real uploads",
+                desc: "Review actual videos for quality, pacing, hooks, clarity, and editing issues instead of relying on generic prompts alone.",
+              },
+              {
+                title: "YouTube SEO and metadata support",
+                desc: "Generate stronger titles, descriptions, timestamps, and tag suggestions based on what is actually inside your video.",
+              },
+              {
+                title: "Short-form planning for TikTok and Instagram",
+                desc: "Find clip-worthy moments, angles, and publishing ideas tailored to short-form creators and repurposing workflows.",
+              },
+              {
+                title: "Weekly content planning",
+                desc: "Turn performance data, trends, and competitor signals into a weekly content planning workflow you can publish from.",
+              },
+            ].map((item, i) => (
+              <FadeIn key={item.title} delay={i * 0.08}>
+                <div className="glass rounded-2xl p-6 border border-white/8 h-full">
+                  <h3 className="text-xl font-semibold mb-3">{item.title}</h3>
+                  <p className="text-sm text-white/55 leading-relaxed">{item.desc}</p>
+                </div>
+              </FadeIn>
+            ))}
+          </div>
         </div>
       </section>
 

@@ -16,16 +16,34 @@
     <priority>0.8</priority>
   </url>
   <url>
+    <loc>https://daytabs.com/blog/ai-video-analysis-for-youtube-creators</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+    <lastmod>2026-04-24</lastmod>
+  </url>
+  <url>
     <loc>https://daytabs.com/blog/youtube-seo-guide-2026</loc>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
     <lastmod>2026-03-10</lastmod>
   </url>
   <url>
+    <loc>https://daytabs.com/blog/youtube-title-and-tag-suggestions-guide</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+    <lastmod>2026-04-22</lastmod>
+  </url>
+  <url>
     <loc>https://daytabs.com/blog/how-to-repurpose-youtube-videos-for-tiktok</loc>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
     <lastmod>2026-03-14</lastmod>
+  </url>
+  <url>
+    <loc>https://daytabs.com/blog/weekly-content-planning-for-creators</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+    <lastmod>2026-04-20</lastmod>
   </url>
   <url>
     <loc>https://daytabs.com/blog/video-quality-checklist-for-creators</loc>
