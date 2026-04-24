@@ -2,4 +2,5 @@ User-agent: *
 Allow: /
 Disallow: /panel/
 Disallow: /api/
+Disallow: /_daytabs_ops_7m4k9x2q/
 Sitemap: https://daytabs.com/sitemap.xml

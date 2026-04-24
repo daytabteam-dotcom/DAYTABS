@@ -230,23 +230,54 @@ function FAQItem({ q, a }: { q: string; a: string }) {
   );
 }
 
+const siteUrl = "https://daytabs.com";
+
+const organizationSchema = {
+  "@context": "https://schema.org",
+  "@type": "Organization",
+  name: "DayTabs",
+  url: siteUrl,
+  logo: `${siteUrl}/favicon.jpg`,
+  sameAs: [
+    "https://daytabs.com",
+  ],
+};
+
+const websiteSchema = {
+  "@context": "https://schema.org",
+  "@type": "WebSite",
+  name: "DayTabs",
+  url: siteUrl,
+  description:
+    "DayTabs is an AI video analysis and content planning platform for YouTube, TikTok, Instagram, LinkedIn, and X creators.",
+  publisher: {
+    "@type": "Organization",
+    name: "DayTabs",
+  },
+};
+
 const softwareSchema = {
   "@context": "https://schema.org",
   "@type": "SoftwareApplication",
   name: "DayTabs",
-  applicationCategory: "MultimediaApplication",
+  applicationCategory: "BusinessApplication",
   operatingSystem: "Web",
   description:
-    "AI-powered video analysis platform for content creators. Analyzes video quality, suggests edits, generates SEO-optimized titles and descriptions.",
+    "AI video analysis and content planning software for creators. Review video quality, editing, YouTube SEO, titles, tags, hooks, and short-form clip opportunities.",
+  url: siteUrl,
+  brand: {
+    "@type": "Brand",
+    name: "DayTabs",
+  },
   offers: {
     "@type": "Offer",
     price: "0",
     priceCurrency: "USD",
+    url: `${siteUrl}/pricing`,
   },
-  aggregateRating: {
-    "@type": "AggregateRating",
-    ratingValue: "4.8",
-    reviewCount: "124",
+  creator: {
+    "@type": "Organization",
+    name: "DayTabs",
   },
 };
 
@@ -267,10 +298,10 @@ export default function LandingPage() {
   return (
     <div className="min-h-screen bg-background text-foreground overflow-x-hidden">
       <Helmet>
-        <title>DayTabs, AI Video Analysis for Content Creators</title>
+        <title>DayTabs | AI Video Analysis and YouTube SEO for Creators</title>
         <meta
           name="description"
-          content="Upload your video and get instant AI feedback on quality, editing, SEO titles, tags, and short clip ideas. Built for YouTube, TikTok, and Instagram creators."
+          content="DayTabs helps creators improve videos with AI video analysis, YouTube SEO suggestions, title and tag ideas, hooks, and weekly content planning."
         />
         <meta name="robots" content="index, follow" />
         <link rel="canonical" href="https://daytabs.com/" />
@@ -279,22 +310,26 @@ export default function LandingPage() {
           name="keywords"
           content="AI video analysis, YouTube SEO, video editing tool, content creator tools, video quality checker, TikTok video analyzer, Instagram Reels optimizer"
         />
-        <meta property="og:title" content="DayTabs, AI Video Analysis for Content Creators" />
+        <meta property="og:title" content="DayTabs | AI Video Analysis and YouTube SEO for Creators" />
         <meta
           property="og:description"
-          content="Upload your video and get instant AI feedback on quality, editing, SEO titles, tags, and short clip ideas. Built for YouTube, TikTok, and Instagram creators."
+          content="AI video analysis, YouTube SEO suggestions, title and tag ideas, hooks, and weekly content planning for creators."
         />
         <meta property="og:image" content="https://daytabs.com/opengraph.jpg" />
+        <meta property="og:image:alt" content="DayTabs AI video analysis platform for creators" />
         <meta property="og:url" content="https://daytabs.com/" />
         <meta property="og:type" content="website" />
         <meta property="og:site_name" content="DayTabs" />
         <meta name="twitter:card" content="summary_large_image" />
-        <meta name="twitter:title" content="DayTabs, AI Video Analysis for Content Creators" />
+        <meta name="twitter:title" content="DayTabs | AI Video Analysis and YouTube SEO for Creators" />
         <meta
           name="twitter:description"
-          content="Upload your video and get instant AI feedback on quality, editing, SEO titles, tags, and short clip ideas. Built for YouTube, TikTok, and Instagram creators."
+          content="AI video analysis, YouTube SEO suggestions, title and tag ideas, hooks, and weekly content planning for creators."
         />
         <meta name="twitter:image" content="https://daytabs.com/opengraph.jpg" />
+        <meta name="twitter:image:alt" content="DayTabs AI video analysis platform for creators" />
+        <script type="application/ld+json">{JSON.stringify(organizationSchema)}</script>
+        <script type="application/ld+json">{JSON.stringify(websiteSchema)}</script>
         <script type="application/ld+json">{JSON.stringify(softwareSchema)}</script>
       </Helmet>
 
