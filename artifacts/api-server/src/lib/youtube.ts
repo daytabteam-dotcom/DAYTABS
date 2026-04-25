@@ -87,6 +87,12 @@ export interface YoutubeVideoAuditReport {
     targetAudience: string;
     likelyFormat: string;
   };
+  transcript: {
+    available: boolean;
+    source: "manual" | "auto" | null;
+    language: string | null;
+    text: string | null;
+  };
   performanceContext: {
     ageDays: number | null;
     viewsPerDay: number | null;
@@ -2038,6 +2044,111 @@ function buildAuditSearchQuery(video: YoutubeRecentVideo, nicheProfile: YoutubeN
   return [...titleWords, ...nicheWords].join(" ").trim() || video.title;
 }
 
+function extractBalancedJson(source: string, marker: string) {
+  const markerIndex = source.indexOf(marker);
+  if (markerIndex === -1) return null;
+  const start = source.indexOf("{", markerIndex + marker.length);
+  if (start === -1) return null;
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = start; index < source.length; index += 1) {
+    const char = source[index];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === "\"") {
+      inString = true;
+      continue;
+    }
+    if (char === "{") depth += 1;
+    if (char === "}") {
+      depth -= 1;
+      if (depth === 0) return source.slice(start, index + 1);
+    }
+  }
+  return null;
+}
+
+function normalizeYoutubeTranscriptText(text: string) {
+  return text
+    .replace(/\u00a0/g, " ")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
+async function fetchPublicYoutubeTranscript(videoId: string) {
+  const watchResponse = await fetch(`https://www.youtube.com/watch?v=${videoId}&hl=en`, {
+    headers: {
+      "User-Agent": "Mozilla/5.0 DayTabsAudit/1.0",
+      "Accept-Language": "en-US,en;q=0.9",
+    },
+  });
+  if (!watchResponse.ok) return null;
+
+  const html = await watchResponse.text();
+  const playerResponseJson =
+    extractBalancedJson(html, "var ytInitialPlayerResponse = ") ||
+    extractBalancedJson(html, "ytInitialPlayerResponse = ") ||
+    extractBalancedJson(html, "window['ytInitialPlayerResponse'] = ") ||
+    extractBalancedJson(html, "window[\"ytInitialPlayerResponse\"] = ");
+  if (!playerResponseJson) return null;
+
+  const playerResponse = asRecord(JSON.parse(playerResponseJson));
+  const captionsRoot = asRecord(asRecord(playerResponse.captions).playerCaptionsTracklistRenderer);
+  const captionTracks = asArray(captionsRoot.captionTracks)
+    .map((item) => asRecord(item))
+    .filter((item) => asString(item.baseUrl));
+  if (!captionTracks.length) return null;
+
+  const preferredTrack =
+    captionTracks.find((track) => !asString(track.kind) && asString(track.languageCode) === "en") ||
+    captionTracks.find((track) => !asString(track.kind)) ||
+    captionTracks.find((track) => asString(track.languageCode) === "en") ||
+    captionTracks[0];
+  const baseUrl = asString(preferredTrack.baseUrl);
+  if (!baseUrl) return null;
+
+  const transcriptResponse = await fetch(`${baseUrl}&fmt=json3`, {
+    headers: {
+      "User-Agent": "Mozilla/5.0 DayTabsAudit/1.0",
+      "Accept-Language": "en-US,en;q=0.9",
+    },
+  });
+  if (!transcriptResponse.ok) return null;
+
+  const transcriptJson = asRecord(await transcriptResponse.json().catch(() => ({})));
+  const events = asArray(transcriptJson.events).map((item) => asRecord(item));
+  const segments = events
+    .map((event) =>
+      asArray(event.segs)
+        .map((seg) => asString(asRecord(seg).utf8) || "")
+        .join("")
+        .replace(/\s+/g, " ")
+        .trim(),
+    )
+    .filter(Boolean);
+  if (!segments.length) return null;
+
+  return {
+    source: asString(preferredTrack.kind) === "asr" ? "auto" as const : "manual" as const,
+    language: asString(preferredTrack.languageCode),
+    text: normalizeYoutubeTranscriptText(segments.join("\n")),
+  };
+}
+
 export async function auditYoutubeVideo(userId: number, videoUrl: string): Promise<YoutubeVideoAuditReport> {
   const videoId = extractYoutubeVideoId(videoUrl);
   if (!videoId) throw new Error("Enter a valid YouTube video URL");
@@ -2085,15 +2196,16 @@ export async function auditYoutubeVideo(userId: number, videoUrl: string): Promi
     ? await analyzeVisuals([thumbnailBase64], likelyYoutubeFormatFromVideo(video), "pro", `${video.title}\n\n${video.description}`, userId).catch(() => null)
     : null;
   const visualAuditRecord = visualAuditRaw ? asRecord(visualAuditRaw) : null;
+  const transcript = await fetchPublicYoutubeTranscript(videoId).catch(() => null);
 
-  const pseudoTranscript = [
+  const transcriptForAudit = transcript?.text || [
     `Video title: ${video.title}`,
     `Description: ${video.description}`,
     video.tags.length ? `Tags: ${video.tags.join(", ")}` : "",
   ].filter(Boolean).join("\n\n");
 
   const seoDraft = await generateSeo(
-    pseudoTranscript,
+    transcriptForAudit,
     likelyYoutubeFormatFromVideo(video),
     [],
     "pro",
@@ -2168,7 +2280,10 @@ Return JSON only:
             channelMedianViews,
             competitorMedianViews,
           },
-          transcriptAvailable: false,
+          transcriptAvailable: Boolean(transcript?.text),
+          transcriptSource: transcript?.source ?? null,
+          transcriptLanguage: transcript?.language ?? null,
+          transcriptExcerpt: transcript?.text?.slice(0, 5000) ?? null,
         }),
       },
     ],
@@ -2225,6 +2340,12 @@ Return JSON only:
       targetAudience: nicheProfile.targetAudience,
       likelyFormat: likelyYoutubeFormatFromVideo(video),
     },
+    transcript: {
+      available: Boolean(transcript?.text),
+      source: transcript?.source ?? null,
+      language: transcript?.language ?? null,
+      text: transcript?.text ?? null,
+    },
     performanceContext: {
       ageDays,
       viewsPerDay,
@@ -2258,9 +2379,11 @@ Return JSON only:
       packagingStrategy: asString(fixes.packagingStrategy) || asString(asRecord(seoDraft).packagingStrategy) || "",
     },
     limitations: asArray(parsed.limitations).map((item) => String(item)).filter(Boolean).slice(0, 6).concat([
-      "Transcript-level script analysis is not available yet for pasted public YouTube URLs in this first version.",
+      transcript?.text
+        ? ""
+        : "Public transcript was not available for this video, so script analysis fell back to title, description, tags, and competitor context.",
       "Frame-level visual analysis currently uses the public thumbnail as a visual proxy unless deeper video access is added later.",
-    ]).filter((value, index, array) => array.indexOf(value) === index),
+    ]).filter(Boolean).filter((value, index, array) => array.indexOf(value) === index),
   };
 }
 

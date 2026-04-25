@@ -34,6 +34,12 @@ type AuditReport = {
     targetAudience: string;
     likelyFormat: string;
   };
+  transcript: {
+    available: boolean;
+    source: "manual" | "auto" | null;
+    language: string | null;
+    text: string | null;
+  };
   performanceContext: {
     ageDays: number | null;
     viewsPerDay: number | null;
@@ -234,6 +240,11 @@ export default function YouTubeAuditTab() {
                   <div className="mt-4 flex flex-wrap gap-2">
                     <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-semibold text-white/70">{report.video.niche}</span>
                     <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-semibold text-white/70">{report.video.likelyFormat}</span>
+                    <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-semibold text-white/70">
+                      {report.transcript.available
+                        ? `Transcript: ${report.transcript.source === "manual" ? "Manual" : "Auto"}${report.transcript.language ? ` · ${report.transcript.language}` : ""}`
+                        : "Transcript unavailable"}
+                    </span>
                   </div>
                 </div>
               </div>
