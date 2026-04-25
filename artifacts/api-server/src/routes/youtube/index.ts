@@ -546,7 +546,7 @@ router.post("/audit-transcribe", requireAuth, (req, res) => {
       const report = await auditYoutubeVideo(req.auth!.user_id, videoUrl, {
         transcriptOverride: {
           text,
-          source: "uploaded",
+          source: "transcribed_audio",
           language: null,
           segments: transcript.segments,
         },
@@ -555,7 +555,7 @@ router.post("/audit-transcribe", requireAuth, (req, res) => {
         report,
         transcript: {
           available: true,
-          source: "uploaded",
+          source: "transcribed_audio",
           language: null,
           text,
           segments: transcript.segments,

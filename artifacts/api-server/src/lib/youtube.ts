@@ -269,13 +269,13 @@ export interface YoutubeVideoAuditReport {
   };
   captions: {
     available: boolean;
-    source: "manual" | "auto" | "uploaded" | null;
+    source: "manual" | "auto" | "uploaded" | "transcribed_audio" | null;
     language: string | null;
     languages: string[];
   };
   transcript: {
     available: boolean;
-    source: "manual" | "auto" | "uploaded" | null;
+    source: "manual" | "auto" | "uploaded" | "transcribed_audio" | null;
     language: string | null;
     text: string | null;
     segments: YoutubeTranscriptSegment[];
@@ -358,6 +358,7 @@ export interface YoutubeVideoAuditPreview {
     source: "manual" | "auto" | null;
     language: string | null;
     languages: string[];
+    downloadable?: boolean;
   };
   transcript: {
     available: boolean;
@@ -2872,6 +2873,12 @@ function seedYoutubeConsentCookies(jar: Map<string, string>) {
   if (!jar.has("SOCS")) jar.set("SOCS", "CAI");
 }
 
+function baseLanguageCode(value: unknown) {
+  const raw = asString(value)?.trim().toLowerCase() || "";
+  if (!raw) return "";
+  return raw.split(/[-_]/)[0] || raw;
+}
+
 function parseTimedTextTrackList(videoId: string, xml: string) {
   const tracks: JsonRecord[] = [];
   for (const match of xml.matchAll(/<track\b([^>]*)\/?>/gi)) {
@@ -3009,42 +3016,55 @@ function parseTranscriptXml(xml: string) {
 async function fetchTranscriptFromTrack(track: JsonRecord, requestHeaders: Record<string, string>) {
   const baseUrl = asString(track.baseUrl);
   if (!baseUrl) return null;
-  const jsonUrl = appendUrlParam(baseUrl, "fmt", "json3");
-  const jsonResponse = await fetch(jsonUrl, { headers: { ...requestHeaders, Accept: "application/json,text/plain,*/*" } }).catch(() => null);
-  if (jsonResponse?.ok) {
-    const raw = await jsonResponse.text().catch(() => "");
+  const urls = [
+    appendUrlParam(baseUrl, "fmt", "json3"),
+    appendUrlParam(baseUrl, "fmt", null),
+  ];
+
+  for (const url of urls) {
+    const wantsJson = url.includes("fmt=json3");
+    const response = await fetch(url, {
+      headers: {
+        ...requestHeaders,
+        Accept: wantsJson ? "application/json,text/plain,*/*" : "*/*",
+      },
+    }).catch(() => null);
+
+    if (!response?.ok) continue;
+    const raw = await response.text().catch(() => "");
     const cleaned = raw.trim().replace(/^\)\]\}'\s*/, "");
-    const transcriptJson = (() => {
-      if (!cleaned) return {};
+    if (!cleaned) continue;
+
+    if (wantsJson) {
       try {
-        return asRecord(JSON.parse(cleaned));
+        const transcriptJson = asRecord(JSON.parse(cleaned));
+        const events = asArray(transcriptJson.events).map((item) => asRecord(item));
+        const segments = normalizeTranscriptSegments(events.map((event) => {
+          const text = asArray(event.segs)
+            .map((seg) => asString(asRecord(seg).utf8) || "")
+            .join("")
+            .replace(/\s+/g, " ")
+            .trim();
+          const startMs = parseNumber(event.tStartMs);
+          const durationMs = parseNumber(event.dDurationMs);
+          return {
+            start: startMs / 1000,
+            end: (startMs + Math.max(100, durationMs || 0)) / 1000,
+            text,
+          };
+        }));
+        if (segments.length) return { text: transcriptSegmentsToText(segments), segments };
       } catch {
-        return {};
+        // Fall through to XML attempt.
       }
-    })();
-    const events = asArray(transcriptJson.events).map((item) => asRecord(item));
-    const segments = normalizeTranscriptSegments(events
-      .map((event) => {
-        const text = asArray(event.segs)
-          .map((seg) => asString(asRecord(seg).utf8) || "")
-          .join("")
-          .replace(/\s+/g, " ")
-          .trim();
-        const startMs = parseNumber(event.tStartMs);
-        const durationMs = parseNumber(event.dDurationMs);
-        return {
-          start: startMs / 1000,
-          end: (startMs + Math.max(100, durationMs || 0)) / 1000,
-          text,
-        };
-      }));
-    if (segments.length) return { text: transcriptSegmentsToText(segments), segments };
+      continue;
+    }
+
+    const parsed = parseTranscriptXml(cleaned);
+    if (parsed) return parsed;
   }
 
-  const xmlUrl = appendUrlParam(baseUrl, "fmt", null);
-  const xmlResponse = await fetch(xmlUrl, { headers: { ...requestHeaders, Accept: "*/*" } }).catch(() => null);
-  if (!xmlResponse?.ok) return null;
-  return parseTranscriptXml(await xmlResponse.text());
+  return null;
 }
 
 async function fetchYoutubeTranscriptPackageFallback(videoId: string, preferredLanguages: Array<string | null> = []) {
@@ -3200,7 +3220,26 @@ async function probeYoutubeCaptionAvailability(videoId: string) {
   }
 
   const hasCaptions = captionTracks.length > 0;
-  const firstTrack = hasCaptions ? asRecord(captionTracks[0]) : null;
+  const orderedTracks = [
+    ...captionTracks.filter((track) => baseLanguageCode(track.languageCode) === "en" && !asString(track.kind)),
+    ...captionTracks.filter((track) => baseLanguageCode(track.languageCode) === "en" && asString(track.kind)),
+    ...captionTracks.filter((track) => baseLanguageCode(track.languageCode) !== "en" && !asString(track.kind)),
+    ...captionTracks.filter((track) => baseLanguageCode(track.languageCode) !== "en" && asString(track.kind)),
+  ].filter((track, index, array) => {
+    const baseUrl = asString(asRecord(track).baseUrl);
+    return Boolean(baseUrl) && array.findIndex((item) => asString(asRecord(item).baseUrl) === baseUrl) === index;
+  });
+
+  const firstTrack = hasCaptions ? asRecord(orderedTracks[0] ?? captionTracks[0]) : null;
+  const downloadableTranscript = firstTrack?.baseUrl
+    ? await fetchTranscriptFromTrack(firstTrack, {
+      ...baseHeaders,
+      ...(cookieJar.size ? { Cookie: cookieHeaderFromJar(cookieJar) } : {}),
+      Referer: watchUrl,
+      Origin: "https://www.youtube.com",
+    }).catch(() => null)
+    : null;
+  const downloadable = Boolean(downloadableTranscript?.text);
   const source = hasCaptions
     ? (asString(firstTrack?.kind) === "asr" ? "auto" as const : "manual" as const)
     : null;
@@ -3213,6 +3252,7 @@ async function probeYoutubeCaptionAvailability(videoId: string) {
 
   return {
     available: hasCaptions,
+    downloadable,
     source,
     language,
     languages,
@@ -3357,10 +3397,10 @@ async function fetchPublicYoutubeTranscript(videoId: string) {
   }
 
   const orderedTracks = [
-    ...captionTracks.filter((track) => !asString(track.kind) && asString(track.languageCode) === "en"),
-    ...captionTracks.filter((track) => !asString(track.kind) && asString(track.languageCode) !== "en"),
-    ...captionTracks.filter((track) => asString(track.kind) && asString(track.languageCode) === "en"),
-    ...captionTracks.filter((track) => asString(track.kind) && asString(track.languageCode) !== "en"),
+    ...captionTracks.filter((track) => baseLanguageCode(track.languageCode) === "en" && !asString(track.kind)),
+    ...captionTracks.filter((track) => baseLanguageCode(track.languageCode) === "en" && asString(track.kind)),
+    ...captionTracks.filter((track) => baseLanguageCode(track.languageCode) !== "en" && !asString(track.kind)),
+    ...captionTracks.filter((track) => baseLanguageCode(track.languageCode) !== "en" && asString(track.kind)),
   ].filter((track, index, array) => {
     const baseUrl = asString(track.baseUrl);
     return Boolean(baseUrl) && array.findIndex((item) => asString(item.baseUrl) === baseUrl) === index;
@@ -3433,6 +3473,7 @@ export async function getYoutubeVideoAuditPreview(userId: number, videoUrl: stri
       source: transcript?.source ?? captionProbe?.source ?? null,
       language: captionsLanguage,
       languages: captionsLanguage ? [captionsLanguage] : (captionProbe?.languages ?? []),
+      downloadable: Boolean(transcript?.text) || Boolean(captionProbe?.downloadable),
     },
     transcript: {
       available: Boolean(transcript?.text),
@@ -3449,7 +3490,7 @@ export async function auditYoutubeVideo(
     uiLocale?: string | null;
     transcriptOverride?: {
       text: string;
-      source: "uploaded";
+      source: "uploaded" | "transcribed_audio";
       language: string | null;
       segments?: YoutubeTranscriptSegment[];
     } | null;
@@ -3826,6 +3867,8 @@ Return JSON only:
       transcript?.text
         ? transcript.source === "uploaded"
           ? "Transcript was generated from the media file you uploaded for this audit."
+          : transcript.source === "transcribed_audio"
+            ? "Transcript was generated by transcribing the audio from an uploaded media file for this audit."
           : ""
         : captionProbe?.available
           ? "Captions were detected for this video, but the transcript text could not be retrieved from YouTube. Script analysis fell back to title, description, tags, and competitor context."
