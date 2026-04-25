@@ -2318,6 +2318,28 @@ Return JSON only:
       whyItWins: asString(record.whyItWins) || "",
     };
   }).filter((item) => item.title);
+  const competitorExampleCards = comparableVideos.slice(0, 5).map((item) => {
+    const matched =
+      competitorExamples.find((example) => example.url && example.url === item.url) ||
+      competitorExamples.find(
+        (example) =>
+          example.title.toLowerCase() === item.title.toLowerCase() &&
+          example.channelName.toLowerCase() === (item.channelTitle || "").toLowerCase(),
+      ) ||
+      competitorExamples.find(
+        (example) =>
+          example.title.toLowerCase() === item.title.toLowerCase(),
+      );
+    return {
+      title: item.title,
+      channelName: item.channelTitle || "YouTube creator",
+      url: item.url,
+      viewCount: parseNumber(item.viewCount),
+      whyItWins:
+        matched?.whyItWins ||
+        "This real competing video is pulling stronger public engagement around a similar topic or viewer intent.",
+    };
+  });
   const fixes = asRecord(parsed.fixes);
 
   return {
@@ -2353,13 +2375,7 @@ Return JSON only:
       competitorMedianViews,
     },
     topCreators,
-    competitorExamples: competitorExamples.length ? competitorExamples : comparableVideos.slice(0, 3).map((item) => ({
-      title: item.title,
-      channelName: item.channelTitle || "YouTube creator",
-      url: item.url,
-      viewCount: parseNumber(item.viewCount),
-      whyItWins: "This video is pulling stronger public engagement around a similar topic or intent.",
-    })),
+    competitorExamples: competitorExampleCards,
     visualAudit: visualAuditRecord ? {
       overallScore: Number(visualAuditRecord.overallVisualScore ?? 0),
       topFix: asString(visualAuditRecord.topFix) || "",
