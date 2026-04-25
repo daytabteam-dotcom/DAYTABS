@@ -83,6 +83,8 @@ type AuditReport = {
     area: string;
     issue: string;
     whyItHurts: string;
+    evidence: string;
+    recommendedChange: string;
     confidence: "high" | "medium" | "low";
     sourceLabel: string;
     priority: 1 | 2 | 3;
@@ -689,6 +691,18 @@ export default function YouTubeAuditTab() {
                     </div>
                     <p className="mt-2 text-sm text-white/78">{item.issue}</p>
                     <p className="mt-2 text-xs leading-6 text-white/50">{item.whyItHurts}</p>
+                    {item.evidence ? (
+                      <div className="mt-3 rounded-xl border border-white/8 bg-black/15 p-3">
+                        <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">What in the script caused this</p>
+                        <p className="mt-2 text-sm leading-6 text-white/78">{item.evidence}</p>
+                      </div>
+                    ) : null}
+                    {item.recommendedChange ? (
+                      <div className="mt-3 rounded-xl border border-emerald-400/10 bg-emerald-500/5 p-3">
+                        <p className="text-[11px] uppercase tracking-[0.14em] text-emerald-100/55">How to improve it</p>
+                        <p className="mt-2 text-sm leading-6 text-white/82">{item.recommendedChange}</p>
+                      </div>
+                    ) : null}
                     <p className="mt-2 text-[11px] uppercase tracking-[0.14em] text-white/30">{item.sourceLabel}</p>
                   </div>
                 ))}
@@ -713,6 +727,12 @@ export default function YouTubeAuditTab() {
                   <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
                     <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">Better hook</p>
                     <p className="mt-3 text-sm text-white/82">{report.fixes.hookRewrite || "No hook rewrite returned yet."}</p>
+                    {report.fixes.scriptDirection ? (
+                      <div className="mt-4 rounded-xl border border-white/8 bg-black/15 p-3">
+                        <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">Script changes to make</p>
+                        <p className="mt-2 text-sm leading-6 text-white/78">{report.fixes.scriptDirection}</p>
+                      </div>
+                    ) : null}
                   </div>
                 ) : (
                   <div className="rounded-2xl border border-amber-400/15 bg-amber-500/10 p-4">
@@ -998,13 +1018,64 @@ export default function YouTubeAuditTab() {
                 </PanelCardSoft>
               ) : null}
 
+              {thumbnailWorking ? (
+                <PanelCardSoft className="overflow-hidden p-0">
+                  <div className="relative aspect-video w-full bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.12),_transparent_45%),linear-gradient(135deg,rgba(255,255,255,0.05),rgba(255,255,255,0.02))]">
+                    <div className="absolute inset-0 bg-[linear-gradient(110deg,transparent,rgba(255,255,255,0.08),transparent)] animate-pulse" />
+                    <div className="absolute inset-0 flex flex-col items-center justify-center px-6 text-center">
+                      <div className="flex h-14 w-14 items-center justify-center rounded-full border border-white/10 bg-white/[0.07]">
+                        <Loader2 className="h-6 w-6 animate-spin text-white/80" />
+                      </div>
+                      <p className="mt-4 text-sm font-semibold text-white">Creating thumbnail</p>
+                      <p className="mt-2 max-w-md text-sm leading-6 text-white/60">
+                        Building the image from your audit notes, style choice, and any uploaded source images.
+                      </p>
+                    </div>
+                    <div className="absolute bottom-5 left-5 right-5 space-y-2">
+                      <div className="h-3 w-32 rounded-full bg-white/10" />
+                      <div className="h-3 w-full rounded-full bg-white/10" />
+                      <div className="h-3 w-5/6 rounded-full bg-white/10" />
+                    </div>
+                  </div>
+                </PanelCardSoft>
+              ) : generatedThumbnail ? (
+                <PanelCardSoft className="p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs uppercase tracking-[0.16em] text-white/40">Preview</p>
+                      <p className="mt-2 text-sm text-white/55">This thumbnail is saved to the current audit and can be downloaded from the report too.</p>
+                    </div>
+                    <a
+                      href={generatedThumbnail.imageDataUrl}
+                      download={`${exportBaseName || "youtube-audit-thumbnail"}.${thumbnailDownloadExtension(generatedThumbnail.imageDataUrl)}`}
+                      className="inline-flex items-center rounded-lg border border-white/10 px-3 py-2 text-sm text-white/75 transition-colors hover:bg-white/[0.06] hover:text-white"
+                    >
+                      <Download className="mr-2 h-4 w-4" />
+                      Download
+                    </a>
+                  </div>
+                  <div className="mt-4 overflow-hidden rounded-xl border border-white/10 bg-black/20">
+                    <img src={generatedThumbnail.imageDataUrl} alt="Generated audit thumbnail preview" className="w-full object-cover" />
+                  </div>
+                </PanelCardSoft>
+              ) : null}
+
+              {generatedThumbnail?.prompt ? (
+                <PanelCardSoft className="p-4">
+                  <p className="text-xs uppercase tracking-[0.16em] text-white/40">Generated prompt</p>
+                  <pre className="mt-3 whitespace-pre-wrap rounded-xl border border-white/10 bg-black/20 p-4 text-xs leading-6 text-white/72">
+                    {generatedThumbnail.prompt}
+                  </pre>
+                </PanelCardSoft>
+              ) : null}
+
               <div className="flex flex-wrap justify-end gap-2">
                 <Button type="button" variant="secondary" className="rounded-lg" onClick={() => setThumbnailModalOpen(false)}>
                   Close
                 </Button>
                 <Button type="button" className="rounded-lg" onClick={() => void generateAuditThumbnail()} disabled={thumbnailWorking}>
                   {thumbnailWorking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-                  {generatedThumbnail ? "Generate again" : "Generate thumbnail"}
+                  {thumbnailWorking ? "Creating image..." : generatedThumbnail ? "Generate again" : "Generate thumbnail"}
                 </Button>
               </div>
             </div>

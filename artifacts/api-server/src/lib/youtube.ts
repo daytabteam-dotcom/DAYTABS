@@ -131,6 +131,8 @@ export interface YoutubeVideoAuditReport {
     area: string;
     issue: string;
     whyItHurts: string;
+    evidence: string;
+    recommendedChange: string;
     confidence: "high" | "medium" | "low";
     sourceLabel: string;
     priority: 1 | 2 | 3;
@@ -689,6 +691,14 @@ async function buildYoutubeThumbnailPrompt(
   const hasSourceImages = payload.sourceImages.length > 0;
   const shouldPreserveImage = hasSourceImages && payload.preserveUploadedImage;
   const thumbnailStrategyRules = `Thumbnail strategy rules:
+- CORE THUMBNAIL RULE: the thumbnail must communicate exactly ONE idea, through ONE focal subject, triggering ONE clear emotion, and be understandable in under 1 second on mobile.
+- THE ONE RULE: a thumbnail must communicate ONE clear idea in under 1 second.
+- Viewer test: the viewer should instantly understand what this is about and why they should care. If they need to think, it is weak. If they get it instantly, it is strong.
+- Validation step: if the thumbnail communicates more than one idea, simplify it. If the idea is not understandable in under 1 second, redesign it.
+- Clarity score: score the concept from 0-10 using these checks: can it be understood in under 1 second, is there only one focal point, and is the message obvious without reading the title. If the score would be below 7, simplify or regenerate the concept instead of returning it.
+- One subject: only ONE focal point is allowed, such as one face, one object, or one action. If multiple people, UI elements, arrows, props, or competing objects split attention, simplify.
+- One emotion/tension: choose exactly ONE emotional driver for the thumbnail, such as curiosity, surprise, problem, transformation, or authority.
+- One message: the visual and text together must express one short idea only. If the concept is trying to communicate multiple messages, remove the weaker ones.
 - Treat the thumbnail as visual packaging, not decoration: it must make one accurate promise the video immediately honors.
 - Optimize for the right click plus watch time/retention, not clickbait CTR alone.
 - Build around one focal subject, one idea, and one payoff; remove visual noise.
@@ -699,6 +709,11 @@ async function buildYoutubeThumbnailPrompt(
 - For YouTube Shorts or vertical concepts, think in poster-frame terms: the first frame or selected frame should be a strong cover with centered subject, readable text, and no important detail near crop/UI edges.
 - For TikTok-style covers, favor vertical-safe composition, UI safe-zone awareness, high resolution, and readable text for profile/search previews.
 - Faces help only when the expression carries the idea; if a source image has a face, preserve identity, facial structure, expression, age, gaze direction, hair, and skin texture exactly.
+- FACE PRESERVATION RULE: if a human face exists in the provided image(s), it MUST remain identical in the final output.
+- Strict face requirements: do not change identity, facial structure, proportions, age, gender presentation, skin tone, or facial features; do not replace the face or generate a new person; do not stylize, cartoonize, beautify, or alter realism; do not rotate or re-angle the face in a way that changes the original pose; do not modify expression beyond natural enhancement.
+- Allowed face-safe adjustments: color correction, exposure, contrast, sharpness, subtle lighting enhancements, background blur/separation, and cropping or zooming that keeps the face intact.
+- If the system cannot preserve the face exactly, it must keep the original image unchanged or redesign the thumbnail without modifying the face.
+- Any output that alters, replaces, or reinterprets a real face is invalid.
 - Category defaults: podcasts/talks use expressive face plus quote/thesis; ads use product/result plus one benefit; demos use before/after or UI/result proof; art uses finished piece plus tool/process cue; cooking uses finished dish plus texture cue; gaming uses character/item/map/stat plus one performance claim; entertainment uses reaction or mystery object plus unresolved question.`;
   const userContent: Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }> = [
     {
@@ -757,11 +772,15 @@ Audit Notes: ${payload.analysisNotes?.trim() || "none"}
 STEP 1: Analyze intent
 - What is the core idea?
 - What emotion should trigger clicks?
+- What is the single focal subject?
+- What is the single emotion or tension?
+- What is the one message the viewer should understand in under 1 second?
 
 STEP 2: Thumbnail strategy
 - Where should attention go in THIS image?
 - What area is safe for text?
 - What should be emphasized visually?
+- What should be removed because it creates a second idea, second focal point, or extra cognitive load?
 
 STEP 3: Text decision
 - If user provided text, optimize it and shorten if needed
@@ -780,6 +799,8 @@ Generate a precise image editing prompt that:
 - Uses high contrast colors for text
 - Ensures readability on mobile
 - Keeps the final asset as JPG format and suitable for YouTube's 2 MB thumbnail limit
+- Passes the one-second clarity test with one clear idea, one focal subject, one emotion, and one message
+- Fails and must be simplified if it contains too many elements, multiple messages, or no emotional trigger
 
 If you modify or regenerate the subject, any face, or the core scene instead of editing the provided image, the output is invalid.
 
@@ -811,6 +832,8 @@ Thumbnail style should match top-performing YouTube thumbnails:
 STEP 1: Analyze intent
 - What is the core idea of the video?
 - What emotion should the viewer feel? (curiosity, shock, urgency, excitement)
+- What is the single focal subject?
+- What is the one message the viewer should understand in under 1 second?
 
 STEP 2: Thumbnail concept
 Generate 3 different thumbnail concepts:
@@ -820,9 +843,12 @@ Each should include:
 - Background style
 - Emotion conveyed
 - Suggested text (if needed)
+- Clarity score out of 10 based on one-second understanding, single focal point, and obvious message without title
 
 STEP 3: Select best concept
-Pick the strongest concept based on CTR potential.
+Pick the strongest concept based on CTR potential and clarity.
+Reject any concept with a clarity score below 7.
+Reject any concept with multiple focal points, multiple messages, or no clear emotional trigger.
 
 STEP 4: Final image generation instructions
 Create a highly detailed image prompt with:
@@ -845,6 +871,8 @@ IMPORTANT RULES:
 - The final image must be a 16:9 YouTube thumbnail composition, optimized for ${YOUTUBE_THUMBNAIL_WIDTH} x ${YOUTUBE_THUMBNAIL_HEIGHT}px
 - If the user gave source images, use them as visual references for subject, style, or assets when helpful
 - If the user did not specify text, generate the strongest 3-5 word text yourself
+- The final concept must pass the one-second clarity test: one idea, one focal subject, one emotion, one message
+- If those rules are violated, simplify or redesign before returning the final prompt
 - Return ONLY the final image generation prompt`;
 
   const completion = await openai.chat.completions.create({
@@ -2594,6 +2622,8 @@ Hard rules:
 - Prioritize only the most actionable 1-3 problems. Do not pad with weak guesses.
 - Tag suggestions must be specific to the topic and search intent in the supplied evidence. Avoid generic tags like "tech podcast" unless the evidence strongly supports them.
 - Title, description, and tag suggestions must reuse real vocabulary patterns visible in the supplied video metadata, transcript excerpt, recent channel videos, and real comparable videos. Avoid generic AI-sounding filler.
+- Every diagnosis item must be specific. Name the exact weak section, missing promise, repeated setup, unclear line, or delayed payoff instead of giving abstract advice.
+- Every diagnosis item must include concrete evidence and a concrete fix. For script and hook findings, point to the opening line, section, or moment from the transcript excerpt and explain what should be cut, moved earlier, rewritten, or added.
 - Do not say "improve the title" without giving better title options.
 - Do not say "fix the thumbnail" without giving a better thumbnail idea.
 - If transcript is unavailable, leave hookRewrite empty.
@@ -2603,6 +2633,7 @@ Short-form and Shorts strategy rules:
 - For short-form, prioritize hook continuation, stayed-to-watch potential, average view duration, average percentage viewed, caption clarity, phone readability, and one clear payoff.
 - Strong Shorts/TikTok-style clips open with the result, problem, tension, transformation, or exact payoff. Never recommend greetings, logos, slow setup, or generic context first.
 - For short-form fixes, write literal first-line or first-frame advice. Avoid vague notes like "make it punchier."
+- If you call out a short-form script problem, identify the exact first line or first 1-2 beats that are wasting time and provide a better replacement opening structure.
 - Use category logic when evidence supports it: podcast/talk clips need one claim or emotional beat; demos show result first then steps; cooking shows finished dish first; art shows transformation/risk/texture; gaming leads with clutch/fail/tip; ads open with pain/result/proof.
 - Shorts packaging should include a compact title, first-frame/cover direction, caption/on-screen keyword guidance, and a description opener that repeats the exact topic naturally.
 - Tags are a small supporting signal. Recommend a tight set only: exact phrase, close variants, central entities/products/games, and obvious misspellings. Never tag-stuff or imply tags outweigh title, thumbnail, description, captions, or retention.
@@ -2612,6 +2643,7 @@ Long-form strategy rules:
 - If the video is long-form, treat it as promise fulfillment over time: packaging wins the click, the first 15-30 seconds validates the click, and each section must keep paying off curiosity.
 - For long-form fixes, prioritize title/thumbnail promise accuracy, description opener, chapter/navigability suggestions when relevant, retention drop risks, and one clear next-watch path.
 - For long-form thumbnail direction, isolate one visual promise. Prefer problem/result, subject/object/tension, or mystery/proof layouts over crowded collages.
+- If you call out a long-form script problem, identify which setup, tangent, throat-clearing, or ordering choice is delaying the payoff and explain the stronger order in concrete terms.
 
 Return JSON only:
 {
@@ -2626,6 +2658,8 @@ Return JSON only:
       "area": "title|thumbnail|description|tags|hook|script|topic",
       "issue": "",
       "whyItHurts": "",
+      "evidence": "",
+      "recommendedChange": "",
       "confidence": "high|medium|low",
       "sourceLabel": "",
       "priority": 1
@@ -2716,6 +2750,8 @@ Return JSON only:
       area: asString(record.area) || "topic",
       issue: asString(record.issue) || "",
       whyItHurts: asString(record.whyItHurts) || "",
+      evidence: asString(record.evidence) || "",
+      recommendedChange: asString(record.recommendedChange) || "",
       confidence: (asString(record.confidence) as "high" | "medium" | "low") || "medium",
       sourceLabel: asString(record.sourceLabel) || "Inferred from public metadata",
       priority: Math.min(3, Math.max(1, parseNumber(record.priority) || 3)) as 1 | 2 | 3,
