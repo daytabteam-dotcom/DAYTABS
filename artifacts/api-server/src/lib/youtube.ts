@@ -3127,6 +3127,17 @@ async function probeYoutubeCaptionAvailability(videoId: string) {
     captionTracks = captionTracksFromWatchHtml(watchHtml);
   }
 
+  if (!captionTracks.length) {
+    const listResponse = await fetchWithCookies(
+      `https://www.youtube.com/api/timedtext?type=list&v=${encodeURIComponent(videoId)}`,
+      {},
+      { Accept: "*/*", Referer: watchUrl, Origin: "https://www.youtube.com" },
+    );
+    if (listResponse?.ok) {
+      captionTracks = parseTimedTextTrackList(videoId, await listResponse.text());
+    }
+  }
+
   const hasCaptions = captionTracks.length > 0;
   const firstTrack = hasCaptions ? asRecord(captionTracks[0]) : null;
   const source = hasCaptions
