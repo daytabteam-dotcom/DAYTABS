@@ -170,6 +170,13 @@ type TranslationAudioResult = {
   voice: string;
 };
 
+type TranslationVideoResult = {
+  downloadUrl: string;
+  filename: string;
+  voice: string;
+  gender: "male" | "female";
+};
+
 const AUDIT_HISTORY_KEY = "daytabs_youtube_audit_history_v1";
 const THUMBNAIL_STYLES = ["Professional", "Realistic", "Minimal", "Cartoon", "Cinematic", "Bold"] as const;
 const TRANSLATION_LANGUAGES = [
@@ -187,6 +194,14 @@ const TRANSLATION_LANGUAGES = [
   "Russian",
 ];
 const OPENAI_VOICES = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"] as const;
+const OPENAI_VOICE_GENDER: Record<(typeof OPENAI_VOICES)[number], "male" | "female"> = {
+  alloy: "male",
+  echo: "male",
+  onyx: "male",
+  fable: "female",
+  nova: "female",
+  shimmer: "female",
+};
 const YOUTUBE_THUMBNAIL_WIDTH = 1280;
 const YOUTUBE_THUMBNAIL_HEIGHT = 720;
 const YOUTUBE_THUMBNAIL_MIN_WIDTH = 640;
@@ -403,6 +418,8 @@ export default function YouTubeAuditTab() {
   const [translationWorking, setTranslationWorking] = useState(false);
   const [translationAudioWorking, setTranslationAudioWorking] = useState(false);
   const [translationAudio, setTranslationAudio] = useState<TranslationAudioResult | null>(null);
+  const [translationVideoWorking, setTranslationVideoWorking] = useState(false);
+  const [translationVideo, setTranslationVideo] = useState<TranslationVideoResult | null>(null);
 
   const isStudio = plan.isStudio;
   const exportBaseName = (preview?.video.title || report?.video.title || "youtube-audit")
@@ -450,6 +467,7 @@ export default function YouTubeAuditTab() {
     setGeneratedThumbnail(null);
     setTranscriptWorking(false);
     setTranslationAudio(null);
+    setTranslationVideo(null);
     try {
       const previewData = await jsonFetch<{ preview: AuditPreview }>("/api/youtube/audit-preview", {
         method: "POST",
@@ -504,6 +522,7 @@ export default function YouTubeAuditTab() {
     setActiveAuditId(normalizedCard.id);
     setTranscriptWorking(false);
     setTranslationAudio(null);
+    setTranslationVideo(null);
     setError(null);
   }
 
@@ -567,6 +586,7 @@ export default function YouTubeAuditTab() {
     };
     setReport(nextReport);
     setTranslationAudio(null);
+    setTranslationVideo(null);
     updateSavedAuditReport(nextReport);
   }
 
@@ -602,6 +622,7 @@ export default function YouTubeAuditTab() {
       setReport(nextReport);
       updateSavedAuditReport(nextReport);
       setTranslationAudio(null);
+      setTranslationVideo(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not generate transcript from upload");
     } finally {
@@ -614,6 +635,7 @@ export default function YouTubeAuditTab() {
     setTranslationWorking(true);
     setError(null);
     setTranslationAudio(null);
+    setTranslationVideo(null);
     try {
       const data = await jsonFetch<{
         translation: AuditReport["transcript"]["translations"][number];
@@ -659,10 +681,34 @@ export default function YouTubeAuditTab() {
         }),
       });
       setTranslationAudio(data);
+      setTranslationVideo(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not generate translated audio");
     } finally {
       setTranslationAudioWorking(false);
+    }
+  }
+
+  async function generateTranslationVideo() {
+    if (!preview || !selectedTranslation || !translationAudio?.filename) return;
+    setTranslationVideoWorking(true);
+    setError(null);
+    try {
+      const data = await jsonFetch<TranslationVideoResult>("/api/youtube/audit-translation-video", {
+        method: "POST",
+        body: JSON.stringify({
+          title: preview.video.title,
+          targetLanguage: selectedTranslation.targetLanguage,
+          voice: translationVoice,
+          audioFilename: translationAudio.filename,
+          gender: OPENAI_VOICE_GENDER[translationVoice],
+        }),
+      });
+      setTranslationVideo(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not generate translated video");
+    } finally {
+      setTranslationVideoWorking(false);
     }
   }
 
@@ -1177,6 +1223,7 @@ export default function YouTubeAuditTab() {
                           onChange={(event) => {
                             setTranslationLanguage(event.target.value);
                             setTranslationAudio(null);
+                            setTranslationVideo(null);
                           }}
                           className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 text-sm text-white outline-none focus:border-primary/35"
                         >
@@ -1210,6 +1257,7 @@ export default function YouTubeAuditTab() {
                             onChange={(event) => {
                               setTranslationVoice(event.target.value as (typeof OPENAI_VOICES)[number]);
                               setTranslationAudio(null);
+                              setTranslationVideo(null);
                             }}
                             className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 text-sm text-white outline-none focus:border-primary/35"
                           >
@@ -1224,6 +1272,16 @@ export default function YouTubeAuditTab() {
                           {translationAudioWorking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                           {translationAudioWorking ? "Generating audio" : "Generate translation audio"}
                         </Button>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          className="rounded-lg"
+                          onClick={() => void generateTranslationVideo()}
+                          disabled={!translationAudio?.filename || translationVideoWorking}
+                        >
+                          {translationVideoWorking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                          {translationVideoWorking ? "Generating video" : "Generate speaking video"}
+                        </Button>
                         {translationAudio ? (
                           <Button
                             type="button"
@@ -1237,6 +1295,21 @@ export default function YouTubeAuditTab() {
                           >
                             <Download className="mr-2 h-4 w-4" />
                             Download audio
+                          </Button>
+                        ) : null}
+                        {translationVideo ? (
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            className="rounded-lg"
+                            onClick={() => {
+                              void downloadAuthenticatedFile(translationVideo.downloadUrl, translationVideo.filename).catch((err) => {
+                                setError(err instanceof Error ? err.message : "Could not download translated video");
+                              });
+                            }}
+                          >
+                            <Download className="mr-2 h-4 w-4" />
+                            Download video
                           </Button>
                         ) : null}
                       </div>

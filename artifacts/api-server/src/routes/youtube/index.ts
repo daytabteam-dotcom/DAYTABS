@@ -1,6 +1,7 @@
 import { Router } from "express";
 import multer from "multer";
 import jwt from "jsonwebtoken";
+import { toFile } from "openai";
 import { OAuth2Client } from "google-auth-library";
 import { eq } from "drizzle-orm";
 import fs from "fs/promises";
@@ -55,6 +56,16 @@ const auditUploadDir = path.join(os.tmpdir(), "daytabs-youtube-audit-uploads");
 const auditExportDir = path.join(os.tmpdir(), "daytabs-youtube-audit-exports");
 const MAX_AUDIT_TRANSCRIPT_DURATION_SEC = 2 * 60 * 60;
 const VALID_TTS_VOICES = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"] as const;
+const TTS_VOICE_GENDER: Record<(typeof VALID_TTS_VOICES)[number], "male" | "female"> = {
+  alloy: "male",
+  echo: "male",
+  onyx: "male",
+  fable: "female",
+  nova: "female",
+  shimmer: "female",
+};
+const AVATAR_IMAGE_MODEL = process.env.YOUTUBE_THUMBNAIL_IMAGE_MODEL || "gpt-image-2";
+const AVATAR_IMAGE_FALLBACK_MODEL = "gpt-image-1";
 
 fs.mkdir(auditUploadDir, { recursive: true }).catch(() => {});
 fs.mkdir(auditExportDir, { recursive: true }).catch(() => {});
@@ -170,6 +181,132 @@ async function createAlignedTranslationAudio(
     const outputFilename = `${sanitizeAuditFilenamePart(baseName)}-${voice}-${exportId}.mp3`;
     const outputPath = path.join(auditExportDir, outputFilename);
     await execAsync(`ffmpeg -f concat -safe 0 -i "${concatList}" -af "apad=pad_dur=${totalDuration.toFixed(3)},atrim=0:${totalDuration.toFixed(3)}" -ar 24000 -ac 1 -c:a libmp3lame -q:a 2 "${outputPath}" -y`);
+    return { outputFilename, outputPath };
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+function extractGeneratedImageBase64(response: unknown) {
+  const record = response && typeof response === "object" ? response as Record<string, unknown> : {};
+  const data = Array.isArray(record.data) ? record.data : [];
+  for (const item of data) {
+    const row = item && typeof item === "object" ? item as Record<string, unknown> : {};
+    const base64 = typeof row.b64_json === "string" ? row.b64_json.trim() : "";
+    if (base64) return base64;
+  }
+  return null;
+}
+
+async function generateImageWithFallback(params: Parameters<typeof openai.images.generate>[0]) {
+  try {
+    return await openai.images.generate(params);
+  } catch (err) {
+    if (params.model === AVATAR_IMAGE_FALLBACK_MODEL) throw err;
+    return await openai.images.generate({ ...params, model: AVATAR_IMAGE_FALLBACK_MODEL });
+  }
+}
+
+async function editImageWithFallback(params: Parameters<typeof openai.images.edit>[0]) {
+  try {
+    return await openai.images.edit(params);
+  } catch (err) {
+    if (params.model === AVATAR_IMAGE_FALLBACK_MODEL) throw err;
+    return await openai.images.edit({ ...params, model: AVATAR_IMAGE_FALLBACK_MODEL });
+  }
+}
+
+async function createAvatarBaseImage(tempDir: string, gender: "male" | "female") {
+  const prompt = [
+    "A fictional AI character face, head-and-shoulders talking-head portrait.",
+    "Stylized 3D animated look (not photorealistic), clean studio lighting, crisp details.",
+    "Centered front-facing head, neutral friendly expression, mouth closed, eyes open.",
+    "Simple soft gradient background, high contrast separation.",
+    gender === "female" ? "Feminine-presenting character." : "Masculine-presenting character.",
+    "No text, no logos, no watermark.",
+    "Do not resemble any real person or public figure.",
+  ].join(" ");
+  const response = await generateImageWithFallback({
+    model: AVATAR_IMAGE_MODEL,
+    prompt,
+    size: "1024x1024",
+    quality: "high",
+    output_format: "png",
+  } as Parameters<typeof openai.images.generate>[0]);
+  const base64 = extractGeneratedImageBase64(response);
+  if (!base64) throw new Error("Avatar generation did not return an image");
+  const outputPath = path.join(tempDir, "avatar_base.png");
+  await fs.writeFile(outputPath, Buffer.from(base64, "base64"));
+  return outputPath;
+}
+
+async function createAvatarMouthVariant(tempDir: string, basePngPath: string, variant: "mid" | "open") {
+  const baseBuffer = await fs.readFile(basePngPath);
+  const prompt = variant === "open"
+    ? "Keep the exact same fictional character, pose, and style. Edit only the mouth to be clearly open as if speaking a vowel sound. Do not change identity, hairstyle, eyes, face shape, or lighting. No text."
+    : "Keep the exact same fictional character, pose, and style. Edit only the mouth to be slightly open as if speaking softly. Do not change identity, hairstyle, eyes, face shape, or lighting. No text.";
+  const response = await editImageWithFallback({
+    model: AVATAR_IMAGE_MODEL,
+    image: [await toFile(baseBuffer, "avatar_base.png", { type: "image/png" })],
+    prompt,
+    size: "1024x1024",
+    quality: "high",
+    output_format: "png",
+  } as Parameters<typeof openai.images.edit>[0]);
+  const base64 = extractGeneratedImageBase64(response);
+  if (!base64) throw new Error("Avatar mouth edit did not return an image");
+  const outputPath = path.join(tempDir, `avatar_${variant}.png`);
+  await fs.writeFile(outputPath, Buffer.from(base64, "base64"));
+  return outputPath;
+}
+
+async function linkOrCopyFile(source: string, dest: string) {
+  try {
+    await fs.link(source, dest);
+  } catch {
+    await fs.copyFile(source, dest);
+  }
+}
+
+async function createTalkingAvatarVideoFromAudio(options: {
+  audioPath: string;
+  voice: (typeof VALID_TTS_VOICES)[number];
+  gender: "male" | "female";
+  baseName: string;
+}) {
+  const exportId = uuidv4();
+  const tempDir = path.join(auditExportDir, `talk_${exportId}`);
+  await fs.mkdir(tempDir, { recursive: true });
+
+  try {
+    const durationSec = await getMediaDuration(options.audioPath).catch(() => 0);
+    if (!durationSec || durationSec <= 0.05) throw new Error("Translated audio duration is unavailable");
+
+    const avatarBase = await createAvatarBaseImage(tempDir, options.gender);
+    const avatarMid = await createAvatarMouthVariant(tempDir, avatarBase, "mid");
+    const avatarOpen = await createAvatarMouthVariant(tempDir, avatarBase, "open");
+
+    const fps = 12;
+    const frameCount = Math.max(1, Math.ceil(durationSec * fps));
+    for (let frameIndex = 0; frameIndex < frameCount; frameIndex += 1) {
+      const phase = frameIndex % 4;
+      const source = phase === 2 ? avatarOpen : phase === 1 || phase === 3 ? avatarMid : avatarBase;
+      const framePath = path.join(tempDir, `frame_${String(frameIndex).padStart(6, "0")}.png`);
+      await linkOrCopyFile(source, framePath);
+    }
+
+    const outputFilename = `${sanitizeAuditFilenamePart(options.baseName)}-${options.voice}-${options.gender}-${exportId}.mp4`;
+    const outputPath = path.join(auditExportDir, outputFilename);
+    const inputPattern = path.join(tempDir, "frame_%06d.png");
+    const videoFilters = [
+      "scale=1280:720:force_original_aspect_ratio=increase",
+      "crop=1280:720",
+      "format=yuv420p",
+    ].join(",");
+    await execAsync(
+      `ffmpeg -hide_banner -loglevel error -framerate ${fps} -start_number 0 -i "${inputPattern}" -i "${options.audioPath}" ` +
+      `-vf "${videoFilters}" -c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p -c:a aac -b:a 128k -shortest "${outputPath}" -y`,
+    );
     return { outputFilename, outputPath };
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
@@ -498,6 +635,60 @@ router.post("/audit-translation-audio", requireAuth, async (req, res) => {
   }
 });
 
+router.post("/audit-translation-video", requireAuth, async (req, res) => {
+  try {
+    const plan = normalizePlan(req.auth?.plan ?? "free");
+    if (plan !== "studio") {
+      res.status(403).json({
+        code: "STUDIO_REQUIRED",
+        error: "YouTube audit translation video is available on the Studio plan.",
+      });
+      return;
+    }
+    const voice = typeof req.body?.voice === "string" ? req.body.voice.trim() : "";
+    const title = typeof req.body?.title === "string" ? req.body.title.trim() : "youtube-audit";
+    const targetLanguage = typeof req.body?.targetLanguage === "string" ? req.body.targetLanguage.trim() : "translated";
+    const audioFilename = typeof req.body?.audioFilename === "string" ? req.body.audioFilename.trim() : "";
+    const requestedGender = typeof req.body?.gender === "string" ? req.body.gender.trim().toLowerCase() : "";
+    if (!VALID_TTS_VOICES.includes(voice as (typeof VALID_TTS_VOICES)[number])) {
+      res.status(400).json({ error: "Choose a valid OpenAI voice." });
+      return;
+    }
+    if (!audioFilename || audioFilename.includes("..") || audioFilename.includes("/") || audioFilename.includes("\\")) {
+      res.status(400).json({ error: "A valid translation audio file is required before generating video." });
+      return;
+    }
+    const audioPath = path.join(auditExportDir, audioFilename);
+    try {
+      await fs.access(audioPath);
+    } catch {
+      res.status(404).json({ error: "Translation audio file not found or has expired. Generate audio again." });
+      return;
+    }
+    const gender: "male" | "female" =
+      requestedGender === "female" || requestedGender === "male"
+        ? (requestedGender as "male" | "female")
+        : (TTS_VOICE_GENDER[voice as (typeof VALID_TTS_VOICES)[number]] ?? "male");
+
+    const baseName = `${title}-${targetLanguage}`;
+    const { outputFilename } = await createTalkingAvatarVideoFromAudio({
+      audioPath,
+      voice: voice as (typeof VALID_TTS_VOICES)[number],
+      gender,
+      baseName,
+    });
+    res.json({
+      filename: outputFilename,
+      downloadUrl: `/api/youtube/audit-download/${encodeURIComponent(outputFilename)}`,
+      voice,
+      gender,
+    });
+  } catch (err) {
+    req.log.error({ err }, "YouTube audit translation video error");
+    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to generate translation video" });
+  }
+});
+
 router.post("/audit-thumbnail", requireAuth, async (req, res) => {
   try {
     const plan = normalizePlan(req.auth?.plan ?? "free");
@@ -534,7 +725,8 @@ router.post("/audit-thumbnail", requireAuth, async (req, res) => {
 
 router.get("/audit-download/:filename", requireAuth, async (req, res) => {
   try {
-    const filename = req.params.filename || "";
+    const filenameParam = req.params.filename;
+    const filename = Array.isArray(filenameParam) ? (filenameParam[0] ?? "") : (filenameParam ?? "");
     if (!filename || filename.includes("..") || filename.includes("/") || filename.includes("\\")) {
       res.status(400).json({ error: "Invalid filename" });
       return;
@@ -547,7 +739,11 @@ router.get("/audit-download/:filename", requireAuth, async (req, res) => {
       return;
     }
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
-    res.setHeader("Content-Type", filename.endsWith(".mp3") ? "audio/mpeg" : "application/octet-stream");
+    res.setHeader("Content-Type", filename.endsWith(".mp3")
+      ? "audio/mpeg"
+      : filename.endsWith(".mp4")
+        ? "video/mp4"
+        : "application/octet-stream");
     const { createReadStream } = await import("fs");
     const stream = createReadStream(filePath);
     stream.pipe(res as unknown as NodeJS.WritableStream);
