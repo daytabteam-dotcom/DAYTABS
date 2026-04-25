@@ -30,6 +30,7 @@ type EditableTranscriptResponse = {
   status?: {
     state: "processing" | "complete" | "error";
     message: string;
+    code?: string;
   };
   transcriptResult?: {
     source: "youtube_caption" | "audio_transcription";
@@ -102,7 +103,9 @@ async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error((data as { error?: string }).error || "Request failed");
+    const err = new Error((data as { error?: string }).error || "Request failed");
+    (err as any).code = (data as { code?: string }).code;
+    throw err;
   }
   return data as T;
 }
@@ -218,7 +221,11 @@ export default function YouTubeTranscriptTab() {
       applyPayload(payload);
 
       if (payload.status?.state === "error") {
-        setError(payload.status.message || "Failed to fetch transcript");
+        if (payload.status.code === "YOUTUBE_BOT_CHECK") {
+          setError("YouTube blocked server access for this video. Upload the video/audio file and we’ll generate the transcript from it.");
+        } else {
+          setError(payload.status.message || "Failed to fetch transcript");
+        }
         return;
       }
 
@@ -239,7 +246,11 @@ export default function YouTubeTranscriptTab() {
               return;
             }
             if (next.status?.state === "error") {
-              setError(next.status.message || "Failed to fetch transcript");
+              if (next.status.code === "YOUTUBE_BOT_CHECK") {
+                setError("YouTube blocked server access for this video. Upload the video/audio file and we’ll generate the transcript from it.");
+              } else {
+                setError(next.status.message || "Failed to fetch transcript");
+              }
               return;
             }
             if (next.editableTranscript.transcript.available) {
@@ -263,7 +274,12 @@ export default function YouTubeTranscriptTab() {
 
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to fetch transcript");
+      const code = err && typeof err === "object" ? (err as any).code : undefined;
+      if (code === "YOUTUBE_BOT_CHECK") {
+        setError("YouTube blocked server access for this video. Upload the video/audio file and we’ll generate the transcript from it.");
+      } else {
+        setError(err instanceof Error ? err.message : "Failed to fetch transcript");
+      }
     } finally {
       setLoadingTranscript(false);
     }

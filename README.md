@@ -84,6 +84,7 @@ CONTACT_EMAIL=
 OPENAI_API_KEY=
 PADDLE_API_KEY=
 PADDLE_WEBHOOK_SECRET=
+YTDLP_COOKIES_PATH=/app/secrets/youtube-cookies.txt
 ```
 
 ### Install & Run
@@ -114,6 +115,11 @@ Server dependencies needed outside npm:
 
 - yt-dlp
 - ffmpeg
+
+Optional: authenticated cookies for yt-dlp (helps with IP-based bot checks)
+
+- Create a cookies file (Netscape format) and mount it as a secret at `YTDLP_COOKIES_PATH` (example: `/app/secrets/youtube-cookies.txt`).
+- Do not commit `youtube-cookies.txt` to Git.
 
 For Docker:
 

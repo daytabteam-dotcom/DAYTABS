@@ -116,6 +116,7 @@ type CachedYoutubeTranscriptPayload =
       kind: "youtubeTranscriptV1";
       status: "error";
       preferredLanguage: string | null;
+      code?: string;
       message: string;
       failedAt: string;
       updatedAt: string;
@@ -163,6 +164,50 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
   return Promise.race([promise, timeout]).finally(() => {
     if (timer) clearTimeout(timer);
   });
+}
+
+class YoutubeAudioAccessError extends Error {
+  code: string;
+  stderrCategory: string;
+  constructor(code: string, message: string, stderrCategory = "unknown") {
+    super(message);
+    this.name = "YoutubeAudioAccessError";
+    this.code = code;
+    this.stderrCategory = stderrCategory;
+  }
+}
+
+function classifyYtDlpStderr(stderr: string) {
+  const normalized = (stderr || "").toLowerCase();
+  if (!normalized.trim()) return "unknown";
+  if (normalized.includes("sign in to confirm you're not a bot") || normalized.includes("sign in to confirm you’re not a bot")) {
+    return "bot_check";
+  }
+  if (normalized.includes("this video is unavailable") || normalized.includes("video unavailable")) return "unavailable";
+  if (normalized.includes("private video") || normalized.includes("is private")) return "private";
+  if (normalized.includes("age-restricted") || normalized.includes("age restricted")) return "age_restricted";
+  if (normalized.includes("this video is not available in your country") || normalized.includes("not available in your country")) return "geo_blocked";
+  if (normalized.includes("429") || normalized.includes("too many requests")) return "rate_limited";
+  if (normalized.includes("requires login") || normalized.includes("please sign in")) return "login_required";
+  return "other";
+}
+
+let ytDlpVersionPromise: Promise<string> | null = null;
+async function getYtDlpVersion(logger: { info: (...args: any[]) => void; warn: (...args: any[]) => void }) {
+  if (!ytDlpVersionPromise) {
+    ytDlpVersionPromise = runCommandCaptureStdout("yt-dlp", ["--version"], 5000, logger)
+      .then((res) => (res.code === 0 ? res.stdout.trim().split(/\s+/)[0] || "unknown" : "unknown"))
+      .catch(() => "unknown");
+  }
+  return await ytDlpVersionPromise;
+}
+
+async function resolveYtDlpCookiesArgs() {
+  const pathValue = (process.env.YTDLP_COOKIES_PATH || "").trim();
+  if (!pathValue) return { args: [] as string[], used: false };
+  const stat = await fs.stat(pathValue).catch(() => null);
+  if (!stat || stat.size <= 0) return { args: [] as string[], used: false };
+  return { args: ["--cookies", pathValue], used: true };
 }
 
 async function readCachedYoutubeTranscript(cacheKey: string): Promise<CachedYoutubeTranscriptPayload | null> {
@@ -316,15 +361,26 @@ async function getYtDlpInfo(
   videoUrl: string,
   logger: { info: (...args: any[]) => void; warn: (...args: any[]) => void },
 ): Promise<{ durationSec: number; isLive: boolean }> {
+  const cookies = await resolveYtDlpCookiesArgs();
+  const ytDlpVersion = await getYtDlpVersion(logger).catch(() => "unknown");
+  logger.info({ ytDlpVersion, cookiesUsed: cookies.used }, "Running yt-dlp metadata probe");
   const result = await runCommandCaptureStdout(
     "yt-dlp",
-    ["--no-playlist", "--skip-download", "--no-warnings", "-J", videoUrl],
+    [...cookies.args, "--no-playlist", "--skip-download", "--no-warnings", "-J", videoUrl],
     30_000,
     logger,
   );
   if (result.code !== 0) {
-    logger.warn({ stderr: result.stderr.trim() }, "yt-dlp info probe failed");
-    throw new Error("yt-dlp failed");
+    const stderrCategory = classifyYtDlpStderr(result.stderr);
+    logger.warn({ stderrCategory, cookiesUsed: cookies.used }, "yt-dlp info probe failed");
+    if (stderrCategory === "bot_check") {
+      throw new YoutubeAudioAccessError(
+        "YOUTUBE_BOT_CHECK",
+        "YouTube blocked server-side access for this video. Please upload the video/audio file, or try again later.",
+        stderrCategory,
+      );
+    }
+    throw new YoutubeAudioAccessError("YOUTUBE_AUDIO_ACCESS_FAILED", "yt-dlp failed", stderrCategory);
   }
   const parsed = JSON.parse(result.stdout || "{}") as { duration?: unknown; is_live?: unknown; live_status?: unknown };
   const durationSec = Number(parsed.duration ?? 0);
@@ -341,10 +397,13 @@ async function downloadYoutubeAudioMp3WithYtDlp(
   maxBytes: number,
   logger: { info: (...args: any[]) => void; warn: (...args: any[]) => void },
 ) {
+  const cookies = await resolveYtDlpCookiesArgs();
+  const ytDlpVersion = await getYtDlpVersion(logger).catch(() => "unknown");
   const base = safeYoutubeTempBase(videoId);
   const exportId = uuidv4();
   const outputTemplate = path.join(os.tmpdir(), `${base}-${exportId}.%(ext)s`);
   const args = [
+    ...cookies.args,
     "-f",
     "bestaudio/best",
     "--extract-audio",
@@ -370,11 +429,19 @@ async function downloadYoutubeAudioMp3WithYtDlp(
     outputTemplate,
     videoUrl,
   ];
-  logger.info({ videoId }, "Starting yt-dlp audio extraction");
+  logger.info({ videoId, ytDlpVersion, cookiesUsed: cookies.used }, "Starting yt-dlp audio extraction");
   const result = await runCommandCaptureStdout("yt-dlp", args, 12 * 60_000, logger);
   if (result.code !== 0) {
-    logger.warn({ stderr: result.stderr.trim(), stdout: result.stdout.trim() }, "yt-dlp audio extraction failed");
-    throw new Error("yt-dlp failed");
+    const stderrCategory = classifyYtDlpStderr(result.stderr);
+    logger.warn({ stderrCategory, cookiesUsed: cookies.used }, "yt-dlp audio extraction failed");
+    if (stderrCategory === "bot_check") {
+      throw new YoutubeAudioAccessError(
+        "YOUTUBE_BOT_CHECK",
+        "YouTube blocked server-side access for this video. Please upload the video/audio file, or try again later.",
+        stderrCategory,
+      );
+    }
+    throw new YoutubeAudioAccessError("YOUTUBE_AUDIO_ACCESS_FAILED", "yt-dlp failed", stderrCategory);
   }
   const printed = result.stdout
     .split(/\r?\n/g)
@@ -975,7 +1042,7 @@ router.post("/transcript", requireAuth, async (req, res) => {
         req.log.warn({ err, videoId }, "YouTube caption check failed while transcript job is processing");
       }
       editableTranscript.needsUploadFallback = false;
-      res.json({ editableTranscript, status: { state: "processing", message: cached.step } });
+      res.json({ editableTranscript, status: { state: "processing", message: cached.step, code: cached.code } });
       return;
     }
 
@@ -991,7 +1058,7 @@ router.post("/transcript", requireAuth, async (req, res) => {
         req.log.warn({ err, videoId }, "YouTube caption check failed while returning transcript job error");
       }
       editableTranscript.needsUploadFallback = false;
-      res.json({ editableTranscript, status: { state: "error", message: cached.message } });
+      res.json({ editableTranscript, status: { state: "error", message: cached.message, code: cached.code } });
       return;
     }
 
@@ -1039,8 +1106,15 @@ router.post("/transcript", requireAuth, async (req, res) => {
     }
 
     // 2) Captions missing/restricted: fall back to audio transcription automatically.
-    const info = await getYtDlpInfo(editableTranscript.canonicalUrl, req.log).catch((err) => {
-      req.log.warn({ err, videoId, canonicalUrl: editableTranscript.canonicalUrl }, "yt-dlp probe failed");
+    const info = await getYtDlpInfo(editableTranscript.canonicalUrl, req.log).catch(async (err) => {
+      const ytDlpVersion = await getYtDlpVersion(req.log).catch(() => "unknown");
+      const stderrCategory =
+        err instanceof YoutubeAudioAccessError ? err.stderrCategory : "unknown";
+      const cookiesUsed = await resolveYtDlpCookiesArgs().then((value) => value.used).catch(() => false);
+      req.log.warn(
+        { videoId, ytDlpVersion, cookiesUsed, stderrCategory, code: err instanceof YoutubeAudioAccessError ? err.code : undefined },
+        "yt-dlp probe failed",
+      );
       return null;
     });
     const durationSec = info?.durationSec ?? 0;
@@ -1087,17 +1161,25 @@ router.post("/transcript", requireAuth, async (req, res) => {
             };
             await writeCachedYoutubeTranscript(cacheKey, payload, ttlMs);
           } catch (err) {
+            const ytDlpVersion = await getYtDlpVersion(req.log).catch(() => "unknown");
+            const stderrCategory = err instanceof YoutubeAudioAccessError ? err.stderrCategory : "unknown";
+            const cookiesUsed = await resolveYtDlpCookiesArgs().then((value) => value.used).catch(() => false);
             req.log.warn({ err, videoId, cacheKey }, "Background YouTube audio transcription failed");
             const now = new Date();
+            const isBotCheck = err instanceof YoutubeAudioAccessError && err.code === "YOUTUBE_BOT_CHECK";
             const payload: CachedYoutubeTranscriptPayload = {
               kind: "youtubeTranscriptV1",
               status: "error",
               preferredLanguage,
+              ...(isBotCheck ? { code: "YOUTUBE_BOT_CHECK" } : {}),
               message:
-                "We couldn’t access captions or audio for this video. This can happen with private, age-restricted, region-locked, or protected videos. Please upload the video/audio file to generate a transcript.",
+                isBotCheck
+                  ? "YouTube blocked server access for this video. Upload the video/audio file and we’ll generate the transcript from it."
+                  : "We couldn’t access captions or audio for this video. This can happen with private, age-restricted, region-locked, or protected videos. Please upload the video/audio file to generate a transcript.",
               failedAt: now.toISOString(),
               updatedAt: now.toISOString(),
             };
+            req.log.warn({ videoId, ytDlpVersion, cookiesUsed, stderrCategory }, "yt-dlp fallback failed (categorized)");
             await writeCachedYoutubeTranscript(cacheKey, payload, 10 * 60_000).catch(() => {});
           } finally {
             runningTranscriptTasks.delete(cacheKey);
@@ -1150,7 +1232,19 @@ router.post("/transcript", requireAuth, async (req, res) => {
       res.json({ editableTranscript, transcriptResult, status: { state: "complete", message: "Transcript ready." } });
       return;
     } catch (err) {
-      req.log.warn({ err, videoId }, "YouTube transcript audio fallback failed");
+      const ytDlpVersion = await getYtDlpVersion(req.log).catch(() => "unknown");
+      const stderrCategory = err instanceof YoutubeAudioAccessError ? err.stderrCategory : "unknown";
+      const cookiesUsed = await resolveYtDlpCookiesArgs().then((value) => value.used).catch(() => false);
+      req.log.warn({ videoId, ytDlpVersion, cookiesUsed, stderrCategory, err }, "YouTube transcript audio fallback failed");
+
+      if (err instanceof YoutubeAudioAccessError && err.code === "YOUTUBE_BOT_CHECK") {
+        res.status(422).json({
+          code: "YOUTUBE_BOT_CHECK",
+          error: "YouTube blocked server-side access for this video. Please upload the video/audio file, or try again later.",
+        });
+        return;
+      }
+
       res.status(422).json({
         error:
           "We couldn’t access captions or audio for this video. This can happen with private, age-restricted, region-locked, or protected videos. Please upload the video/audio file to generate a transcript.",
