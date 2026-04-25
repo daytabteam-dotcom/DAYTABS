@@ -12,10 +12,12 @@ import {
   Lock,
   CalendarDays,
   Bell,
+  Youtube,
 } from "lucide-react";
 import VideoAnalyzerTab from "./tabs/VideoAnalyzerTab";
 import TeleprompterTab from "./tabs/TeleprompterTab";
 import ScriptPlannerTab from "./tabs/ScriptPlannerTab";
+import YouTubeAuditTab from "./tabs/YouTubeAuditTab";
 import YouTubeGrowthPlannerV2Tab, {
   getGrowthPlannerNotificationCounts,
   getGrowthPlannerNotifications,
@@ -56,6 +58,12 @@ const TABS = [
     id: "growth-planner",
     label: "YouTube Growth",
     icon: CalendarDays,
+    desc: "Studio",
+  },
+  {
+    id: "youtube-audit",
+    label: "YouTube Audit",
+    icon: Youtube,
     desc: "Studio",
   },
   {
@@ -460,6 +468,14 @@ function Dashboard({
             onClick={() => onNavigate("growth-planner")}
             badge={!plan.isStudio ? "Studio" : undefined}
           />
+          <QuickActionCard
+            icon={Youtube}
+            title="Audit a YouTube Video"
+            desc="Paste a URL and compare it to stronger competitors"
+            color="bg-red-500/15 border border-red-500/20 text-red-300"
+            onClick={() => onNavigate("youtube-audit")}
+            badge={!plan.isStudio ? "Studio" : undefined}
+          />
           {!plan.isPaid && (
             <QuickActionCard
               icon={Zap}
@@ -639,6 +655,7 @@ export default function Home() {
         )}
         {activeTab === "script-planner" && <ScriptPlannerTab />}
         {activeTab === "growth-planner" && <YouTubeGrowthPlannerV2Tab />}
+        {activeTab === "youtube-audit" && <YouTubeAuditTab />}
         {activeTab === "teleprompter" && <TeleprompterTab />}
       </main>
     </div>

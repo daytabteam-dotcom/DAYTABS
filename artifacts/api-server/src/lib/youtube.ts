@@ -15,6 +15,7 @@ import {
 } from "@workspace/db";
 import { openai } from "./openai";
 import { logTokenUsage, usageTokens } from "./logTokens";
+import { analyzeVisuals, generateSeo } from "../routes/analysis/services";
 
 const JWT_SECRET = process.env.JWT_SECRET!;
 const YOUTUBE_CLIENT_ID = process.env.YOUTUBE_CLIENT_ID || process.env.GOOGLE_CLIENT_ID || "";
@@ -64,6 +65,71 @@ export interface YoutubeNicheProfile {
   targetAudience: string;
   keywords: string[];
   summary: string;
+}
+
+export interface YoutubeVideoAuditReport {
+  summary: string;
+  video: {
+    id: string;
+    title: string;
+    channelName: string;
+    channelId: string | null;
+    publishedAt: string | null;
+    duration: string | null;
+    viewCount: number;
+    likeCount: number;
+    commentCount: number;
+    tags: string[];
+    description: string;
+    thumbnailUrl: string | null;
+    niche: string;
+    contentStyle: string;
+    targetAudience: string;
+    likelyFormat: string;
+  };
+  performanceContext: {
+    ageDays: number | null;
+    viewsPerDay: number | null;
+    channelMedianViews: number | null;
+    competitorMedianViews: number | null;
+  };
+  topCreators: Array<{
+    channelName: string;
+    subscriberCount: number;
+    averageViews: number;
+    whyTheyMatter: string;
+  }>;
+  competitorExamples: Array<{
+    title: string;
+    channelName: string;
+    url: string;
+    viewCount: number;
+    whyItWins: string;
+  }>;
+  visualAudit: {
+    overallScore: number;
+    topFix: string;
+    lighting: string;
+    framing: string;
+    sharpness: string;
+  } | null;
+  diagnosis: Array<{
+    area: string;
+    issue: string;
+    whyItHurts: string;
+    confidence: "high" | "medium" | "low";
+  }>;
+  fixes: {
+    titles: string[];
+    description: string;
+    tags: string[];
+    thumbnailIdea: string;
+    hookRewrite: string;
+    scriptDirection: string;
+    qualityFixes: string[];
+    packagingStrategy: string;
+  };
+  limitations: string[];
 }
 
 interface YoutubeSettings {
@@ -351,6 +417,17 @@ function parseNumber(value: unknown) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function parseYoutubeIsoDuration(value?: string | null) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return 0;
+  const match = raw.match(/^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/i);
+  if (!match) return 0;
+  const hours = Number(match[1] ?? 0);
+  const minutes = Number(match[2] ?? 0);
+  const seconds = Number(match[3] ?? 0);
+  return (hours * 3600) + (minutes * 60) + seconds;
+}
+
 function isoDate(date: Date) {
   return date.toISOString().slice(0, 10);
 }
@@ -425,6 +502,22 @@ function normalizeTitleToRange(title: string, min: number, max: number) {
 function getDayNameForIso(iso: string) {
   const date = new Date(`${iso}T00:00:00Z`);
   return DAYS_OF_WEEK[date.getUTCDay()] ?? "Mon";
+}
+
+function median(numbers: number[]) {
+  const valid = numbers.filter((value) => Number.isFinite(value)).sort((a, b) => a - b);
+  if (!valid.length) return null;
+  const middle = Math.floor(valid.length / 2);
+  if (valid.length % 2 === 1) return valid[middle] ?? null;
+  return Math.round(((valid[middle - 1] ?? 0) + (valid[middle] ?? 0)) / 2);
+}
+
+function daysSince(iso?: string | null) {
+  if (!iso) return null;
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return null;
+  const diff = Date.now() - date.getTime();
+  return Math.max(1, Math.round(diff / (1000 * 60 * 60 * 24)));
 }
 
 function selectBestPostingSlotByDay(videos: YoutubeRecentVideo[]) {
@@ -1444,6 +1537,39 @@ async function fetchRecentVideos(userId: number, channelId: string, limit = 20) 
   return asArray(videos.items).map(normalizeVideo);
 }
 
+async function fetchVideoById(userId: number, videoId: string) {
+  const response = await youtubeJson<{ items?: unknown[] }>(userId, dataApiUrl("videos", {
+    part: "snippet,statistics,contentDetails,status",
+    id: videoId,
+    maxResults: "1",
+  }), { cacheKey: `video:${videoId}`, quotaCost: 1, ttlMs: 60 * 60 * 1000 });
+  const item = asArray(response.items)[0];
+  if (!item) throw new Error("Video not found on YouTube");
+  return normalizeVideo(item);
+}
+
+async function searchRelevantVideos(userId: number, query: string, maxResults = 12) {
+  const search = await youtubeJson<{ items?: unknown[] }>(userId, dataApiUrl("search", {
+    part: "snippet",
+    type: "video",
+    q: query,
+    maxResults: String(maxResults),
+    order: "relevance",
+    regionCode: "US",
+  }), { cacheKey: `video-search:${query}:${maxResults}`, quotaCost: 100, ttlMs: 12 * 60 * 60 * 1000 });
+
+  const ids = asArray(search.items)
+    .map((item) => asString(asRecord(asRecord(item).id).videoId))
+    .filter((id): id is string => Boolean(id));
+  if (!ids.length) return [] as YoutubeRecentVideo[];
+  const videos = await youtubeJson<{ items?: unknown[] }>(userId, dataApiUrl("videos", {
+    part: "snippet,statistics,contentDetails,status",
+    id: ids.join(","),
+    maxResults: String(ids.length),
+  }), { cacheKey: `video-search-details:${ids.join(",")}`, quotaCost: 1, ttlMs: 12 * 60 * 60 * 1000 });
+  return asArray(videos.items).map(normalizeVideo);
+}
+
 async function fetchChannelsByIds(userId: number, channelIds: string[]) {
   const ids = [...new Set(channelIds.filter(Boolean))];
   if (!ids.length) return [] as unknown[];
@@ -1884,6 +2010,257 @@ export async function getYoutubeStatus(userId: number) {
     plans,
     latestResults,
     settings,
+  };
+}
+
+async function fetchImageAsBase64(url?: string | null) {
+  const target = asString(url);
+  if (!target) return null;
+  const response = await fetch(target);
+  if (!response.ok) throw new Error(`Image fetch failed with ${response.status}`);
+  const buffer = Buffer.from(await response.arrayBuffer());
+  return buffer.toString("base64");
+}
+
+function likelyYoutubeFormatFromVideo(video: YoutubeRecentVideo) {
+  const durationSec = parseYoutubeIsoDuration(video.duration);
+  if (video.url.includes("/shorts/") || durationSec <= 180) return "youtube_shorts";
+  return "youtube_long";
+}
+
+function buildAuditSearchQuery(video: YoutubeRecentVideo, nicheProfile: YoutubeNicheProfile) {
+  const titleWords = video.title
+    .replace(/[^\w\s]/g, " ")
+    .split(/\s+/)
+    .filter((word) => word.length > 3)
+    .slice(0, 6);
+  const nicheWords = nicheProfile.keywords.slice(0, 3);
+  return [...titleWords, ...nicheWords].join(" ").trim() || video.title;
+}
+
+export async function auditYoutubeVideo(userId: number, videoUrl: string): Promise<YoutubeVideoAuditReport> {
+  const videoId = extractYoutubeVideoId(videoUrl);
+  if (!videoId) throw new Error("Enter a valid YouTube video URL");
+
+  const video = await fetchVideoById(userId, videoId);
+  const channelId = video.channelId ?? null;
+  const recentVideos = channelId ? await fetchRecentVideos(userId, channelId, 12) : [];
+  const nicheProfile = await analyzeNiche(userId, {
+    id: channelId ?? "",
+    title: video.channelTitle,
+    description: video.description,
+    subscriberCount: null,
+    totalViewCount: null,
+    videoCount: null,
+  }, recentVideos.length ? recentVideos : [video]);
+
+  const searchQuery = buildAuditSearchQuery(video, nicheProfile);
+  const comparableVideos = (await searchRelevantVideos(userId, searchQuery, 14))
+    .filter((item) => item.id !== video.id && item.channelId !== video.channelId)
+    .slice(0, 10);
+
+  const comparableByChannel = new Map<string, YoutubeRecentVideo[]>();
+  for (const item of comparableVideos) {
+    const key = item.channelId || item.channelTitle || item.id;
+    if (!comparableByChannel.has(key)) comparableByChannel.set(key, []);
+    comparableByChannel.get(key)!.push(item);
+  }
+
+  const topCreators = [...comparableByChannel.values()]
+    .map((videos) => {
+      const first = videos[0]!;
+      const averageViews = Math.round(videos.reduce((sum, current) => sum + parseNumber(current.viewCount), 0) / videos.length);
+      return {
+        channelName: first.channelTitle || "YouTube creator",
+        subscriberCount: 0,
+        averageViews,
+        whyTheyMatter: `${first.channelTitle || "This creator"} is ranking around the same topic with clearer packaging or stronger audience pull.`,
+      };
+    })
+    .sort((a, b) => b.averageViews - a.averageViews)
+    .slice(0, 5);
+
+  const thumbnailBase64 = await fetchImageAsBase64(video.thumbnailUrl).catch(() => null);
+  const visualAuditRaw = thumbnailBase64
+    ? await analyzeVisuals([thumbnailBase64], likelyYoutubeFormatFromVideo(video), "pro", `${video.title}\n\n${video.description}`, userId).catch(() => null)
+    : null;
+  const visualAuditRecord = visualAuditRaw ? asRecord(visualAuditRaw) : null;
+
+  const pseudoTranscript = [
+    `Video title: ${video.title}`,
+    `Description: ${video.description}`,
+    video.tags.length ? `Tags: ${video.tags.join(", ")}` : "",
+  ].filter(Boolean).join("\n\n");
+
+  const seoDraft = await generateSeo(
+    pseudoTranscript,
+    likelyYoutubeFormatFromVideo(video),
+    [],
+    "pro",
+    undefined,
+    video.title,
+    undefined,
+    userId,
+  ).catch(() => ({ titles: [], description: "", hashtags: [], packagingStrategy: "", algorithmFit: "" } as any));
+
+  const ageDays = daysSince(video.publishedAt);
+  const viewsPerDay = ageDays ? Math.round(parseNumber(video.viewCount) / ageDays) : null;
+  const channelMedianViews = median(recentVideos.map((item) => parseNumber(item.viewCount)));
+  const competitorMedianViews = median(comparableVideos.map((item) => parseNumber(item.viewCount)));
+
+  const auditPrompt = `You are a YouTube growth strategist producing a forensic audit for one existing video.
+Your job is to explain why the video likely underperformed compared to stronger competitors in the same niche and format.
+
+Rules:
+- Be direct and evidence-based.
+- Separate what is likely weak in packaging, topic choice, hook, thumbnail, tags, script clarity, and production quality.
+- If transcript is unavailable, say so and base script diagnosis on title, description, niche, and visible packaging limitations only.
+- Do not say "improve the title" without giving better title options.
+- Do not say "fix the thumbnail" without giving a better thumbnail idea.
+- Do not say "make the hook stronger" without giving an exact better opening line.
+- Do not hallucinate private metrics. Use only the supplied public data and comparisons.
+
+Return JSON only:
+{
+  "summary": "",
+  "diagnosis": [
+    { "area": "title|thumbnail|description|tags|hook|script|topic|quality", "issue": "", "whyItHurts": "", "confidence": "high|medium|low" }
+  ],
+  "competitorExamples": [
+    { "title": "", "channelName": "", "url": "", "viewCount": 0, "whyItWins": "" }
+  ],
+  "fixes": {
+    "titles": ["", "", ""],
+    "description": "",
+    "tags": ["", "", "", "", "", "", "", ""],
+    "thumbnailIdea": "",
+    "hookRewrite": "",
+    "scriptDirection": "",
+    "qualityFixes": ["", "", ""],
+    "packagingStrategy": ""
+  },
+  "limitations": ["", ""]
+}`;
+
+  const completion = await openai.chat.completions.create({
+    model: "gpt-4o",
+    messages: [
+      { role: "system", content: auditPrompt },
+      {
+        role: "user",
+        content: JSON.stringify({
+          video,
+          nicheProfile,
+          recentVideos: recentVideos.slice(0, 8),
+          comparableVideos: comparableVideos.slice(0, 8),
+          topCreators,
+          visualAudit: visualAuditRecord ? {
+            overallScore: Number(visualAuditRecord.overallVisualScore ?? 0),
+            topFix: asString(visualAuditRecord.topFix) || "",
+            lighting: asString(asRecord(visualAuditRecord.lighting).assessment) || "",
+            framing: asString(asRecord(visualAuditRecord.framing).assessment) || "",
+            sharpness: asString(asRecord(visualAuditRecord.sharpness).assessment) || "",
+          } : null,
+          seoDraft,
+          performanceContext: {
+            ageDays,
+            viewsPerDay,
+            channelMedianViews,
+            competitorMedianViews,
+          },
+          transcriptAvailable: false,
+        }),
+      },
+    ],
+    response_format: { type: "json_object" },
+    max_completion_tokens: 2600,
+  });
+
+  await logTokenUsage({
+    userId,
+    feature: "youtubeVideoAudit",
+    model: "gpt-4o",
+    ...usageTokens(completion.usage),
+  });
+
+  const parsed = asRecord(parseAiJson(completion.choices[0]?.message?.content ?? "{}"));
+  const diagnosis = asArray(parsed.diagnosis).map((item) => {
+    const record = asRecord(item);
+    return {
+      area: asString(record.area) || "topic",
+      issue: asString(record.issue) || "",
+      whyItHurts: asString(record.whyItHurts) || "",
+      confidence: (asString(record.confidence) as "high" | "medium" | "low") || "medium",
+    };
+  }).filter((item) => item.issue);
+  const competitorExamples = asArray(parsed.competitorExamples).map((item) => {
+    const record = asRecord(item);
+    return {
+      title: asString(record.title) || "",
+      channelName: asString(record.channelName) || "",
+      url: asString(record.url) || "",
+      viewCount: parseNumber(record.viewCount),
+      whyItWins: asString(record.whyItWins) || "",
+    };
+  }).filter((item) => item.title);
+  const fixes = asRecord(parsed.fixes);
+
+  return {
+    summary: asString(parsed.summary) || "Audit generated from public YouTube data, thumbnail analysis, and competitor comparison.",
+    video: {
+      id: video.id,
+      title: video.title,
+      channelName: video.channelTitle || "YouTube channel",
+      channelId,
+      publishedAt: video.publishedAt,
+      duration: video.duration,
+      viewCount: parseNumber(video.viewCount),
+      likeCount: parseNumber(video.likeCount),
+      commentCount: parseNumber(video.commentCount),
+      tags: video.tags,
+      description: video.description,
+      thumbnailUrl: video.thumbnailUrl ?? null,
+      niche: nicheProfile.niche,
+      contentStyle: nicheProfile.contentStyle,
+      targetAudience: nicheProfile.targetAudience,
+      likelyFormat: likelyYoutubeFormatFromVideo(video),
+    },
+    performanceContext: {
+      ageDays,
+      viewsPerDay,
+      channelMedianViews,
+      competitorMedianViews,
+    },
+    topCreators,
+    competitorExamples: competitorExamples.length ? competitorExamples : comparableVideos.slice(0, 3).map((item) => ({
+      title: item.title,
+      channelName: item.channelTitle || "YouTube creator",
+      url: item.url,
+      viewCount: parseNumber(item.viewCount),
+      whyItWins: "This video is pulling stronger public engagement around a similar topic or intent.",
+    })),
+    visualAudit: visualAuditRecord ? {
+      overallScore: Number(visualAuditRecord.overallVisualScore ?? 0),
+      topFix: asString(visualAuditRecord.topFix) || "",
+      lighting: asString(asRecord(visualAuditRecord.lighting).assessment) || "",
+      framing: asString(asRecord(visualAuditRecord.framing).assessment) || "",
+      sharpness: asString(asRecord(visualAuditRecord.sharpness).assessment) || "",
+    } : null,
+    diagnosis,
+    fixes: {
+      titles: asArray(fixes.titles).map((item) => String(item)).filter(Boolean).slice(0, 5),
+      description: asString(fixes.description) || asString(asRecord(seoDraft).description) || "",
+      tags: asArray(fixes.tags).map((item) => String(item)).filter(Boolean).slice(0, 12),
+      thumbnailIdea: asString(fixes.thumbnailIdea) || "",
+      hookRewrite: asString(fixes.hookRewrite) || "",
+      scriptDirection: asString(fixes.scriptDirection) || "",
+      qualityFixes: asArray(fixes.qualityFixes).map((item) => String(item)).filter(Boolean).slice(0, 5),
+      packagingStrategy: asString(fixes.packagingStrategy) || asString(asRecord(seoDraft).packagingStrategy) || "",
+    },
+    limitations: asArray(parsed.limitations).map((item) => String(item)).filter(Boolean).slice(0, 6).concat([
+      "Transcript-level script analysis is not available yet for pasted public YouTube URLs in this first version.",
+      "Frame-level visual analysis currently uses the public thumbnail as a visual proxy unless deeper video access is added later.",
+    ]).filter((value, index, array) => array.indexOf(value) === index),
   };
 }
 

@@ -6,6 +6,7 @@ import { db, youtubeChannelProfilesTable } from "@workspace/db";
 import { requireAuth } from "../../middlewares/auth";
 import {
   addYoutubeCompetitorByUrl,
+  auditYoutubeVideo,
   createYoutubePlanDay,
   createYoutubeAuthUrl,
   deleteYoutubePlanDay,
@@ -25,6 +26,7 @@ import {
   updateYoutubeIdeaFeedback,
   updateYoutubeSettings,
 } from "../../lib/youtube";
+import { normalizePlan } from "../../lib/planLimits";
 
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET!;
@@ -133,6 +135,29 @@ router.post("/competitors/discover", requireAuth, async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "YouTube competitor discovery error");
     res.status(500).json({ error: err instanceof Error ? err.message : "Failed to discover competitors" });
+  }
+});
+
+router.post("/audit", requireAuth, async (req, res) => {
+  try {
+    const plan = normalizePlan(req.auth?.plan ?? "free");
+    if (plan !== "studio") {
+      res.status(403).json({
+        code: "STUDIO_REQUIRED",
+        error: "YouTube video audit is available on the Studio plan.",
+      });
+      return;
+    }
+    const videoUrl = typeof req.body?.videoUrl === "string" ? req.body.videoUrl.trim() : "";
+    if (!videoUrl) {
+      res.status(400).json({ error: "A YouTube video URL is required" });
+      return;
+    }
+    const report = await auditYoutubeVideo(req.auth!.user_id, videoUrl);
+    res.json({ report });
+  } catch (err) {
+    req.log.error({ err }, "YouTube video audit error");
+    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to audit YouTube video" });
   }
 });
 
