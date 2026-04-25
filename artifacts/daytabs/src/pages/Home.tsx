@@ -39,7 +39,7 @@ import {
   PanelCard,
   PanelCardSoft,
 } from "@/components/panel-system";
-import { useDayTabsI18n, type DayTabsLocale } from "@/lib/i18n";
+import { DAYTABS_LOCALE_LABELS, SUPPORTED_DAYTABS_LOCALES, useDayTabsI18n, type DayTabsLocale } from "@/lib/i18n";
 
 const TABS = [
   { id: "dashboard", icon: LayoutDashboard },
@@ -593,8 +593,11 @@ export default function Home() {
                 onChange={(event) => setLocale(event.target.value as DayTabsLocale)}
                 className="bg-transparent text-white outline-none"
               >
-                <option value="en" className="bg-slate-950">English</option>
-                <option value="tr" className="bg-slate-950">Turkce</option>
+                {SUPPORTED_DAYTABS_LOCALES.map((item) => (
+                  <option key={item} value={item} className="bg-slate-950">
+                    {DAYTABS_LOCALE_LABELS[item]}
+                  </option>
+                ))}
               </select>
             </label>
             <NotificationBell
