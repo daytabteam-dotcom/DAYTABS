@@ -66,6 +66,7 @@ const TTS_VOICE_GENDER: Record<(typeof VALID_TTS_VOICES)[number], "male" | "fema
 };
 const AVATAR_IMAGE_MODEL = process.env.YOUTUBE_THUMBNAIL_IMAGE_MODEL || "gpt-image-2";
 const AVATAR_IMAGE_FALLBACK_MODEL = "gpt-image-1";
+const MAX_TRANSLATION_VIDEO_DURATION_SEC = 15 * 60;
 
 fs.mkdir(auditUploadDir, { recursive: true }).catch(() => {});
 fs.mkdir(auditExportDir, { recursive: true }).catch(() => {});
@@ -281,6 +282,9 @@ async function createTalkingAvatarVideoFromAudio(options: {
   try {
     const durationSec = await getMediaDuration(options.audioPath).catch(() => 0);
     if (!durationSec || durationSec <= 0.05) throw new Error("Translated audio duration is unavailable");
+    if (durationSec > MAX_TRANSLATION_VIDEO_DURATION_SEC) {
+      throw new Error(`Translation video generation currently supports up to ${Math.round(MAX_TRANSLATION_VIDEO_DURATION_SEC / 60)} minutes of audio. Shorten the transcript or download the audio only.`);
+    }
 
     const avatarBase = await createAvatarBaseImage(tempDir, options.gender);
     const avatarMid = await createAvatarMouthVariant(tempDir, avatarBase, "mid");
