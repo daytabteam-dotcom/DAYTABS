@@ -87,6 +87,11 @@ export interface YoutubeVideoAuditReport {
     targetAudience: string;
     likelyFormat: string;
   };
+  nicheInference: {
+    label: string;
+    confidence: "high" | "medium" | "low";
+    basis: string;
+  };
   transcript: {
     available: boolean;
     source: "manual" | "auto" | null;
@@ -113,7 +118,7 @@ export interface YoutubeVideoAuditReport {
     whyItWins: string;
   }>;
   visualAudit: {
-    overallScore: number;
+    basis: "thumbnail_only";
     topFix: string;
     lighting: string;
     framing: string;
@@ -124,6 +129,8 @@ export interface YoutubeVideoAuditReport {
     issue: string;
     whyItHurts: string;
     confidence: "high" | "medium" | "low";
+    sourceLabel: string;
+    priority: 1 | 2 | 3;
   }>;
   fixes: {
     titles: string[];
@@ -2220,23 +2227,41 @@ export async function auditYoutubeVideo(userId: number, videoUrl: string): Promi
   const channelMedianViews = median(recentVideos.map((item) => parseNumber(item.viewCount)));
   const competitorMedianViews = median(comparableVideos.map((item) => parseNumber(item.viewCount)));
 
-  const auditPrompt = `You are a YouTube growth strategist producing a forensic audit for one existing video.
-Your job is to explain why the video likely underperformed compared to stronger competitors in the same niche and format.
+  const auditPrompt = `You are a YouTube growth strategist producing a careful audit for one existing video.
+Your job is to explain what can actually be assessed from the available evidence, what cannot be assessed, and what the creator should test first.
 
-Rules:
-- Be direct and evidence-based.
-- Separate what is likely weak in packaging, topic choice, hook, thumbnail, tags, script clarity, and production quality.
-- If transcript is unavailable, say so and base script diagnosis on title, description, niche, and visible packaging limitations only.
+Hard rules:
+- Never diagnose what is not supported by the supplied evidence.
+- If transcript is unavailable, do not return any script finding and do not write a hook rewrite that implies you watched the spoken opening.
+- If visual input is only a public thumbnail, do not call it a full video quality audit. Treat it as thumbnail/packaging evidence only.
+- Do not hallucinate competitors, URLs, private metrics, transcript lines, or viewer-retention details.
+- Competitor examples may explain why a supplied real video looks stronger, but they must not invent new videos.
+- Niche should be treated as inferred unless the evidence is overwhelming.
+- Be transparent about basis. Every finding must say what it was assessed from.
+- Prioritize only the most actionable 1-3 problems. Do not pad with weak guesses.
+- Tag suggestions must be specific to the topic and search intent in the supplied evidence. Avoid generic tags like "tech podcast" unless the evidence strongly supports them.
+- Title, description, and tag suggestions must reuse real vocabulary patterns visible in the supplied video metadata, transcript excerpt, recent channel videos, and real comparable videos. Avoid generic AI-sounding filler.
 - Do not say "improve the title" without giving better title options.
 - Do not say "fix the thumbnail" without giving a better thumbnail idea.
-- Do not say "make the hook stronger" without giving an exact better opening line.
-- Do not hallucinate private metrics. Use only the supplied public data and comparisons.
+- If transcript is unavailable, leave hookRewrite empty.
 
 Return JSON only:
 {
   "summary": "",
+  "nicheInference": {
+    "label": "",
+    "confidence": "high|medium|low",
+    "basis": ""
+  },
   "diagnosis": [
-    { "area": "title|thumbnail|description|tags|hook|script|topic|quality", "issue": "", "whyItHurts": "", "confidence": "high|medium|low" }
+    {
+      "area": "title|thumbnail|description|tags|hook|script|topic",
+      "issue": "",
+      "whyItHurts": "",
+      "confidence": "high|medium|low",
+      "sourceLabel": "",
+      "priority": 1
+    }
   ],
   "competitorExamples": [
     { "title": "", "channelName": "", "url": "", "viewCount": 0, "whyItWins": "" }
@@ -2299,6 +2324,7 @@ Return JSON only:
   });
 
   const parsed = asRecord(parseAiJson(completion.choices[0]?.message?.content ?? "{}"));
+  const transcriptAvailable = Boolean(transcript?.text);
   const diagnosis = asArray(parsed.diagnosis).map((item) => {
     const record = asRecord(item);
     return {
@@ -2306,8 +2332,15 @@ Return JSON only:
       issue: asString(record.issue) || "",
       whyItHurts: asString(record.whyItHurts) || "",
       confidence: (asString(record.confidence) as "high" | "medium" | "low") || "medium",
+      sourceLabel: asString(record.sourceLabel) || "Inferred from public metadata",
+      priority: Math.min(3, Math.max(1, parseNumber(record.priority) || 3)) as 1 | 2 | 3,
     };
-  }).filter((item) => item.issue);
+  }).filter((item) => item.issue)
+    .filter((item) => transcriptAvailable || item.area !== "script")
+    .filter((item) => item.area !== "quality")
+    .sort((a, b) => a.priority - b.priority || (a.confidence === "high" ? -1 : a.confidence === "medium" ? 0 : 1) - (b.confidence === "high" ? -1 : b.confidence === "medium" ? 0 : 1))
+    .slice(0, 3);
+  const nicheInference = asRecord(parsed.nicheInference);
   const competitorExamples = asArray(parsed.competitorExamples).map((item) => {
     const record = asRecord(item);
     return {
@@ -2341,6 +2374,8 @@ Return JSON only:
     };
   });
   const fixes = asRecord(parsed.fixes);
+  const rawHookRewrite = asString(fixes.hookRewrite) || "";
+  const qualityFixes = asArray(fixes.qualityFixes).map((item) => String(item)).filter(Boolean).slice(0, 5);
 
   return {
     summary: asString(parsed.summary) || "Audit generated from public YouTube data, thumbnail analysis, and competitor comparison.",
@@ -2362,8 +2397,13 @@ Return JSON only:
       targetAudience: nicheProfile.targetAudience,
       likelyFormat: likelyYoutubeFormatFromVideo(video),
     },
+    nicheInference: {
+      label: asString(nicheInference.label) || nicheProfile.niche,
+      confidence: ((asString(nicheInference.confidence) as "high" | "medium" | "low") || "medium"),
+      basis: asString(nicheInference.basis) || "Inferred from the video title, description, tags, and nearby comparable videos.",
+    },
     transcript: {
-      available: Boolean(transcript?.text),
+      available: transcriptAvailable,
       source: transcript?.source ?? null,
       language: transcript?.language ?? null,
       text: transcript?.text ?? null,
@@ -2377,7 +2417,7 @@ Return JSON only:
     topCreators,
     competitorExamples: competitorExampleCards,
     visualAudit: visualAuditRecord ? {
-      overallScore: Number(visualAuditRecord.overallVisualScore ?? 0),
+      basis: "thumbnail_only",
       topFix: asString(visualAuditRecord.topFix) || "",
       lighting: asString(asRecord(visualAuditRecord.lighting).assessment) || "",
       framing: asString(asRecord(visualAuditRecord.framing).assessment) || "",
@@ -2389,16 +2429,16 @@ Return JSON only:
       description: asString(fixes.description) || asString(asRecord(seoDraft).description) || "",
       tags: asArray(fixes.tags).map((item) => String(item)).filter(Boolean).slice(0, 12),
       thumbnailIdea: asString(fixes.thumbnailIdea) || "",
-      hookRewrite: asString(fixes.hookRewrite) || "",
-      scriptDirection: asString(fixes.scriptDirection) || "",
-      qualityFixes: asArray(fixes.qualityFixes).map((item) => String(item)).filter(Boolean).slice(0, 5),
+      hookRewrite: transcriptAvailable ? rawHookRewrite : "",
+      scriptDirection: transcriptAvailable ? (asString(fixes.scriptDirection) || "") : "",
+      qualityFixes,
       packagingStrategy: asString(fixes.packagingStrategy) || asString(asRecord(seoDraft).packagingStrategy) || "",
     },
     limitations: asArray(parsed.limitations).map((item) => String(item)).filter(Boolean).slice(0, 6).concat([
       transcript?.text
         ? ""
         : "Public transcript was not available for this video, so script analysis fell back to title, description, tags, and competitor context.",
-      "Frame-level visual analysis currently uses the public thumbnail as a visual proxy unless deeper video access is added later.",
+      "Thumbnail notes are based on the public thumbnail only, not on full frame-by-frame video quality analysis.",
     ]).filter(Boolean).filter((value, index, array) => array.indexOf(value) === index),
   };
 }

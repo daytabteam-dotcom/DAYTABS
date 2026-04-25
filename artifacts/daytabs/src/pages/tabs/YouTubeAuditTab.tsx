@@ -34,6 +34,11 @@ type AuditReport = {
     targetAudience: string;
     likelyFormat: string;
   };
+  nicheInference: {
+    label: string;
+    confidence: "high" | "medium" | "low";
+    basis: string;
+  };
   transcript: {
     available: boolean;
     source: "manual" | "auto" | null;
@@ -60,7 +65,7 @@ type AuditReport = {
     whyItWins: string;
   }>;
   visualAudit: {
-    overallScore: number;
+    basis: "thumbnail_only";
     topFix: string;
     lighting: string;
     framing: string;
@@ -71,6 +76,8 @@ type AuditReport = {
     issue: string;
     whyItHurts: string;
     confidence: "high" | "medium" | "low";
+    sourceLabel: string;
+    priority: 1 | 2 | 3;
   }>;
   fixes: {
     titles: string[];
@@ -111,6 +118,12 @@ function confidenceClass(value: "high" | "medium" | "low") {
   if (value === "high") return "border-emerald-400/20 bg-emerald-500/10 text-emerald-200";
   if (value === "medium") return "border-amber-400/20 bg-amber-500/10 text-amber-200";
   return "border-red-400/20 bg-red-500/10 text-red-200";
+}
+
+function priorityLabel(value: 1 | 2 | 3) {
+  if (value === 1) return "Start here";
+  if (value === 2) return "Next";
+  return "Lower priority";
 }
 
 export default function YouTubeAuditTab() {
@@ -215,7 +228,7 @@ export default function YouTubeAuditTab() {
           </button>
         </form>
         <p className="mt-3 text-xs text-white/40">
-          Current v1 uses public video metadata, thumbnail analysis, niche inference, and competitor comparison. Transcript-level audit is coming later.
+          Current v1 uses public metadata, real comparable videos, public transcripts when available, and thumbnail-only packaging analysis.
         </p>
         {error ? (
           <div className="mt-4 rounded-xl border border-red-400/20 bg-red-500/10 px-4 py-3 text-sm text-red-200">
@@ -238,7 +251,9 @@ export default function YouTubeAuditTab() {
                   <p className="mt-1 text-sm text-white/45">{report.video.channelName}</p>
                   <p className="mt-3 text-sm leading-6 text-white/72">{report.summary}</p>
                   <div className="mt-4 flex flex-wrap gap-2">
-                    <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-semibold text-white/70">{report.video.niche}</span>
+                    <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-semibold text-white/70">
+                      Inferred niche: {report.nicheInference.label}
+                    </span>
                     <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-semibold text-white/70">{report.video.likelyFormat}</span>
                     <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-semibold text-white/70">
                       {report.transcript.available
@@ -246,6 +261,9 @@ export default function YouTubeAuditTab() {
                         : "Transcript unavailable"}
                     </span>
                   </div>
+                  <p className="mt-3 text-xs leading-5 text-white/45">
+                    Niche confidence: {report.nicheInference.confidence} · {report.nicheInference.basis}
+                  </p>
                 </div>
               </div>
             </PanelCard>
@@ -261,7 +279,7 @@ export default function YouTubeAuditTab() {
                 ))}
               </div>
               <div className="mt-4 text-xs leading-6 text-white/50">
-                Channel median: {formatNumber(report.performanceContext.channelMedianViews)} · Competitor median: {formatNumber(report.performanceContext.competitorMedianViews)}
+                Age: {report.performanceContext.ageDays != null ? `${report.performanceContext.ageDays} day${report.performanceContext.ageDays === 1 ? "" : "s"}` : "n/a"} · Channel median: {formatNumber(report.performanceContext.channelMedianViews)} · Competitor median: {formatNumber(report.performanceContext.competitorMedianViews)}
               </div>
             </PanelCard>
           </div>
@@ -277,10 +295,16 @@ export default function YouTubeAuditTab() {
                   <div key={`${item.area}-${index}`} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
                     <div className="flex items-center justify-between gap-3">
                       <p className="text-sm font-semibold capitalize text-white">{item.area}</p>
-                      <span className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] ${confidenceClass(item.confidence)}`}>{item.confidence}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="rounded-full border border-sky-400/20 bg-sky-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-sky-200">
+                          {priorityLabel(item.priority)}
+                        </span>
+                        <span className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] ${confidenceClass(item.confidence)}`}>{item.confidence}</span>
+                      </div>
                     </div>
                     <p className="mt-2 text-sm text-white/78">{item.issue}</p>
                     <p className="mt-2 text-xs leading-6 text-white/50">{item.whyItHurts}</p>
+                    <p className="mt-2 text-[11px] uppercase tracking-[0.14em] text-white/30">{item.sourceLabel}</p>
                   </div>
                 ))}
               </div>
@@ -300,10 +324,12 @@ export default function YouTubeAuditTab() {
                     ))}
                   </ul>
                 </div>
-                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                  <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">Better hook</p>
-                  <p className="mt-3 text-sm text-white/82">{report.fixes.hookRewrite || "No hook rewrite returned yet."}</p>
-                </div>
+                {report.transcript.available ? (
+                  <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                    <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">Better hook</p>
+                    <p className="mt-3 text-sm text-white/82">{report.fixes.hookRewrite || "No hook rewrite returned yet."}</p>
+                  </div>
+                ) : null}
                 <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
                   <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">Thumbnail idea</p>
                   <p className="mt-3 text-sm leading-6 text-white/82">{report.fixes.thumbnailIdea || "No thumbnail direction returned yet."}</p>
@@ -335,13 +361,13 @@ export default function YouTubeAuditTab() {
             <PanelCard className="p-5">
               <div className="flex items-center gap-2">
                 <Eye className="h-4 w-4 text-violet-300" />
-                <p className="text-sm font-semibold text-white">Visual and quality audit</p>
+                <p className="text-sm font-semibold text-white">Thumbnail packaging notes</p>
               </div>
               {report.visualAudit ? (
                 <div className="mt-4 space-y-3">
                   <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                    <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">Overall visual score</p>
-                    <p className="mt-2 text-3xl font-semibold text-white">{report.visualAudit.overallScore}</p>
+                    <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">Assessment basis</p>
+                    <p className="mt-2 text-sm text-white/78">Public thumbnail only. This is packaging feedback, not a full video quality audit.</p>
                     <p className="mt-3 text-sm text-white/78">{report.visualAudit.topFix}</p>
                   </div>
                   {[
@@ -360,7 +386,7 @@ export default function YouTubeAuditTab() {
               )}
               {report.fixes.qualityFixes.length ? (
                 <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                  <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">Detailed quality fixes</p>
+                  <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">Packaging notes from thumbnail</p>
                   <ul className="mt-3 space-y-2">
                     {report.fixes.qualityFixes.map((item, index) => (
                       <li key={`${item}-${index}`} className="text-sm text-white/78">{item}</li>
