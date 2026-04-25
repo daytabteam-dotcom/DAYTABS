@@ -688,6 +688,18 @@ async function buildYoutubeThumbnailPrompt(
 ) {
   const hasSourceImages = payload.sourceImages.length > 0;
   const shouldPreserveImage = hasSourceImages && payload.preserveUploadedImage;
+  const thumbnailStrategyRules = `Thumbnail strategy rules:
+- Treat the thumbnail as visual packaging, not decoration: it must make one accurate promise the video immediately honors.
+- Optimize for the right click plus watch time/retention, not clickbait CTR alone.
+- Build around one focal subject, one idea, and one payoff; remove visual noise.
+- Design for phone-size legibility: large subject, strong subject/background separation, high contrast, and text that reads instantly.
+- Use thumbnail text only when it adds value beyond the title; keep it bold, non-redundant, and about 3-5 words.
+- Match the title, description, hook, and first 30 seconds so the thumbnail promise fits the actual video.
+- For YouTube long-form, create a true 16:9 custom thumbnail concept that is accurate, uncluttered, high-resolution, and testable.
+- For YouTube Shorts or vertical concepts, think in poster-frame terms: the first frame or selected frame should be a strong cover with centered subject, readable text, and no important detail near crop/UI edges.
+- For TikTok-style covers, favor vertical-safe composition, UI safe-zone awareness, high resolution, and readable text for profile/search previews.
+- Faces help only when the expression carries the idea; if a source image has a face, preserve identity, facial structure, expression, age, gaze direction, hair, and skin texture exactly.
+- Category defaults: podcasts/talks use expressive face plus quote/thesis; ads use product/result plus one benefit; demos use before/after or UI/result proof; art uses finished piece plus tool/process cue; cooking uses finished dish plus texture cue; gaming uses character/item/map/stat plus one performance claim; entertainment uses reaction or mystery object plus unresolved question.`;
   const userContent: Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }> = [
     {
       type: "text",
@@ -697,7 +709,9 @@ Tags: ${payload.tags.join(", ")}
 User Text Preference: ${payload.textPreference?.trim() || "auto-generate"}
 Style Preference: ${payload.stylePreference?.trim() || "auto-detect the best thumbnail style"}
 Audit Notes: ${payload.analysisNotes?.trim() || "none"}
-Image Inputs: ${hasSourceImages ? `The attached ${payload.sourceImages.length} source image(s) are ${payload.sourceImageKind === "current_thumbnail" ? "the video's current public thumbnail" : "provided by the user"}.` : "No source images provided."}`,
+Image Inputs: ${hasSourceImages ? `The attached ${payload.sourceImages.length} source image(s) are ${payload.sourceImageKind === "current_thumbnail" ? "the video's current public thumbnail" : "provided by the user"}.` : "No source images provided."}
+
+${thumbnailStrategyRules}`,
     },
   ];
 
@@ -712,6 +726,8 @@ Image Inputs: ${hasSourceImages ? `The attached ${payload.sourceImages.length} s
     ? `You are an expert YouTube thumbnail designer focused on maximizing CTR.
 
 IMPORTANT: ${payload.sourceImageKind === "current_thumbnail" ? "The provided image is the video's current thumbnail. Improve it; do not replace it." : "The user has provided an image."}
+
+${thumbnailStrategyRules}
 
 STRICT RULES (MUST FOLLOW):
 - The provided image MUST remain the base of the final thumbnail
@@ -772,6 +788,9 @@ Return ONLY the final image editing prompt.`
     : `You are an expert YouTube thumbnail designer and viral content strategist.
 
 Your goal is NOT just to create a beautiful image, but to maximize click-through-rate (CTR).
+However, do not chase misleading CTR: the thumbnail must attract the right viewer and preserve watch time/retention.
+
+${thumbnailStrategyRules}
 
 Analyze the provided YouTube metadata and design a thumbnail that:
 - Creates curiosity or emotional tension
@@ -3786,6 +3805,12 @@ export async function generateYoutubeIdeaThumbnail(
   const normalizedDay = normalizePlanDayRecord(existingDay, dayIndex);
   const sourceImages = sanitizeSourceImageDataUrls(input.sourceImages);
   const preserveUploadedImage = sourceImages.length > 0 && input.preserveUploadedImage !== false;
+  const growthThumbnailNotes = [
+    normalizedDay.thumbnailConcept ? `Planned thumbnail concept: ${normalizedDay.thumbnailConcept}` : "",
+    normalizedDay.hook ? `Opening hook: ${normalizedDay.hook}` : "",
+    normalizedDay.rationale ? `Growth rationale: ${normalizedDay.rationale}` : "",
+    normalizedDay.stage ? `Plan stage: ${normalizedDay.stage}` : "",
+  ].filter(Boolean).join("\n") || null;
   const prompt = await buildYoutubeThumbnailPrompt(userId, {
     title: normalizedDay.contentIdea,
     description: normalizedDay.descriptionSuggestion,
@@ -3793,6 +3818,8 @@ export async function generateYoutubeIdeaThumbnail(
     textPreference: asString(input.textPreference)?.trim() || null,
     sourceImages,
     preserveUploadedImage,
+    sourceImageKind: sourceImages.length ? "user_uploaded" : null,
+    analysisNotes: growthThumbnailNotes,
   });
   if (!prompt) throw new Error("Thumbnail prompt generation failed");
 
