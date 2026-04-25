@@ -627,6 +627,7 @@ export default function YouTubeAuditTab() {
           ) : null}
 
           {report ? (
+            <>
           <div className="grid gap-4 xl:grid-cols-[1fr,1fr]">
             <PanelCardSoft className="p-5">
               <div className="flex items-center gap-2">
@@ -834,6 +835,7 @@ export default function YouTubeAuditTab() {
               ))}
             </ul>
           </PanelCard>
+            </>
           ) : null}
         </div>
       ) : null}
