@@ -15,6 +15,7 @@ import {
   generateYoutubeIdeaThumbnail,
   getYoutubeAppRedirect,
   getYoutubeRedirectUri,
+  getYoutubeVideoAuditPreview,
   getYoutubeStatus,
   patchYoutubePlanDay,
   improveYoutubeIdea,
@@ -158,6 +159,29 @@ router.post("/audit", requireAuth, async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "YouTube video audit error");
     res.status(500).json({ error: err instanceof Error ? err.message : "Failed to audit YouTube video" });
+  }
+});
+
+router.post("/audit-preview", requireAuth, async (req, res) => {
+  try {
+    const plan = normalizePlan(req.auth?.plan ?? "free");
+    if (plan !== "studio") {
+      res.status(403).json({
+        code: "STUDIO_REQUIRED",
+        error: "YouTube video audit is available on the Studio plan.",
+      });
+      return;
+    }
+    const videoUrl = typeof req.body?.videoUrl === "string" ? req.body.videoUrl.trim() : "";
+    if (!videoUrl) {
+      res.status(400).json({ error: "A YouTube video URL is required" });
+      return;
+    }
+    const preview = await getYoutubeVideoAuditPreview(req.auth!.user_id, videoUrl);
+    res.json({ preview });
+  } catch (err) {
+    req.log.error({ err }, "YouTube video audit preview error");
+    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to prepare YouTube video audit" });
   }
 });
 

@@ -145,6 +145,34 @@ export interface YoutubeVideoAuditReport {
   limitations: string[];
 }
 
+export interface YoutubeVideoAuditPreview {
+  video: {
+    id: string;
+    title: string;
+    channelName: string;
+    channelId: string | null;
+    publishedAt: string | null;
+    duration: string | null;
+    viewCount: number;
+    likeCount: number;
+    commentCount: number;
+    tags: string[];
+    description: string;
+    thumbnailUrl: string | null;
+    likelyFormat: string;
+  };
+  nicheInference: {
+    label: string;
+    confidence: "high" | "medium" | "low";
+    basis: string;
+  };
+  transcript: {
+    available: boolean;
+    source: "manual" | "auto" | null;
+    language: string | null;
+  };
+}
+
 interface YoutubeSettings {
   preferredPostsPerWeek: number;
   connectedAt: string | null;
@@ -2051,6 +2079,34 @@ function buildAuditSearchQuery(video: YoutubeRecentVideo, nicheProfile: YoutubeN
   return [...titleWords, ...nicheWords].join(" ").trim() || video.title;
 }
 
+async function searchAuditComparableVideos(
+  userId: number,
+  video: YoutubeRecentVideo,
+  nicheProfile: YoutubeNicheProfile,
+) {
+  const queries = [
+    buildAuditSearchQuery(video, nicheProfile),
+    video.title,
+    [nicheProfile.niche, nicheProfile.keywords[0], nicheProfile.keywords[1]].filter(Boolean).join(" "),
+    video.tags.slice(0, 3).join(" "),
+  ]
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  const seen = new Map<string, YoutubeRecentVideo>();
+  for (const query of queries) {
+    const results = await searchRelevantVideos(userId, query, 10).catch(() => [] as YoutubeRecentVideo[]);
+    for (const item of results) {
+      if (item.id === video.id || item.channelId === video.channelId) continue;
+      if (!seen.has(item.id)) seen.set(item.id, item);
+      if (seen.size >= 12) break;
+    }
+    if (seen.size >= 12) break;
+  }
+
+  return [...seen.values()].slice(0, 10);
+}
+
 function extractBalancedJson(source: string, marker: string) {
   const markerIndex = source.indexOf(marker);
   if (markerIndex === -1) return null;
@@ -2097,27 +2153,48 @@ function normalizeYoutubeTranscriptText(text: string) {
 }
 
 async function fetchPublicYoutubeTranscript(videoId: string) {
+  const requestHeaders = {
+    "User-Agent": "Mozilla/5.0 DayTabsAudit/1.0",
+    "Accept-Language": "en-US,en;q=0.9",
+  };
+
+  let captionTracks: JsonRecord[] = [];
+
   const watchResponse = await fetch(`https://www.youtube.com/watch?v=${videoId}&hl=en`, {
-    headers: {
-      "User-Agent": "Mozilla/5.0 DayTabsAudit/1.0",
-      "Accept-Language": "en-US,en;q=0.9",
-    },
-  });
-  if (!watchResponse.ok) return null;
+    headers: requestHeaders,
+  }).catch(() => null);
+  if (watchResponse?.ok) {
+    const html = await watchResponse.text();
+    const playerResponseJson =
+      extractBalancedJson(html, "var ytInitialPlayerResponse = ") ||
+      extractBalancedJson(html, "ytInitialPlayerResponse = ") ||
+      extractBalancedJson(html, "window['ytInitialPlayerResponse'] = ") ||
+      extractBalancedJson(html, "window[\"ytInitialPlayerResponse\"] = ");
+    if (playerResponseJson) {
+      const playerResponse = asRecord(JSON.parse(playerResponseJson));
+      captionTracks = asArray(asRecord(asRecord(playerResponse.captions).playerCaptionsTracklistRenderer).captionTracks)
+        .map((item) => asRecord(item))
+        .filter((item) => asString(item.baseUrl));
+    }
+  }
 
-  const html = await watchResponse.text();
-  const playerResponseJson =
-    extractBalancedJson(html, "var ytInitialPlayerResponse = ") ||
-    extractBalancedJson(html, "ytInitialPlayerResponse = ") ||
-    extractBalancedJson(html, "window['ytInitialPlayerResponse'] = ") ||
-    extractBalancedJson(html, "window[\"ytInitialPlayerResponse\"] = ");
-  if (!playerResponseJson) return null;
+  if (!captionTracks.length) {
+    const infoResponse = await fetch(`https://www.youtube.com/get_video_info?video_id=${videoId}&el=detailpage&hl=en`, {
+      headers: requestHeaders,
+    }).catch(() => null);
+    if (infoResponse?.ok) {
+      const raw = await infoResponse.text();
+      const params = new URLSearchParams(raw);
+      const playerResponseRaw = params.get("player_response");
+      if (playerResponseRaw) {
+        const playerResponse = asRecord(JSON.parse(playerResponseRaw));
+        captionTracks = asArray(asRecord(asRecord(playerResponse.captions).playerCaptionsTracklistRenderer).captionTracks)
+          .map((item) => asRecord(item))
+          .filter((item) => asString(item.baseUrl));
+      }
+    }
+  }
 
-  const playerResponse = asRecord(JSON.parse(playerResponseJson));
-  const captionsRoot = asRecord(asRecord(playerResponse.captions).playerCaptionsTracklistRenderer);
-  const captionTracks = asArray(captionsRoot.captionTracks)
-    .map((item) => asRecord(item))
-    .filter((item) => asString(item.baseUrl));
   if (!captionTracks.length) return null;
 
   const preferredTrack =
@@ -2128,12 +2205,7 @@ async function fetchPublicYoutubeTranscript(videoId: string) {
   const baseUrl = asString(preferredTrack.baseUrl);
   if (!baseUrl) return null;
 
-  const transcriptResponse = await fetch(`${baseUrl}&fmt=json3`, {
-    headers: {
-      "User-Agent": "Mozilla/5.0 DayTabsAudit/1.0",
-      "Accept-Language": "en-US,en;q=0.9",
-    },
-  });
+  const transcriptResponse = await fetch(`${baseUrl}&fmt=json3`, { headers: requestHeaders });
   if (!transcriptResponse.ok) return null;
 
   const transcriptJson = asRecord(await transcriptResponse.json().catch(() => ({})));
@@ -2156,6 +2228,52 @@ async function fetchPublicYoutubeTranscript(videoId: string) {
   };
 }
 
+export async function getYoutubeVideoAuditPreview(userId: number, videoUrl: string): Promise<YoutubeVideoAuditPreview> {
+  const videoId = extractYoutubeVideoId(videoUrl);
+  if (!videoId) throw new Error("Enter a valid YouTube video URL");
+
+  const video = await fetchVideoById(userId, videoId);
+  const channelId = video.channelId ?? null;
+  const recentVideos = channelId ? await fetchRecentVideos(userId, channelId, 12) : [];
+  const nicheProfile = await analyzeNiche(userId, {
+    id: channelId ?? "",
+    title: video.channelTitle,
+    description: video.description,
+    subscriberCount: null,
+    totalViewCount: null,
+    videoCount: null,
+  }, recentVideos.length ? recentVideos : [video]);
+  const transcript = await fetchPublicYoutubeTranscript(videoId).catch(() => null);
+
+  return {
+    video: {
+      id: video.id,
+      title: video.title,
+      channelName: video.channelTitle || "YouTube channel",
+      channelId,
+      publishedAt: video.publishedAt,
+      duration: video.duration,
+      viewCount: parseNumber(video.viewCount),
+      likeCount: parseNumber(video.likeCount),
+      commentCount: parseNumber(video.commentCount),
+      tags: video.tags,
+      description: video.description,
+      thumbnailUrl: video.thumbnailUrl ?? null,
+      likelyFormat: likelyYoutubeFormatFromVideo(video),
+    },
+    nicheInference: {
+      label: nicheProfile.niche,
+      confidence: "medium",
+      basis: "Inferred from the title, description, tags, and recent channel uploads.",
+    },
+    transcript: {
+      available: Boolean(transcript?.text),
+      source: transcript?.source ?? null,
+      language: transcript?.language ?? null,
+    },
+  };
+}
+
 export async function auditYoutubeVideo(userId: number, videoUrl: string): Promise<YoutubeVideoAuditReport> {
   const videoId = extractYoutubeVideoId(videoUrl);
   if (!videoId) throw new Error("Enter a valid YouTube video URL");
@@ -2172,10 +2290,7 @@ export async function auditYoutubeVideo(userId: number, videoUrl: string): Promi
     videoCount: null,
   }, recentVideos.length ? recentVideos : [video]);
 
-  const searchQuery = buildAuditSearchQuery(video, nicheProfile);
-  const comparableVideos = (await searchRelevantVideos(userId, searchQuery, 14))
-    .filter((item) => item.id !== video.id && item.channelId !== video.channelId)
-    .slice(0, 10);
+  const comparableVideos = await searchAuditComparableVideos(userId, video, nicheProfile);
 
   const comparableByChannel = new Map<string, YoutubeRecentVideo[]>();
   for (const item of comparableVideos) {
@@ -2184,13 +2299,25 @@ export async function auditYoutubeVideo(userId: number, videoUrl: string): Promi
     comparableByChannel.get(key)!.push(item);
   }
 
+  const creatorChannelIds = [...new Set(comparableVideos.map((item) => item.channelId).filter(Boolean) as string[])];
+  const creatorChannelRows = await fetchChannelsByIds(userId, creatorChannelIds).catch(() => []);
+  const channelById = new Map(
+    creatorChannelRows.map((item) => {
+      const record = asRecord(item);
+      return [
+        asString(record.id) || "",
+        parseNumber(asRecord(record.statistics).subscriberCount),
+      ] as const;
+    }),
+  );
+
   const topCreators = [...comparableByChannel.values()]
     .map((videos) => {
       const first = videos[0]!;
       const averageViews = Math.round(videos.reduce((sum, current) => sum + parseNumber(current.viewCount), 0) / videos.length);
       return {
         channelName: first.channelTitle || "YouTube creator",
-        subscriberCount: 0,
+        subscriberCount: first.channelId ? (channelById.get(first.channelId) ?? 0) : 0,
         averageViews,
         whyTheyMatter: `${first.channelTitle || "This creator"} is ranking around the same topic with clearer packaging or stronger audience pull.`,
       };

@@ -92,6 +92,34 @@ type AuditReport = {
   limitations: string[];
 };
 
+type AuditPreview = {
+  video: {
+    id: string;
+    title: string;
+    channelName: string;
+    channelId: string | null;
+    publishedAt: string | null;
+    duration: string | null;
+    viewCount: number;
+    likeCount: number;
+    commentCount: number;
+    tags: string[];
+    description: string;
+    thumbnailUrl: string | null;
+    likelyFormat: string;
+  };
+  nicheInference: {
+    label: string;
+    confidence: "high" | "medium" | "low";
+    basis: string;
+  };
+  transcript: {
+    available: boolean;
+    source: "manual" | "auto" | null;
+    language: string | null;
+  };
+};
+
 async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
   const token = localStorage.getItem("daytabs_token");
   const response = await fetch(url, {
@@ -129,37 +157,53 @@ function priorityLabel(value: 1 | 2 | 3) {
 export default function YouTubeAuditTab() {
   const { plan, loading: planLoading } = usePlan();
   const [videoUrl, setVideoUrl] = useState("");
+  const [preview, setPreview] = useState<AuditPreview | null>(null);
   const [report, setReport] = useState<AuditReport | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [loadingReport, setLoadingReport] = useState(false);
 
   const isStudio = plan.isStudio;
 
   const topMetrics = useMemo(() => {
-    if (!report) return [];
+    const source = report?.video ?? preview?.video;
+    const performance = report?.performanceContext ?? null;
+    if (!source) return [];
     return [
-      { label: "Views", value: formatNumber(report.video.viewCount) },
-      { label: "Likes", value: formatNumber(report.video.likeCount) },
-      { label: "Comments", value: formatNumber(report.video.commentCount) },
-      { label: "Views / day", value: formatNumber(report.performanceContext.viewsPerDay) },
+      { label: "Views", value: formatNumber(source.viewCount) },
+      { label: "Likes", value: formatNumber(source.likeCount) },
+      { label: "Comments", value: formatNumber(source.commentCount) },
+      { label: "Views / day", value: formatNumber(performance?.viewsPerDay) },
     ];
-  }, [report]);
+  }, [preview, report]);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     if (!videoUrl.trim()) return;
-    setLoading(true);
+    setLoadingPreview(true);
+    setLoadingReport(false);
     setError(null);
+    setPreview(null);
+    setReport(null);
     try {
-      const data = await jsonFetch<{ report: AuditReport }>("/api/youtube/audit", {
+      const previewData = await jsonFetch<{ preview: AuditPreview }>("/api/youtube/audit-preview", {
         method: "POST",
         body: JSON.stringify({ videoUrl: videoUrl.trim() }),
       });
-      setReport(data.report);
+      setPreview(previewData.preview);
+      setLoadingPreview(false);
+      setLoadingReport(true);
+
+      const reportData = await jsonFetch<{ report: AuditReport }>("/api/youtube/audit", {
+        method: "POST",
+        body: JSON.stringify({ videoUrl: videoUrl.trim() }),
+      });
+      setReport(reportData.report);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to audit video");
     } finally {
-      setLoading(false);
+      setLoadingPreview(false);
+      setLoadingReport(false);
     }
   }
 
@@ -221,10 +265,10 @@ export default function YouTubeAuditTab() {
           </div>
           <button
             type="submit"
-            disabled={loading || !videoUrl.trim()}
+            disabled={loadingPreview || loadingReport || !videoUrl.trim()}
             className="inline-flex h-12 items-center justify-center rounded-xl bg-primary px-5 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Run Audit"}
+            {loadingPreview || loadingReport ? <Loader2 className="h-4 w-4 animate-spin" /> : "Run Audit"}
           </button>
         </form>
         <p className="mt-3 text-xs text-white/40">
@@ -237,32 +281,38 @@ export default function YouTubeAuditTab() {
         ) : null}
       </PanelCard>
 
-      {report ? (
+      {preview ? (
         <>
           <div className="grid gap-4 lg:grid-cols-[1.1fr,0.9fr]">
             <PanelCard className="p-5">
               <div className="flex gap-4">
-                {report.video.thumbnailUrl ? (
-                  <img src={report.video.thumbnailUrl} alt={report.video.title} className="h-28 w-44 rounded-2xl border border-white/10 object-cover" />
+                {preview.video.thumbnailUrl ? (
+                  <img src={preview.video.thumbnailUrl} alt={preview.video.title} className="h-28 w-44 rounded-2xl border border-white/10 object-cover" />
                 ) : null}
                 <div className="min-w-0 flex-1">
-                  <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Audit summary</p>
-                  <h3 className="mt-2 text-xl font-semibold text-white">{report.video.title}</h3>
-                  <p className="mt-1 text-sm text-white/45">{report.video.channelName}</p>
-                  <p className="mt-3 text-sm leading-6 text-white/72">{report.summary}</p>
+                  <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Video loaded</p>
+                  <h3 className="mt-2 text-xl font-semibold text-white">{preview.video.title}</h3>
+                  <p className="mt-1 text-sm text-white/45">{preview.video.channelName}</p>
+                  {report ? (
+                    <p className="mt-3 text-sm leading-6 text-white/72">{report.summary}</p>
+                  ) : (
+                    <p className="mt-3 text-sm leading-6 text-white/60">
+                      Metadata loaded. Building the full audit report with comparable videos, transcript checks, and packaging fixes now.
+                    </p>
+                  )}
                   <div className="mt-4 flex flex-wrap gap-2">
                     <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-semibold text-white/70">
-                      Inferred niche: {report.nicheInference.label}
+                      Inferred niche: {(report?.nicheInference ?? preview.nicheInference).label}
                     </span>
-                    <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-semibold text-white/70">{report.video.likelyFormat}</span>
+                    <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-semibold text-white/70">{preview.video.likelyFormat}</span>
                     <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-semibold text-white/70">
-                      {report.transcript.available
-                        ? `Transcript: ${report.transcript.source === "manual" ? "Manual" : "Auto"}${report.transcript.language ? ` · ${report.transcript.language}` : ""}`
+                      {(report?.transcript ?? preview.transcript).available
+                        ? `Transcript: ${(report?.transcript ?? preview.transcript).source === "manual" ? "Manual" : "Auto"}${(report?.transcript ?? preview.transcript).language ? ` · ${(report?.transcript ?? preview.transcript).language}` : ""}`
                         : "Transcript unavailable"}
                     </span>
                   </div>
                   <p className="mt-3 text-xs leading-5 text-white/45">
-                    Niche confidence: {report.nicheInference.confidence} · {report.nicheInference.basis}
+                    Niche confidence: {(report?.nicheInference ?? preview.nicheInference).confidence} · {(report?.nicheInference ?? preview.nicheInference).basis}
                   </p>
                 </div>
               </div>
@@ -278,12 +328,33 @@ export default function YouTubeAuditTab() {
                   </div>
                 ))}
               </div>
-              <div className="mt-4 text-xs leading-6 text-white/50">
-                Age: {report.performanceContext.ageDays != null ? `${report.performanceContext.ageDays} day${report.performanceContext.ageDays === 1 ? "" : "s"}` : "n/a"} · Channel median: {formatNumber(report.performanceContext.channelMedianViews)} · Competitor median: {formatNumber(report.performanceContext.competitorMedianViews)}
-              </div>
+              {report ? (
+                <div className="mt-4 text-xs leading-6 text-white/50">
+                  Age: {report.performanceContext.ageDays != null ? `${report.performanceContext.ageDays} day${report.performanceContext.ageDays === 1 ? "" : "s"}` : "n/a"} · Channel median: {formatNumber(report.performanceContext.channelMedianViews)} · Competitor median: {formatNumber(report.performanceContext.competitorMedianViews)}
+                </div>
+              ) : (
+                <div className="mt-4 text-xs leading-6 text-white/45">
+                  Performance comparison and competitor context are still loading.
+                </div>
+              )}
             </PanelCard>
           </div>
 
+          {!report && loadingReport ? (
+            <PanelCard className="p-5">
+              <div className="flex items-center gap-3">
+                <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                <div>
+                  <p className="text-sm font-semibold text-white">Building full audit report</p>
+                  <p className="text-xs leading-6 text-white/45">
+                    Checking public subtitles, finding real competitor videos, and generating the source-aware report.
+                  </p>
+                </div>
+              </div>
+            </PanelCard>
+          ) : null}
+
+          {report ? (
           <div className="grid gap-4 xl:grid-cols-[1fr,1fr]">
             <PanelCardSoft className="p-5">
               <div className="flex items-center gap-2">
@@ -404,13 +475,20 @@ export default function YouTubeAuditTab() {
                 <p className="text-sm font-semibold text-white">Top creators in this lane</p>
               </div>
               <div className="mt-4 space-y-3">
-                {report.topCreators.map((creator, index) => (
+                {report.topCreators.length ? report.topCreators.map((creator, index) => (
                   <div key={`${creator.channelName}-${index}`} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
                     <p className="text-sm font-semibold text-white">{creator.channelName}</p>
-                    <p className="mt-1 text-xs text-white/40">Avg views: {formatNumber(creator.averageViews)}</p>
+                    <p className="mt-1 text-xs text-white/40">
+                      Avg views: {formatNumber(creator.averageViews)}
+                      {creator.subscriberCount > 0 ? ` · Subs: ${formatNumber(creator.subscriberCount)}` : ""}
+                    </p>
                     <p className="mt-2 text-sm leading-6 text-white/72">{creator.whyTheyMatter}</p>
                   </div>
-                ))}
+                )) : (
+                  <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm leading-6 text-white/55">
+                    We could not find enough strong comparable creators for this topic yet. Try another video or a more search-specific title.
+                  </div>
+                )}
               </div>
             </PanelCardSoft>
 
@@ -420,7 +498,7 @@ export default function YouTubeAuditTab() {
                 <p className="text-sm font-semibold text-white">Competitor videos worth studying</p>
               </div>
               <div className="mt-4 space-y-3">
-                {report.competitorExamples.map((video, index) => (
+                {report.competitorExamples.length ? report.competitorExamples.map((video, index) => (
                   <a key={`${video.url}-${index}`} href={video.url} target="_blank" rel="noreferrer" className="block rounded-2xl border border-white/10 bg-white/[0.03] p-4 transition-colors hover:border-primary/30">
                     <div className="flex items-start justify-between gap-3">
                       <div>
@@ -431,7 +509,11 @@ export default function YouTubeAuditTab() {
                     </div>
                     <p className="mt-2 text-sm leading-6 text-white/72">{video.whyItWins}</p>
                   </a>
-                ))}
+                )) : (
+                  <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm leading-6 text-white/55">
+                    No strong comparable videos were found for this audit yet.
+                  </div>
+                )}
               </div>
             </PanelCardSoft>
           </div>
@@ -450,6 +532,7 @@ export default function YouTubeAuditTab() {
               ))}
             </ul>
           </PanelCard>
+          ) : null}
         </>
       ) : null}
     </PanelPage>
