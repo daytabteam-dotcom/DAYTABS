@@ -50,3 +50,6 @@ Thumbs.db
 
 # Large local media artifacts
 attached_assets/*.mp4
+
+# Local secrets (do not commit)
+secrets/

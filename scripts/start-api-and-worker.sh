@@ -15,6 +15,10 @@ cleanup() {
 
 trap cleanup INT TERM EXIT
 
+if [ -z "${YTDLP_COOKIES_PATH:-}" ] && [ -f "/app/secrets/youtube-cookies.txt" ]; then
+  export YTDLP_COOKIES_PATH="/app/secrets/youtube-cookies.txt"
+fi
+
 node --max-old-space-size=384 --enable-source-maps artifacts/api-server/dist/index.mjs &
 API_PID=$!
 

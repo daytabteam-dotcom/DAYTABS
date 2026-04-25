@@ -7,6 +7,9 @@ RUN npm install -g pnpm
 
 WORKDIR /app
 
+# Optional runtime secret mount location (e.g. yt-dlp cookies file)
+RUN mkdir -p /app/secrets
+
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc tsconfig*.json ./
 
 COPY artifacts/ ./artifacts/

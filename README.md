@@ -120,6 +120,7 @@ Optional: authenticated cookies for yt-dlp (helps with IP-based bot checks)
 
 - Create a cookies file (Netscape format) and mount it as a secret at `YTDLP_COOKIES_PATH` (example: `/app/secrets/youtube-cookies.txt`).
 - Do not commit `youtube-cookies.txt` to Git.
+- In Docker images built from this repo, if you mount the file at `/app/secrets/youtube-cookies.txt`, the server will auto-detect it even if you don't set `YTDLP_COOKIES_PATH`.
 
 For Docker:
 
