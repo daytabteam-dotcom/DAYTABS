@@ -33,6 +33,8 @@ const YOUTUBE_QUOTA_CACHE_THRESHOLD = Number(process.env.YOUTUBE_QUOTA_CACHE_THR
 const YOUTUBE_THUMBNAIL_WIDTH = 1280;
 const YOUTUBE_THUMBNAIL_HEIGHT = 720;
 const YOUTUBE_THUMBNAIL_MAX_BYTES = 2 * 1024 * 1024;
+const YOUTUBE_THUMBNAIL_IMAGE_MODEL = process.env.YOUTUBE_THUMBNAIL_IMAGE_MODEL || "gpt-image-2";
+const YOUTUBE_THUMBNAIL_FALLBACK_IMAGE_MODEL = "gpt-image-1";
 
 export const YOUTUBE_SCOPES = [
   "https://www.googleapis.com/auth/youtube.readonly",
@@ -678,6 +680,7 @@ async function buildYoutubeThumbnailPrompt(
     textPreference: string | null;
     sourceImages: string[];
     preserveUploadedImage: boolean;
+    sourceImageKind?: "user_uploaded" | "current_thumbnail" | null;
     stylePreference?: string | null;
     analysisNotes?: string | null;
   },
@@ -693,7 +696,7 @@ Tags: ${payload.tags.join(", ")}
 User Text Preference: ${payload.textPreference?.trim() || "auto-generate"}
 Style Preference: ${payload.stylePreference?.trim() || "auto-detect the best thumbnail style"}
 Audit Notes: ${payload.analysisNotes?.trim() || "none"}
-Image Inputs: ${hasSourceImages ? `The attached ${payload.sourceImages.length} source image(s) are provided by the user.` : "No source images provided."}`,
+Image Inputs: ${hasSourceImages ? `The attached ${payload.sourceImages.length} source image(s) are ${payload.sourceImageKind === "current_thumbnail" ? "the video's current public thumbnail" : "provided by the user"}.` : "No source images provided."}`,
     },
   ];
 
@@ -707,20 +710,24 @@ Image Inputs: ${hasSourceImages ? `The attached ${payload.sourceImages.length} s
   const systemPrompt = shouldPreserveImage
     ? `You are an expert YouTube thumbnail designer focused on maximizing CTR.
 
-IMPORTANT: The user has provided an image.
+IMPORTANT: ${payload.sourceImageKind === "current_thumbnail" ? "The provided image is the video's current thumbnail. Improve it; do not replace it." : "The user has provided an image."}
 
 STRICT RULES (MUST FOLLOW):
 - The provided image MUST remain the base of the final thumbnail
 - DO NOT recreate, redraw, or reinterpret the scene
 - DO NOT change the subject, pose, composition, or camera angle
 - DO NOT replace the person or objects
+- If there are any faces, preserve identity, facial structure, expression, skin texture, hair, age, gaze direction, and pose exactly
+- Do not beautify, age, de-age, stylize, cartoon, or alter any face
+- Do not invent a new person, new face, new background scene, or new object that replaces an existing important object
 - You may ONLY:
-  - enhance colors
-  - improve lighting and contrast
-  - increase sharpness and clarity
-  - slightly blur or simplify the background for focus
-  - add text, overlays, icons, or graphic elements
+  - enhance colors, contrast, exposure, and local lighting
+  - improve sharpness and clarity without changing facial features
+  - add tasteful rim light, glow, vignette, depth, or background separation
+  - slightly blur, darken, or simplify the background for focus without changing the subject
+  - add bold readable text, arrows, outlines, highlights, or graphic accents in empty/non-face areas
 - The original image content must remain clearly recognizable and unchanged
+- The final result should look like a polished high-performing YouTube thumbnail made from the original thumbnail, not like a new AI image
 
 INPUT:
 Title: ${payload.title}
@@ -746,17 +753,18 @@ STEP 3: Text decision
 STEP 4: Final editing instructions
 
 Generate a precise image editing prompt that:
-- Keeps the exact original image
+- Keeps the exact original image as the base layer
+- Preserves every face and human identity exactly if faces are present
 - Produces a YouTube thumbnail composition at ${YOUTUBE_THUMBNAIL_WIDTH} x ${YOUTUBE_THUMBNAIL_HEIGHT}px, 16:9 aspect ratio
 - Enhances subject visibility with lighting and contrast
-- Applies cinematic color grading
+- Applies tasteful cinematic color grading without making skin unnatural
 - Adds strong depth with background blur if needed
 - Places bold readable text in a non-blocking area
 - Uses high contrast colors for text
 - Ensures readability on mobile
 - Keeps the final asset as JPG format and suitable for YouTube's 2 MB thumbnail limit
 
-If you modify or regenerate the subject instead of editing the provided image, the output is invalid.
+If you modify or regenerate the subject, any face, or the core scene instead of editing the provided image, the output is invalid.
 
 OUTPUT:
 Return ONLY the final image editing prompt.`
@@ -844,25 +852,44 @@ IMPORTANT RULES:
   return (completion.choices[0]?.message?.content || "").trim();
 }
 
-async function generateYoutubeThumbnailImage(userId: number, prompt: string, sourceImages: string[], preserveUploadedImage: boolean) {
-  const response = sourceImages.length && preserveUploadedImage
-    ? await openai.images.edit({
-      model: "gpt-image-1",
+async function runYoutubeThumbnailImageRequest(
+  model: string,
+  prompt: string,
+  sourceImages: string[],
+  preserveUploadedImage: boolean,
+) {
+  const isGptImage2 = model === "gpt-image-2";
+  const sharedOptions = {
+    model,
+    prompt,
+    size: isGptImage2 ? "2048x1152" : "1536x1024",
+    quality: "high",
+    output_format: "jpeg",
+    output_compression: isGptImage2 ? 82 : 85,
+  } as const;
+  if (sourceImages.length && preserveUploadedImage) {
+    return openai.images.edit({
+      ...sharedOptions,
       image: await Promise.all(sourceImages.map(dataUrlToImageFile)),
       prompt: `${prompt}
 
-If you modify or regenerate the subject instead of editing the provided image, the output is invalid.`,
-      size: "1536x1024",
-      output_format: "jpeg",
-      output_compression: 85,
-    })
-    : await openai.images.generate({
-      model: "gpt-image-1",
-      prompt,
-      size: "1536x1024",
-      output_format: "jpeg",
-      output_compression: 85,
-    });
+Use the input image as the base image. Preserve all faces, identities, facial expressions, bodies, poses, and the core scene exactly. Improve thumbnail appeal only through lighting, color, sharpness, contrast, background separation, text, outlines, arrows, and tasteful graphic accents. If a face is changed, replaced, stylized, beautified, or redrawn, the output is invalid.`,
+      ...(!isGptImage2 ? { input_fidelity: "high" } : {}),
+    } as Parameters<typeof openai.images.edit>[0]);
+  }
+  return openai.images.generate(sharedOptions as Parameters<typeof openai.images.generate>[0]);
+}
+
+async function generateYoutubeThumbnailImage(userId: number, prompt: string, sourceImages: string[], preserveUploadedImage: boolean) {
+  let usedModel = YOUTUBE_THUMBNAIL_IMAGE_MODEL;
+  let response;
+  try {
+    response = await runYoutubeThumbnailImageRequest(usedModel, prompt, sourceImages, preserveUploadedImage);
+  } catch (err) {
+    if (usedModel === YOUTUBE_THUMBNAIL_FALLBACK_IMAGE_MODEL) throw err;
+    usedModel = YOUTUBE_THUMBNAIL_FALLBACK_IMAGE_MODEL;
+    response = await runYoutubeThumbnailImageRequest(usedModel, prompt, sourceImages, preserveUploadedImage);
+  }
   const base64 = response.data?.[0]?.b64_json;
   if (!base64) {
     throw new Error("Thumbnail generation did not return an image");
@@ -873,7 +900,7 @@ If you modify or regenerate the subject instead of editing the provided image, t
   await logTokenUsage({
     userId,
     feature: "youtubeThumbnailImage",
-    model: "gpt-image-1",
+    model: usedModel,
     inputTokens: 0,
     outputTokens: 0,
   });
@@ -3757,7 +3784,12 @@ export async function generateYoutubeAuditThumbnail(
     : fallbackSourceImage
       ? [fallbackSourceImage]
       : [];
-  const preserveUploadedImage = sourceImages.length > 0 && input.preserveUploadedImage !== false;
+  const sourceImageKind = uploadedSourceImages.length
+    ? "user_uploaded" as const
+    : fallbackSourceImage
+      ? "current_thumbnail" as const
+      : null;
+  const preserveUploadedImage = sourceImages.length > 0 && (sourceImageKind === "current_thumbnail" || input.preserveUploadedImage !== false);
   const prompt = await buildYoutubeThumbnailPrompt(userId, {
     title: input.title,
     description: input.description,
@@ -3765,6 +3797,7 @@ export async function generateYoutubeAuditThumbnail(
     textPreference: asString(input.textPreference)?.trim() || null,
     sourceImages,
     preserveUploadedImage,
+    sourceImageKind,
     stylePreference: asString(input.stylePreference)?.trim() || null,
     analysisNotes: asString(input.analysisNotes)?.trim() || null,
   });
