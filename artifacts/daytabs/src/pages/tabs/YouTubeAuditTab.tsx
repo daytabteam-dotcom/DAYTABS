@@ -9,6 +9,7 @@ import {
   ImagePlus,
   Lightbulb,
   Loader2,
+  Upload,
   Search,
   Sparkles,
   Tag,
@@ -48,7 +49,7 @@ type AuditReport = {
   };
   transcript: {
     available: boolean;
-    source: "manual" | "auto" | null;
+    source: "manual" | "auto" | "uploaded" | null;
     language: string | null;
     text: string | null;
   };
@@ -124,7 +125,7 @@ type AuditPreview = {
   recommendedThumbnailStyle: string;
   transcript: {
     available: boolean;
-    source: "manual" | "auto" | null;
+    source: "manual" | "auto" | "uploaded" | null;
     language: string | null;
   };
 };
@@ -298,6 +299,7 @@ export default function YouTubeAuditTab() {
   const [thumbnailStyle, setThumbnailStyle] = useState<string>("Professional");
   const [generatedThumbnail, setGeneratedThumbnail] = useState<GeneratedAuditThumbnail | null>(null);
   const [thumbnailWorking, setThumbnailWorking] = useState(false);
+  const [transcriptWorking, setTranscriptWorking] = useState(false);
 
   const isStudio = plan.isStudio;
   const exportBaseName = (preview?.video.title || report?.video.title || "youtube-audit")
@@ -336,6 +338,7 @@ export default function YouTubeAuditTab() {
     setPreview(null);
     setReport(null);
     setGeneratedThumbnail(null);
+    setTranscriptWorking(false);
     try {
       const previewData = await jsonFetch<{ preview: AuditPreview }>("/api/youtube/audit-preview", {
         method: "POST",
@@ -379,6 +382,7 @@ export default function YouTubeAuditTab() {
     setReport(card.report);
     setGeneratedThumbnail(card.generatedThumbnail);
     setActiveAuditId(card.id);
+    setTranscriptWorking(false);
     setError(null);
   }
 
@@ -389,6 +393,42 @@ export default function YouTubeAuditTab() {
       persistSavedAudits(next);
       return next;
     });
+  }
+
+  function updateSavedAuditReport(nextReport: AuditReport) {
+    if (!activeAuditId) return;
+    setSavedAudits((current) => {
+      const next = current.map((card) => card.id === activeAuditId ? { ...card, report: nextReport } : card);
+      persistSavedAudits(next);
+      return next;
+    });
+  }
+
+  async function handleAuditTranscriptMedia(files: FileList | null) {
+    const file = files?.[0];
+    if (!file || !videoUrl.trim()) return;
+    setTranscriptWorking(true);
+    setError(null);
+    try {
+      const token = localStorage.getItem("daytabs_token");
+      const formData = new FormData();
+      formData.append("videoUrl", videoUrl.trim());
+      formData.append("media", file);
+      const response = await fetch("/api/youtube/audit-transcribe", {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        body: formData,
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Could not generate transcript from upload");
+      const nextReport = data.report as AuditReport;
+      setReport(nextReport);
+      updateSavedAuditReport(nextReport);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not generate transcript from upload");
+    } finally {
+      setTranscriptWorking(false);
+    }
   }
 
   async function handleThumbnailSourceFiles(files: FileList | null) {
@@ -580,7 +620,7 @@ export default function YouTubeAuditTab() {
                     <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-semibold text-white/70">{preview.video.likelyFormat}</span>
                     <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-semibold text-white/70">
                       {(report?.transcript ?? preview.transcript).available
-                        ? `Transcript: ${(report?.transcript ?? preview.transcript).source === "manual" ? "Manual" : "Auto"}${(report?.transcript ?? preview.transcript).language ? ` · ${(report?.transcript ?? preview.transcript).language}` : ""}`
+                        ? `Transcript: ${(report?.transcript ?? preview.transcript).source === "manual" ? "Manual" : (report?.transcript ?? preview.transcript).source === "uploaded" ? "Uploaded" : "Auto"}${(report?.transcript ?? preview.transcript).language ? ` · ${(report?.transcript ?? preview.transcript).language}` : ""}`
                         : "Transcript unavailable"}
                     </span>
                   </div>
@@ -674,7 +714,26 @@ export default function YouTubeAuditTab() {
                     <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">Better hook</p>
                     <p className="mt-3 text-sm text-white/82">{report.fixes.hookRewrite || "No hook rewrite returned yet."}</p>
                   </div>
-                ) : null}
+                ) : (
+                  <div className="rounded-2xl border border-amber-400/15 bg-amber-500/10 p-4">
+                    <p className="text-[11px] uppercase tracking-[0.14em] text-amber-100/55">Transcript fallback</p>
+                    <p className="mt-3 text-sm leading-6 text-amber-50/75">Upload the matching video or audio file to generate a transcript and rebuild this audit with script-level findings.</p>
+                    <label className="mt-4 inline-flex cursor-pointer items-center rounded-lg border border-amber-300/20 px-3 py-2 text-sm font-semibold text-amber-50 transition-colors hover:bg-amber-300/10">
+                      {transcriptWorking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
+                      {transcriptWorking ? "Transcribing" : "Upload media"}
+                      <input
+                        type="file"
+                        accept="audio/*,video/*,.mp3,.m4a,.wav,.webm,.mp4,.mov,.avi,.mkv"
+                        className="hidden"
+                        disabled={transcriptWorking}
+                        onChange={(event) => {
+                          void handleAuditTranscriptMedia(event.target.files);
+                          event.currentTarget.value = "";
+                        }}
+                      />
+                    </label>
+                  </div>
+                )}
                 <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
                   <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">Thumbnail idea</p>
                   <p className="mt-3 text-sm leading-6 text-white/82">{report.fixes.thumbnailIdea || "No thumbnail direction returned yet."}</p>

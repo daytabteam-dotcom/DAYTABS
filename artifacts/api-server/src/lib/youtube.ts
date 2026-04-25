@@ -94,7 +94,7 @@ export interface YoutubeVideoAuditReport {
   };
   transcript: {
     available: boolean;
-    source: "manual" | "auto" | null;
+    source: "manual" | "auto" | "uploaded" | null;
     language: string | null;
     text: string | null;
   };
@@ -2423,7 +2423,17 @@ export async function getYoutubeVideoAuditPreview(userId: number, videoUrl: stri
   };
 }
 
-export async function auditYoutubeVideo(userId: number, videoUrl: string): Promise<YoutubeVideoAuditReport> {
+export async function auditYoutubeVideo(
+  userId: number,
+  videoUrl: string,
+  options?: {
+    transcriptOverride?: {
+      text: string;
+      source: "uploaded";
+      language: string | null;
+    } | null;
+  },
+): Promise<YoutubeVideoAuditReport> {
   const videoId = extractYoutubeVideoId(videoUrl);
   if (!videoId) throw new Error("Enter a valid YouTube video URL");
 
@@ -2479,7 +2489,9 @@ export async function auditYoutubeVideo(userId: number, videoUrl: string): Promi
     ? await analyzeVisuals([thumbnailBase64], likelyYoutubeFormatFromVideo(video), "pro", `${video.title}\n\n${video.description}`, userId).catch(() => null)
     : null;
   const visualAuditRecord = visualAuditRaw ? asRecord(visualAuditRaw) : null;
-  const transcript = await fetchPublicYoutubeTranscript(videoId).catch(() => null);
+  const transcript = options?.transcriptOverride?.text
+    ? options.transcriptOverride
+    : await fetchPublicYoutubeTranscript(videoId).catch(() => null);
 
   const transcriptForAudit = transcript?.text || [
     `Video title: ${video.title}`,
@@ -2713,7 +2725,9 @@ Return JSON only:
     },
     limitations: asArray(parsed.limitations).map((item) => String(item)).filter(Boolean).slice(0, 6).concat([
       transcript?.text
-        ? ""
+        ? transcript.source === "uploaded"
+          ? "Transcript was generated from the media file you uploaded for this audit."
+          : ""
         : "Public transcript was not available for this video, so script analysis fell back to title, description, tags, and competitor context.",
       "Thumbnail notes are based on the public thumbnail only, not on full frame-by-frame video quality analysis.",
     ]).filter(Boolean).filter((value, index, array) => array.indexOf(value) === index),

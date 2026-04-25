@@ -1,9 +1,15 @@
 import { Router } from "express";
+import multer from "multer";
 import jwt from "jsonwebtoken";
 import { OAuth2Client } from "google-auth-library";
 import { eq } from "drizzle-orm";
+import fs from "fs/promises";
+import os from "os";
+import path from "path";
+import { v4 as uuidv4 } from "uuid";
 import { db, youtubeChannelProfilesTable } from "@workspace/db";
 import { requireAuth } from "../../middlewares/auth";
+import { extractAudio, getMediaDuration, transcribeAudio } from "../analysis/services";
 import {
   addYoutubeCompetitorByUrl,
   auditYoutubeVideo,
@@ -41,6 +47,47 @@ const CANONICAL_APP_ORIGIN = (
   "https://daytabs.com"
 ).replace(/\/$/, "");
 const RENDER_HOST = "daytabs.onrender.com";
+const auditUploadDir = path.join(os.tmpdir(), "daytabs-youtube-audit-uploads");
+const MAX_AUDIT_TRANSCRIPT_DURATION_SEC = 2 * 60 * 60;
+
+fs.mkdir(auditUploadDir, { recursive: true }).catch(() => {});
+
+const auditMediaUpload = multer({
+  storage: multer.diskStorage({
+    destination: async (_req, _file, cb) => {
+      try {
+        await fs.mkdir(auditUploadDir, { recursive: true });
+        cb(null, auditUploadDir);
+      } catch (err) {
+        cb(err as Error, "");
+      }
+    },
+    filename: (_req, file, cb) => {
+      cb(null, `${uuidv4()}${path.extname(file.originalname) || ".mp4"}`);
+    },
+  }),
+  limits: { fileSize: 2 * 1024 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = [
+      "audio/mpeg",
+      "audio/mp3",
+      "audio/mp4",
+      "audio/wav",
+      "audio/x-wav",
+      "audio/webm",
+      "video/mp4",
+      "video/quicktime",
+      "video/x-msvideo",
+      "video/webm",
+      "video/mpeg",
+    ];
+    if (allowed.includes(file.mimetype) || file.originalname.match(/\.(mp3|m4a|wav|webm|mp4|mov|avi|mpeg|mkv)$/i)) {
+      cb(null, true);
+    } else {
+      cb(new Error("Upload an audio or video file to generate a transcript."));
+    }
+  },
+});
 
 function redirectForHost(req: import("express").Request, path: string) {
   const host = (req.get("x-forwarded-host") || req.get("host") || "").split(",")[0].trim();
@@ -184,6 +231,76 @@ router.post("/audit-preview", requireAuth, async (req, res) => {
     req.log.error({ err }, "YouTube video audit preview error");
     res.status(500).json({ error: err instanceof Error ? err.message : "Failed to prepare YouTube video audit" });
   }
+});
+
+router.post("/audit-transcribe", requireAuth, (req, res) => {
+  auditMediaUpload.single("media")(req, res, async (multerErr) => {
+    let uploadedPath: string | null = null;
+    let audioPath: string | null = null;
+    try {
+      const plan = normalizePlan(req.auth?.plan ?? "free");
+      if (plan !== "studio") {
+        res.status(403).json({
+          code: "STUDIO_REQUIRED",
+          error: "YouTube audit transcript generation is available on the Studio plan.",
+        });
+        return;
+      }
+      if (multerErr) {
+        res.status(400).json({ error: multerErr.message ?? "File upload error" });
+        return;
+      }
+      const file = req.file;
+      uploadedPath = file?.path ?? null;
+      const videoUrl = typeof req.body?.videoUrl === "string" ? req.body.videoUrl.trim() : "";
+      if (!videoUrl) {
+        res.status(400).json({ error: "A YouTube video URL is required" });
+        return;
+      }
+      if (!file?.path) {
+        res.status(400).json({ error: "Upload an audio or video file to generate a transcript" });
+        return;
+      }
+
+      const durationSec = await getMediaDuration(file.path);
+      if (durationSec > MAX_AUDIT_TRANSCRIPT_DURATION_SEC) {
+        res.status(400).json({ error: "Uploaded media must be 2 hours or shorter for transcript generation." });
+        return;
+      }
+
+      audioPath = path.join(auditUploadDir, `${uuidv4()}.mp3`);
+      await extractAudio(file.path, audioPath);
+      const transcript = await transcribeAudio(audioPath);
+      const text = transcript.text.trim();
+      if (!text) {
+        res.status(422).json({ error: "Could not detect speech in the uploaded media." });
+        return;
+      }
+
+      const report = await auditYoutubeVideo(req.auth!.user_id, videoUrl, {
+        transcriptOverride: {
+          text,
+          source: "uploaded",
+          language: null,
+        },
+      });
+      res.json({
+        report,
+        transcript: {
+          available: true,
+          source: "uploaded",
+          language: null,
+          text,
+        },
+      });
+    } catch (err) {
+      req.log.error({ err }, "YouTube audit uploaded transcript error");
+      res.status(500).json({ error: err instanceof Error ? err.message : "Failed to generate transcript from upload" });
+    } finally {
+      if (uploadedPath) await fs.unlink(uploadedPath).catch(() => {});
+      if (audioPath) await fs.unlink(audioPath).catch(() => {});
+    }
+  });
 });
 
 router.post("/audit-thumbnail", requireAuth, async (req, res) => {
