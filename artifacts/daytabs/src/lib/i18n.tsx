@@ -46,6 +46,7 @@ export type DayTabsCopy = {
     "script-planner": { label: string; desc: string };
     "growth-planner": { label: string; desc: string };
     "youtube-audit": { label: string; desc: string };
+    "youtube-transcript": { label: string; desc: string };
     teleprompter: { label: string; desc: string };
   };
   notifications: {
@@ -377,6 +378,7 @@ const baseCopy: DayTabsCopy = {
     "script-planner": { label: "Script Planner", desc: "AI Scripts" },
     "growth-planner": { label: "YouTube Growth", desc: "Studio" },
     "youtube-audit": { label: "YouTube Audit", desc: "Studio" },
+    "youtube-transcript": { label: "YouTube Transcript", desc: "Studio" },
     teleprompter: { label: "Teleprompter", desc: "Read Live" },
   },
   notifications: {
@@ -717,6 +719,7 @@ const localeOverrides: Partial<Record<DayTabsLocale, DeepPartial<DayTabsCopy>>> 
       "script-planner": { label: "Script Planner", desc: "YZ Scriptleri" },
       "growth-planner": { label: "YouTube Buyume", desc: "Studio" },
       "youtube-audit": { label: "YouTube Denetimi", desc: "Studio" },
+      "youtube-transcript": { label: "YouTube Transkript", desc: "Studio" },
       teleprompter: { label: "Teleprompter", desc: "Canli Oku" },
     },
     dashboard: {
@@ -1008,6 +1011,7 @@ const localeOverrides: Partial<Record<DayTabsLocale, DeepPartial<DayTabsCopy>>> 
       "script-planner": { label: "Planificador de Guiones", desc: "Guiones IA" },
       "growth-planner": { label: "Crecimiento en YouTube", desc: "Studio" },
       "youtube-audit": { label: "Auditoria de YouTube", desc: "Studio" },
+      "youtube-transcript": { label: "Transcripcion YouTube", desc: "Studio" },
       teleprompter: { label: "Teleprompter", desc: "Leer en Vivo" },
     },
   },
@@ -1019,6 +1023,7 @@ const localeOverrides: Partial<Record<DayTabsLocale, DeepPartial<DayTabsCopy>>> 
       "script-planner": { label: "Planificateur de Script", desc: "Scripts IA" },
       "growth-planner": { label: "Croissance YouTube", desc: "Studio" },
       "youtube-audit": { label: "Audit YouTube", desc: "Studio" },
+      "youtube-transcript": { label: "Transcription YouTube", desc: "Studio" },
       teleprompter: { label: "Teleprompteur", desc: "Lire en Direct" },
     },
   },
@@ -1030,6 +1035,7 @@ const localeOverrides: Partial<Record<DayTabsLocale, DeepPartial<DayTabsCopy>>> 
       "script-planner": { label: "Skriptplaner", desc: "KI Skripte" },
       "growth-planner": { label: "YouTube Wachstum", desc: "Studio" },
       "youtube-audit": { label: "YouTube Audit", desc: "Studio" },
+      "youtube-transcript": { label: "YouTube Transkript", desc: "Studio" },
       teleprompter: { label: "Teleprompter", desc: "Live Lesen" },
     },
   },
@@ -1041,6 +1047,7 @@ const localeOverrides: Partial<Record<DayTabsLocale, DeepPartial<DayTabsCopy>>> 
       "script-planner": { label: "Planejador de Roteiro", desc: "Roteiros IA" },
       "growth-planner": { label: "Crescimento no YouTube", desc: "Studio" },
       "youtube-audit": { label: "Auditoria do YouTube", desc: "Studio" },
+      "youtube-transcript": { label: "Transcricao YouTube", desc: "Studio" },
       teleprompter: { label: "Teleprompter", desc: "Ler ao Vivo" },
     },
   },
@@ -1052,6 +1059,7 @@ const localeOverrides: Partial<Record<DayTabsLocale, DeepPartial<DayTabsCopy>>> 
       "script-planner": { label: "Pianificatore Script", desc: "Script IA" },
       "growth-planner": { label: "Crescita YouTube", desc: "Studio" },
       "youtube-audit": { label: "Audit YouTube", desc: "Studio" },
+      "youtube-transcript": { label: "Trascrizione YouTube", desc: "Studio" },
       teleprompter: { label: "Teleprompter", desc: "Leggi dal Vivo" },
     },
   },
@@ -1063,6 +1071,7 @@ const localeOverrides: Partial<Record<DayTabsLocale, DeepPartial<DayTabsCopy>>> 
       "script-planner": { label: "Scriptplanner", desc: "AI Scripts" },
       "growth-planner": { label: "YouTube Groei", desc: "Studio" },
       "youtube-audit": { label: "YouTube Audit", desc: "Studio" },
+      "youtube-transcript": { label: "YouTube Transcript", desc: "Studio" },
       teleprompter: { label: "Teleprompter", desc: "Live Lezen" },
     },
   },
@@ -1074,6 +1083,7 @@ const localeOverrides: Partial<Record<DayTabsLocale, DeepPartial<DayTabsCopy>>> 
       "script-planner": { label: "Planner Stsenariya", desc: "AI Skripty" },
       "growth-planner": { label: "Rost YouTube", desc: "Studio" },
       "youtube-audit": { label: "Audit YouTube", desc: "Studio" },
+      "youtube-transcript": { label: "Transkript YouTube", desc: "Studio" },
       teleprompter: { label: "Teleprompter", desc: "Chitat V Pryamom Efire" },
     },
   },
@@ -1085,6 +1095,7 @@ const localeOverrides: Partial<Record<DayTabsLocale, DeepPartial<DayTabsCopy>>> 
       "script-planner": { label: "مخطط السكربت", desc: "سكريبتات الذكاء الاصطناعي" },
       "growth-planner": { label: "نمو يوتيوب", desc: "الاستوديو" },
       "youtube-audit": { label: "تدقيق يوتيوب", desc: "الاستوديو" },
+      "youtube-transcript": { label: "نص يوتيوب", desc: "الاستوديو" },
       teleprompter: { label: "التلقين", desc: "قراءة مباشرة" },
     },
   },
@@ -1096,6 +1107,7 @@ const localeOverrides: Partial<Record<DayTabsLocale, DeepPartial<DayTabsCopy>>> 
       "script-planner": { label: "स्क्रिप्ट प्लानर", desc: "एआई स्क्रिप्ट्स" },
       "growth-planner": { label: "यूट्यूब ग्रोथ", desc: "स्टूडियो" },
       "youtube-audit": { label: "यूट्यूब ऑडिट", desc: "स्टूडियो" },
+      "youtube-transcript": { label: "यूट्यूब ट्रांसक्रिप्ट", desc: "स्टूडियो" },
       teleprompter: { label: "टेलीप्रॉम्प्टर", desc: "लाइव पढ़ें" },
     },
   },
@@ -1107,6 +1119,7 @@ const localeOverrides: Partial<Record<DayTabsLocale, DeepPartial<DayTabsCopy>>> 
       "script-planner": { label: "スクリプトプランナー", desc: "AIスクリプト" },
       "growth-planner": { label: "YouTube成長", desc: "スタジオ" },
       "youtube-audit": { label: "YouTube監査", desc: "スタジオ" },
+      "youtube-transcript": { label: "YouTube文字起こし", desc: "スタジオ" },
       teleprompter: { label: "テレプロンプター", desc: "ライブ表示" },
     },
   },
@@ -1118,6 +1131,7 @@ const localeOverrides: Partial<Record<DayTabsLocale, DeepPartial<DayTabsCopy>>> 
       "script-planner": { label: "스크립트 플래너", desc: "AI 스크립트" },
       "growth-planner": { label: "유튜브 성장", desc: "스튜디오" },
       "youtube-audit": { label: "유튜브 감사", desc: "스튜디오" },
+      "youtube-transcript": { label: "유튜브 트랜스크립트", desc: "스튜디오" },
       teleprompter: { label: "텔레프롬프터", desc: "라이브 읽기" },
     },
   },
@@ -1129,6 +1143,7 @@ const localeOverrides: Partial<Record<DayTabsLocale, DeepPartial<DayTabsCopy>>> 
       "script-planner": { label: "脚本规划", desc: "AI 脚本" },
       "growth-planner": { label: "YouTube 增长", desc: "工作室" },
       "youtube-audit": { label: "YouTube 审核", desc: "工作室" },
+      "youtube-transcript": { label: "YouTube 转录", desc: "工作室" },
       teleprompter: { label: "提词器", desc: "实时阅读" },
     },
   },

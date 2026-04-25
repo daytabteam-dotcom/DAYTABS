@@ -242,6 +242,26 @@ export interface YoutubeAuditTranscriptTranslation {
   createdAt: string;
 }
 
+export interface YoutubeEditableTranscript {
+  videoId: string;
+  canonicalUrl: string;
+  captions: {
+    available: boolean;
+    downloadable: boolean;
+    source: "manual" | "auto" | null;
+    language: string | null;
+    languages: string[];
+  };
+  transcript: {
+    available: boolean;
+    source: "manual" | "auto" | "transcribed_audio" | null;
+    language: string | null;
+    text: string | null;
+    segments: YoutubeTranscriptSegment[];
+  };
+  needsUploadFallback: boolean;
+}
+
 export interface YoutubeVideoAuditReport {
   summary: string;
   video: {
@@ -3424,6 +3444,44 @@ async function fetchPublicYoutubeTranscript(videoId: string) {
   }
 
   return fetchYoutubeTranscriptPackageFallback(videoId, [...discoveredLanguages]).catch(() => null);
+}
+
+export async function getYoutubeEditableTranscript(videoUrl: string): Promise<YoutubeEditableTranscript> {
+  const videoId = extractYoutubeVideoId(videoUrl);
+  if (!videoId) throw new Error("Enter a valid YouTube video URL");
+
+  const transcript = await fetchPublicYoutubeTranscript(videoId).catch(() => null);
+  const transcriptAvailable = Boolean(transcript?.text);
+  const captionProbe = transcriptAvailable ? null : await probeYoutubeCaptionAvailability(videoId).catch(() => null);
+
+  const captionsAvailable = transcriptAvailable || Boolean(captionProbe?.available);
+  const captionsDownloadable = transcriptAvailable || Boolean(captionProbe?.downloadable);
+  const captionsSource = transcript?.source ?? captionProbe?.source ?? null;
+  const captionsLanguage = transcript?.language ?? captionProbe?.language ?? null;
+  const captionsLanguages =
+    transcript?.language
+      ? [transcript.language]
+      : captionProbe?.languages ?? (captionsLanguage ? [captionsLanguage] : []);
+
+  return {
+    videoId,
+    canonicalUrl: `https://www.youtube.com/watch?v=${videoId}`,
+    captions: {
+      available: captionsAvailable,
+      downloadable: captionsDownloadable,
+      source: captionsSource,
+      language: captionsLanguage,
+      languages: captionsLanguages,
+    },
+    transcript: {
+      available: transcriptAvailable,
+      source: transcript?.source ?? null,
+      language: transcript?.language ?? null,
+      text: transcript?.text ?? null,
+      segments: groupAuditTranscriptSegments(transcript?.segments ?? []),
+    },
+    needsUploadFallback: captionsAvailable && !captionsDownloadable,
+  };
 }
 
 export async function getYoutubeVideoAuditPreview(userId: number, videoUrl: string): Promise<YoutubeVideoAuditPreview> {

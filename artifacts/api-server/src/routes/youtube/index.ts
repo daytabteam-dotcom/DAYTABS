@@ -24,6 +24,7 @@ import {
   generateYoutubeAuditThumbnail,
   getYoutubeAppRedirect,
   getYoutubeRedirectUri,
+  getYoutubeEditableTranscript,
   getYoutubeVideoAuditPreview,
   getYoutubeStatus,
   patchYoutubePlanDay,
@@ -499,6 +500,29 @@ router.post("/audit-preview", requireAuth, async (req, res) => {
   }
 });
 
+router.post("/transcript", requireAuth, async (req, res) => {
+  try {
+    const plan = normalizePlan(req.auth?.plan ?? "free");
+    if (plan !== "studio") {
+      res.status(403).json({
+        code: "STUDIO_REQUIRED",
+        error: "YouTube transcript editing is available on the Studio plan.",
+      });
+      return;
+    }
+    const videoUrl = typeof req.body?.videoUrl === "string" ? req.body.videoUrl.trim() : "";
+    if (!videoUrl) {
+      res.status(400).json({ error: "A YouTube video URL is required" });
+      return;
+    }
+    const editableTranscript = await getYoutubeEditableTranscript(videoUrl);
+    res.json({ editableTranscript });
+  } catch (err) {
+    req.log.error({ err }, "YouTube transcript fetch error");
+    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to fetch YouTube transcript" });
+  }
+});
+
 router.post("/audit-transcribe", requireAuth, (req, res) => {
   auditMediaUpload.single("media")(req, res, async (multerErr) => {
     let uploadedPath: string | null = null;
@@ -569,6 +593,245 @@ router.post("/audit-transcribe", requireAuth, (req, res) => {
       if (audioPath) await fs.unlink(audioPath).catch(() => {});
     }
   });
+});
+
+router.post("/transcript-transcribe", requireAuth, (req, res) => {
+  auditMediaUpload.single("media")(req, res, async (multerErr) => {
+    let uploadedPath: string | null = null;
+    let audioPath: string | null = null;
+    try {
+      const plan = normalizePlan(req.auth?.plan ?? "free");
+      if (plan !== "studio") {
+        res.status(403).json({
+          code: "STUDIO_REQUIRED",
+          error: "YouTube transcript editing is available on the Studio plan.",
+        });
+        return;
+      }
+      if (multerErr) {
+        res.status(400).json({ error: multerErr.message ?? "File upload error" });
+        return;
+      }
+      const file = req.file;
+      uploadedPath = file?.path ?? null;
+      if (!file?.path) {
+        res.status(400).json({ error: "Upload an audio or video file to generate a transcript" });
+        return;
+      }
+
+      const durationSec = await getMediaDuration(file.path);
+      if (durationSec > MAX_AUDIT_TRANSCRIPT_DURATION_SEC) {
+        res.status(400).json({ error: "Uploaded media must be 2 hours or shorter for transcript generation." });
+        return;
+      }
+
+      audioPath = path.join(auditUploadDir, `${uuidv4()}.mp3`);
+      await extractAudio(file.path, audioPath);
+      const transcript = await transcribeAudio(audioPath);
+      const text = transcript.text.trim();
+      if (!text) {
+        res.status(422).json({ error: "Could not detect speech in the uploaded media." });
+        return;
+      }
+
+      res.json({
+        transcript: {
+          available: true,
+          source: "transcribed_audio",
+          language: null,
+          text,
+          segments: transcript.segments,
+        },
+      });
+    } catch (err) {
+      req.log.error({ err }, "YouTube transcript transcribe error");
+      res.status(500).json({ error: err instanceof Error ? err.message : "Failed to generate transcript" });
+    } finally {
+      if (uploadedPath) await fs.unlink(uploadedPath).catch(() => {});
+      if (audioPath) await fs.unlink(audioPath).catch(() => {});
+    }
+  });
+});
+
+router.post("/transcript-translate", requireAuth, async (req, res) => {
+  try {
+    const plan = normalizePlan(req.auth?.plan ?? "free");
+    if (plan !== "studio") {
+      res.status(403).json({
+        code: "STUDIO_REQUIRED",
+        error: "YouTube transcript translation is available on the Studio plan.",
+      });
+      return;
+    }
+    const targetLanguage = typeof req.body?.targetLanguage === "string" ? req.body.targetLanguage.trim() : "";
+    const sourceLanguage = typeof req.body?.sourceLanguage === "string" ? req.body.sourceLanguage.trim() : null;
+    const segments = normalizeAuditTranscriptSegments(req.body?.segments);
+    if (!targetLanguage) {
+      res.status(400).json({ error: "Choose a target language." });
+      return;
+    }
+    if (!segments.length) {
+      res.status(400).json({ error: "A timestamped transcript is required before translation." });
+      return;
+    }
+    const translation = await translateYoutubeAuditTranscript(req.auth!.user_id, segments, targetLanguage, sourceLanguage);
+    res.json({ translation });
+  } catch (err) {
+    req.log.error({ err }, "YouTube transcript translation error");
+    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to translate transcript" });
+  }
+});
+
+router.post("/transcript-translation-audio", requireAuth, async (req, res) => {
+  try {
+    const plan = normalizePlan(req.auth?.plan ?? "free");
+    if (plan !== "studio") {
+      res.status(403).json({
+        code: "STUDIO_REQUIRED",
+        error: "YouTube transcript translation audio is available on the Studio plan.",
+      });
+      return;
+    }
+    const voice = typeof req.body?.voice === "string" ? req.body.voice.trim() : "";
+    const title = typeof req.body?.title === "string" ? req.body.title.trim() : "youtube-transcript";
+    const targetLanguage = typeof req.body?.targetLanguage === "string" ? req.body.targetLanguage.trim() : "translated";
+    const segments = normalizeAuditTranscriptSegments(req.body?.segments);
+    if (!VALID_TTS_VOICES.includes(voice as (typeof VALID_TTS_VOICES)[number])) {
+      res.status(400).json({ error: "Choose a valid OpenAI voice." });
+      return;
+    }
+    if (!segments.length) {
+      res.status(400).json({ error: "A translated timestamped transcript is required before generating audio." });
+      return;
+    }
+    const baseName = `${title}-${targetLanguage}`;
+    const { outputFilename } = await createAlignedTranslationAudio(
+      segments,
+      voice as (typeof VALID_TTS_VOICES)[number],
+      baseName,
+    );
+    res.json({
+      filename: outputFilename,
+      downloadUrl: `/api/youtube/audit-download/${encodeURIComponent(outputFilename)}`,
+      voice,
+    });
+  } catch (err) {
+    req.log.error({ err }, "YouTube transcript translation audio error");
+    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to generate translation audio" });
+  }
+});
+
+router.post("/transcript-translation-video", requireAuth, async (req, res) => {
+  try {
+    const plan = normalizePlan(req.auth?.plan ?? "free");
+    if (plan !== "studio") {
+      res.status(403).json({
+        code: "STUDIO_REQUIRED",
+        error: "YouTube transcript translation video is available on the Studio plan.",
+      });
+      return;
+    }
+    const voice = typeof req.body?.voice === "string" ? req.body.voice.trim() : "";
+    const title = typeof req.body?.title === "string" ? req.body.title.trim() : "youtube-transcript";
+    const targetLanguage = typeof req.body?.targetLanguage === "string" ? req.body.targetLanguage.trim() : "translated";
+    const audioFilename = typeof req.body?.audioFilename === "string" ? req.body.audioFilename.trim() : "";
+    const requestedGender = typeof req.body?.gender === "string" ? req.body.gender.trim().toLowerCase() : "";
+    if (!VALID_TTS_VOICES.includes(voice as (typeof VALID_TTS_VOICES)[number])) {
+      res.status(400).json({ error: "Choose a valid OpenAI voice." });
+      return;
+    }
+    if (!audioFilename || audioFilename.includes("..") || audioFilename.includes("/") || audioFilename.includes("\\")) {
+      res.status(400).json({ error: "A valid translation audio file is required before generating video." });
+      return;
+    }
+    const audioPath = path.join(auditExportDir, audioFilename);
+    try {
+      await fs.access(audioPath);
+    } catch {
+      res.status(404).json({ error: "Translation audio file not found or has expired. Generate audio again." });
+      return;
+    }
+    const gender: "male" | "female" =
+      requestedGender === "female" || requestedGender === "male"
+        ? (requestedGender as "male" | "female")
+        : (TTS_VOICE_GENDER[voice as (typeof VALID_TTS_VOICES)[number]] ?? "male");
+
+    const baseName = `${title}-${targetLanguage}`;
+    const { outputFilename } = await createTalkingAvatarVideoFromAudio({
+      audioPath,
+      voice: voice as (typeof VALID_TTS_VOICES)[number],
+      gender,
+      baseName,
+    });
+    res.json({
+      filename: outputFilename,
+      downloadUrl: `/api/youtube/audit-download/${encodeURIComponent(outputFilename)}`,
+      voice,
+      gender,
+    });
+  } catch (err) {
+    req.log.error({ err }, "YouTube transcript translation video error");
+    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to generate translation video" });
+  }
+});
+
+router.post("/transcript-translation-video-direct", requireAuth, async (req, res) => {
+  try {
+    const plan = normalizePlan(req.auth?.plan ?? "free");
+    if (plan !== "studio") {
+      res.status(403).json({
+        code: "STUDIO_REQUIRED",
+        error: "YouTube transcript translation video is available on the Studio plan.",
+      });
+      return;
+    }
+    const voice = typeof req.body?.voice === "string" ? req.body.voice.trim() : "";
+    const title = typeof req.body?.title === "string" ? req.body.title.trim() : "youtube-transcript";
+    const targetLanguage = typeof req.body?.targetLanguage === "string" ? req.body.targetLanguage.trim() : "translated";
+    const requestedGender = typeof req.body?.gender === "string" ? req.body.gender.trim().toLowerCase() : "";
+    const segments = normalizeAuditTranscriptSegments(req.body?.segments);
+    if (!VALID_TTS_VOICES.includes(voice as (typeof VALID_TTS_VOICES)[number])) {
+      res.status(400).json({ error: "Choose a valid OpenAI voice." });
+      return;
+    }
+    if (!segments.length) {
+      res.status(400).json({ error: "A translated timestamped transcript is required before generating video." });
+      return;
+    }
+    const gender: "male" | "female" =
+      requestedGender === "female" || requestedGender === "male"
+        ? (requestedGender as "male" | "female")
+        : (TTS_VOICE_GENDER[voice as (typeof VALID_TTS_VOICES)[number]] ?? "male");
+
+    const baseName = `${title}-${targetLanguage}`;
+    const { outputFilename: audioFilename, outputPath: audioPath } = await createAlignedTranslationAudio(
+      segments,
+      voice as (typeof VALID_TTS_VOICES)[number],
+      baseName,
+    );
+    const { outputFilename: videoFilename } = await createTalkingAvatarVideoFromAudio({
+      audioPath,
+      voice: voice as (typeof VALID_TTS_VOICES)[number],
+      gender,
+      baseName,
+    });
+
+    res.json({
+      audio: {
+        filename: audioFilename,
+        downloadUrl: `/api/youtube/audit-download/${encodeURIComponent(audioFilename)}`,
+      },
+      video: {
+        filename: videoFilename,
+        downloadUrl: `/api/youtube/audit-download/${encodeURIComponent(videoFilename)}`,
+      },
+      voice,
+      gender,
+    });
+  } catch (err) {
+    req.log.error({ err }, "YouTube transcript direct translation video error");
+    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to generate translation video" });
+  }
 });
 
 router.post("/audit-translate", requireAuth, async (req, res) => {
