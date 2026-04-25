@@ -13,6 +13,7 @@ import {
   discoverCompetitors,
   generateYoutubeWeeklyPlan,
   generateYoutubeIdeaThumbnail,
+  generateYoutubeAuditThumbnail,
   getYoutubeAppRedirect,
   getYoutubeRedirectUri,
   getYoutubeVideoAuditPreview,
@@ -182,6 +183,39 @@ router.post("/audit-preview", requireAuth, async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "YouTube video audit preview error");
     res.status(500).json({ error: err instanceof Error ? err.message : "Failed to prepare YouTube video audit" });
+  }
+});
+
+router.post("/audit-thumbnail", requireAuth, async (req, res) => {
+  try {
+    const plan = normalizePlan(req.auth?.plan ?? "free");
+    if (plan !== "studio") {
+      res.status(403).json({
+        code: "STUDIO_REQUIRED",
+        error: "YouTube audit thumbnail generation is available on the Studio plan.",
+      });
+      return;
+    }
+    const title = typeof req.body?.title === "string" ? req.body.title.trim() : "";
+    const description = typeof req.body?.description === "string" ? req.body.description.trim() : "";
+    if (!title) {
+      res.status(400).json({ error: "A video title is required for thumbnail generation" });
+      return;
+    }
+    const thumbnail = await generateYoutubeAuditThumbnail(req.auth!.user_id, {
+      title,
+      description,
+      tags: Array.isArray(req.body?.tags) ? req.body.tags : [],
+      textPreference: typeof req.body?.textPreference === "string" ? req.body.textPreference : null,
+      sourceImages: req.body?.sourceImages,
+      preserveUploadedImage: req.body?.preserveUploadedImage,
+      stylePreference: typeof req.body?.stylePreference === "string" ? req.body.stylePreference : null,
+      analysisNotes: typeof req.body?.analysisNotes === "string" ? req.body.analysisNotes : null,
+    });
+    res.json({ thumbnail });
+  } catch (err) {
+    req.log.error({ err }, "YouTube audit thumbnail generation error");
+    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to generate audit thumbnail" });
   }
 });
 

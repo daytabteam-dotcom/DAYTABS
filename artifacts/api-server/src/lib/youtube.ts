@@ -137,6 +137,7 @@ export interface YoutubeVideoAuditReport {
     description: string;
     tags: string[];
     thumbnailIdea: string;
+    recommendedThumbnailStyle: string;
     hookRewrite: string;
     scriptDirection: string;
     qualityFixes: string[];
@@ -166,6 +167,7 @@ export interface YoutubeVideoAuditPreview {
     confidence: "high" | "medium" | "low";
     basis: string;
   };
+  recommendedThumbnailStyle: string;
   transcript: {
     available: boolean;
     source: "manual" | "auto" | null;
@@ -676,6 +678,8 @@ async function buildYoutubeThumbnailPrompt(
     textPreference: string | null;
     sourceImages: string[];
     preserveUploadedImage: boolean;
+    stylePreference?: string | null;
+    analysisNotes?: string | null;
   },
 ) {
   const hasSourceImages = payload.sourceImages.length > 0;
@@ -687,6 +691,8 @@ async function buildYoutubeThumbnailPrompt(
 Description: ${payload.description}
 Tags: ${payload.tags.join(", ")}
 User Text Preference: ${payload.textPreference?.trim() || "auto-generate"}
+Style Preference: ${payload.stylePreference?.trim() || "auto-detect the best thumbnail style"}
+Audit Notes: ${payload.analysisNotes?.trim() || "none"}
 Image Inputs: ${hasSourceImages ? `The attached ${payload.sourceImages.length} source image(s) are provided by the user.` : "No source images provided."}`,
     },
   ];
@@ -721,6 +727,8 @@ Title: ${payload.title}
 Description: ${payload.description}
 Tags: ${payload.tags.join(", ")}
 User Text: ${payload.textPreference?.trim() || "auto"}
+Style Preference: ${payload.stylePreference?.trim() || "best fit for this video"}
+Audit Notes: ${payload.analysisNotes?.trim() || "none"}
 
 STEP 1: Analyze intent
 - What is the core idea?
@@ -762,6 +770,8 @@ Analyze the provided YouTube metadata and design a thumbnail that:
 - Uses strong visual hierarchy (clear subject, background, contrast)
 - Works well on mobile (small size clarity)
 - Avoids clutter and unnecessary elements
+- Matches this preferred style when provided: ${payload.stylePreference?.trim() || "best fit for the video"}
+- Uses these audit notes when relevant: ${payload.analysisNotes?.trim() || "none"}
 
 Thumbnail style should match top-performing YouTube thumbnails:
 - Bold composition
@@ -2152,6 +2162,17 @@ function normalizeYoutubeTranscriptText(text: string) {
     .trim();
 }
 
+function recommendThumbnailStyle(video: YoutubeRecentVideo, nicheProfile: YoutubeNicheProfile) {
+  const format = likelyYoutubeFormatFromVideo(video);
+  const text = `${video.title} ${video.description} ${nicheProfile.niche} ${nicheProfile.summary}`.toLowerCase();
+  if (text.match(/\b(funny|comedy|cartoon|animation|meme|parody|storytime)\b/)) return "Cartoon";
+  if (text.match(/\b(podcast|interview|discussion|saas|software|ai|developer|startup|business|finance|analysis)\b/)) return "Professional";
+  if (format === "youtube_shorts") return "Bold";
+  if (text.match(/\b(vlog|lifestyle|travel|cinematic|film|story)\b/)) return "Cinematic";
+  if (text.match(/\b(tutorial|how to|guide|explained|minimal)\b/)) return "Minimal";
+  return "Realistic";
+}
+
 async function fetchPublicYoutubeTranscript(videoId: string) {
   const requestHeaders = {
     "User-Agent": "Mozilla/5.0 DayTabsAudit/1.0",
@@ -2266,6 +2287,7 @@ export async function getYoutubeVideoAuditPreview(userId: number, videoUrl: stri
       confidence: "medium",
       basis: "Inferred from the title, description, tags, and recent channel uploads.",
     },
+    recommendedThumbnailStyle: recommendThumbnailStyle(video, nicheProfile),
     transcript: {
       available: Boolean(transcript?.text),
       source: transcript?.source ?? null,
@@ -2556,6 +2578,7 @@ Return JSON only:
       description: asString(fixes.description) || asString(asRecord(seoDraft).description) || "",
       tags: asArray(fixes.tags).map((item) => String(item)).filter(Boolean).slice(0, 12),
       thumbnailIdea: asString(fixes.thumbnailIdea) || "",
+      recommendedThumbnailStyle: recommendThumbnailStyle(video, nicheProfile),
       hookRewrite: transcriptAvailable ? rawHookRewrite : "",
       scriptDirection: transcriptAvailable ? (asString(fixes.scriptDirection) || "") : "",
       qualityFixes,
@@ -3568,6 +3591,44 @@ export async function generateYoutubeIdeaThumbnail(
     generatedThumbnail,
     updatedAt: new Date().toISOString(),
   }));
+}
+
+export async function generateYoutubeAuditThumbnail(
+  userId: number,
+  input: {
+    title: string;
+    description: string;
+    tags?: string[];
+    textPreference?: string | null;
+    sourceImages?: unknown;
+    preserveUploadedImage?: unknown;
+    stylePreference?: string | null;
+    analysisNotes?: string | null;
+  },
+) {
+  const sourceImages = sanitizeSourceImageDataUrls(input.sourceImages);
+  const preserveUploadedImage = sourceImages.length > 0 && input.preserveUploadedImage !== false;
+  const prompt = await buildYoutubeThumbnailPrompt(userId, {
+    title: input.title,
+    description: input.description,
+    tags: Array.isArray(input.tags) ? input.tags.map((item) => String(item)).filter(Boolean).slice(0, 12) : [],
+    textPreference: asString(input.textPreference)?.trim() || null,
+    sourceImages,
+    preserveUploadedImage,
+    stylePreference: asString(input.stylePreference)?.trim() || null,
+    analysisNotes: asString(input.analysisNotes)?.trim() || null,
+  });
+  if (!prompt) throw new Error("Thumbnail prompt generation failed");
+
+  const imageDataUrl = await generateYoutubeThumbnailImage(userId, prompt, sourceImages, preserveUploadedImage);
+  return {
+    imageDataUrl,
+    prompt,
+    requestedText: asString(input.textPreference)?.trim() || null,
+    selectedStyle: asString(input.stylePreference)?.trim() || null,
+    preserveUploadedImage,
+    createdAt: new Date().toISOString(),
+  };
 }
 
 export async function deleteYoutubePlanDay(userId: number, planId: number, dayIndex: number) {

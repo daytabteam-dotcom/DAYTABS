@@ -1,20 +1,27 @@
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   BarChart3,
   CheckCircle2,
+  Download,
   ExternalLink,
   Eye,
+  ImagePlus,
   Lightbulb,
   Loader2,
   Search,
   Sparkles,
   Tag,
   Target,
+  X,
   Youtube,
 } from "lucide-react";
 import { usePlan } from "@/hooks/use-plan";
+import { usePdfExport } from "@/hooks/use-pdf-export";
 import { PanelCard, PanelCardSoft, PanelHeader, PanelPage, PanelSubtitle, PanelTitle } from "@/components/panel-system";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
 
 type AuditReport = {
   summary: string;
@@ -84,6 +91,7 @@ type AuditReport = {
     description: string;
     tags: string[];
     thumbnailIdea: string;
+    recommendedThumbnailStyle: string;
     hookRewrite: string;
     scriptDirection: string;
     qualityFixes: string[];
@@ -113,12 +121,43 @@ type AuditPreview = {
     confidence: "high" | "medium" | "low";
     basis: string;
   };
+  recommendedThumbnailStyle: string;
   transcript: {
     available: boolean;
     source: "manual" | "auto" | null;
     language: string | null;
   };
 };
+
+type ThumbnailSourceImage = {
+  name: string;
+  dataUrl: string;
+};
+
+type GeneratedAuditThumbnail = {
+  imageDataUrl: string;
+  prompt: string;
+  requestedText: string | null;
+  selectedStyle: string | null;
+  preserveUploadedImage: boolean;
+  createdAt: string;
+};
+
+type SavedAuditCard = {
+  id: string;
+  videoUrl: string;
+  savedAt: string;
+  preview: AuditPreview;
+  report: AuditReport;
+  generatedThumbnail: GeneratedAuditThumbnail | null;
+};
+
+const AUDIT_HISTORY_KEY = "daytabs_youtube_audit_history_v1";
+const THUMBNAIL_STYLES = ["Professional", "Realistic", "Minimal", "Cartoon", "Cinematic", "Bold"] as const;
+const YOUTUBE_THUMBNAIL_WIDTH = 1280;
+const YOUTUBE_THUMBNAIL_HEIGHT = 720;
+const YOUTUBE_THUMBNAIL_MIN_WIDTH = 640;
+const YOUTUBE_THUMBNAIL_MAX_BYTES = 2 * 1024 * 1024;
 
 async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
   const token = localStorage.getItem("daytabs_token");
@@ -154,16 +193,122 @@ function priorityLabel(value: 1 | 2 | 3) {
   return "Lower priority";
 }
 
+function dataUrlBytes(dataUrl: string) {
+  const base64 = dataUrl.split(",")[1] ?? "";
+  return Math.floor((base64.length * 3) / 4);
+}
+
+function thumbnailDownloadExtension(dataUrl: string) {
+  return dataUrl.startsWith("data:image/jpeg") ? "jpg" : "png";
+}
+
+function buildAuditStorageId(videoId: string, savedAt: string) {
+  return `${videoId}:${savedAt}`;
+}
+
+function loadSavedAudits(): SavedAuditCard[] {
+  try {
+    const raw = localStorage.getItem(AUDIT_HISTORY_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistSavedAudits(cards: SavedAuditCard[]) {
+  localStorage.setItem(AUDIT_HISTORY_KEY, JSON.stringify(cards.slice(0, 10)));
+}
+
+async function resizeImageFileToDataUrl(file: File) {
+  if (!/^image\/(jpeg|jpg)$/i.test(file.type) && !/\.jpe?g$/i.test(file.name)) {
+    throw new Error("Source images must be JPG files.");
+  }
+
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error(`Could not read ${file.name}`));
+    reader.onload = () => {
+      const src = typeof reader.result === "string" ? reader.result : "";
+      const image = new Image();
+      image.onerror = () => reject(new Error(`Could not load ${file.name}`));
+      image.onload = () => {
+        if (image.width < YOUTUBE_THUMBNAIL_MIN_WIDTH) {
+          reject(new Error(`${file.name} must be at least ${YOUTUBE_THUMBNAIL_MIN_WIDTH}px wide.`));
+          return;
+        }
+
+        const canvas = document.createElement("canvas");
+        canvas.width = YOUTUBE_THUMBNAIL_WIDTH;
+        canvas.height = YOUTUBE_THUMBNAIL_HEIGHT;
+        const context = canvas.getContext("2d");
+        if (!context) {
+          reject(new Error(`Could not process ${file.name}`));
+          return;
+        }
+
+        const coverScale = Math.max(canvas.width / image.width, canvas.height / image.height);
+        const coverWidth = image.width * coverScale;
+        const coverHeight = image.height * coverScale;
+        context.save();
+        context.filter = "blur(18px) brightness(0.72)";
+        context.drawImage(image, (canvas.width - coverWidth) / 2, (canvas.height - coverHeight) / 2, coverWidth, coverHeight);
+        context.restore();
+        context.fillStyle = "rgba(0, 0, 0, 0.18)";
+        context.fillRect(0, 0, canvas.width, canvas.height);
+
+        const containScale = Math.min(canvas.width / image.width, canvas.height / image.height);
+        const containWidth = image.width * containScale;
+        const containHeight = image.height * containScale;
+        context.drawImage(image, (canvas.width - containWidth) / 2, (canvas.height - containHeight) / 2, containWidth, containHeight);
+
+        let quality = 0.9;
+        let dataUrl = canvas.toDataURL("image/jpeg", quality);
+        while (dataUrlBytes(dataUrl) > YOUTUBE_THUMBNAIL_MAX_BYTES && quality > 0.6) {
+          quality -= 0.08;
+          dataUrl = canvas.toDataURL("image/jpeg", quality);
+        }
+        if (dataUrlBytes(dataUrl) > YOUTUBE_THUMBNAIL_MAX_BYTES) {
+          reject(new Error(`${file.name} could not be compressed under 2 MB as a JPG thumbnail.`));
+          return;
+        }
+        resolve(dataUrl);
+      };
+      image.src = src;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 export default function YouTubeAuditTab() {
   const { plan, loading: planLoading } = usePlan();
   const [videoUrl, setVideoUrl] = useState("");
   const [preview, setPreview] = useState<AuditPreview | null>(null);
   const [report, setReport] = useState<AuditReport | null>(null);
+  const [savedAudits, setSavedAudits] = useState<SavedAuditCard[]>([]);
+  const [activeAuditId, setActiveAuditId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [loadingReport, setLoadingReport] = useState(false);
+  const [thumbnailModalOpen, setThumbnailModalOpen] = useState(false);
+  const [thumbnailTextPreference, setThumbnailTextPreference] = useState("");
+  const [thumbnailSourceImages, setThumbnailSourceImages] = useState<ThumbnailSourceImage[]>([]);
+  const [preserveThumbnailSourceImage, setPreserveThumbnailSourceImage] = useState(true);
+  const [thumbnailStyle, setThumbnailStyle] = useState<string>("Professional");
+  const [generatedThumbnail, setGeneratedThumbnail] = useState<GeneratedAuditThumbnail | null>(null);
+  const [thumbnailWorking, setThumbnailWorking] = useState(false);
 
   const isStudio = plan.isStudio;
+  const exportBaseName = (preview?.video.title || report?.video.title || "youtube-audit")
+    .replace(/[^a-z0-9]+/gi, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase() || "youtube-audit";
+  const { ref: pdfExportRef, exportPdf, isExporting: isPdfExporting } = usePdfExport(`${exportBaseName}-daytabs-audit.pdf`);
+
+  useEffect(() => {
+    setSavedAudits(loadSavedAudits());
+  }, []);
 
   const topMetrics = useMemo(() => {
     const source = report?.video ?? preview?.video;
@@ -177,6 +322,11 @@ export default function YouTubeAuditTab() {
     ];
   }, [preview, report]);
 
+  useEffect(() => {
+    const recommendedStyle = report?.fixes.recommendedThumbnailStyle || preview?.recommendedThumbnailStyle || "Professional";
+    setThumbnailStyle(recommendedStyle);
+  }, [preview, report]);
+
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     if (!videoUrl.trim()) return;
@@ -185,6 +335,7 @@ export default function YouTubeAuditTab() {
     setError(null);
     setPreview(null);
     setReport(null);
+    setGeneratedThumbnail(null);
     try {
       const previewData = await jsonFetch<{ preview: AuditPreview }>("/api/youtube/audit-preview", {
         method: "POST",
@@ -199,11 +350,101 @@ export default function YouTubeAuditTab() {
         body: JSON.stringify({ videoUrl: videoUrl.trim() }),
       });
       setReport(reportData.report);
+      const savedAt = new Date().toISOString();
+      const card: SavedAuditCard = {
+        id: buildAuditStorageId(previewData.preview.video.id, savedAt),
+        videoUrl: videoUrl.trim(),
+        savedAt,
+        preview: previewData.preview,
+        report: reportData.report,
+        generatedThumbnail: null,
+      };
+      setActiveAuditId(card.id);
+      setSavedAudits((current) => {
+        const next = [card, ...current].slice(0, 10);
+        persistSavedAudits(next);
+        return next;
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to audit video");
     } finally {
       setLoadingPreview(false);
       setLoadingReport(false);
+    }
+  }
+
+  function loadSavedAudit(card: SavedAuditCard) {
+    setVideoUrl(card.videoUrl);
+    setPreview(card.preview);
+    setReport(card.report);
+    setGeneratedThumbnail(card.generatedThumbnail);
+    setActiveAuditId(card.id);
+    setError(null);
+  }
+
+  function updateSavedAuditThumbnail(thumbnail: GeneratedAuditThumbnail | null) {
+    if (!activeAuditId) return;
+    setSavedAudits((current) => {
+      const next = current.map((card) => card.id === activeAuditId ? { ...card, generatedThumbnail: thumbnail } : card);
+      persistSavedAudits(next);
+      return next;
+    });
+  }
+
+  async function handleThumbnailSourceFiles(files: FileList | null) {
+    const nextFiles = Array.from(files ?? []).slice(0, 4);
+    if (!nextFiles.length) return;
+    setError(null);
+    try {
+      const processed = await Promise.all(nextFiles.map(async (file) => ({
+        name: file.name,
+        dataUrl: await resizeImageFileToDataUrl(file),
+      })));
+      setThumbnailSourceImages((current) => [...current, ...processed].slice(0, 4));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not read source images");
+    }
+  }
+
+  function openThumbnailModal() {
+    setThumbnailTextPreference("");
+    setThumbnailSourceImages([]);
+    setPreserveThumbnailSourceImage(true);
+    setGeneratedThumbnail((current) => current);
+    setThumbnailModalOpen(true);
+  }
+
+  async function generateAuditThumbnail() {
+    if (!preview || !report) return;
+    setThumbnailWorking(true);
+    setError(null);
+    try {
+      const analysisNotes = [
+        report.summary,
+        report.fixes.thumbnailIdea,
+        report.visualAudit?.topFix || "",
+        report.diagnosis.map((item) => `${item.area}: ${item.issue}`).join(" | "),
+      ].filter(Boolean).join("\n");
+
+      const data = await jsonFetch<{ thumbnail: GeneratedAuditThumbnail }>("/api/youtube/audit-thumbnail", {
+        method: "POST",
+        body: JSON.stringify({
+          title: preview.video.title,
+          description: report.fixes.description || preview.video.description,
+          tags: report.fixes.tags.length ? report.fixes.tags : preview.video.tags,
+          textPreference: thumbnailTextPreference.trim() || null,
+          sourceImages: thumbnailSourceImages.map((image) => image.dataUrl),
+          preserveUploadedImage: preserveThumbnailSourceImage,
+          stylePreference: thumbnailStyle,
+          analysisNotes,
+        }),
+      });
+      setGeneratedThumbnail(data.thumbnail);
+      updateSavedAuditThumbnail(data.thumbnail);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not generate thumbnail");
+    } finally {
+      setThumbnailWorking(false);
     }
   }
 
@@ -281,8 +522,39 @@ export default function YouTubeAuditTab() {
         ) : null}
       </PanelCard>
 
+      {savedAudits.length ? (
+        <PanelCard className="p-5">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Saved audits</p>
+              <p className="mt-2 text-sm text-white/55">Reload a previous YouTube audit card without running the whole report again.</p>
+            </div>
+            {report ? (
+              <Button type="button" variant="secondary" className="rounded-lg" onClick={() => void exportPdf()} disabled={isPdfExporting}>
+                {isPdfExporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+                Export report
+              </Button>
+            ) : null}
+          </div>
+          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {savedAudits.map((card) => (
+              <button
+                key={card.id}
+                type="button"
+                onClick={() => loadSavedAudit(card)}
+                className={`rounded-2xl border p-4 text-left transition-colors ${activeAuditId === card.id ? "border-primary/30 bg-primary/10" : "border-white/10 bg-white/[0.03] hover:border-white/20"}`}
+              >
+                <p className="text-sm font-semibold text-white">{card.preview.video.title}</p>
+                <p className="mt-1 text-xs text-white/40">{card.preview.video.channelName}</p>
+                <p className="mt-2 text-xs text-white/35">{new Date(card.savedAt).toLocaleString()}</p>
+              </button>
+            ))}
+          </div>
+        </PanelCard>
+      ) : null}
+
       {preview ? (
-        <>
+        <div ref={pdfExportRef} data-pdf-export-root="true" className="space-y-6">
           <div className="grid gap-4 lg:grid-cols-[1.1fr,0.9fr]">
             <PanelCard className="p-5">
               <div className="flex gap-4">
@@ -404,6 +676,15 @@ export default function YouTubeAuditTab() {
                 <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
                   <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">Thumbnail idea</p>
                   <p className="mt-3 text-sm leading-6 text-white/82">{report.fixes.thumbnailIdea || "No thumbnail direction returned yet."}</p>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <Button type="button" className="rounded-lg" onClick={openThumbnailModal}>
+                      <Sparkles className="mr-2 h-4 w-4" />
+                      Generate thumbnail
+                    </Button>
+                    <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-semibold text-white/65">
+                      Suggested style: {report.fixes.recommendedThumbnailStyle}
+                    </span>
+                  </div>
                 </div>
               </div>
             </PanelCardSoft>
@@ -463,6 +744,27 @@ export default function YouTubeAuditTab() {
                       <li key={`${item}-${index}`} className="text-sm text-white/78">{item}</li>
                     ))}
                   </ul>
+                </div>
+              ) : null}
+              {generatedThumbnail ? (
+                <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">Generated thumbnail</p>
+                      <p className="mt-2 text-sm text-white/55">Created from your selected style, notes, and optional source images.</p>
+                    </div>
+                    <a
+                      href={generatedThumbnail.imageDataUrl}
+                      download={`${exportBaseName || "youtube-audit-thumbnail"}.${thumbnailDownloadExtension(generatedThumbnail.imageDataUrl)}`}
+                      className="inline-flex items-center rounded-lg border border-white/10 px-3 py-2 text-sm text-white/75 transition-colors hover:bg-white/[0.06] hover:text-white"
+                    >
+                      <Download className="mr-2 h-4 w-4" />
+                      Download
+                    </a>
+                  </div>
+                  <div className="mt-4 overflow-hidden rounded-xl border border-white/10 bg-black/20">
+                    <img src={generatedThumbnail.imageDataUrl} alt="Generated audit thumbnail" className="w-full object-cover" />
+                  </div>
                 </div>
               ) : null}
             </PanelCard>
@@ -533,8 +835,120 @@ export default function YouTubeAuditTab() {
             </ul>
           </PanelCard>
           ) : null}
-        </>
+        </div>
       ) : null}
+
+      <Dialog open={thumbnailModalOpen} onOpenChange={setThumbnailModalOpen}>
+        <DialogContent className="max-h-[85vh] max-w-3xl overflow-y-auto pt-10">
+          <DialogHeader>
+            <DialogTitle>Create Thumbnail</DialogTitle>
+            <DialogDescription>Upload optional source images, choose a style, add optional text, and generate a saved thumbnail for this audit.</DialogDescription>
+          </DialogHeader>
+          {report && preview ? (
+            <div className="space-y-4">
+              <PanelCardSoft className="p-4">
+                <p className="text-xs uppercase tracking-[0.16em] text-white/40">Video</p>
+                <p className="mt-2 text-base font-semibold text-white">{preview.video.title}</p>
+                <p className="mt-2 text-sm text-white/55">{report.fixes.thumbnailIdea}</p>
+              </PanelCardSoft>
+
+              <PanelCardSoft className="p-4">
+                <p className="text-xs uppercase tracking-[0.16em] text-white/40">Source images</p>
+                <p className="mt-2 text-sm text-white/55">Add up to 4 JPG images. Preserve mode keeps your upload as the base image and edits around it.</p>
+                <p className="mt-2 text-xs text-white/40">Requirements: JPG, 16:9 output, 1280 x 720px, minimum source width 640px, max 2 MB.</p>
+                <div className="mt-3 flex flex-wrap gap-3">
+                  {thumbnailSourceImages.map((image, index) => (
+                    <div key={`${image.name}-${index}`} className="relative overflow-hidden rounded-xl border border-white/10 bg-black/20">
+                      <img src={image.dataUrl} alt={image.name} className="h-28 w-40 object-cover" />
+                      <button
+                        type="button"
+                        onClick={() => setThumbnailSourceImages((current) => current.filter((_, itemIndex) => itemIndex !== index))}
+                        className="absolute right-2 top-2 rounded-full border border-white/10 bg-black/50 p-1 text-white/70 hover:text-white"
+                        aria-label={`Remove ${image.name}`}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                  {thumbnailSourceImages.length < 4 ? (
+                    <label className="flex h-28 w-40 cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-white/10 bg-white/[0.03] text-center text-sm text-white/45 hover:border-white/20 hover:text-white/70">
+                      <ImagePlus className="mb-2 h-5 w-5" />
+                      Add image
+                      <input
+                        type="file"
+                        accept="image/jpeg,.jpg,.jpeg"
+                        multiple
+                        className="hidden"
+                        onChange={(event) => void handleThumbnailSourceFiles(event.target.files)}
+                      />
+                    </label>
+                  ) : null}
+                </div>
+              </PanelCardSoft>
+
+              <PanelCardSoft className="p-4">
+                <p className="text-xs uppercase tracking-[0.16em] text-white/40">Thumbnail style</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {THUMBNAIL_STYLES.map((style) => (
+                    <button
+                      key={style}
+                      type="button"
+                      onClick={() => setThumbnailStyle(style)}
+                      className={`rounded-full border px-3 py-2 text-xs font-semibold transition-colors ${thumbnailStyle === style ? "border-primary/30 bg-primary/10 text-primary" : "border-white/10 bg-white/[0.03] text-white/60 hover:text-white"}`}
+                    >
+                      {style}
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-3 text-xs text-white/40">Auto-selected from audit: {report.fixes.recommendedThumbnailStyle}</p>
+              </PanelCardSoft>
+
+              <PanelCardSoft className="p-4">
+                <p className="text-xs uppercase tracking-[0.16em] text-white/40">Text on thumbnail</p>
+                <Textarea
+                  value={thumbnailTextPreference}
+                  onChange={(event) => setThumbnailTextPreference(event.target.value)}
+                  placeholder="Optional. Leave empty and AI will generate the strongest thumbnail text."
+                  className="mt-3 min-h-24"
+                />
+              </PanelCardSoft>
+
+              {thumbnailSourceImages.length ? (
+                <PanelCardSoft className="p-4">
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <button
+                      type="button"
+                      onClick={() => setPreserveThumbnailSourceImage(true)}
+                      className={`rounded-xl border p-3 text-left transition-all ${preserveThumbnailSourceImage ? "border-emerald-300/35 bg-emerald-400/10 text-white" : "border-white/10 bg-white/[0.03] text-white/55 hover:bg-white/[0.06] hover:text-white"}`}
+                    >
+                      <span className="text-sm font-semibold">Preserve my image</span>
+                      <span className="mt-1 block text-xs leading-5 text-white/45">Recommended. Keeps the exact subject, pose, scene, and composition.</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPreserveThumbnailSourceImage(false)}
+                      className={`rounded-xl border p-3 text-left transition-all ${!preserveThumbnailSourceImage ? "border-red-300/35 bg-red-400/10 text-white" : "border-white/10 bg-white/[0.03] text-white/55 hover:bg-white/[0.06] hover:text-white"}`}
+                    >
+                      <span className="text-sm font-semibold">Allow AI to redesign</span>
+                      <span className="mt-1 block text-xs leading-5 text-white/45">Uses uploads as references, but can create a new thumbnail scene.</span>
+                    </button>
+                  </div>
+                </PanelCardSoft>
+              ) : null}
+
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button type="button" variant="secondary" className="rounded-lg" onClick={() => setThumbnailModalOpen(false)}>
+                  Close
+                </Button>
+                <Button type="button" className="rounded-lg" onClick={() => void generateAuditThumbnail()} disabled={thumbnailWorking}>
+                  {thumbnailWorking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+                  {generatedThumbnail ? "Generate again" : "Generate thumbnail"}
+                </Button>
+              </div>
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </PanelPage>
   );
 }
