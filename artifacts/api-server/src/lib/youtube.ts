@@ -89,6 +89,54 @@ function detectLanguageNameFromText(sample: string) {
   if (/[\u0c00-\u0c7f]/.test(text)) return "Telugu";
   if (/[\u0c80-\u0cff]/.test(text)) return "Kannada";
   if (/[\u0d00-\u0d7f]/.test(text)) return "Malayalam";
+  const normalized = ` ${text
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim()} `;
+  if (!normalized.trim()) return null;
+
+  const latinLanguageSignals = [
+    {
+      name: "English",
+      patterns: [" the ", " and ", " you ", " your ", " this ", " with ", " how ", " what ", " why ", " video "],
+    },
+    {
+      name: "Spanish",
+      patterns: [" el ", " la ", " de ", " que ", " en ", " para ", " como ", " con ", " video ", " canal "],
+    },
+    {
+      name: "Portuguese",
+      patterns: [" o ", " a ", " de ", " que ", " para ", " com ", " como ", " voce ", " video ", " canal "],
+    },
+    {
+      name: "French",
+      patterns: [" le ", " la ", " les ", " des ", " pour ", " avec ", " comment ", " video ", " chaine "],
+    },
+    {
+      name: "German",
+      patterns: [" der ", " die ", " das ", " und ", " mit ", " nicht ", " wie ", " video ", " kanal "],
+    },
+    {
+      name: "Italian",
+      patterns: [" il ", " la ", " che ", " per ", " con ", " come ", " video ", " canale "],
+    },
+    {
+      name: "Turkish",
+      patterns: [" ve ", " bir ", " icin ", " bu ", " nasil ", " video ", " kanal ", " daha "],
+    },
+    {
+      name: "Dutch",
+      patterns: [" de ", " het ", " een ", " voor ", " met ", " hoe ", " video ", " kanaal "],
+    },
+  ] as const;
+
+  let bestMatch: { name: string; score: number } | null = null;
+  for (const language of latinLanguageSignals) {
+    const score = language.patterns.reduce((sum, pattern) => sum + (normalized.includes(pattern) ? 1 : 0), 0);
+    if (!bestMatch || score > bestMatch.score) bestMatch = { name: language.name, score };
+  }
+  if (bestMatch && bestMatch.score >= 2) return bestMatch.name;
   return null;
 }
 
@@ -100,7 +148,20 @@ function inferOutputLanguage(options: {
   tags?: string[];
   recentVideos?: Array<{ title?: string | null; description?: string | null; tags?: string[] }>;
 }) {
+  const primarySample = [
+    options.transcriptText || "",
+    options.title || "",
+    options.description || "",
+    ...(options.tags ?? []),
+  ].filter(Boolean).join(" ").slice(0, 6000);
+  const primaryDetected = detectLanguageNameFromText(primarySample);
   const explicit = languageNameFromCode(options.explicitLanguage);
+  if (primaryDetected) {
+    return {
+      label: primaryDetected,
+      instruction: `Write every user-facing output in ${primaryDetected}. Do not translate the response to English. Keep summaries, explanations, titles, descriptions, hooks, tags, thumbnail ideas, and recommendations in the same language used by the source video evidence.`,
+    };
+  }
   if (explicit) {
     return {
       label: explicit,
@@ -108,23 +169,18 @@ function inferOutputLanguage(options: {
     };
   }
 
-  const sampleParts = [
-    options.transcriptText || "",
-    options.title || "",
-    options.description || "",
-    ...(options.tags ?? []),
+  const secondarySample = [
     ...((options.recentVideos ?? []).flatMap((video) => [
       video.title || "",
       video.description || "",
       ...(video.tags ?? []),
     ])),
   ].filter(Boolean);
-  const sample = sampleParts.join(" ").slice(0, 6000);
-  const detected = detectLanguageNameFromText(sample);
+  const detected = detectLanguageNameFromText(secondarySample.join(" ").slice(0, 6000));
   if (detected) {
     return {
       label: detected,
-      instruction: `Write every user-facing output in ${detected}. Do not translate the response to English. Keep summaries, explanations, titles, descriptions, hooks, tags, thumbnail ideas, and recommendations in the same language used by the source evidence.`,
+      instruction: `Write every user-facing output in ${detected}. Do not translate the response to English. Keep summaries, explanations, titles, descriptions, hooks, tags, thumbnail ideas, and recommendations in the creator's dominant language unless the source video evidence clearly uses a different language.`,
     };
   }
   return {
@@ -2730,30 +2786,48 @@ async function fetchTranscriptFromTrack(track: JsonRecord, requestHeaders: Recor
   return parseTranscriptXml(await xmlResponse.text());
 }
 
-async function fetchYoutubeTranscriptPackageFallback(videoId: string) {
-  const rows = await fetchYoutubeTranscriptPackage(videoId, { lang: "en" });
-  const segments = normalizeTranscriptSegments(rows
-    .map((row: { text?: string | null; lang?: string | null; offset?: number | null; duration?: number | null }) => {
-      const text = normalizeYoutubeTranscriptText(String(row.text || ""));
-      const start = Number(row.offset ?? 0) / 1000;
-      const duration = Number(row.duration ?? 0) / 1000;
-      return {
-        start,
-        end: start + Math.max(0.8, duration || 0),
-        text,
-      };
-    }));
-  const fallbackSegments = segments.length ? segments : buildApproximateTranscriptSegmentsFromText(rows
-    .map((row: { text?: string | null }) => normalizeYoutubeTranscriptText(String(row.text || "")))
-    .filter(Boolean)
-    .join("\n"));
-  if (!fallbackSegments.length) return null;
-  return {
-    source: "auto" as const,
-    language: rows.find((row: { text?: string | null; lang?: string | null }) => row.lang)?.lang ?? "en",
-    text: transcriptSegmentsToText(fallbackSegments),
-    segments: fallbackSegments,
-  };
+async function fetchYoutubeTranscriptPackageFallback(videoId: string, preferredLanguages: Array<string | null> = []) {
+  const attempts = [...new Set(
+    [
+      ...preferredLanguages,
+      null,
+      "en",
+    ]
+      .map((value) => value?.trim() || null)
+      .flatMap((value) => {
+        if (!value) return [null];
+        const base = value.toLowerCase().split(/[-_]/)[0] || value.toLowerCase();
+        return base === value.toLowerCase() ? [value, null] : [value, base, null];
+      }),
+  )];
+
+  for (const lang of attempts) {
+    const rows = await fetchYoutubeTranscriptPackage(videoId, lang ? { lang } : {}).catch(() => null);
+    if (!rows?.length) continue;
+    const segments = normalizeTranscriptSegments(rows
+      .map((row: { text?: string | null; lang?: string | null; offset?: number | null; duration?: number | null }) => {
+        const text = normalizeYoutubeTranscriptText(String(row.text || ""));
+        const start = Number(row.offset ?? 0) / 1000;
+        const duration = Number(row.duration ?? 0) / 1000;
+        return {
+          start,
+          end: start + Math.max(0.8, duration || 0),
+          text,
+        };
+      }));
+    const fallbackSegments = segments.length ? segments : buildApproximateTranscriptSegmentsFromText(rows
+      .map((row: { text?: string | null }) => normalizeYoutubeTranscriptText(String(row.text || "")))
+      .filter(Boolean)
+      .join("\n"));
+    if (!fallbackSegments.length) continue;
+    return {
+      source: "auto" as const,
+      language: rows.find((row: { text?: string | null; lang?: string | null }) => row.lang)?.lang ?? lang ?? null,
+      text: transcriptSegmentsToText(fallbackSegments),
+      segments: fallbackSegments,
+    };
+  }
+  return null;
 }
 
 function recommendThumbnailStyle(video: YoutubeRecentVideo, nicheProfile: YoutubeNicheProfile) {
@@ -2775,6 +2849,7 @@ async function fetchPublicYoutubeTranscript(videoId: string) {
 
   let captionTracks: JsonRecord[] = [];
   let watchHtml = "";
+  const discoveredLanguages = new Set<string>();
 
   const watchResponse = await fetch(`https://www.youtube.com/watch?v=${videoId}&hl=en`, {
     headers: requestHeaders,
@@ -2790,6 +2865,10 @@ async function fetchPublicYoutubeTranscript(videoId: string) {
       if (playerResponseJson) {
         const playerResponse = asRecord(JSON.parse(playerResponseJson));
         captionTracks = captionTracksFromPlayerResponse(playerResponse);
+        for (const track of captionTracks) {
+          const languageCode = asString(track.languageCode);
+          if (languageCode) discoveredLanguages.add(languageCode);
+        }
       }
     } catch {
       captionTracks = [];
@@ -2808,6 +2887,10 @@ async function fetchPublicYoutubeTranscript(videoId: string) {
         try {
           const playerResponse = asRecord(JSON.parse(playerResponseRaw));
           captionTracks = captionTracksFromPlayerResponse(playerResponse);
+          for (const track of captionTracks) {
+            const languageCode = asString(track.languageCode);
+            if (languageCode) discoveredLanguages.add(languageCode);
+          }
         } catch {
           captionTracks = [];
         }
@@ -2829,6 +2912,10 @@ async function fetchPublicYoutubeTranscript(videoId: string) {
       }).catch(() => null);
       if (playerResponse?.ok) {
         captionTracks = captionTracksFromPlayerResponse(asRecord(await playerResponse.json().catch(() => ({}))));
+        for (const track of captionTracks) {
+          const languageCode = asString(track.languageCode);
+          if (languageCode) discoveredLanguages.add(languageCode);
+        }
       }
     }
   }
@@ -2839,11 +2926,15 @@ async function fetchPublicYoutubeTranscript(videoId: string) {
     }).catch(() => null);
     if (listResponse?.ok) {
       captionTracks = parseTimedTextTrackList(videoId, await listResponse.text());
+      for (const track of captionTracks) {
+        const languageCode = asString(track.languageCode);
+        if (languageCode) discoveredLanguages.add(languageCode);
+      }
     }
   }
 
   if (!captionTracks.length) {
-    return fetchYoutubeTranscriptPackageFallback(videoId).catch(() => null);
+    return fetchYoutubeTranscriptPackageFallback(videoId, [...discoveredLanguages]).catch(() => null);
   }
 
   const orderedTracks = [
@@ -2867,7 +2958,7 @@ async function fetchPublicYoutubeTranscript(videoId: string) {
     };
   }
 
-  return fetchYoutubeTranscriptPackageFallback(videoId).catch(() => null);
+  return fetchYoutubeTranscriptPackageFallback(videoId, [...discoveredLanguages]).catch(() => null);
 }
 
 export async function getYoutubeVideoAuditPreview(userId: number, videoUrl: string): Promise<YoutubeVideoAuditPreview> {
