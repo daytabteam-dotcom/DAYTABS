@@ -2773,13 +2773,25 @@ function decodeJsonEscapedString(value: string) {
   const trimmed = value.trim();
   if (!trimmed) return trimmed;
   try {
-    return JSON.parse(`"${trimmed.replace(/"/g, "\\\"")}"`) as string;
+    const parsed = JSON.parse(`"${trimmed.replace(/"/g, "\\\"")}"`) as string;
+    return decodeHtmlEntities(
+      parsed
+        .replace(/\\u([0-9a-f]{4})/gi, (_, code) => String.fromCharCode(parseInt(code, 16)))
+        .replace(/\\\//g, "/")
+        .replace(/\\n/g, "\n")
+        .replace(/\\t/g, "\t"),
+    );
   } catch {
     return trimmed
+      .replace(/\\u([0-9a-f]{4})/gi, (_, code) => String.fromCharCode(parseInt(code, 16)))
       .replace(/\\u0026/g, "&")
       .replace(/\\u003d/g, "=")
       .replace(/\\u003f/g, "?")
       .replace(/\\u002f/g, "/")
+      .replace(/&amp;/g, "&")
+      .replace(/&quot;/g, "\"")
+      .replace(/&apos;/g, "'")
+      .replace(/&#39;/g, "'")
       .replace(/\\\//g, "/");
   }
 }
@@ -2788,6 +2800,7 @@ function captionTracksFromWatchHtml(html: string) {
   const candidates = [
     extractBalancedArray(html, "\"captionTracks\":"),
     extractBalancedArray(html, "captionTracks\":"),
+    extractBalancedArray(html, "\\\"captionTracks\\\":"),
   ].filter(Boolean) as string[];
   for (const arrayJson of candidates) {
     try {
@@ -2809,15 +2822,28 @@ function captionTracksFromWatchHtml(html: string) {
   }
 
   const extracted: JsonRecord[] = [];
-  for (const match of html.matchAll(/"baseUrl":"([^"]+)"/g)) {
+  const baseUrlMatches = [
+    ...html.matchAll(/"baseUrl":"([^"]+)"/g),
+    ...html.matchAll(/\\\"baseUrl\\\":\\\"([^"]+)\\\"/g),
+  ];
+  for (const match of baseUrlMatches) {
     const rawBaseUrl = match[1] || "";
     const baseUrl = decodeJsonEscapedString(rawBaseUrl);
     if (!baseUrl) continue;
     const start = match.index ?? 0;
-    const snippet = html.slice(start, start + 800);
-    const languageCode = snippet.match(/"languageCode":"([^"]+)"/)?.[1];
-    const kind = snippet.match(/"kind":"([^"]+)"/)?.[1] ?? null;
-    const name = snippet.match(/"simpleText":"([^"]+)"/)?.[1] ?? null;
+    const snippet = html.slice(start, start + 900);
+    const languageCode =
+      snippet.match(/"languageCode":"([^"]+)"/)?.[1]
+      ?? snippet.match(/\\\"languageCode\\\":\\\"([^"]+)\\\"/)?.[1]
+      ?? null;
+    const kind =
+      snippet.match(/"kind":"([^"]+)"/)?.[1]
+      ?? snippet.match(/\\\"kind\\\":\\\"([^"]+)\\\"/)?.[1]
+      ?? null;
+    const name =
+      snippet.match(/"simpleText":"([^"]+)"/)?.[1]
+      ?? snippet.match(/\\\"simpleText\\\":\\\"([^"]+)\\\"/)?.[1]
+      ?? null;
     extracted.push({
       baseUrl,
       languageCode: languageCode ? decodeJsonEscapedString(languageCode) : null,
@@ -2828,6 +2854,22 @@ function captionTracksFromWatchHtml(html: string) {
   }
 
   return extracted.filter((item) => asString(item.baseUrl));
+}
+
+function isYoutubeConsentInterstitial(html: string, finalUrl?: string | null) {
+  const normalizedUrl = String(finalUrl || "").toLowerCase();
+  if (normalizedUrl.includes("consent.youtube.com")) return true;
+  const normalizedHtml = html.toLowerCase();
+  return normalizedHtml.includes("consent.youtube.com")
+    || normalizedHtml.includes("before you continue to youtube")
+    || normalizedHtml.includes("consent.google.com");
+}
+
+function seedYoutubeConsentCookies(jar: Map<string, string>) {
+  // Best-effort: helps avoid EU consent interstitials and bot-classified HTML variants.
+  // Safe even when unnecessary.
+  if (!jar.has("CONSENT")) jar.set("CONSENT", "YES+1");
+  if (!jar.has("SOCS")) jar.set("SOCS", "CAI");
 }
 
 function parseTimedTextTrackList(videoId: string, xml: string) {
@@ -2970,7 +3012,16 @@ async function fetchTranscriptFromTrack(track: JsonRecord, requestHeaders: Recor
   const jsonUrl = appendUrlParam(baseUrl, "fmt", "json3");
   const jsonResponse = await fetch(jsonUrl, { headers: { ...requestHeaders, Accept: "application/json,text/plain,*/*" } }).catch(() => null);
   if (jsonResponse?.ok) {
-    const transcriptJson = asRecord(await jsonResponse.json().catch(() => ({})));
+    const raw = await jsonResponse.text().catch(() => "");
+    const cleaned = raw.trim().replace(/^\)\]\}'\s*/, "");
+    const transcriptJson = (() => {
+      if (!cleaned) return {};
+      try {
+        return asRecord(JSON.parse(cleaned));
+      } catch {
+        return {};
+      }
+    })();
     const events = asArray(transcriptJson.events).map((item) => asRecord(item));
     const segments = normalizeTranscriptSegments(events
       .map((event) => {
@@ -3053,6 +3104,7 @@ function recommendThumbnailStyle(video: YoutubeRecentVideo, nicheProfile: Youtub
 
 async function probeYoutubeCaptionAvailability(videoId: string) {
   const cookieJar = new Map<string, string>();
+  seedYoutubeConsentCookies(cookieJar);
   const baseHeaders: Record<string, string> = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Accept-Language": "en-US,en;q=0.9",
@@ -3082,6 +3134,15 @@ async function probeYoutubeCaptionAvailability(videoId: string) {
   );
   if (watchResponse?.ok) {
     watchHtml = await watchResponse.text();
+    if (isYoutubeConsentInterstitial(watchHtml, watchResponse.url)) {
+      seedYoutubeConsentCookies(cookieJar);
+      const retry = await fetchWithCookies(
+        watchUrl,
+        {},
+        { Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" },
+      );
+      if (retry?.ok) watchHtml = await retry.text();
+    }
     try {
       const playerResponseJson =
         extractBalancedJson(watchHtml, "var ytInitialPlayerResponse = ") ||
@@ -3162,6 +3223,7 @@ async function fetchPublicYoutubeTranscript(videoId: string) {
   // Use a real browser UA and persist cookies across requests.
   // YouTube will often classify custom UAs as bots/crawlers and omit/deny caption data.
   const cookieJar = new Map<string, string>();
+  seedYoutubeConsentCookies(cookieJar);
   const baseHeaders: Record<string, string> = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Accept-Language": "en-US,en;q=0.9",
@@ -3188,6 +3250,11 @@ async function fetchPublicYoutubeTranscript(videoId: string) {
   const watchResponse = await fetchWithCookies(watchUrl, {}, { Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" });
   if (watchResponse?.ok) {
     watchHtml = await watchResponse.text();
+    if (isYoutubeConsentInterstitial(watchHtml, watchResponse.url)) {
+      seedYoutubeConsentCookies(cookieJar);
+      const retry = await fetchWithCookies(watchUrl, {}, { Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" });
+      if (retry?.ok) watchHtml = await retry.text();
+    }
     try {
       const playerResponseJson =
         extractBalancedJson(watchHtml, "var ytInitialPlayerResponse = ") ||
