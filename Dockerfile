@@ -1,7 +1,6 @@
 FROM node:24-slim
 
-RUN apt-get update && apt-get install -y ffmpeg postgresql-client python3 python3-pip \
-  && pip3 install yt-dlp \
+RUN apt-get update && apt-get install -y ffmpeg postgresql-client yt-dlp \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/*
 RUN npm install -g pnpm

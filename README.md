@@ -118,8 +118,7 @@ Server dependencies needed outside npm:
 For Docker:
 
 ```dockerfile
-RUN apt-get update && apt-get install -y ffmpeg python3 python3-pip \\
-  && pip3 install yt-dlp \\
+RUN apt-get update && apt-get install -y ffmpeg yt-dlp \\
   && apt-get clean
 ```
 
