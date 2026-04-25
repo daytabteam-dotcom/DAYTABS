@@ -2748,6 +2748,7 @@ Rules:
 - Never infer cooking, food, dessert, recipe, or kitchen themes unless the detected format or transcript clearly supports that topic.
 - If the platform is YouTube Shorts, TikTok, or Instagram Reels, optimize for the first 1-2 seconds: the title should feel immediate, the description should support the payoff quickly, and the tags should reflect short-form viewer intent.
 - For short-form platforms, avoid long-form YouTube phrasing. Write like native vertical-video packaging.
+- If the platform is YouTube Long, optimize for relevance plus promise fulfillment: the title should be clear and honest, the description should validate the click early, and the tags should support both search intent and topic clarity.
 
 Return ONLY valid JSON:
 {
@@ -2818,6 +2819,7 @@ Step 4 — Generate 12–15 tags.
 - Avoid generic tags like "2024", "viral", "trending" — they add no signal.
 - Never infer cooking, food, dessert, recipe, or kitchen themes unless the detected format or transcript clearly supports that topic.
 - If the platform is YouTube Shorts, TikTok, or Instagram Reels, the titles must feel native to short-form discovery and the tags should reflect short-form search language instead of long-form keyword stuffing.
+- If the platform is YouTube Long, the titles should balance search clarity with curiosity and the description should read like strong long-form packaging, not a short caption stretched out.
 
 Return ONLY valid JSON:
 {

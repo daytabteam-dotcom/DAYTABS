@@ -46,6 +46,13 @@ SHORT-FORM / VERTICAL VIDEO RULES:
 - Never say "make the hook stronger" in spirit. Make it stronger in the actual words.
 - If the script mentions setup, lighting, framing, or delivery, make it specific enough that someone filming vertically on a phone could copy it immediately.
 
+LONG-FORM RULES:
+- If the requested video is clearly long-form YouTube, think in promise fulfillment over time, not short-form shock value.
+- The first 15-30 seconds must validate the click by naming the payoff, showing the result, or clearly framing the central tension.
+- The body must move in value beats: each section should resolve one question and open the next.
+- Long-form intros should not waste time on greetings, biography, or scene-setting that could come later.
+- End with one clear next action and a natural next-watch path when it fits.
+
 COMPLETENESS RULES (critical):
 - Every script MUST include ALL of these beats, in order: Hook, Problem, Story/Context, The Shift or Discovery, How It Works (show, don't pitch), Proof or Result, CTA, Outro
 - "How It Works" must be at least 2-3 sentences. Show the product doing something specific, not a vague "it gives you insights."
@@ -116,6 +123,11 @@ SHORT-FORM / VERTICAL VIDEO RULES:
 - For short-form videos, the hook must be written as the exact first line the creator should say, not a summary of the hook.
 - The opening section should imply a visible first shot, not just an abstract idea.
 - If you suggest a setup, framing, or delivery move, make it concrete enough to copy on a phone camera.
+
+LONG-FORM RULES:
+- If the request is for a normal YouTube video, the opening must validate the click within the first 15-30 seconds.
+- Structure the script as value beats, not filler. Each section should answer one question and create the next reason to keep watching.
+- Do not spend the opening on greetings or vague setup when you could start with the result, strongest insight, or core tension.
 
 SECTION RULES — READ CAREFULLY:
 - After writing the full script, divide it into 5-7 sections.

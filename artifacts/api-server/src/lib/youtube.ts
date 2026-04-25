@@ -2574,6 +2574,8 @@ If a day uses a short-form or vertical format like YouTube Shorts, the hook must
 For short-form or vertical ideas, describe the first visual beat too: what the viewer sees in the opening frame and what changes in the next second or two.
 For short-form or vertical ideas, thumbnailIdea should behave like cover-direction or opening-frame direction: specific composition, subject action, text if any, and why it stops the scroll.
 For short-form or vertical ideas, avoid vague notes like "make it punchier" or "show value fast." Say what the creator should literally say or show.
+If a day uses a long-form YouTube format, treat it like promise fulfillment over time: the hook should validate the click in the first 15-30 seconds, the thumbnailIdea should behave like a true thumbnail concept, and the title should balance search clarity with curiosity honestly.
+For long-form ideas, structure whyThisIdea around packaging quality, retention structure, and watch-time payoff, not just raw trend novelty.
 
 POSTING STRATEGY:
 
@@ -2717,6 +2719,7 @@ Suggest a thumbnail concept that is visually distinct — describe the actual im
 Suggest 1 alternative angle on the same topic if the original framing has weak search volume potential.
 If this idea would work best as a Short or other vertical video, make the hook the exact first spoken line and make the thumbnailIdea describe the opening frame or cover direction in concrete terms.
 For short-form ideas, never give vague advice. Say exactly what to open on, what to say first, and what visual change creates the scroll-stop.
+If this idea would work best as a long-form YouTube video, make the hook validate the click within the first 15-30 seconds and make the thumbnailIdea describe a real thumbnail concept, not a cover frame.
 Do not pad the response with explanations. Return JSON only.
 
 Return shape:
@@ -2943,6 +2946,7 @@ Tags must include 8-12 real search phrases that fit this category and come from 
 Thumbnail idea must describe the actual image composition and emotional contrast.
 If the regenerated idea is short-form or vertical, the hook must be the literal first line or first on-screen phrase, and thumbnailIdea must describe the opening frame or cover in exact visual terms.
 For short-form ideas, avoid generic notes like "make it more punchy." Specify what the creator should show first and what they should say first.
+If the regenerated idea is long-form, the hook should validate the click early and thumbnailIdea should describe a true thumbnail layout with one focal promise.
 Explain in whyDifferent how this idea is distinct from the one it replaces.
 Return JSON only.
 
