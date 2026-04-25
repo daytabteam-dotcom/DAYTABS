@@ -3139,6 +3139,9 @@ Hard rules:
 - Every diagnosis item must include concrete evidence and a concrete fix. For script and hook findings, point to the opening line, section, or moment from the transcript excerpt and explain what should be cut, moved earlier, rewritten, or added.
 - Do not say "improve the title" without giving better title options.
 - Do not say "fix the thumbnail" without giving a better thumbnail idea.
+- For any thumbnail finding, the recommendedChange must be visually specific: describe the focal subject, composition/layout, emotional trigger, background treatment, thumbnail style, and optional 3-5 word text if text would help.
+- Thumbnail fixes should name exact text suggestions when useful, such as a 2-5 word overlay, and explain where that text should sit in the frame.
+- If a thumbnail diagnosis says the packaging is unclear, explain exactly what visual promise should replace it and what should be removed from the current concept.
 - If transcript is unavailable, leave hookRewrite empty.
 
 Short-form and Shorts strategy rules:
@@ -3147,6 +3150,7 @@ Short-form and Shorts strategy rules:
 - Strong Shorts/TikTok-style clips open with the result, problem, tension, transformation, or exact payoff. Never recommend greetings, logos, slow setup, or generic context first.
 - For short-form fixes, write literal first-line or first-frame advice. Avoid vague notes like "make it punchier."
 - If you call out a short-form script problem, identify the exact first line or first 1-2 beats that are wasting time and provide a better replacement opening structure.
+- For short-form thumbnail or cover fixes, describe the opening frame/cover in exact visual terms: subject position, action, text, contrast treatment, and why it stops the scroll.
 - Use category logic when evidence supports it: podcast/talk clips need one claim or emotional beat; demos show result first then steps; cooking shows finished dish first; art shows transformation/risk/texture; gaming leads with clutch/fail/tip; ads open with pain/result/proof.
 - Shorts packaging should include a compact title, first-frame/cover direction, caption/on-screen keyword guidance, and a description opener that repeats the exact topic naturally.
 - Tags are a small supporting signal. Recommend a tight set only: exact phrase, close variants, central entities/products/games, and obvious misspellings. Never tag-stuff or imply tags outweigh title, thumbnail, description, captions, or retention.
@@ -3156,6 +3160,7 @@ Long-form strategy rules:
 - If the video is long-form, treat it as promise fulfillment over time: packaging wins the click, the first 15-30 seconds validates the click, and each section must keep paying off curiosity.
 - For long-form fixes, prioritize title/thumbnail promise accuracy, description opener, chapter/navigability suggestions when relevant, retention drop risks, and one clear next-watch path.
 - For long-form thumbnail direction, isolate one visual promise. Prefer problem/result, subject/object/tension, or mystery/proof layouts over crowded collages.
+- For long-form thumbnail fixes, include at least one specific visual layout and, when text is useful, 2-5 exact words of suggested overlay text plus the recommended style direction.
 - If you call out a long-form script problem, identify which setup, tangent, throat-clearing, or ordering choice is delaying the payoff and explain the stronger order in concrete terms.
 
 Return JSON only:

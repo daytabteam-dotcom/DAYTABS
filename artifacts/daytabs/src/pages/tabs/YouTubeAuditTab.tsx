@@ -683,11 +683,25 @@ export default function YouTubeAuditTab() {
     setThumbnailWorking(true);
     setError(null);
     try {
+      const thumbnailDiagnosisNotes = report.diagnosis
+        .filter((item) => item.area === "thumbnail" || item.area === "title" || item.area === "hook")
+        .map((item) => [
+          `${item.area.toUpperCase()} ISSUE: ${item.issue}`,
+          item.evidence ? `Evidence: ${item.evidence}` : "",
+          item.recommendedChange ? `How to improve it: ${item.recommendedChange}` : "",
+        ].filter(Boolean).join("\n"))
+        .filter(Boolean)
+        .join("\n\n");
       const analysisNotes = [
         report.summary,
+        report.fixes.packagingStrategy,
         report.fixes.thumbnailIdea,
         report.visualAudit?.topFix || "",
-        report.diagnosis.map((item) => `${item.area}: ${item.issue}`).join(" | "),
+        report.visualAudit?.lighting ? `Lighting note: ${report.visualAudit.lighting}` : "",
+        report.visualAudit?.framing ? `Framing note: ${report.visualAudit.framing}` : "",
+        report.visualAudit?.sharpness ? `Sharpness note: ${report.visualAudit.sharpness}` : "",
+        thumbnailDiagnosisNotes,
+        report.fixes.qualityFixes.length ? `Packaging notes:\n${report.fixes.qualityFixes.map((item) => `- ${item}`).join("\n")}` : "",
       ].filter(Boolean).join("\n");
 
       const data = await jsonFetch<{ thumbnail: GeneratedAuditThumbnail }>("/api/youtube/audit-thumbnail", {
