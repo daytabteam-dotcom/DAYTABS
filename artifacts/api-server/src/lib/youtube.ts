@@ -3,6 +3,7 @@ import jwt from "jsonwebtoken";
 import { toFile } from "openai";
 import { OAuth2Client } from "google-auth-library";
 import { and, desc, eq, gte, sql } from "drizzle-orm";
+import { fetchTranscript as fetchYoutubeTranscriptPackage } from "youtube-transcript/dist/youtube-transcript.esm.js";
 import {
   db,
   youtubeApiCacheTable,
@@ -2292,6 +2293,19 @@ async function fetchTranscriptFromTrack(track: JsonRecord, requestHeaders: Recor
   return parseTranscriptXml(await xmlResponse.text());
 }
 
+async function fetchYoutubeTranscriptPackageFallback(videoId: string) {
+  const rows = await fetchYoutubeTranscriptPackage(videoId, { lang: "en" });
+  const segments = rows
+    .map((row) => normalizeYoutubeTranscriptText(String(row.text || "")))
+    .filter(Boolean);
+  if (!segments.length) return null;
+  return {
+    source: "auto" as const,
+    language: rows.find((row) => row.lang)?.lang ?? "en",
+    text: normalizeYoutubeTranscriptText(segments.join("\n")),
+  };
+}
+
 function recommendThumbnailStyle(video: YoutubeRecentVideo, nicheProfile: YoutubeNicheProfile) {
   const format = likelyYoutubeFormatFromVideo(video);
   const text = `${video.title} ${video.description} ${nicheProfile.niche} ${nicheProfile.summary}`.toLowerCase();
@@ -2378,7 +2392,9 @@ async function fetchPublicYoutubeTranscript(videoId: string) {
     }
   }
 
-  if (!captionTracks.length) return null;
+  if (!captionTracks.length) {
+    return fetchYoutubeTranscriptPackageFallback(videoId).catch(() => null);
+  }
 
   const orderedTracks = [
     ...captionTracks.filter((track) => !asString(track.kind) && asString(track.languageCode) === "en"),
@@ -2400,7 +2416,7 @@ async function fetchPublicYoutubeTranscript(videoId: string) {
     };
   }
 
-  return null;
+  return fetchYoutubeTranscriptPackageFallback(videoId).catch(() => null);
 }
 
 export async function getYoutubeVideoAuditPreview(userId: number, videoUrl: string): Promise<YoutubeVideoAuditPreview> {
