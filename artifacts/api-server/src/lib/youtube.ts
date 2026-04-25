@@ -70,6 +70,20 @@ export interface YoutubeNicheProfile {
   summary: string;
 }
 
+export interface YoutubeTranscriptSegment {
+  start: number;
+  end: number;
+  text: string;
+}
+
+export interface YoutubeAuditTranscriptTranslation {
+  targetLanguage: string;
+  sourceLanguage: string | null;
+  fullText: string;
+  segments: YoutubeTranscriptSegment[];
+  createdAt: string;
+}
+
 export interface YoutubeVideoAuditReport {
   summary: string;
   video: {
@@ -100,6 +114,8 @@ export interface YoutubeVideoAuditReport {
     source: "manual" | "auto" | "uploaded" | null;
     language: string | null;
     text: string | null;
+    segments: YoutubeTranscriptSegment[];
+    translations: YoutubeAuditTranscriptTranslation[];
   };
   performanceContext: {
     ageDays: number | null;
@@ -2459,11 +2475,65 @@ function parseTimedTextTrackList(videoId: string, xml: string) {
   return tracks;
 }
 
-function parseTranscriptXml(xml: string) {
-  const segments = [...xml.matchAll(/<text\b[^>]*>([\s\S]*?)<\/text>/gi)]
-    .map((match) => normalizeYoutubeTranscriptText(decodeHtmlEntities(match[1]).replace(/\s+/g, " ")))
+function normalizeTranscriptSegments(segments: YoutubeTranscriptSegment[]) {
+  return segments
+    .map((segment) => ({
+      start: Math.max(0, Number(segment.start) || 0),
+      end: Math.max(0, Number(segment.end) || 0),
+      text: normalizeYoutubeTranscriptText(segment.text || ""),
+    }))
+    .filter((segment) => segment.text)
+    .map((segment) => ({
+      ...segment,
+      end: segment.end > segment.start ? segment.end : Math.max(segment.start + 0.8, segment.end),
+    }));
+}
+
+function transcriptSegmentsToText(segments: YoutubeTranscriptSegment[]) {
+  return normalizeYoutubeTranscriptText(segments.map((segment) => segment.text).join("\n"));
+}
+
+function buildApproximateTranscriptSegmentsFromText(text: string): YoutubeTranscriptSegment[] {
+  const cleaned = normalizeYoutubeTranscriptText(text);
+  if (!cleaned) return [];
+  const parts = cleaned
+    .split(/(?<=[.!?])\s+/)
+    .map((part) => part.trim())
     .filter(Boolean);
-  return segments.length ? normalizeYoutubeTranscriptText(segments.join("\n")) : null;
+  let cursor = 0;
+  return parts.map((part) => {
+    const wordCount = part.split(/\s+/).filter(Boolean).length;
+    const duration = Math.max(1.2, Math.min(7, wordCount / 2.7));
+    const segment = {
+      start: cursor,
+      end: cursor + duration,
+      text: part,
+    };
+    cursor += duration;
+    return segment;
+  });
+}
+
+function parseTranscriptXml(xml: string) {
+  const segments = normalizeTranscriptSegments(
+    [...xml.matchAll(/<text\b([^>]*)>([\s\S]*?)<\/text>/gi)].map((match) => {
+      const attrs: JsonRecord = {};
+      for (const attr of (match[1] || "").matchAll(/([\w:-]+)="([^"]*)"/g)) {
+        attrs[attr[1]] = decodeHtmlEntities(attr[2]);
+      }
+      const text = normalizeYoutubeTranscriptText(decodeHtmlEntities(match[2]).replace(/\s+/g, " "));
+      const start = Number(attrs.start ?? 0);
+      const duration = Number(attrs.dur ?? 0);
+      return {
+        start,
+        end: start + Math.max(0.1, duration || 0),
+        text,
+      };
+    }),
+  );
+  return segments.length
+    ? { text: transcriptSegmentsToText(segments), segments }
+    : null;
 }
 
 async function fetchTranscriptFromTrack(track: JsonRecord, requestHeaders: Record<string, string>) {
@@ -2474,16 +2544,22 @@ async function fetchTranscriptFromTrack(track: JsonRecord, requestHeaders: Recor
   if (jsonResponse?.ok) {
     const transcriptJson = asRecord(await jsonResponse.json().catch(() => ({})));
     const events = asArray(transcriptJson.events).map((item) => asRecord(item));
-    const segments = events
-      .map((event) =>
-        asArray(event.segs)
+    const segments = normalizeTranscriptSegments(events
+      .map((event) => {
+        const text = asArray(event.segs)
           .map((seg) => asString(asRecord(seg).utf8) || "")
           .join("")
           .replace(/\s+/g, " ")
-          .trim(),
-      )
-      .filter(Boolean);
-    if (segments.length) return normalizeYoutubeTranscriptText(segments.join("\n"));
+          .trim();
+        const startMs = parseNumber(event.tStartMs);
+        const durationMs = parseNumber(event.dDurationMs);
+        return {
+          start: startMs / 1000,
+          end: (startMs + Math.max(100, durationMs || 0)) / 1000,
+          text,
+        };
+      }));
+    if (segments.length) return { text: transcriptSegmentsToText(segments), segments };
   }
 
   const xmlUrl = appendUrlParam(baseUrl, "fmt", null);
@@ -2494,14 +2570,27 @@ async function fetchTranscriptFromTrack(track: JsonRecord, requestHeaders: Recor
 
 async function fetchYoutubeTranscriptPackageFallback(videoId: string) {
   const rows = await fetchYoutubeTranscriptPackage(videoId, { lang: "en" });
-  const segments = rows
-    .map((row: { text?: string | null; lang?: string | null }) => normalizeYoutubeTranscriptText(String(row.text || "")))
-    .filter(Boolean);
-  if (!segments.length) return null;
+  const segments = normalizeTranscriptSegments(rows
+    .map((row: { text?: string | null; lang?: string | null; offset?: number | null; duration?: number | null }) => {
+      const text = normalizeYoutubeTranscriptText(String(row.text || ""));
+      const start = Number(row.offset ?? 0) / 1000;
+      const duration = Number(row.duration ?? 0) / 1000;
+      return {
+        start,
+        end: start + Math.max(0.8, duration || 0),
+        text,
+      };
+    }));
+  const fallbackSegments = segments.length ? segments : buildApproximateTranscriptSegmentsFromText(rows
+    .map((row: { text?: string | null }) => normalizeYoutubeTranscriptText(String(row.text || "")))
+    .filter(Boolean)
+    .join("\n"));
+  if (!fallbackSegments.length) return null;
   return {
     source: "auto" as const,
     language: rows.find((row: { text?: string | null; lang?: string | null }) => row.lang)?.lang ?? "en",
-    text: normalizeYoutubeTranscriptText(segments.join("\n")),
+    text: transcriptSegmentsToText(fallbackSegments),
+    segments: fallbackSegments,
   };
 }
 
@@ -2606,12 +2695,13 @@ async function fetchPublicYoutubeTranscript(videoId: string) {
   });
 
   for (const track of orderedTracks) {
-    const text = await fetchTranscriptFromTrack(track, requestHeaders);
-    if (!text) continue;
+    const transcript = await fetchTranscriptFromTrack(track, requestHeaders);
+    if (!transcript) continue;
     return {
       source: asString(track.kind) === "asr" ? "auto" as const : "manual" as const,
       language: asString(track.languageCode),
-      text,
+      text: transcript.text,
+      segments: transcript.segments,
     };
   }
 
@@ -2673,6 +2763,7 @@ export async function auditYoutubeVideo(
       text: string;
       source: "uploaded";
       language: string | null;
+      segments?: YoutubeTranscriptSegment[];
     } | null;
   },
 ): Promise<YoutubeVideoAuditReport> {
@@ -2980,6 +3071,8 @@ Return JSON only:
       source: transcript?.source ?? null,
       language: transcript?.language ?? null,
       text: transcript?.text ?? null,
+      segments: normalizeTranscriptSegments(transcript?.segments ?? []),
+      translations: [],
     },
     performanceContext: {
       ageDays,
@@ -3016,6 +3109,75 @@ Return JSON only:
         : "Public transcript was not available for this video, so script analysis fell back to title, description, tags, and competitor context.",
       "Thumbnail notes are based on the public thumbnail only, not on full frame-by-frame video quality analysis.",
     ]).filter(Boolean).filter((value, index, array) => array.indexOf(value) === index),
+  };
+}
+
+export async function translateYoutubeAuditTranscript(
+  userId: number,
+  segments: YoutubeTranscriptSegment[],
+  targetLanguage: string,
+  sourceLanguage?: string | null,
+): Promise<YoutubeAuditTranscriptTranslation> {
+  const normalizedSegments = normalizeTranscriptSegments(segments);
+  if (!normalizedSegments.length) {
+    throw new Error("A timestamped transcript is required for translation.");
+  }
+  const translatedSegments: YoutubeTranscriptSegment[] = [];
+  const batchSize = 40;
+  for (let index = 0; index < normalizedSegments.length; index += batchSize) {
+    const batch = normalizedSegments.slice(index, index + batchSize);
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content: `You are a professional audiovisual translator.
+Translate subtitle segments into ${targetLanguage} in a way that preserves meaning, tone, and natural phrasing.
+Do not translate word-for-word when that sounds unnatural.
+Keep each output line aligned to its original segment index.
+Do not add commentary. Return JSON only in the shape {"items":[{"index":0,"text":"..."}]}.`,
+        },
+        {
+          role: "user",
+          content: JSON.stringify({
+            sourceLanguage: sourceLanguage || "unknown",
+            targetLanguage,
+            items: batch.map((segment, batchIndex) => ({
+              index: batchIndex,
+              text: segment.text,
+            })),
+          }),
+        },
+      ],
+      response_format: { type: "json_object" },
+      max_completion_tokens: 4000,
+    });
+    await logTokenUsage({
+      userId,
+      feature: "youtubeAuditTranscriptTranslate",
+      model: "gpt-4o-mini",
+      ...usageTokens(completion.usage),
+    });
+    const parsed = asRecord(parseAiJson(completion.choices[0]?.message?.content ?? "{}"));
+    const items = asArray(parsed.items);
+    const translatedByIndex = new Map<number, string>(
+      items.map((item) => {
+        const row = asRecord(item);
+        return [parseNumber(row.index), asString(row.text)?.trim() || ""] as const;
+      }),
+    );
+    translatedSegments.push(...batch.map((segment, batchIndex) => ({
+      ...segment,
+      text: translatedByIndex.get(batchIndex) || segment.text,
+    })));
+  }
+  const normalizedTranslatedSegments = normalizeTranscriptSegments(translatedSegments);
+  return {
+    targetLanguage,
+    sourceLanguage: sourceLanguage ?? null,
+    fullText: transcriptSegmentsToText(normalizedTranslatedSegments),
+    segments: normalizedTranslatedSegments,
+    createdAt: new Date().toISOString(),
   };
 }
 

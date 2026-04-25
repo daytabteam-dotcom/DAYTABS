@@ -9,7 +9,8 @@ import path from "path";
 import { v4 as uuidv4 } from "uuid";
 import { db, youtubeChannelProfilesTable } from "@workspace/db";
 import { requireAuth } from "../../middlewares/auth";
-import { extractAudio, getMediaDuration, transcribeAudio } from "../analysis/services";
+import { extractAudio, execAsync, getMediaDuration, transcribeAudio } from "../analysis/services";
+import { openai } from "../../lib/openai";
 import {
   addYoutubeCompetitorByUrl,
   auditYoutubeVideo,
@@ -31,6 +32,8 @@ import {
   savePlanResults,
   storeYoutubeTokens,
   syncYoutubeChannel,
+  translateYoutubeAuditTranscript,
+  type YoutubeTranscriptSegment,
   updateYoutubeIdeaFeedback,
   updateYoutubeSettings,
 } from "../../lib/youtube";
@@ -48,9 +51,131 @@ const CANONICAL_APP_ORIGIN = (
 ).replace(/\/$/, "");
 const RENDER_HOST = "daytabs.onrender.com";
 const auditUploadDir = path.join(os.tmpdir(), "daytabs-youtube-audit-uploads");
+const auditExportDir = path.join(os.tmpdir(), "daytabs-youtube-audit-exports");
 const MAX_AUDIT_TRANSCRIPT_DURATION_SEC = 2 * 60 * 60;
+const VALID_TTS_VOICES = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"] as const;
 
 fs.mkdir(auditUploadDir, { recursive: true }).catch(() => {});
+fs.mkdir(auditExportDir, { recursive: true }).catch(() => {});
+
+function sanitizeAuditFilenamePart(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80) || "youtube-audit";
+}
+
+function normalizeAuditTranscriptSegments(value: unknown): YoutubeTranscriptSegment[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      const row = item && typeof item === "object" ? item as Record<string, unknown> : {};
+      const start = Number(row.start ?? 0);
+      const end = Number(row.end ?? 0);
+      const text = typeof row.text === "string" ? row.text.trim() : "";
+      return {
+        start: Number.isFinite(start) ? Math.max(0, start) : 0,
+        end: Number.isFinite(end) ? Math.max(0, end) : 0,
+        text,
+      };
+    })
+    .filter((item) => item.text)
+    .map((item) => ({
+      ...item,
+      end: item.end > item.start ? item.end : item.start + 0.8,
+    }));
+}
+
+function buildAtempoFilter(speedMultiplier: number) {
+  const filters: string[] = [];
+  let remaining = speedMultiplier;
+  while (remaining > 2) {
+    filters.push("atempo=2");
+    remaining /= 2;
+  }
+  while (remaining < 0.5) {
+    filters.push("atempo=0.5");
+    remaining /= 0.5;
+  }
+  filters.push(`atempo=${remaining.toFixed(4)}`);
+  return filters.join(",");
+}
+
+async function createSilentMp3(outputPath: string, durationSec: number) {
+  await execAsync(`ffmpeg -f lavfi -i anullsrc=r=24000:cl=mono -t "${durationSec}" -q:a 9 -acodec libmp3lame "${outputPath}" -y`);
+}
+
+async function createAlignedTranslationAudio(
+  segments: YoutubeTranscriptSegment[],
+  voice: (typeof VALID_TTS_VOICES)[number],
+  baseName: string,
+) {
+  const exportId = uuidv4();
+  const tempDir = path.join(auditExportDir, `tts_${exportId}`);
+  await fs.mkdir(tempDir, { recursive: true });
+  const concatEntries: string[] = [];
+  const tempFiles: string[] = [];
+  let cursor = 0;
+
+  try {
+    for (let index = 0; index < segments.length; index++) {
+      const segment = segments[index]!;
+      const gap = Math.max(0, segment.start - cursor);
+      if (gap > 0.02) {
+        const silencePath = path.join(tempDir, `silence_${index}.mp3`);
+        await createSilentMp3(silencePath, gap);
+        concatEntries.push(`file '${silencePath.replace(/'/g, "'\\''")}'`);
+        tempFiles.push(silencePath);
+        cursor += gap;
+      }
+
+      const slotDuration = Math.max(0.35, segment.end - segment.start);
+      const speechResponse = await openai.audio.speech.create({
+        model: "tts-1",
+        voice,
+        input: segment.text,
+        response_format: "mp3",
+      } as Parameters<typeof openai.audio.speech.create>[0]);
+      const rawPath = path.join(tempDir, `speech_raw_${index}.mp3`);
+      await fs.writeFile(rawPath, Buffer.from(await speechResponse.arrayBuffer()));
+      tempFiles.push(rawPath);
+
+      let speechPath = rawPath;
+      const speechDuration = await getMediaDuration(rawPath).catch(() => 0);
+      if (speechDuration > slotDuration + 0.05) {
+        const adjustedPath = path.join(tempDir, `speech_adjusted_${index}.mp3`);
+        const speedMultiplier = Math.min(6, Math.max(1.02, speechDuration / slotDuration));
+        await execAsync(`ffmpeg -i "${rawPath}" -filter:a "${buildAtempoFilter(speedMultiplier)}" -q:a 2 "${adjustedPath}" -y`);
+        tempFiles.push(adjustedPath);
+        speechPath = adjustedPath;
+      }
+
+      concatEntries.push(`file '${speechPath.replace(/'/g, "'\\''")}'`);
+      const finalSpeechDuration = await getMediaDuration(speechPath).catch(() => slotDuration);
+      cursor = segment.start + Math.min(slotDuration, finalSpeechDuration);
+
+      const trailingGap = Math.max(0, segment.end - cursor);
+      if (trailingGap > 0.02) {
+        const trailingSilencePath = path.join(tempDir, `silence_tail_${index}.mp3`);
+        await createSilentMp3(trailingSilencePath, trailingGap);
+        concatEntries.push(`file '${trailingSilencePath.replace(/'/g, "'\\''")}'`);
+        tempFiles.push(trailingSilencePath);
+      }
+      cursor = segment.end;
+    }
+
+    const concatList = path.join(tempDir, "concat.txt");
+    await fs.writeFile(concatList, concatEntries.join("\n"));
+    tempFiles.push(concatList);
+    const outputFilename = `${sanitizeAuditFilenamePart(baseName)}-${voice}-${exportId}.mp3`;
+    const outputPath = path.join(auditExportDir, outputFilename);
+    await execAsync(`ffmpeg -f concat -safe 0 -i "${concatList}" -c copy "${outputPath}" -y`);
+    return { outputFilename, outputPath };
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
 
 const auditMediaUpload = multer({
   storage: multer.diskStorage({
@@ -282,6 +407,7 @@ router.post("/audit-transcribe", requireAuth, (req, res) => {
           text,
           source: "uploaded",
           language: null,
+          segments: transcript.segments,
         },
       });
       res.json({
@@ -291,6 +417,7 @@ router.post("/audit-transcribe", requireAuth, (req, res) => {
           source: "uploaded",
           language: null,
           text,
+          segments: transcript.segments,
         },
       });
     } catch (err) {
@@ -301,6 +428,74 @@ router.post("/audit-transcribe", requireAuth, (req, res) => {
       if (audioPath) await fs.unlink(audioPath).catch(() => {});
     }
   });
+});
+
+router.post("/audit-translate", requireAuth, async (req, res) => {
+  try {
+    const plan = normalizePlan(req.auth?.plan ?? "free");
+    if (plan !== "studio") {
+      res.status(403).json({
+        code: "STUDIO_REQUIRED",
+        error: "YouTube audit transcript translation is available on the Studio plan.",
+      });
+      return;
+    }
+    const targetLanguage = typeof req.body?.targetLanguage === "string" ? req.body.targetLanguage.trim() : "";
+    const sourceLanguage = typeof req.body?.sourceLanguage === "string" ? req.body.sourceLanguage.trim() : null;
+    const segments = normalizeAuditTranscriptSegments(req.body?.segments);
+    if (!targetLanguage) {
+      res.status(400).json({ error: "Choose a target language." });
+      return;
+    }
+    if (!segments.length) {
+      res.status(400).json({ error: "A timestamped transcript is required before translation." });
+      return;
+    }
+    const translation = await translateYoutubeAuditTranscript(req.auth!.user_id, segments, targetLanguage, sourceLanguage);
+    res.json({ translation });
+  } catch (err) {
+    req.log.error({ err }, "YouTube audit transcript translation error");
+    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to translate transcript" });
+  }
+});
+
+router.post("/audit-translation-audio", requireAuth, async (req, res) => {
+  try {
+    const plan = normalizePlan(req.auth?.plan ?? "free");
+    if (plan !== "studio") {
+      res.status(403).json({
+        code: "STUDIO_REQUIRED",
+        error: "YouTube audit translation audio is available on the Studio plan.",
+      });
+      return;
+    }
+    const voice = typeof req.body?.voice === "string" ? req.body.voice.trim() : "";
+    const title = typeof req.body?.title === "string" ? req.body.title.trim() : "youtube-audit";
+    const targetLanguage = typeof req.body?.targetLanguage === "string" ? req.body.targetLanguage.trim() : "translated";
+    const segments = normalizeAuditTranscriptSegments(req.body?.segments);
+    if (!VALID_TTS_VOICES.includes(voice as (typeof VALID_TTS_VOICES)[number])) {
+      res.status(400).json({ error: "Choose a valid OpenAI voice." });
+      return;
+    }
+    if (!segments.length) {
+      res.status(400).json({ error: "A translated timestamped transcript is required before generating audio." });
+      return;
+    }
+    const baseName = `${title}-${targetLanguage}`;
+    const { outputFilename } = await createAlignedTranslationAudio(
+      segments,
+      voice as (typeof VALID_TTS_VOICES)[number],
+      baseName,
+    );
+    res.json({
+      filename: outputFilename,
+      downloadUrl: `/api/youtube/audit-download/${encodeURIComponent(outputFilename)}`,
+      voice,
+    });
+  } catch (err) {
+    req.log.error({ err }, "YouTube audit translation audio error");
+    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to generate translation audio" });
+  }
 });
 
 router.post("/audit-thumbnail", requireAuth, async (req, res) => {
@@ -334,6 +529,32 @@ router.post("/audit-thumbnail", requireAuth, async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "YouTube audit thumbnail generation error");
     res.status(500).json({ error: err instanceof Error ? err.message : "Failed to generate audit thumbnail" });
+  }
+});
+
+router.get("/audit-download/:filename", requireAuth, async (req, res) => {
+  try {
+    const filename = req.params.filename || "";
+    if (!filename || filename.includes("..") || filename.includes("/") || filename.includes("\\")) {
+      res.status(400).json({ error: "Invalid filename" });
+      return;
+    }
+    const filePath = path.join(auditExportDir, filename);
+    try {
+      await fs.access(filePath);
+    } catch {
+      res.status(404).json({ error: "File not found or has expired" });
+      return;
+    }
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.setHeader("Content-Type", filename.endsWith(".mp3") ? "audio/mpeg" : "application/octet-stream");
+    const { createReadStream } = await import("fs");
+    const stream = createReadStream(filePath);
+    stream.pipe(res as unknown as NodeJS.WritableStream);
+    stream.on("end", () => { fs.unlink(filePath).catch(() => {}); });
+  } catch (err) {
+    req.log.error({ err }, "YouTube audit download error");
+    res.status(500).json({ error: "Download failed" });
   }
 });
 
