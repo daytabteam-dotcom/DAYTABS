@@ -2542,9 +2542,12 @@ export async function auditYoutubeVideo(
     video.tags.length ? `Tags: ${video.tags.join(", ")}` : "",
   ].filter(Boolean).join("\n\n");
 
+  const likelyFormat = likelyYoutubeFormatFromVideo(video);
+  const isShortFormAudit = likelyFormat === "youtube_shorts";
+
   const seoDraft = await generateSeo(
     transcriptForAudit,
-    likelyYoutubeFormatFromVideo(video),
+    likelyFormat,
     [],
     "pro",
     undefined,
@@ -2575,6 +2578,21 @@ Hard rules:
 - Do not say "improve the title" without giving better title options.
 - Do not say "fix the thumbnail" without giving a better thumbnail idea.
 - If transcript is unavailable, leave hookRewrite empty.
+
+Short-form and Shorts strategy rules:
+- If the video is a Short, vertical, square, or 3 minutes or shorter, audit it as short-form. The first frame and first 1-2 seconds must establish topic, tension, and payoff.
+- For short-form, prioritize hook continuation, stayed-to-watch potential, average view duration, average percentage viewed, caption clarity, phone readability, and one clear payoff.
+- Strong Shorts/TikTok-style clips open with the result, problem, tension, transformation, or exact payoff. Never recommend greetings, logos, slow setup, or generic context first.
+- For short-form fixes, write literal first-line or first-frame advice. Avoid vague notes like "make it punchier."
+- Use category logic when evidence supports it: podcast/talk clips need one claim or emotional beat; demos show result first then steps; cooking shows finished dish first; art shows transformation/risk/texture; gaming leads with clutch/fail/tip; ads open with pain/result/proof.
+- Shorts packaging should include a compact title, first-frame/cover direction, caption/on-screen keyword guidance, and a description opener that repeats the exact topic naturally.
+- Tags are a small supporting signal. Recommend a tight set only: exact phrase, close variants, central entities/products/games, and obvious misspellings. Never tag-stuff or imply tags outweigh title, thumbnail, description, captions, or retention.
+- Captions matter for muted viewing, accessibility, comprehension, and search relevance. If transcript is available, judge whether the first spoken line is strong enough for silent/fast comprehension too.
+
+Long-form strategy rules:
+- If the video is long-form, treat it as promise fulfillment over time: packaging wins the click, the first 15-30 seconds validates the click, and each section must keep paying off curiosity.
+- For long-form fixes, prioritize title/thumbnail promise accuracy, description opener, chapter/navigability suggestions when relevant, retention drop risks, and one clear next-watch path.
+- For long-form thumbnail direction, isolate one visual promise. Prefer problem/result, subject/object/tension, or mystery/proof layouts over crowded collages.
 
 Return JSON only:
 {
@@ -2616,9 +2634,26 @@ Return JSON only:
       { role: "system", content: auditPrompt },
       {
         role: "user",
-        content: JSON.stringify({
-          video,
-          nicheProfile,
+	        content: JSON.stringify({
+	          video,
+	          strategyFramework: {
+	            likelyFormat,
+	            isShortFormAudit,
+	            shortFormPrinciples: isShortFormAudit ? [
+	              "first frame and first 1-2 seconds must establish topic, tension, and payoff",
+	              "result/problem/tension first, context second",
+	              "large captions and on-screen keywords for muted mobile viewing",
+	              "title, description, and cover should match one exact topic phrase",
+	              "tags are minimal support: exact phrase, variants, central entities, and misspellings",
+	            ] : [],
+	            longFormPrinciples: isShortFormAudit ? [] : [
+	              "validate the click in the first 15-30 seconds",
+	              "structure around recurring payoff beats",
+	              "title, thumbnail, and description promise must align with the content",
+	              "use chapters, captions, and next-watch paths when helpful",
+	            ],
+	          },
+	          nicheProfile,
           recentVideos: recentVideos.slice(0, 8),
           comparableVideos: comparableVideos.slice(0, 8),
           topCreators,
