@@ -2708,6 +2708,20 @@ function mergeCookies(jar: Map<string, string>, setCookieHeaders: string[]) {
   }
 }
 
+function safeGetSetCookieHeaders(headers: Headers) {
+  const anyHeaders = headers as unknown as { getSetCookie?: () => string[] };
+  try {
+    if (typeof anyHeaders.getSetCookie === "function") {
+      const values = anyHeaders.getSetCookie();
+      return Array.isArray(values) ? values : [];
+    }
+  } catch {
+    // Ignore and fall back to single-header extraction.
+  }
+  const single = headers.get("set-cookie");
+  return single ? [single] : [];
+}
+
 function cookieHeaderFromJar(jar: Map<string, string>) {
   if (!jar.size) return "";
   return [...jar.entries()].map(([name, value]) => `${name}=${value}`).join("; ");
@@ -2717,6 +2731,103 @@ function captionTracksFromPlayerResponse(playerResponse: JsonRecord) {
   return asArray(asRecord(asRecord(playerResponse.captions).playerCaptionsTracklistRenderer).captionTracks)
     .map((item) => asRecord(item))
     .filter((item) => asString(item.baseUrl));
+}
+
+function extractBalancedArray(source: string, marker: string) {
+  const markerIndex = source.indexOf(marker);
+  if (markerIndex === -1) return null;
+  const start = source.indexOf("[", markerIndex + marker.length);
+  if (start === -1) return null;
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = start; index < source.length; index += 1) {
+    const char = source[index];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === "\"") {
+      inString = true;
+      continue;
+    }
+    if (char === "[") depth += 1;
+    if (char === "]") {
+      depth -= 1;
+      if (depth === 0) return source.slice(start, index + 1);
+    }
+  }
+  return null;
+}
+
+function decodeJsonEscapedString(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return trimmed;
+  try {
+    return JSON.parse(`"${trimmed.replace(/"/g, "\\\"")}"`) as string;
+  } catch {
+    return trimmed
+      .replace(/\\u0026/g, "&")
+      .replace(/\\u003d/g, "=")
+      .replace(/\\u003f/g, "?")
+      .replace(/\\u002f/g, "/")
+      .replace(/\\\//g, "/");
+  }
+}
+
+function captionTracksFromWatchHtml(html: string) {
+  const candidates = [
+    extractBalancedArray(html, "\"captionTracks\":"),
+    extractBalancedArray(html, "captionTracks\":"),
+  ].filter(Boolean) as string[];
+  for (const arrayJson of candidates) {
+    try {
+      const parsed = JSON.parse(arrayJson);
+      if (!Array.isArray(parsed)) continue;
+      const tracks = parsed
+        .map((item) => asRecord(item))
+        .filter((item) => asString(item.baseUrl))
+        .map((item) => ({
+          baseUrl: asString(item.baseUrl),
+          languageCode: asString(item.languageCode),
+          kind: asString(item.kind),
+          name: asString(asRecord(item.name).simpleText),
+        }));
+      if (tracks.length) return tracks;
+    } catch {
+      // Fall through to heuristic parsing below.
+    }
+  }
+
+  const extracted: JsonRecord[] = [];
+  for (const match of html.matchAll(/"baseUrl":"([^"]+)"/g)) {
+    const rawBaseUrl = match[1] || "";
+    const baseUrl = decodeJsonEscapedString(rawBaseUrl);
+    if (!baseUrl) continue;
+    const start = match.index ?? 0;
+    const snippet = html.slice(start, start + 800);
+    const languageCode = snippet.match(/"languageCode":"([^"]+)"/)?.[1];
+    const kind = snippet.match(/"kind":"([^"]+)"/)?.[1] ?? null;
+    const name = snippet.match(/"simpleText":"([^"]+)"/)?.[1] ?? null;
+    extracted.push({
+      baseUrl,
+      languageCode: languageCode ? decodeJsonEscapedString(languageCode) : null,
+      kind: kind ? decodeJsonEscapedString(kind) : null,
+      name: name ? decodeJsonEscapedString(name) : null,
+    });
+    if (extracted.length >= 60) break;
+  }
+
+  return extracted.filter((item) => asString(item.baseUrl));
 }
 
 function parseTimedTextTrackList(videoId: string, xml: string) {
@@ -2857,7 +2968,7 @@ async function fetchTranscriptFromTrack(track: JsonRecord, requestHeaders: Recor
   const baseUrl = asString(track.baseUrl);
   if (!baseUrl) return null;
   const jsonUrl = appendUrlParam(baseUrl, "fmt", "json3");
-  const jsonResponse = await fetch(jsonUrl, { headers: requestHeaders }).catch(() => null);
+  const jsonResponse = await fetch(jsonUrl, { headers: { ...requestHeaders, Accept: "application/json,text/plain,*/*" } }).catch(() => null);
   if (jsonResponse?.ok) {
     const transcriptJson = asRecord(await jsonResponse.json().catch(() => ({})));
     const events = asArray(transcriptJson.events).map((item) => asRecord(item));
@@ -2880,7 +2991,7 @@ async function fetchTranscriptFromTrack(track: JsonRecord, requestHeaders: Recor
   }
 
   const xmlUrl = appendUrlParam(baseUrl, "fmt", null);
-  const xmlResponse = await fetch(xmlUrl, { headers: requestHeaders }).catch(() => null);
+  const xmlResponse = await fetch(xmlUrl, { headers: { ...requestHeaders, Accept: "*/*" } }).catch(() => null);
   if (!xmlResponse?.ok) return null;
   return parseTranscriptXml(await xmlResponse.text());
 }
@@ -2946,7 +3057,7 @@ async function probeYoutubeCaptionAvailability(videoId: string) {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Accept-Language": "en-US,en;q=0.9",
   };
-  const watchUrl = `https://www.youtube.com/watch?v=${videoId}&hl=en`;
+  const watchUrl = `https://www.youtube.com/watch?v=${videoId}&hl=en&gl=US`;
 
   const fetchWithCookies = async (url: string, init: RequestInit = {}, extraHeaders: Record<string, string> = {}) => {
     const cookieHeader = cookieHeaderFromJar(cookieJar);
@@ -2957,7 +3068,7 @@ async function probeYoutubeCaptionAvailability(videoId: string) {
       ...extraHeaders,
     };
     const response = await fetch(url, { ...init, headers }).catch(() => null);
-    if (response) mergeCookies(cookieJar, response.headers.getSetCookie());
+    if (response) mergeCookies(cookieJar, safeGetSetCookieHeaders(response.headers));
     return response;
   };
 
@@ -2984,6 +3095,10 @@ async function probeYoutubeCaptionAvailability(videoId: string) {
     } catch {
       captionTracks = [];
     }
+
+    if (!captionTracks.length && watchHtml) {
+      captionTracks = captionTracksFromWatchHtml(watchHtml);
+    }
   }
 
   if (!captionTracks.length && watchHtml) {
@@ -3006,6 +3121,10 @@ async function probeYoutubeCaptionAvailability(videoId: string) {
         captionTracks = captionTracksFromPlayerResponse(asRecord(await playerResponse.json().catch(() => ({}))));
       }
     }
+  }
+
+  if (!captionTracks.length && watchHtml) {
+    captionTracks = captionTracksFromWatchHtml(watchHtml);
   }
 
   const hasCaptions = captionTracks.length > 0;
@@ -3037,7 +3156,7 @@ async function fetchPublicYoutubeTranscript(videoId: string) {
     "Accept-Language": "en-US,en;q=0.9",
   };
 
-  const watchUrl = `https://www.youtube.com/watch?v=${videoId}&hl=en`;
+  const watchUrl = `https://www.youtube.com/watch?v=${videoId}&hl=en&gl=US`;
   const fetchWithCookies = async (url: string, init: RequestInit = {}, extraHeaders: Record<string, string> = {}) => {
     const cookieHeader = cookieHeaderFromJar(cookieJar);
     const headers = {
@@ -3047,7 +3166,7 @@ async function fetchPublicYoutubeTranscript(videoId: string) {
       ...extraHeaders,
     };
     const response = await fetch(url, { ...init, headers }).catch(() => null);
-    if (response) mergeCookies(cookieJar, response.headers.getSetCookie());
+    if (response) mergeCookies(cookieJar, safeGetSetCookieHeaders(response.headers));
     return response;
   };
 
@@ -3074,6 +3193,14 @@ async function fetchPublicYoutubeTranscript(videoId: string) {
       }
     } catch {
       captionTracks = [];
+    }
+
+    if (!captionTracks.length && watchHtml) {
+      captionTracks = captionTracksFromWatchHtml(watchHtml);
+      for (const track of captionTracks) {
+        const languageCode = asString(track.languageCode);
+        if (languageCode) discoveredLanguages.add(languageCode);
+      }
     }
   }
 
@@ -3121,6 +3248,14 @@ async function fetchPublicYoutubeTranscript(videoId: string) {
           if (languageCode) discoveredLanguages.add(languageCode);
         }
       }
+    }
+  }
+
+  if (!captionTracks.length && watchHtml) {
+    captionTracks = captionTracksFromWatchHtml(watchHtml);
+    for (const track of captionTracks) {
+      const languageCode = asString(track.languageCode);
+      if (languageCode) discoveredLanguages.add(languageCode);
     }
   }
 
