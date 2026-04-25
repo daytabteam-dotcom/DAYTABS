@@ -2,20 +2,21 @@ import { useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { motion, AnimatePresence } from "framer-motion";
 import { Menu, X } from "lucide-react";
-
-const navLinks = [
-  { label: "Features", href: "#features" },
-  { label: "How It Works", href: "#how-it-works" },
-  { label: "Blog", href: "/blog" },
-  { label: "Pricing", href: "/pricing" },
-  { label: "Refunds", href: "/refund-policy" },
-  { label: "Contact", href: "/contact" },
-];
+import { useLandingI18n, type LandingLocale } from "@/lib/i18n";
 
 export default function Navbar() {
+  const { locale, setLocale, copy } = useLandingI18n();
   const [scrolled, setScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [currentPath, navigate] = useLocation();
+  const navLinks = [
+    { label: copy.nav.features, href: "#features" },
+    { label: copy.nav.howItWorks, href: "#how-it-works" },
+    { label: copy.nav.blog, href: "/blog" },
+    { label: copy.nav.pricing, href: "/pricing" },
+    { label: copy.nav.refunds, href: "/refund-policy" },
+    { label: copy.nav.contact, href: "/contact" },
+  ];
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 20);
@@ -70,14 +71,25 @@ export default function Navbar() {
         </div>
 
         <div className="hidden md:flex items-center gap-3">
+          <label className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/70">
+            <span>{copy.languageLabel}</span>
+            <select
+              value={locale}
+              onChange={(event) => setLocale(event.target.value as LandingLocale)}
+              className="bg-transparent text-white outline-none"
+            >
+              <option value="en" className="bg-slate-950">English</option>
+              <option value="tr" className="bg-slate-950">Turkce</option>
+            </select>
+          </label>
           <Link href="/login" data-testid="link-login">
             <button className="px-4 py-2 text-sm text-white/80 hover:text-white transition-colors cursor-pointer">
-              Login
+              {copy.nav.login}
             </button>
           </Link>
           <Link href="/signup" data-testid="link-signup">
             <button className="px-4 py-2 text-sm font-medium bg-gradient-to-r from-violet-600 to-purple-500 text-white rounded-xl hover:from-violet-500 hover:to-purple-400 transition-all shadow-lg shadow-violet-500/25 cursor-pointer">
-              Get Started
+              {copy.nav.getStarted}
             </button>
           </Link>
         </div>
@@ -108,15 +120,26 @@ export default function Navbar() {
                 {link.label}
               </button>
             ))}
+            <label className="flex items-center justify-between rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/70">
+              <span>{copy.languageLabel}</span>
+              <select
+                value={locale}
+                onChange={(event) => setLocale(event.target.value as LandingLocale)}
+                className="bg-transparent text-white outline-none"
+              >
+                <option value="en" className="bg-slate-950">English</option>
+                <option value="tr" className="bg-slate-950">Turkce</option>
+              </select>
+            </label>
             <div className="flex gap-3 pt-2 border-t border-white/10">
               <Link href="/login" className="flex-1">
                 <button className="w-full px-4 py-2 text-sm text-white/80 border border-white/20 rounded-xl hover:border-white/40 transition-all cursor-pointer">
-                  Login
+                  {copy.nav.login}
                 </button>
               </Link>
               <Link href="/signup" className="flex-1">
                 <button className="w-full px-4 py-2 text-sm font-medium bg-gradient-to-r from-violet-600 to-purple-500 text-white rounded-xl cursor-pointer">
-                  Get Started
+                  {copy.nav.getStarted}
                 </button>
               </Link>
             </div>

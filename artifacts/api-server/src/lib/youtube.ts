@@ -36,6 +36,38 @@ const YOUTUBE_THUMBNAIL_HEIGHT = 720;
 const YOUTUBE_THUMBNAIL_MAX_BYTES = 2 * 1024 * 1024;
 const YOUTUBE_THUMBNAIL_IMAGE_MODEL = process.env.YOUTUBE_THUMBNAIL_IMAGE_MODEL || "gpt-image-2";
 const YOUTUBE_THUMBNAIL_FALLBACK_IMAGE_MODEL = "gpt-image-1";
+const YOUTUBE_CREATOR_GROWTH_PLAYBOOK_RULES = `Creator Growth Playbook for YouTube and TikTok in 2026:
+- Treat every upload as a system: one core idea, one packaging promise, one opening payoff, and one next step.
+- Do not imply there is a guaranteed viral formula. Optimize for clearer distribution odds through packaging quality, retention structure, and audience fit.
+- Tags are secondary metadata. Use them narrowly for exact topic phrases, close variants, named entities, tools, products, and obvious misspellings. Never treat tags as the main growth lever.
+- Search optimization starts with exact search intent in the title and the first description lines, not with keyword stuffing.
+- Recommendation optimization starts with viewer satisfaction: accurate packaging, strong opening payoff, clean structure, and watch-worthy follow-through.
+- Short-form strategy: first frame and first seconds must establish what the video is about, why it matters, and what payoff is coming. Design for sound-on delight and sound-off comprehension.
+- Strong short-form hooks should open with a result, problem, tension, transformation, disagreement, or proof. Avoid greetings, throat-clearing, logos, and slow setup first.
+- Short-form editing should improve rewatchability. Every 1-3 seconds, the visual, idea, angle, or energy should advance.
+- Long-form strategy: packaging wins the click, the first 15-30 seconds validates the click, and the structure keeps paying off curiosity over time.
+- Longer videos are only better when they stay easy to enter, navigate, and continue watching. Recommend chapters, section transitions, proof beats, and one clear next-watch path when helpful.
+- Thumbnail rule: communicate one clear idea fast. Use one dominant subject, one emotional or informational idea, strong mobile readability, and title-thumbnail alignment.
+- For Shorts/TikTok covers, think in opening-frame and selected-frame terms. For long-form YouTube, think in true thumbnail terms.
+- Use category logic when evidence supports it: podcasts need tension or a quotable turn, demos show result first, cooking shows sensory payoff first, art shows transformation or texture, gaming leads with the outcome, ads lead with pain/result/proof.
+- If giving feedback or generated ideas, be concrete. Say exactly what should be shown first, said first, cut, moved earlier, or emphasized instead of using generic advice.`;
+const LANGUAGE_CODE_TO_NAME: Record<string, string> = {
+  ar: "Arabic",
+  de: "German",
+  en: "English",
+  es: "Spanish",
+  fr: "French",
+  hi: "Hindi",
+  it: "Italian",
+  ja: "Japanese",
+  ko: "Korean",
+  nl: "Dutch",
+  pt: "Portuguese",
+  ru: "Russian",
+  tr: "Turkish",
+  uk: "Ukrainian",
+  zh: "Simplified Chinese",
+};
 
 export const YOUTUBE_SCOPES = [
   "https://www.googleapis.com/auth/youtube.readonly",
@@ -43,6 +75,66 @@ export const YOUTUBE_SCOPES = [
 ];
 
 type JsonRecord = Record<string, unknown>;
+
+function languageNameFromCode(input?: string | null) {
+  if (!input) return null;
+  const normalized = input.trim().toLowerCase();
+  if (!normalized) return null;
+  const direct = LANGUAGE_CODE_TO_NAME[normalized];
+  if (direct) return direct;
+  const base = normalized.split(/[-_]/)[0] || normalized;
+  return LANGUAGE_CODE_TO_NAME[base] || null;
+}
+
+function detectLanguageNameFromText(sample: string) {
+  const text = sample.trim();
+  if (!text) return null;
+  if (/[ğĞıİşŞçÇöÖüÜ]/.test(text)) return "Turkish";
+  if (/[\u3040-\u30ff]/.test(text)) return "Japanese";
+  if (/[\uac00-\ud7af]/.test(text)) return "Korean";
+  if (/[\u0600-\u06ff]/.test(text)) return "Arabic";
+  if (/[\u0900-\u097f]/.test(text)) return "Hindi";
+  if (/[\u4e00-\u9fff]/.test(text)) return "Simplified Chinese";
+  if (/[А-Яа-яЁёІіЇїЄє]/.test(text)) return "Russian";
+  const lower = text.toLowerCase();
+  const turkishHits = [" bir ", " ve ", " ile ", " ama ", " icin ", " nasil ", " video ", " kanali ", " daha "].filter((token) => lower.includes(token)).length;
+  if (turkishHits >= 2) return "Turkish";
+  return null;
+}
+
+function inferOutputLanguage(options: {
+  explicitLanguage?: string | null;
+  transcriptText?: string | null;
+  title?: string | null;
+  description?: string | null;
+  tags?: string[];
+  recentVideos?: Array<{ title?: string | null; description?: string | null; tags?: string[] }>;
+}) {
+  const explicit = languageNameFromCode(options.explicitLanguage);
+  if (explicit) {
+    return {
+      label: explicit,
+      instruction: `Write every user-facing output in ${explicit}. Do not translate the response to English. Keep summaries, explanations, titles, descriptions, hooks, tags, thumbnail ideas, and recommendations in ${explicit}.`,
+    };
+  }
+
+  const sampleParts = [
+    options.transcriptText || "",
+    options.title || "",
+    options.description || "",
+    ...(options.tags ?? []),
+    ...((options.recentVideos ?? []).flatMap((video) => [
+      video.title || "",
+      video.description || "",
+      ...(video.tags ?? []),
+    ])),
+  ].filter(Boolean);
+  const detected = detectLanguageNameFromText(sampleParts.join(" ").slice(0, 6000)) || "English";
+  return {
+    label: detected,
+    instruction: `Write every user-facing output in ${detected}. Do not translate the response to English. Keep summaries, explanations, titles, descriptions, hooks, tags, thumbnail ideas, and recommendations in ${detected}.`,
+  };
+}
 
 export interface YoutubeRecentVideo {
   id: string;
@@ -844,10 +936,16 @@ async function buildYoutubeThumbnailPrompt(
     sourceImageKind?: "user_uploaded" | "current_thumbnail" | null;
     stylePreference?: string | null;
     analysisNotes?: string | null;
+    outputLanguage?: string | null;
   },
 ) {
   const hasSourceImages = payload.sourceImages.length > 0;
   const shouldPreserveImage = hasSourceImages && payload.preserveUploadedImage;
+  const thumbnailOutputLanguage = payload.outputLanguage || inferOutputLanguage({
+    title: payload.title,
+    description: payload.description,
+    tags: payload.tags,
+  }).label;
   const thumbnailStrategyRules = `Thumbnail strategy rules:
 - CORE THUMBNAIL RULE: the thumbnail must communicate exactly ONE idea, through ONE focal subject, triggering ONE clear emotion, and be understandable in under 1 second on mobile.
 - THE ONE RULE: a thumbnail must communicate ONE clear idea in under 1 second.
@@ -963,7 +1061,11 @@ Generate a precise image editing prompt that:
 If you modify or regenerate the subject, any face, or the core scene instead of editing the provided image, the output is invalid.
 
 OUTPUT:
-Return ONLY the final image editing prompt.`
+Return ONLY the final image editing prompt.
+
+OUTPUT LANGUAGE RULE:
+- Write the final image editing prompt in ${thumbnailOutputLanguage}.
+- If the thumbnail includes text, write that thumbnail text in ${thumbnailOutputLanguage} unless the user explicitly requested another language.`
     : `You are an expert YouTube thumbnail designer and viral content strategist.
 
 Your goal is NOT just to create a beautiful image, but to maximize click-through-rate (CTR).
@@ -1031,7 +1133,11 @@ IMPORTANT RULES:
 - If the user did not specify text, generate the strongest 3-5 word text yourself
 - The final concept must pass the one-second clarity test: one idea, one focal subject, one emotion, one message
 - If those rules are violated, simplify or redesign before returning the final prompt
-- Return ONLY the final image generation prompt`;
+- Return ONLY the final image generation prompt
+
+OUTPUT LANGUAGE RULE:
+- Write the final image generation prompt in ${thumbnailOutputLanguage}.
+- If the thumbnail includes text, write that thumbnail text in ${thumbnailOutputLanguage} unless the user explicitly requested another language.`;
 
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
@@ -2489,6 +2595,55 @@ function normalizeTranscriptSegments(segments: YoutubeTranscriptSegment[]) {
     }));
 }
 
+function groupAuditTranscriptSegments(segments: YoutubeTranscriptSegment[]) {
+  const normalized = normalizeTranscriptSegments(segments);
+  if (!normalized.length) return [];
+  const grouped: YoutubeTranscriptSegment[] = [];
+  let current: YoutubeTranscriptSegment | null = null;
+  const maxChunkSeconds = 10;
+  const minChunkSeconds = 2.5;
+
+  const shouldCloseChunk = (segment: YoutubeTranscriptSegment, nextSegment?: YoutubeTranscriptSegment | null) => {
+    const duration = segment.end - segment.start;
+    const endsSentence = /[.!?]["')\]]?$/.test(segment.text);
+    const longEnough = duration >= minChunkSeconds;
+    const gapToNext = nextSegment ? Math.max(0, nextSegment.start - segment.end) : 0;
+    return duration >= maxChunkSeconds
+      || (endsSentence && longEnough)
+      || gapToNext >= 1.2
+      || !nextSegment;
+  };
+
+  for (let index = 0; index < normalized.length; index++) {
+    const segment = normalized[index]!;
+    const nextSegment = normalized[index + 1] ?? null;
+    if (!current) {
+      current = { ...segment };
+    } else {
+      const mergedDuration = segment.end - current.start;
+      const mergedText = `${current.text} ${segment.text}`.replace(/\s+/g, " ").trim();
+      current = {
+        start: current.start,
+        end: segment.end,
+        text: mergedText,
+      };
+      if (mergedDuration >= maxChunkSeconds + 1.5) {
+        grouped.push(current);
+        current = null;
+        continue;
+      }
+    }
+
+    if (current && shouldCloseChunk(current, nextSegment)) {
+      grouped.push(current);
+      current = null;
+    }
+  }
+
+  if (current) grouped.push(current);
+  return normalizeTranscriptSegments(grouped);
+}
+
 function transcriptSegmentsToText(segments: YoutubeTranscriptSegment[]) {
   return normalizeYoutubeTranscriptText(segments.map((segment) => segment.text).join("\n"));
 }
@@ -2825,6 +2980,18 @@ export async function auditYoutubeVideo(
   const transcript = options?.transcriptOverride?.text
     ? options.transcriptOverride
     : await fetchPublicYoutubeTranscript(videoId).catch(() => null);
+  const outputLanguage = inferOutputLanguage({
+    explicitLanguage: transcript?.language ?? null,
+    transcriptText: transcript?.text ?? null,
+    title: video.title,
+    description: video.description,
+    tags: video.tags,
+    recentVideos: recentVideos.map((item) => ({
+      title: item.title,
+      description: item.description,
+      tags: item.tags,
+    })),
+  });
 
   const transcriptForAudit = transcript?.text || [
     `Video title: ${video.title}`,
@@ -2853,6 +3020,11 @@ export async function auditYoutubeVideo(
 
   const auditPrompt = `You are a YouTube growth strategist producing a careful audit for one existing video.
 Your job is to explain what can actually be assessed from the available evidence, what cannot be assessed, and what the creator should test first.
+
+${YOUTUBE_CREATOR_GROWTH_PLAYBOOK_RULES}
+
+OUTPUT LANGUAGE RULE:
+- ${outputLanguage.instruction}
 
 Hard rules:
 - Never diagnose what is not supported by the supplied evidence.
@@ -2970,6 +3142,7 @@ Return JSON only:
           transcriptAvailable: Boolean(transcript?.text),
           transcriptSource: transcript?.source ?? null,
           transcriptLanguage: transcript?.language ?? null,
+          outputLanguage: outputLanguage.label,
           transcriptExcerpt: transcript?.text?.slice(0, 5000) ?? null,
         }),
       },
@@ -3071,7 +3244,7 @@ Return JSON only:
       source: transcript?.source ?? null,
       language: transcript?.language ?? null,
       text: transcript?.text ?? null,
-      segments: normalizeTranscriptSegments(transcript?.segments ?? []),
+      segments: groupAuditTranscriptSegments(transcript?.segments ?? []),
       translations: [],
     },
     performanceContext: {
@@ -3135,6 +3308,9 @@ export async function translateYoutubeAuditTranscript(
 Translate subtitle segments into ${targetLanguage} in a way that preserves meaning, tone, and natural phrasing.
 Do not translate word-for-word when that sounds unnatural.
 Keep each output line aligned to its original segment index.
+Each translated line must fit naturally inside the original segment timing when spoken aloud.
+If the target language would run long, compress the phrasing while preserving the meaning and tone.
+Prefer shorter, voice-friendly subtitle wording over literal completeness when timing is tight.
 Do not add commentary. Return JSON only in the shape {"items":[{"index":0,"text":"..."}]}.`,
         },
         {
@@ -3144,6 +3320,8 @@ Do not add commentary. Return JSON only in the shape {"items":[{"index":0,"text"
             targetLanguage,
             items: batch.map((segment, batchIndex) => ({
               index: batchIndex,
+              durationSec: Math.max(0.1, segment.end - segment.start),
+              approxMaxWordsAtNaturalSpeech: Math.max(1, Math.round((segment.end - segment.start) * 2.6)),
               text: segment.text,
             })),
           }),
@@ -3807,6 +3985,15 @@ export async function generateYoutubeWeeklyPlan(userId: number) {
     .slice(0, Math.max(1, preferredPostsPerWeek))
     .map((item) => item.day);
   const tagEvidence = buildYoutubeTagEvidenceSummary(recentVideos, competitors, performanceSignals);
+  const outputLanguage = inferOutputLanguage({
+    title: asString(profile.channelName),
+    description: asString(profile.channelDescription),
+    recentVideos: recentVideos.slice(0, 12).map((video: JsonRecord) => ({
+      title: asString(video.title),
+      description: asString(video.description),
+      tags: asArray(video.tags).map((tag) => String(tag)).filter(Boolean),
+    })),
+  });
   const context = {
     profile,
     channelProfile: profile,
@@ -3832,6 +4019,7 @@ export async function generateYoutubeWeeklyPlan(userId: number) {
     startDate,
     endDate,
     preferredPostsPerWeek,
+    outputLanguage: outputLanguage.label,
   };
 
   const completion = await openai.chat.completions.create({
@@ -3851,6 +4039,11 @@ Check trends. Which of the trending topics are actually relevant to this channel
 Now generate. Every idea must trace to at least one of the above signals. If you can't justify an idea with data, don't include it.
 
 IDEA QUALITY RULES:
+
+${YOUTUBE_CREATOR_GROWTH_PLAYBOOK_RULES}
+
+OUTPUT LANGUAGE RULE:
+- ${outputLanguage.instruction}
 
 Titles, descriptions, tags, and thumbnail ideas must sound like this creator wrote them. Infer their language from recent video titles/descriptions/tags: repeated phrases, tone, word choice, audience address, punctuation, and how they frame value.
 Use the nicheProfile and competitor/top-performer examples to make the package feel native to this content category, not generic YouTube advice.
@@ -3991,6 +4184,15 @@ export async function improveYoutubeIdea(userId: number, idea: { title?: string;
     [],
   );
   const tagEvidence = buildYoutubeTagEvidenceSummary(recentVideos, competitors, performanceSignals);
+  const outputLanguage = inferOutputLanguage({
+    title: asString(profile.channelName),
+    description: asString(profile.channelDescription),
+    recentVideos: recentVideos.slice(0, 12).map((video: JsonRecord) => ({
+      title: asString(video.title),
+      description: asString(video.description),
+      tags: asArray(video.tags).map((tag) => String(tag)).filter(Boolean),
+    })),
+  });
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
@@ -3999,6 +4201,11 @@ export async function improveYoutubeIdea(userId: number, idea: { title?: string;
         content: `You are a YouTube content strategist helping a creator sharpen one specific idea they came up with.
 Your job is NOT to replace their idea with something generic. Your job is to make their specific idea stronger — better title, clearer hook, more search-targeted, more thumbnail-friendly — while staying true to what they were going for.
 Rules:
+
+${YOUTUBE_CREATOR_GROWTH_PLAYBOOK_RULES}
+
+OUTPUT LANGUAGE RULE:
+- ${outputLanguage.instruction}
 
 Use the creator's own language. Infer it from their previous published video titles, descriptions, and tags: tone, recurring words, audience address, pacing, punctuation, and promise style.
 Use the niche profile and competitor/top-performer examples to make the idea likely to perform in this content category.
@@ -4170,6 +4377,11 @@ export async function generateYoutubeIdeaThumbnail(
     preserveUploadedImage,
     sourceImageKind: sourceImages.length ? "user_uploaded" : null,
     analysisNotes: growthThumbnailNotes,
+    outputLanguage: inferOutputLanguage({
+      title: normalizedDay.contentIdea,
+      description: normalizedDay.descriptionSuggestion,
+      tags: asArray(normalizedDay.tags).map((item) => String(item)).filter(Boolean),
+    }).label,
   });
   if (!prompt) throw new Error("Thumbnail prompt generation failed");
 
@@ -4228,6 +4440,11 @@ export async function generateYoutubeAuditThumbnail(
     sourceImageKind,
     stylePreference: asString(input.stylePreference)?.trim() || null,
     analysisNotes: asString(input.analysisNotes)?.trim() || null,
+    outputLanguage: inferOutputLanguage({
+      title: input.title,
+      description: input.description,
+      tags: Array.isArray(input.tags) ? input.tags.map((item) => String(item)).filter(Boolean).slice(0, 12) : [],
+    }).label,
   });
   if (!prompt) throw new Error("Thumbnail prompt generation failed");
 
@@ -4281,6 +4498,20 @@ export async function regenerateYoutubePlanIdea(userId: number, planId: number, 
       targetKeyword: asString(item.targetKeyword),
     }))
     .filter((item) => item.title || item.targetKeyword);
+  const outputLanguage = inferOutputLanguage({
+    title: asString(profile.channelName),
+    description: asString(profile.channelDescription),
+    recentVideos: Array.isArray(profile.recentVideos)
+      ? profile.recentVideos.slice(0, 12).map((video: unknown) => {
+          const item = asRecord(video);
+          return {
+            title: asString(item.title),
+            description: asString(item.description),
+            tags: asArray(item.tags).map((tag) => String(tag)).filter(Boolean),
+          };
+        })
+      : [],
+  });
 
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
@@ -4290,6 +4521,11 @@ export async function regenerateYoutubePlanIdea(userId: number, planId: number, 
         content: `You are a YouTube content strategist replacing one planned video idea with something better.
 The creator rejected the previous idea for this slot. Your job is to generate a genuinely different concept — not a rephrased version of the same idea.
 Rules:
+
+${YOUTUBE_CREATOR_GROWTH_PLAYBOOK_RULES}
+
+OUTPUT LANGUAGE RULE:
+- ${outputLanguage.instruction}
 
 Check the ideaFeedbackSummary. If the rejected idea matches a pattern of previously disliked or deleted ideas, explicitly steer away from that direction.
 Look at siblingIdeas (other videos planned this week). The new idea must not overlap in topic or format with any sibling.

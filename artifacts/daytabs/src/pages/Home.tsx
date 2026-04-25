@@ -39,39 +39,15 @@ import {
   PanelCard,
   PanelCardSoft,
 } from "@/components/panel-system";
+import { useDayTabsI18n, type DayTabsLocale } from "@/lib/i18n";
 
 const TABS = [
-  { id: "dashboard", label: "Home", icon: LayoutDashboard, desc: "Overview" },
-  {
-    id: "video-analyzer",
-    label: "Video Analyzer",
-    icon: Wand2,
-    desc: "Full Analysis",
-  },
-  {
-    id: "script-planner",
-    label: "Script Planner",
-    icon: Clapperboard,
-    desc: "AI Scripts",
-  },
-  {
-    id: "growth-planner",
-    label: "YouTube Growth",
-    icon: CalendarDays,
-    desc: "Studio",
-  },
-  {
-    id: "youtube-audit",
-    label: "YouTube Audit",
-    icon: Youtube,
-    desc: "Studio",
-  },
-  {
-    id: "teleprompter",
-    label: "Teleprompter",
-    icon: MonitorPlay,
-    desc: "Read Live",
-  },
+  { id: "dashboard", icon: LayoutDashboard },
+  { id: "video-analyzer", icon: Wand2 },
+  { id: "script-planner", icon: Clapperboard },
+  { id: "growth-planner", icon: CalendarDays },
+  { id: "youtube-audit", icon: Youtube },
+  { id: "teleprompter", icon: MonitorPlay },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -107,6 +83,7 @@ function NotificationBell({
 }: {
   onOpenGrowthPlanner: () => void;
 }) {
+  const { copy } = useDayTabsI18n();
   const [open, setOpen] = useState(false);
   const [counts, setCounts] = useState(() =>
     getGrowthPlannerNotificationCounts(),
@@ -141,7 +118,7 @@ function NotificationBell({
         type="button"
         onClick={() => setOpen((value) => !value)}
         className="panel-card-soft panel-hover relative flex h-10 w-10 items-center justify-center text-white/55 hover:text-white"
-        aria-label="Notifications"
+        aria-label={copy.notifications.button}
       >
         <Bell className="w-5 h-5" />
         {total > 0 && (
@@ -153,22 +130,22 @@ function NotificationBell({
       {open && (
         <div className="panel-card absolute right-0 z-50 mt-3 w-80 max-w-[calc(100vw-2rem)] p-4">
           <div className="flex items-center justify-between gap-3 mb-3">
-            <p className="text-sm font-semibold text-white">Notifications</p>
+            <p className="text-sm font-semibold text-white">{copy.notifications.title}</p>
             {total > 0 && (
-              <span className="text-xs text-amber-200">{total} active</span>
+              <span className="text-xs text-amber-200">{total} {copy.notifications.active}</span>
             )}
           </div>
           {total === 0 ? (
             <p className="text-sm text-white/45">
-              No scheduled posts need attention right now.
+              {copy.notifications.empty}
             </p>
           ) : (
             <div className="space-y-2">
               {counts.today > 0 && (
                 <NotificationGroup
                   type="today"
-                  title={`${counts.today} post${counts.today === 1 ? "" : "s"} should be posted today.`}
-                  helper="Click to see which cards are due."
+                  title={copy.notifications.dueToday(counts.today)}
+                  helper={copy.notifications.dueTodayHelper}
                   expanded={expandedType === "today"}
                   items={notifications.filter((item) => item.type === "today")}
                   onToggle={() =>
@@ -190,8 +167,8 @@ function NotificationBell({
               {counts.overdue > 0 && (
                 <NotificationGroup
                   type="overdue"
-                  title={`${counts.overdue} overdue post${counts.overdue === 1 ? "" : "s"} need an update.`}
-                  helper="Click to see which cards need a posted URL or skipped status."
+                  title={copy.notifications.overdue(counts.overdue)}
+                  helper={copy.notifications.overdueHelper}
                   expanded={expandedType === "overdue"}
                   items={notifications.filter(
                     (item) => item.type === "overdue",
@@ -340,6 +317,7 @@ function Dashboard({
   onNavigate: (tab: TabId) => void;
   onUpgrade: () => void;
 }) {
+  const { copy } = useDayTabsI18n();
   const { user } = useUser();
   const { plan, getModeLimits, getScriptPlannerLimits } = usePlan();
   const norm = plan.normalizedPlan;
@@ -358,8 +336,8 @@ function Dashboard({
     <PanelPage className="max-w-7xl space-y-8">
       <PanelHeader className="md:block">
         <div>
-          <PanelTitle>Welcome back, {firstName}</PanelTitle>
-          <PanelSubtitle>Here's what's ready for you today.</PanelSubtitle>
+          <PanelTitle>{copy.dashboard.welcome(firstName)}</PanelTitle>
+          <PanelSubtitle>{copy.dashboard.subtitle}</PanelSubtitle>
         </div>
       </PanelHeader>
       <PanelCard className="p-4 sm:p-5">
@@ -372,22 +350,22 @@ function Dashboard({
             </div>
             <div className="grid grid-cols-2 gap-3 sm:hidden">
               <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
-                <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">Used</p>
+                <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">{copy.dashboard.used}</p>
                 <p className="mt-2 text-2xl font-semibold text-white">{used}</p>
-                <p className="mt-1 text-xs text-white/35">of {total} this month</p>
+                <p className="mt-1 text-xs text-white/35">of {total} {copy.dashboard.thisMonth}</p>
               </div>
               <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
-                <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">Remaining</p>
+                <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">{copy.dashboard.remaining}</p>
                 <p className={`mt-2 text-2xl font-semibold ${remaining === 0 ? "text-red-400" : remaining <= 3 ? "text-amber-300" : "text-primary"}`}>{remaining}</p>
-                <p className="mt-1 text-xs text-white/35">analyses left</p>
+                <p className="mt-1 text-xs text-white/35">{copy.dashboard.analysesLeft}</p>
               </div>
             </div>
             <div className="hidden items-center gap-3 sm:flex">
               <p className="text-xs text-white/40">
-                {used} of {total} monthly usage used
+                {copy.dashboard.monthlyUsageUsed(used, total)}
               </p>
               <span className="text-white/20">•</span>
-              <p className="text-xs text-white/40">{remaining} remaining</p>
+              <p className="text-xs text-white/40">{copy.dashboard.remainingInline(remaining)}</p>
             </div>
           </div>
           {!plan.isPaid && (
@@ -395,13 +373,13 @@ function Dashboard({
               onClick={onUpgrade}
               className="w-full rounded-xl border border-primary/30 bg-primary/14 px-3 py-2 text-sm font-semibold text-primary transition-all hover:bg-primary/20 sm:w-auto sm:rounded-lg sm:px-3 sm:py-1.5 sm:text-xs"
             >
-              Upgrade
+              {copy.dashboard.upgrade}
             </button>
           )}
         </div>
         <div className="mt-4">
           <div className="flex items-center justify-between gap-3 text-xs text-white/40">
-            <p>Monthly usage progress</p>
+            <p>{copy.dashboard.monthlyUsageProgress}</p>
             <p>{Math.max(0, Math.min(100, Math.round((used / total) * 100)))}%</p>
           </div>
           <div className="mt-2 h-2.5 overflow-hidden rounded-full bg-white/8">
@@ -411,76 +389,76 @@ function Dashboard({
             />
           </div>
           <p className="mt-3 text-xs leading-5 text-white/35">
-            Up to {limits.analysesLimit} video analyses each month. Longer videos may use more of your monthly usage.
+            {copy.dashboard.monthlyLimitNote(limits.analysesLimit)}
           </p>
         </div>
       </PanelCard>
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard label="Usage used" value={used} sublabel="this month" />
+        <StatCard label={copy.dashboard.statUsageUsed} value={used} sublabel={copy.dashboard.thisMonth} />
         <StatCard
-          label="Usage left"
+          label={copy.dashboard.statUsageLeft}
           value={remaining}
-          sublabel="this month"
+          sublabel={copy.dashboard.thisMonth}
           color={remaining === 0 ? "text-red-400" : "text-primary"}
         />
         <StatCard
-          label="Script generations"
+          label={copy.dashboard.statScriptGenerations}
           value={spLimits.generationsUsed}
-          sublabel={`of ${spChatLimit} this month`}
+          sublabel={`of ${spChatLimit} ${copy.dashboard.thisMonth}`}
         />
         <StatCard
-          label="Max duration"
+          label={copy.dashboard.statMaxDuration}
           value={getDurationLimitLabel(norm)}
-          sublabel="per video"
+          sublabel={copy.dashboard.perVideo}
         />
       </div>
       <div>
         <p className="text-xs text-white/40 uppercase tracking-wider mb-4">
-          Quick Actions
+          {copy.dashboard.quickActions}
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
           <QuickActionCard
             icon={Wand2}
-            title="Analyze a Video"
-            desc="Quality, editing, and publish insights"
+            title={copy.dashboard.actions.analyze.title}
+            desc={copy.dashboard.actions.analyze.desc}
             color="bg-primary/15 border border-primary/20 text-primary"
             onClick={() => onNavigate("video-analyzer")}
           />
           <QuickActionCard
             icon={Clapperboard}
-            title="Plan a Script"
-            desc="AI-powered script and shot planning"
+            title={copy.dashboard.actions.script.title}
+            desc={copy.dashboard.actions.script.desc}
             color="bg-blue-500/15 border border-blue-500/20 text-blue-400"
             onClick={() => onNavigate("script-planner")}
           />
           <QuickActionCard
             icon={MonitorPlay}
-            title="Use Teleprompter"
-            desc="Read your script live on screen"
+            title={copy.dashboard.actions.teleprompter.title}
+            desc={copy.dashboard.actions.teleprompter.desc}
             color="bg-emerald-500/15 border border-emerald-500/20 text-emerald-400"
             onClick={() => onNavigate("teleprompter")}
           />
           <QuickActionCard
             icon={CalendarDays}
-            title="Build Growth Calendar"
-            desc="Studio social strategy and weekly plans"
+            title={copy.dashboard.actions.growth.title}
+            desc={copy.dashboard.actions.growth.desc}
             color="bg-pink-500/15 border border-pink-500/20 text-pink-400"
             onClick={() => onNavigate("growth-planner")}
-            badge={!plan.isStudio ? "Studio" : undefined}
+            badge={!plan.isStudio ? copy.dashboard.actions.growth.badge : undefined}
           />
           <QuickActionCard
             icon={Youtube}
-            title="Audit a YouTube Video"
-            desc="Paste a URL and compare it to stronger competitors"
+            title={copy.dashboard.actions.audit.title}
+            desc={copy.dashboard.actions.audit.desc}
             color="bg-red-500/15 border border-red-500/20 text-red-300"
             onClick={() => onNavigate("youtube-audit")}
-            badge={!plan.isStudio ? "Studio" : undefined}
+            badge={!plan.isStudio ? copy.dashboard.actions.audit.badge : undefined}
           />
           {!plan.isPaid && (
             <QuickActionCard
               icon={Zap}
-              title="Upgrade Your Plan"
-              desc="Unlock more analyses and features"
+              title={copy.dashboard.actions.upgrade.title}
+              desc={copy.dashboard.actions.upgrade.desc}
               color="bg-pink-500/15 border border-pink-500/20 text-pink-400"
               onClick={onUpgrade}
             />
@@ -489,24 +467,24 @@ function Dashboard({
       </div>
       <PanelCardSoft className="p-5">
         <p className="text-xs text-white/40 uppercase tracking-wider mb-3">
-          What DayTabs can do
+          {copy.dashboard.capabilities}
         </p>
         <div className="grid sm:grid-cols-2 gap-3">
           {[
             {
               icon: Video,
-              label: "Video Quality Analysis",
-              desc: "Lighting, audio, framing, and pacing scores",
+              label: copy.dashboard.features.quality.label,
+              desc: copy.dashboard.features.quality.desc,
             },
             {
               icon: FileText,
-              label: "Editing Suggestions",
-              desc: "Hook moments, cut points, and B-roll cues",
+              label: copy.dashboard.features.editing.label,
+              desc: copy.dashboard.features.editing.desc,
             },
             {
               icon: TrendingUp,
-              label: "Publish Package",
-              desc: "Optimized titles, descriptions, and tags",
+              label: copy.dashboard.features.publish.label,
+              desc: copy.dashboard.features.publish.desc,
               locked: !plan.isPaid,
             },
           ].map((feat, i) => (
@@ -538,6 +516,7 @@ function Dashboard({
 }
 
 export default function Home() {
+  const { locale, setLocale, copy } = useDayTabsI18n();
   const [activeTab, setActiveTab] = useState<TabId>(() => getTabFromUrl());
   const [activeTabHasData, setActiveTabHasData] = useState(false);
   const [showPlanModal, setShowPlanModal] = useState(false);
@@ -607,6 +586,17 @@ export default function Home() {
             </span>
           </div>
           <div className="flex items-center gap-3">
+            <label className="hidden items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs text-white/60 sm:flex">
+              <span>{copy.languageLabel}</span>
+              <select
+                value={locale}
+                onChange={(event) => setLocale(event.target.value as DayTabsLocale)}
+                className="bg-transparent text-white outline-none"
+              >
+                <option value="en" className="bg-slate-950">English</option>
+                <option value="tr" className="bg-slate-950">Turkce</option>
+              </select>
+            </label>
             <NotificationBell
               onOpenGrowthPlanner={() => handleTabClick("growth-planner")}
             />
@@ -620,6 +610,7 @@ export default function Home() {
             {TABS.map((tab) => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
+              const tabCopy = copy.tabs[tab.id];
               return (
                 <button
                   key={tab.id}
@@ -631,11 +622,11 @@ export default function Home() {
                   }`}
                 >
                   <Icon className="w-4 h-4" />
-                  {tab.label}
+                  {tabCopy.label}
                   <span
                     className={`hidden sm:block text-xs font-normal ${isActive ? "text-primary/70" : "text-white/30"}`}
                   >
-                    {tab.desc}
+                    {tabCopy.desc}
                   </span>
                 </button>
               );

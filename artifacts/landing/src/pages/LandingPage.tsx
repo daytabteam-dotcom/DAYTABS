@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import Navbar from "../components/Navbar";
 import { blogPosts } from "../data/blogPosts";
+import { useLandingI18n } from "@/lib/i18n";
 
 function FadeIn({ children, delay = 0, className = "" }: { children: React.ReactNode; delay?: number; className?: string }) {
   const ref = useRef(null);
@@ -282,6 +283,7 @@ const softwareSchema = {
 };
 
 export default function LandingPage() {
+  const { copy } = useLandingI18n();
   const [, navigate] = useLocation();
   const firstPost = blogPosts[0];
 
@@ -360,7 +362,7 @@ export default function LandingPage() {
             className="inline-flex items-center gap-2 glass rounded-full px-4 py-2 text-sm text-violet-300 mb-8 border border-violet-500/20"
           >
             <Sparkles className="w-4 h-4" aria-hidden="true" />
-            AI-Powered Video Analysis Platform
+            {copy.hero.badge}
           </motion.div>
 
           <motion.h1
@@ -369,8 +371,8 @@ export default function LandingPage() {
             transition={{ duration: 0.7, delay: 0.1 }}
             className="text-5xl md:text-7xl font-bold leading-tight mb-6"
           >
-            DayTabs AI Video Analysis for{" "}
-            <span className="gradient-text">Content Creators</span>
+            {copy.hero.titleLead}{" "}
+            <span className="gradient-text">{copy.hero.titleAccent}</span>
           </motion.h1>
 
           <motion.p
@@ -379,8 +381,7 @@ export default function LandingPage() {
             transition={{ duration: 0.7, delay: 0.2 }}
             className="text-lg md:text-xl text-white/60 max-w-2xl mx-auto mb-10"
           >
-            DayTabs gives YouTube, TikTok, and Instagram creators AI video analysis, YouTube SEO help,
-            title and tag suggestions, short clip ideas, and content planning in one workflow.
+            {copy.hero.description}
           </motion.p>
 
           <motion.div
@@ -394,7 +395,7 @@ export default function LandingPage() {
               className="px-8 py-4 text-base font-semibold bg-gradient-to-r from-violet-600 to-purple-500 text-white rounded-2xl hover:from-violet-500 hover:to-purple-400 transition-all shadow-xl shadow-violet-500/30 purple-glow cursor-pointer"
               data-testid="button-hero-cta"
             >
-              Get Started Free
+              {copy.hero.primaryCta}
             </button>
             <button
               onClick={() => document.querySelector("#how-it-works")?.scrollIntoView({ behavior: "smooth" })}
@@ -402,7 +403,7 @@ export default function LandingPage() {
               data-testid="button-hero-how"
             >
               <Play className="w-4 h-4" aria-hidden="true" />
-              See How It Works
+              {copy.hero.secondaryCta}
             </button>
           </motion.div>
 
@@ -436,32 +437,34 @@ export default function LandingPage() {
         <div className="max-w-6xl mx-auto">
           <FadeIn className="text-center mb-16">
             <h2 className="text-4xl md:text-5xl font-bold mb-4">
-              How <span className="gradient-text">DayTabs Works</span>
+              {copy.howItWorks.titleLead} <span className="gradient-text">{copy.howItWorks.titleAccent}</span>
             </h2>
             <p className="text-white/50 text-lg max-w-2xl mx-auto">
-              From upload to insight in three simple steps.{" "}
+              {copy.howItWorks.subtitle}{" "}
               <button
                 onClick={() => document.querySelector("#how-it-works")?.scrollIntoView({ behavior: "smooth" })}
                 className="text-violet-400 hover:text-violet-300 transition-colors cursor-pointer"
               >
-                How it works →
+                {copy.howItWorks.link}
               </button>
             </p>
           </FadeIn>
 
           <div className="grid md:grid-cols-3 gap-8">
-            {steps.map((step, i) => (
+            {steps.map((step, i) => {
+              const localized = copy.howItWorks.steps[i] ?? copy.howItWorks.steps[0];
+              return (
               <FadeIn key={i} delay={i * 0.15}>
                 <div className="glass rounded-3xl p-8 border border-white/8 card-glow transition-all h-full flex flex-col">
                   <div className="text-5xl font-black gradient-text opacity-30 mb-4">{step.num}</div>
                   {step.visual}
                   <div className="mt-6">
-                    <h3 className="text-xl font-bold mb-2">{step.title}</h3>
-                    <p className="text-white/50 text-sm leading-relaxed">{step.desc}</p>
+                    <h3 className="text-xl font-bold mb-2">{localized.title}</h3>
+                    <p className="text-white/50 text-sm leading-relaxed">{localized.desc}</p>
                   </div>
                 </div>
               </FadeIn>
-            ))}
+            );})}
           </div>
         </div>
       </section>
@@ -474,10 +477,10 @@ export default function LandingPage() {
         <div className="max-w-6xl mx-auto">
           <FadeIn className="text-center mb-16">
             <h2 className="text-4xl md:text-5xl font-bold mb-4">
-              Advanced <span className="gradient-text">Capabilities</span>
+              {copy.advanced.titleLead} <span className="gradient-text">{copy.advanced.titleAccent}</span>
             </h2>
             <p className="text-white/50 text-lg max-w-2xl mx-auto">
-              Go beyond analysis with trend-aware planning and publishing support
+              {copy.advanced.subtitle}
             </p>
           </FadeIn>
 
@@ -491,7 +494,9 @@ export default function LandingPage() {
                   { icon: "📝", title: "Transcript Generation", desc: "Full speech-to-text with timestamps, perfect for captions and subtitles." },
                   { icon: "📈", title: "Growth Planner", desc: "Build weekly content calendars from niche trends, profile signals, and platform cadence." },
                   { icon: "🎯", title: "Competitor Insights", desc: "Spot real accounts and formats worth learning from before planning your next posts." },
-                ].map((item, i) => (
+                ].map((item, i) => {
+                  const localized = copy.advanced.cards[i] ?? copy.advanced.cards[0];
+                  return (
                   <motion.div
                     key={i}
                     initial={{ opacity: 0, x: 20 }}
@@ -502,11 +507,11 @@ export default function LandingPage() {
                   >
                     <div className="text-2xl" aria-hidden="true">{item.icon}</div>
                     <div>
-                      <h3 className="font-semibold mb-1">{item.title}</h3>
-                      <p className="text-sm text-white/50">{item.desc}</p>
+                      <h3 className="font-semibold mb-1">{localized.title}</h3>
+                      <p className="text-sm text-white/50">{localized.desc}</p>
                     </div>
                   </motion.div>
-                ))}
+                );})}
               </div>
             </FadeIn>
           </div>
@@ -518,30 +523,31 @@ export default function LandingPage() {
         <div className="max-w-6xl mx-auto">
           <FadeIn className="text-center mb-16">
             <h2 className="text-4xl md:text-5xl font-bold mb-4">
-              Everything You Need to{" "}
-              <span className="gradient-text">Grow Your Channel</span>
+              {copy.featuresSection.titleLead}{" "}
+              <span className="gradient-text">{copy.featuresSection.titleAccent}</span>
             </h2>
             <p className="text-white/50 text-lg max-w-2xl mx-auto">
-              A complete toolkit for serious YouTube, TikTok, and Instagram creators, with AI video analysis,
-              YouTube SEO guidance, title and tag suggestions, and content planning built into one dashboard.{" "}
+              {copy.featuresSection.subtitle}{" "}
               <button onClick={() => navigate("/pricing")} className="text-violet-400 hover:text-violet-300 transition-colors cursor-pointer">
-                See all features →
+                {copy.featuresSection.link}
               </button>
             </p>
           </FadeIn>
 
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {features.map((f, i) => (
+            {features.map((f, i) => {
+              const localized = copy.featuresSection.features[i] ?? copy.featuresSection.features[0];
+              return (
               <FadeIn key={i} delay={i * 0.08}>
                 <div className="glass rounded-2xl p-6 border border-white/8 card-glow transition-all h-full group">
                   <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${f.color} flex items-center justify-center mb-4 shadow-lg`}>
                     <f.icon className="w-6 h-6 text-white" aria-hidden="true" />
                   </div>
-                  <h3 className="font-bold text-lg mb-2 group-hover:text-violet-300 transition-colors">{f.title}</h3>
-                  <p className="text-sm text-white/50 leading-relaxed">{f.desc}</p>
+                  <h3 className="font-bold text-lg mb-2 group-hover:text-violet-300 transition-colors">{localized.title}</h3>
+                  <p className="text-sm text-white/50 leading-relaxed">{localized.desc}</p>
                 </div>
               </FadeIn>
-            ))}
+            );})}
           </div>
         </div>
       </section>
@@ -550,11 +556,10 @@ export default function LandingPage() {
         <div className="max-w-5xl mx-auto">
           <FadeIn className="text-center mb-12">
             <h2 className="text-4xl md:text-5xl font-bold mb-4">
-              What You <span className="gradient-text">Receive</span>
+              {copy.receive.titleLead} <span className="gradient-text">{copy.receive.titleAccent}</span>
             </h2>
             <p className="text-white/50 text-lg max-w-2xl mx-auto">
-              DayTabs is a web-based subscription product for creators who want visible, actionable AI video analysis,
-              publish-ready title and tag suggestions, and ongoing content planning help.
+              {copy.receive.subtitle}
             </p>
           </FadeIn>
 
@@ -572,14 +577,16 @@ export default function LandingPage() {
                 title: "Monthly usage limits by plan",
                 desc: "Each subscription clearly states how many videos you can analyze, your file-size limits, duration limits, and planning capacity.",
               },
-            ].map((item, i) => (
+            ].map((item, i) => {
+              const localized = copy.receive.cards[i] ?? copy.receive.cards[0];
+              return (
               <FadeIn key={item.title} delay={i * 0.1}>
                 <div className="glass rounded-2xl p-6 border border-white/8 h-full">
-                  <h3 className="text-xl font-semibold mb-3">{item.title}</h3>
-                  <p className="text-sm text-white/55 leading-relaxed">{item.desc}</p>
+                  <h3 className="text-xl font-semibold mb-3">{localized.title}</h3>
+                  <p className="text-sm text-white/55 leading-relaxed">{localized.desc}</p>
                 </div>
               </FadeIn>
-            ))}
+            );})}
           </div>
         </div>
       </section>
@@ -589,11 +596,10 @@ export default function LandingPage() {
         <div className="max-w-4xl mx-auto text-center">
           <FadeIn>
             <h2 className="text-3xl md:text-4xl font-bold mb-4">
-              Built for <span className="gradient-text">Every Platform</span>
+              {copy.platformsSection.titleLead} <span className="gradient-text">{copy.platformsSection.titleAccent}</span>
             </h2>
             <p className="text-white/50 text-lg max-w-2xl mx-auto mb-8">
-              Whether you publish long-form on YouTube or short-form on TikTok, Instagram Reels, LinkedIn, or Twitter,
-              DayTabs adapts AI video analysis, YouTube SEO recommendations, and content planning to each platform in a single report.
+              {copy.platformsSection.subtitle}
             </p>
             <div className="flex flex-wrap items-center justify-center gap-6">
               {platforms.map((p) => (
@@ -611,11 +617,10 @@ export default function LandingPage() {
         <div className="max-w-5xl mx-auto">
           <FadeIn className="text-center mb-12">
             <h2 className="text-4xl md:text-5xl font-bold mb-4">
-              Built Around the <span className="gradient-text">Terms Creators Search For</span>
+              {copy.termsSection.titleLead} <span className="gradient-text">{copy.termsSection.titleAccent}</span>
             </h2>
             <p className="text-white/50 text-lg max-w-3xl mx-auto">
-              If you are looking for AI video analysis, YouTube SEO, title and tag suggestions, or content planning for
-              YouTube, TikTok, and Instagram creators, DayTabs brings those workflows together in one creator dashboard.
+              {copy.termsSection.subtitle}
             </p>
           </FadeIn>
 
@@ -637,14 +642,16 @@ export default function LandingPage() {
                 title: "Weekly content planning",
                 desc: "Turn performance data, trends, and competitor signals into a weekly content planning workflow you can publish from.",
               },
-            ].map((item, i) => (
+            ].map((item, i) => {
+              const localized = copy.termsSection.cards[i] ?? copy.termsSection.cards[0];
+              return (
               <FadeIn key={item.title} delay={i * 0.08}>
                 <div className="glass rounded-2xl p-6 border border-white/8 h-full">
-                  <h3 className="text-xl font-semibold mb-3">{item.title}</h3>
-                  <p className="text-sm text-white/55 leading-relaxed">{item.desc}</p>
+                  <h3 className="text-xl font-semibold mb-3">{localized.title}</h3>
+                  <p className="text-sm text-white/55 leading-relaxed">{localized.desc}</p>
                 </div>
               </FadeIn>
-            ))}
+            );})}
           </div>
         </div>
       </section>
@@ -656,12 +663,12 @@ export default function LandingPage() {
             <FadeIn>
               <div className="glass rounded-2xl border border-white/8 p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                 <div>
-                  <p className="text-xs text-violet-400 font-semibold uppercase tracking-wider mb-1">From the blog</p>
+                  <p className="text-xs text-violet-400 font-semibold uppercase tracking-wider mb-1">{copy.blog.eyebrow}</p>
                   <p className="font-semibold text-white/80">{firstPost.title}</p>
                 </div>
                 <Link href={`/blog/${firstPost.slug}`}>
                   <button className="shrink-0 px-5 py-2.5 text-sm font-medium glass text-white rounded-xl border border-violet-500/30 hover:border-violet-500/60 transition-all cursor-pointer whitespace-nowrap">
-                    Read our YouTube SEO guide →
+                    {copy.blog.cta}
                   </button>
                 </Link>
               </div>
@@ -675,14 +682,14 @@ export default function LandingPage() {
         <div className="max-w-3xl mx-auto">
           <FadeIn className="text-center mb-12">
             <h2 className="text-4xl md:text-5xl font-bold mb-4">
-              Frequently Asked <span className="gradient-text">Questions</span>
+              {copy.faq.titleLead} <span className="gradient-text">{copy.faq.titleAccent}</span>
             </h2>
-            <p className="text-white/50 text-lg">Everything you need to know before getting started.</p>
+            <p className="text-white/50 text-lg">{copy.faq.subtitle}</p>
           </FadeIn>
 
           <FadeIn delay={0.1}>
             <div className="flex flex-col gap-3">
-              {faqs.map((item, i) => (
+              {copy.faq.items.map((item, i) => (
                 <FAQItem key={i} q={item.q} a={item.a} />
               ))}
             </div>
@@ -700,11 +707,11 @@ export default function LandingPage() {
             <div className="glass rounded-3xl p-12 border border-violet-500/20 purple-glow">
               <Star className="w-10 h-10 text-violet-400 mx-auto mb-6" aria-hidden="true" />
               <h2 className="text-4xl md:text-5xl font-bold mb-4">
-                Simple, Transparent{" "}
-                <span className="gradient-text">Pricing</span>
+                {copy.finalCta.titleLead}{" "}
+                <span className="gradient-text">{copy.finalCta.titleAccent}</span>
               </h2>
               <p className="text-white/50 text-lg mb-8 max-w-xl mx-auto">
-                Start free. No credit card required. Upgrade only when you're ready to publish more.
+                {copy.finalCta.subtitle}
               </p>
               <div className="flex flex-col sm:flex-row gap-4 justify-center">
                 <button
@@ -712,17 +719,17 @@ export default function LandingPage() {
                   className="px-8 py-4 text-base font-semibold bg-gradient-to-r from-violet-600 to-purple-500 text-white rounded-2xl hover:from-violet-500 hover:to-purple-400 transition-all shadow-xl shadow-violet-500/30 cursor-pointer"
                   data-testid="button-final-cta"
                 >
-                  Sign Up Free
+                  {copy.finalCta.primaryCta}
                 </button>
                 <button
                   onClick={() => navigate("/pricing")}
                   className="px-8 py-4 text-base font-medium glass text-white rounded-2xl border border-white/10 hover:border-violet-500/40 transition-all cursor-pointer"
                 >
-                  View Pricing
+                  {copy.finalCta.secondaryCta}
                 </button>
               </div>
               <div className="mt-6 flex flex-wrap items-center justify-center gap-4 text-sm text-white/40">
-                {["No credit card required", "Free plan available", "Cancel anytime"].map((t) => (
+                {copy.finalCta.bullets.map((t) => (
                   <div key={t} className="flex items-center gap-1.5">
                     <CheckCircle className="w-3.5 h-3.5 text-violet-400" aria-hidden="true" />
                     {t}
@@ -743,14 +750,14 @@ export default function LandingPage() {
             </div>
             <span className="font-semibold text-white/60">DayTabs</span>
           </div>
-          <p>© {new Date().getFullYear()} DayTabs. All rights reserved.</p>
+          <p>{copy.footer.rights(new Date().getFullYear())}</p>
           <div className="flex gap-6">
             <Link href="/blog" className="hover:text-white transition-colors">Blog</Link>
-            <Link href="/pricing" className="hover:text-white transition-colors">Pricing</Link>
-            <Link href="/contact" className="hover:text-white transition-colors">Contact</Link>
-            <Link href="/privacy" className="hover:text-white transition-colors">Privacy Policy</Link>
-            <Link href="/refund-policy" className="hover:text-white transition-colors">Refund Policy</Link>
-            <Link href="/terms" className="hover:text-white transition-colors">Terms</Link>
+            <Link href="/pricing" className="hover:text-white transition-colors">{copy.nav.pricing}</Link>
+            <Link href="/contact" className="hover:text-white transition-colors">{copy.nav.contact}</Link>
+            <Link href="/privacy" className="hover:text-white transition-colors">{copy.footer.privacy}</Link>
+            <Link href="/refund-policy" className="hover:text-white transition-colors">{copy.footer.refund}</Link>
+            <Link href="/terms" className="hover:text-white transition-colors">{copy.footer.terms}</Link>
           </div>
         </div>
       </footer>

@@ -1163,7 +1163,7 @@ export default function YouTubeAuditTab() {
                       </Button>
                     </div>
                     <p className="mt-3 text-xs leading-5 text-white/45">
-                      Translation is meaning-first rather than word-for-word, while keeping the original segment timestamps.
+                      Translation is meaning-first rather than word-for-word, while being compressed when needed to fit the original segment timestamps.
                     </p>
                     <p className="mt-2 text-xs leading-5 text-white/35">
                       If you edit the transcript or timestamps below, existing translations are cleared and the next translation/audio generation will use your updated script.
@@ -1215,7 +1215,7 @@ export default function YouTubeAuditTab() {
                         <audio controls preload="none" src={`/api/analysis/voice-preview/${translationVoice}`} className="h-10 max-w-full" />
                       </div>
                       <p className="mt-3 text-xs leading-5 text-white/45">
-                        The generated audio follows the original segment timeline. If a translated line runs long, the speech is tightened to stay aligned.
+                        The generated audio is forced to the original timeline. If a translated line runs long, the wording is shortened at translation time and the speech is tightened to stay inside the original segment length.
                       </p>
                     </PanelCardSoft>
                   ) : null}
@@ -1224,7 +1224,7 @@ export default function YouTubeAuditTab() {
                     <PanelCardSoft className="p-4">
                       <div className="flex items-center justify-between gap-3">
                         <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">Original script</p>
-                        <span className="text-xs text-white/40">Editable before translation or audio generation</span>
+                        <span className="text-xs text-white/40">Grouped into sentence-style or roughly 10-second sections</span>
                       </div>
                       <div className="mt-4 max-h-[28rem] space-y-3 overflow-y-auto pr-1">
                         {report.transcript.segments.map((segment, index) => (

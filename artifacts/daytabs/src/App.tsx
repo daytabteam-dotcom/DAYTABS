@@ -5,6 +5,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import Home from "./pages/Home";
 import NotFound from "@/pages/not-found";
 import ProtectedRoute from "./components/ProtectedRoute";
+import { DayTabsI18nProvider } from "./lib/i18n";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -29,12 +30,14 @@ function Router() {
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-          <Router />
-        </WouterRouter>
-        <Toaster />
-      </TooltipProvider>
+      <DayTabsI18nProvider>
+        <TooltipProvider>
+          <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+            <Router />
+          </WouterRouter>
+          <Toaster />
+        </TooltipProvider>
+      </DayTabsI18nProvider>
     </QueryClientProvider>
   );
 }

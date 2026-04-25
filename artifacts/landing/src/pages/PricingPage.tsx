@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 import { Helmet } from "react-helmet-async";
 import { Check, Zap, Star, Flame, Building2, Loader2 } from "lucide-react";
 import Navbar from "../components/Navbar";
+import { useLandingI18n } from "@/lib/i18n";
 
 type PlanKey = "free" | "creator" | "pro" | "studio";
 type Feature = { text: string; badge?: string };
@@ -113,6 +114,7 @@ function formatLivePrice(p: LivePrice | undefined): string {
 }
 
 export default function PricingPage() {
+  const { copy } = useLandingI18n();
   const [, navigate] = useLocation();
   const [livePrices, setLivePrices] = useState<Record<string, LivePrice>>({});
   const [pricesLoading, setPricesLoading] = useState(true);
@@ -209,10 +211,10 @@ export default function PricingPage() {
             className="text-center mb-16"
           >
             <h1 className="text-5xl md:text-6xl font-bold mb-4">
-              Simple, <span className="gradient-text">Transparent</span> Pricing
+              {copy.pricing.pageTitleLead} <span className="gradient-text">{copy.pricing.pageTitleAccent}</span> {copy.pricing.pageTitleTail}
             </h1>
             <p className="text-white/50 text-lg max-w-xl mx-auto">
-              Start free, upgrade when you're ready. No hidden fees, cancel anytime.
+              {copy.pricing.subtitle}
             </p>
           </motion.div>
 

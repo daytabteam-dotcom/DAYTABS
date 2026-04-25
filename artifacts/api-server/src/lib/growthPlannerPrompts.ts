@@ -39,6 +39,13 @@ CONTENT STRATEGY RULES:
 - For short-form or vertical ideas, the hook must be concrete enough to use as the exact opening line or on-screen phrase, not just a vague concept.
 - For TikTok, Instagram Reels, and YouTube Shorts ideas, think in first-frame terms: what the viewer sees immediately, what changes in the next second, and why that earns the stop.
 - Do not write vague short-form guidance like "make it punchy" or "open stronger." Say what the creator should literally say or show first.
+- Treat every content idea like a system: one core idea, one clear packaging promise, one opening payoff, and one next action.
+- Do not imply there is a guaranteed viral formula. Optimize for stronger distribution odds through packaging quality, retention structure, and audience fit.
+- For YouTube ideas, treat tags as secondary metadata. Use them narrowly for exact topic phrases, close variants, named entities, products, tools, and obvious misspellings. Never use tag stuffing as the main growth recommendation.
+- For short-form ideas, prioritize immediate clarity: what is this about, why should I care, and what payoff is coming. Open with result, problem, tension, disagreement, transformation, or proof, not greetings or broad setup.
+- For long-form ideas, treat structure as promise fulfillment over time: packaging wins the click, the first 15-30 seconds validates the click, and the rest should keep paying off curiosity through clear sections and proof beats.
+- For YouTube long-form thumbnail directions, insist on one dominant subject and one clear promise. For TikTok/Shorts/Reels visual directions, think in opening-frame and cover terms instead of generic thumbnail language.
+- Use category-native framing when relevant: podcasts need tension or a quotable turn, demos show result first, cooking shows sensory payoff first, art shows transformation or texture, gaming leads with the outcome, and ads lead with pain/result/proof.
 
 REALISM REQUIREMENTS:
 - engagement_estimate must be based on the actual follower count extracted from profileData when available, using typical platform benchmarks: Instagram about 3-5% reach, TikTok about 5-20% reach on trend-tied content, LinkedIn about 2-6% reach, YouTube Shorts about 5-15% reach, X about 1-5% reach.

@@ -117,6 +117,7 @@ async function createAlignedTranslationAudio(
   const concatEntries: string[] = [];
   const tempFiles: string[] = [];
   let cursor = 0;
+  const totalDuration = Math.max(0.1, segments[segments.length - 1]?.end ?? 0);
 
   try {
     for (let index = 0; index < segments.length; index++) {
@@ -143,25 +144,22 @@ async function createAlignedTranslationAudio(
 
       let speechPath = rawPath;
       const speechDuration = await getMediaDuration(rawPath).catch(() => 0);
-      if (speechDuration > slotDuration + 0.05) {
-        const adjustedPath = path.join(tempDir, `speech_adjusted_${index}.mp3`);
-        const speedMultiplier = Math.min(6, Math.max(1.02, speechDuration / slotDuration));
-        await execAsync(`ffmpeg -i "${rawPath}" -filter:a "${buildAtempoFilter(speedMultiplier)}" -q:a 2 "${adjustedPath}" -y`);
-        tempFiles.push(adjustedPath);
-        speechPath = adjustedPath;
+      const exactPath = path.join(tempDir, `speech_exact_${index}.mp3`);
+      if (speechDuration > 0) {
+        const speedMultiplier = speechDuration > slotDuration
+          ? Math.min(12, Math.max(1.02, speechDuration / slotDuration))
+          : 1;
+        const filters = [
+          speedMultiplier > 1 ? buildAtempoFilter(speedMultiplier) : null,
+          `apad=pad_dur=${slotDuration.toFixed(3)}`,
+          `atrim=0:${slotDuration.toFixed(3)}`,
+        ].filter(Boolean).join(",");
+        await execAsync(`ffmpeg -i "${rawPath}" -filter:a "${filters}" -ar 24000 -ac 1 -c:a libmp3lame -q:a 2 "${exactPath}" -y`);
+        tempFiles.push(exactPath);
+        speechPath = exactPath;
       }
 
       concatEntries.push(`file '${speechPath.replace(/'/g, "'\\''")}'`);
-      const finalSpeechDuration = await getMediaDuration(speechPath).catch(() => slotDuration);
-      cursor = segment.start + Math.min(slotDuration, finalSpeechDuration);
-
-      const trailingGap = Math.max(0, segment.end - cursor);
-      if (trailingGap > 0.02) {
-        const trailingSilencePath = path.join(tempDir, `silence_tail_${index}.mp3`);
-        await createSilentMp3(trailingSilencePath, trailingGap);
-        concatEntries.push(`file '${trailingSilencePath.replace(/'/g, "'\\''")}'`);
-        tempFiles.push(trailingSilencePath);
-      }
       cursor = segment.end;
     }
 
@@ -170,7 +168,7 @@ async function createAlignedTranslationAudio(
     tempFiles.push(concatList);
     const outputFilename = `${sanitizeAuditFilenamePart(baseName)}-${voice}-${exportId}.mp3`;
     const outputPath = path.join(auditExportDir, outputFilename);
-    await execAsync(`ffmpeg -f concat -safe 0 -i "${concatList}" -c copy "${outputPath}" -y`);
+    await execAsync(`ffmpeg -f concat -safe 0 -i "${concatList}" -af "apad=pad_dur=${totalDuration.toFixed(3)},atrim=0:${totalDuration.toFixed(3)}" -ar 24000 -ac 1 -c:a libmp3lame -q:a 2 "${outputPath}" -y`);
     return { outputFilename, outputPath };
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
