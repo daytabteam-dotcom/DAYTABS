@@ -1,0 +1,11 @@
+declare module "youtube-transcript/dist/youtube-transcript.esm.js" {
+  export interface YoutubeTranscriptRow {
+    text?: string | null;
+    lang?: string | null;
+  }
+
+  export function fetchTranscript(
+    videoId: string,
+    options?: { lang?: string | null },
+  ): Promise<YoutubeTranscriptRow[]>;
+}

@@ -342,6 +342,148 @@ interface PerformanceSignalSummary {
   }>;
 }
 
+function normalizePerformanceSignalSummary(value: unknown): PerformanceSignalSummary {
+  const record = asRecord(value);
+  const bestPostingTimeRecord = asRecord(record.bestPostingTime);
+  const bestPostingTime = bestPostingTimeRecord.label
+    ? {
+        label: asString(bestPostingTimeRecord.label) || "",
+        averageViews: parseNumber(bestPostingTimeRecord.averageViews),
+        percentAboveChannelAverage: parseNumber(bestPostingTimeRecord.percentAboveChannelAverage),
+        sampleVideos: asArray(bestPostingTimeRecord.sampleVideos).map((item) => {
+          const video = asRecord(item);
+          return {
+            title: asString(video.title) || "",
+            viewCount: parseNumber(video.viewCount),
+            publishedAt: asString(video.publishedAt),
+          };
+        }).filter((item) => item.title),
+      }
+    : null;
+  const bestPostingTimeByDay = asArray(record.bestPostingTimeByDay).map((item) => {
+    const row = asRecord(item);
+    return {
+      day: asString(row.day) || "",
+      slotLabel: asString(row.slotLabel) || "",
+      suggestedTime: asString(row.suggestedTime) || "",
+      averageViews: parseNumber(row.averageViews),
+    };
+  }).filter((item) => item.day && item.suggestedTime);
+  const hookInsightRecord = asRecord(record.hookInsight);
+  const hookInsight = hookInsightRecord.bestType
+    ? {
+        bestType: asString(hookInsightRecord.bestType) || "",
+        averageViews: parseNumber(hookInsightRecord.averageViews),
+        evidenceVideos: asArray(hookInsightRecord.evidenceVideos).map((item) => {
+          const video = asRecord(item);
+          return {
+            title: asString(video.title) || "",
+            viewCount: parseNumber(video.viewCount),
+          };
+        }).filter((item) => item.title),
+        analysis: asString(hookInsightRecord.analysis) || "",
+        nextHookSuggestions: asArray(hookInsightRecord.nextHookSuggestions).map((item) => String(item)).filter(Boolean),
+      }
+    : null;
+  const titleLengthInsightRecord = asRecord(record.titleLengthInsight);
+  const titleLengthInsight = titleLengthInsightRecord.winningBucket
+    ? {
+        winningBucket: asString(titleLengthInsightRecord.winningBucket) || "",
+        min: parseNumber(titleLengthInsightRecord.min),
+        max: parseNumber(titleLengthInsightRecord.max),
+        averageViews: parseNumber(titleLengthInsightRecord.averageViews),
+        percentAboveChannelAverage: parseNumber(titleLengthInsightRecord.percentAboveChannelAverage),
+        topPerformers: asArray(titleLengthInsightRecord.topPerformers).map((item) => {
+          const video = asRecord(item);
+          return {
+            title: asString(video.title) || "",
+            views: parseNumber(video.views),
+            titleLength: parseNumber(video.titleLength),
+          };
+        }).filter((item) => item.title),
+        bottomPerformers: asArray(titleLengthInsightRecord.bottomPerformers).map((item) => {
+          const video = asRecord(item);
+          return {
+            title: asString(video.title) || "",
+            views: parseNumber(video.views),
+            titleLength: parseNumber(video.titleLength),
+          };
+        }).filter((item) => item.title),
+      }
+    : null;
+  const tagInsightRecord = asRecord(record.tagInsight);
+  const subscriberSpikeRecord = asRecord(record.subscriberSpike);
+  const subscriberSpike = subscriberSpikeRecord.date
+    ? {
+        date: asString(subscriberSpikeRecord.date) || "",
+        subscribersNet: parseNumber(subscriberSpikeRecord.subscribersNet),
+        videoTitle: asString(subscriberSpikeRecord.videoTitle) || "",
+        contentType: asString(subscriberSpikeRecord.contentType) || "",
+        hookStyle: asString(subscriberSpikeRecord.hookStyle) || "",
+        implication: asString(subscriberSpikeRecord.implication) || "",
+      }
+    : null;
+  const competitorGapRecord = asRecord(record.competitorGap);
+  const competitorGap = competitorGapRecord.channelName
+    ? {
+        channelName: asString(competitorGapRecord.channelName) || "",
+        averageViews: parseNumber(competitorGapRecord.averageViews),
+        videosPerWeek: asString(competitorGapRecord.videosPerWeek) || "",
+        contentDriver: asString(competitorGapRecord.contentDriver) || "",
+        hookStyle: asString(competitorGapRecord.hookStyle) || "",
+        recommendation: asString(competitorGapRecord.recommendation) || "",
+      }
+    : null;
+  return {
+    bestPostingTime,
+    bestPostingTimeByDay,
+    hookInsight,
+    titleLengthInsight,
+    tagInsight: {
+      topPerformingTags: asArray(tagInsightRecord.topPerformingTags).map((item) => {
+        const tag = asRecord(item);
+        const relativeToMedian = asString(tag.relativeToMedian);
+        const normalizedRelativeToMedian: "above" | "neutral" | "below" =
+          relativeToMedian === "above" || relativeToMedian === "below" ? relativeToMedian : "neutral";
+        return {
+          tag: asString(tag.tag) || "",
+          averageViews: parseNumber(tag.averageViews),
+          relativeToMedian: normalizedRelativeToMedian,
+        };
+      }).filter((item) => item.tag),
+      trendingTags: asArray(tagInsightRecord.trendingTags).map((item) => {
+        const tag = asRecord(item);
+        return {
+          tag: asString(tag.tag) || "",
+          signal: parseNumber(tag.signal),
+          why: asString(tag.why) || "",
+        };
+      }).filter((item) => item.tag),
+    },
+    subscriberSpike,
+    competitorGap,
+    tier1CompetitorPatterns: asArray(record.tier1CompetitorPatterns).map((item) => {
+      const pattern = asRecord(item);
+      return {
+        channelName: asString(pattern.channelName) || "",
+        subscriberCount: parseNumber(pattern.subscriberCount),
+        averageViews: parseNumber(pattern.averageViews),
+        contentType: asString(pattern.contentType) || "",
+        hookStyle: asString(pattern.hookStyle) || "",
+        exampleTitles: asArray(pattern.exampleTitles).map((title) => String(title)).filter(Boolean),
+      };
+    }).filter((item) => item.channelName),
+    linkedVideoPerformance: asArray(record.linkedVideoPerformance).map((item) => {
+      const row = asRecord(item);
+      return {
+        plannedTitle: asString(row.plannedTitle) || "",
+        videoUrl: asString(row.videoUrl) || "",
+        metrics: asRecord(row.metrics),
+      };
+    }).filter((item) => item.plannedTitle || item.videoUrl),
+  };
+}
+
 function getCoreAppPath(): string {
   try {
     const url = new URL(CORE_APP_URL);
@@ -928,9 +1070,19 @@ Use the input image as the base image. Preserve all faces, identities, facial ex
   return openai.images.generate(sharedOptions as Parameters<typeof openai.images.generate>[0]);
 }
 
+function extractGeneratedThumbnailBase64(response: unknown) {
+  const record = asRecord(response);
+  const data = asArray(record.data);
+  for (const item of data) {
+    const base64 = asString(asRecord(item).b64_json)?.trim();
+    if (base64) return base64;
+  }
+  return null;
+}
+
 async function generateYoutubeThumbnailImage(userId: number, prompt: string, sourceImages: string[], preserveUploadedImage: boolean) {
   let usedModel = YOUTUBE_THUMBNAIL_IMAGE_MODEL;
-  let response;
+  let response: unknown;
   try {
     response = await runYoutubeThumbnailImageRequest(usedModel, prompt, sourceImages, preserveUploadedImage);
   } catch (err) {
@@ -938,7 +1090,7 @@ async function generateYoutubeThumbnailImage(userId: number, prompt: string, sou
     usedModel = YOUTUBE_THUMBNAIL_FALLBACK_IMAGE_MODEL;
     response = await runYoutubeThumbnailImageRequest(usedModel, prompt, sourceImages, preserveUploadedImage);
   }
-  const base64 = response.data?.[0]?.b64_json;
+  const base64 = extractGeneratedThumbnailBase64(response);
   if (!base64) {
     throw new Error("Thumbnail generation did not return an image");
   }
@@ -1320,16 +1472,16 @@ function derivePerformanceSignals(
 
   const ownAverageViews = channelAverageViews;
   const tier1CompetitorPatterns = competitors
-    .filter((competitor) => {
+    .filter((competitor: typeof youtubeCompetitorsTable.$inferSelect) => {
       const subscribers = parseNumber(competitor.subscriberCount);
       return ownSubscribers > 0 && subscribers > 0 && subscribers <= ownSubscribers * 5;
     })
-    .map((competitor) => {
+    .map((competitor: typeof youtubeCompetitorsTable.$inferSelect) => {
       const recent = Array.isArray(competitor.mostViewedRecentVideos) ? competitor.mostViewedRecentVideos : [];
       const averageViews = recent.length
-        ? Math.round(recent.reduce((sum, video) => sum + parseNumber(asRecord(video).viewCount), 0) / recent.length)
+        ? Math.round(recent.reduce((sum: number, video: unknown) => sum + parseNumber(asRecord(video).viewCount), 0) / recent.length)
         : 0;
-      const titles = recent.map((video) => asString(asRecord(video).title) || "").filter(Boolean);
+      const titles = recent.map((video: unknown) => asString(asRecord(video).title) || "").filter(Boolean);
       const leadTitle = titles[0] || "";
       return {
         channelName: competitor.channelName,
@@ -1342,10 +1494,10 @@ function derivePerformanceSignals(
     })
     .sort((a, b) => a.subscriberCount - b.subscriberCount || b.averageViews - a.averageViews);
   const competitorGap = competitors
-    .map((competitor) => {
+    .map((competitor: typeof youtubeCompetitorsTable.$inferSelect) => {
       const topVideos = Array.isArray(competitor.mostViewedRecentVideos) ? competitor.mostViewedRecentVideos : [];
       const averageViews = topVideos.length
-        ? Math.round(topVideos.reduce((sum, video) => sum + parseNumber(asRecord(video).viewCount), 0) / topVideos.length)
+        ? Math.round(topVideos.reduce((sum: number, video: unknown) => sum + parseNumber(asRecord(video).viewCount), 0) / topVideos.length)
         : 0;
       const contentDriver = topVideos[0] ? contentTypeFromText(asString(asRecord(topVideos[0]).title) || "") : "educational";
       const hookStyle = topVideos[0] ? hookType(asString(asRecord(topVideos[0]).title) || "") : "Descriptive";
@@ -2090,10 +2242,10 @@ export async function getYoutubeStatus(userId: number) {
     }
   }
 
-  const competitorsMissingImages = competitors.filter((competitor) => competitor.channelId && !competitor.thumbnailUrl);
+  const competitorsMissingImages = competitors.filter((competitor: typeof youtubeCompetitorsTable.$inferSelect) => competitor.channelId && !competitor.thumbnailUrl);
   if (connection && competitorsMissingImages.length) {
     try {
-      const fetchedChannels = await fetchChannelsByIds(userId, competitorsMissingImages.map((competitor) => competitor.channelId || ""));
+      const fetchedChannels = await fetchChannelsByIds(userId, competitorsMissingImages.map((competitor: typeof youtubeCompetitorsTable.$inferSelect) => competitor.channelId || ""));
       const thumbnailEntries: Array<[string, string]> = fetchedChannels.flatMap((item) => {
           const channel = asRecord(item);
           const snippet = asRecord(channel.snippet);
@@ -2112,7 +2264,7 @@ export async function getYoutubeStatus(userId: number) {
           .where(eq(youtubeCompetitorsTable.id, competitor.id));
       }
 
-      competitors = competitors.map((competitor) => ({
+      competitors = competitors.map((competitor: typeof youtubeCompetitorsTable.$inferSelect) => ({
         ...competitor,
         thumbnailUrl: competitor.thumbnailUrl || thumbnailByChannelId.get(competitor.channelId || "") || null,
       }));
@@ -2343,12 +2495,12 @@ async function fetchTranscriptFromTrack(track: JsonRecord, requestHeaders: Recor
 async function fetchYoutubeTranscriptPackageFallback(videoId: string) {
   const rows = await fetchYoutubeTranscriptPackage(videoId, { lang: "en" });
   const segments = rows
-    .map((row) => normalizeYoutubeTranscriptText(String(row.text || "")))
+    .map((row: { text?: string | null; lang?: string | null }) => normalizeYoutubeTranscriptText(String(row.text || "")))
     .filter(Boolean);
   if (!segments.length) return null;
   return {
     source: "auto" as const,
-    language: rows.find((row) => row.lang)?.lang ?? "en",
+    language: rows.find((row: { text?: string | null; lang?: string | null }) => row.lang)?.lang ?? "en",
     text: normalizeYoutubeTranscriptText(segments.join("\n")),
   };
 }
@@ -2928,7 +3080,7 @@ export async function discoverCompetitors(userId: number, profile: typeof youtub
       .where(eq(youtubeCompetitorsTable.userId, userId))
       .orderBy(desc(youtubeCompetitorsTable.fetchedAt));
     if (userSubscribers <= 0) return existingCompetitors.slice(0, 6);
-    const filtered = existingCompetitors.filter((competitor) => {
+    const filtered = existingCompetitors.filter((competitor: typeof youtubeCompetitorsTable.$inferSelect) => {
       const subscribers = parseNumber(competitor.subscriberCount);
       return subscribers > 0 && subscribers <= userSubscribers * 5;
     });
@@ -3027,8 +3179,8 @@ export async function discoverCompetitors(userId: number, profile: typeof youtub
       .where(eq(youtubeCompetitorsTable.userId, userId));
     const existingByChannelId = new Map(
       existingCompetitors
-        .filter((competitor) => competitor.channelId)
-        .map((competitor) => [competitor.channelId, competitor] as const),
+        .filter((competitor: typeof youtubeCompetitorsTable.$inferSelect) => competitor.channelId)
+        .map((competitor: typeof youtubeCompetitorsTable.$inferSelect) => [competitor.channelId, competitor] as const),
     );
     const selectedChannelIds = new Set(
       selected
@@ -3036,11 +3188,11 @@ export async function discoverCompetitors(userId: number, profile: typeof youtub
         .filter((id): id is string => Boolean(id)),
     );
     const staleDiscoveredIds = existingCompetitors
-      .filter((competitor) => {
+      .filter((competitor: typeof youtubeCompetitorsTable.$inferSelect) => {
         const meta = readCompetitorMeta(competitor.niche);
         return meta.source !== "manual" && !selectedChannelIds.has(competitor.channelId);
       })
-      .map((competitor) => competitor.id);
+      .map((competitor: typeof youtubeCompetitorsTable.$inferSelect) => competitor.id);
 
     for (const competitorId of staleDiscoveredIds) {
       await db.delete(youtubeCompetitorsTable).where(eq(youtubeCompetitorsTable.id, competitorId));
@@ -3071,7 +3223,7 @@ export async function discoverCompetitors(userId: number, profile: typeof youtub
       .orderBy(desc(youtubeCompetitorsTable.fetchedAt));
 
     if (userSubscribers <= 0) return savedCompetitors.slice(0, 6);
-    const filtered = savedCompetitors.filter((competitor) => {
+    const filtered = savedCompetitors.filter((competitor: typeof youtubeCompetitorsTable.$inferSelect) => {
       const subscribers = parseNumber(competitor.subscriberCount);
       return subscribers > 0 && subscribers <= userSubscribers * 5;
     });
@@ -3094,7 +3246,7 @@ export async function addYoutubeCompetitorByUrl(userId: number, channelUrl: stri
     .select()
     .from(youtubeCompetitorsTable)
     .where(eq(youtubeCompetitorsTable.userId, userId));
-  const existing = existingCompetitors.find((competitor) => competitor.channelId === channelId) ?? null;
+  const existing = existingCompetitors.find((competitor: typeof youtubeCompetitorsTable.$inferSelect) => competitor.channelId === channelId) ?? null;
   return await upsertYoutubeCompetitor(userId, profile, channelId, {
     source: "manual",
     requestedUrl: channelUrl.trim(),
@@ -3176,9 +3328,9 @@ async function previousPerformanceSummary(userId: number) {
   if (!results.length) return null;
   const [profile] = await db.select().from(youtubeChannelProfilesTable).where(eq(youtubeChannelProfilesTable.userId, userId)).limit(1);
   const plans = await db.select().from(youtubeWeeklyPlansTable).where(eq(youtubeWeeklyPlansTable.userId, userId)).orderBy(desc(youtubeWeeklyPlansTable.weekNumber));
-  const recentVideos = Array.isArray(profile?.recentVideos) ? profile.recentVideos.map((video) => asRecord(video)) : [];
+  const recentVideos = Array.isArray(profile?.recentVideos) ? profile.recentVideos.map((video: unknown) => asRecord(video)) : [];
   const publishedByVideoId = new Map<string, { publishedAt: string | null; publishedDay: string | null }>(
-    recentVideos.flatMap((video) => {
+    recentVideos.flatMap((video: JsonRecord) => {
       const id = asString(video.id);
       const publishedAt = asString(video.publishedAt);
       if (!id) return [];
@@ -3190,10 +3342,10 @@ async function previousPerformanceSummary(userId: number) {
   );
   const ideaFeedbackSummary = await getPersistedIdeaFeedbackSummary(userId, profile, plans);
   const filteredResults: PreviousPerformanceResultPayload[] = results
-    .map((result) => {
+    .map((result: typeof youtubePlanResultsTable.$inferSelect) => {
       const metrics = asRecord(result.metrics);
       const linkedPublish = publishedByVideoId.get(result.videoId);
-      const plan = plans.find((item) => item.id === result.planId);
+      const plan = plans.find((item: typeof youtubeWeeklyPlansTable.$inferSelect) => item.id === result.planId);
       const matchingDay = plan
         ? asPlanDays(asArray(asRecord(plan.plan).days)).find((day) => parsePlanDayIndex(day.day, -1) === result.dayIndex)
         : null;
@@ -3217,8 +3369,8 @@ async function previousPerformanceSummary(userId: number) {
         ideaFeedbackSummary,
       } satisfies PreviousPerformanceResultPayload;
     })
-    .filter((result) => metricsHasLinkedSignal(result.metrics))
-    .sort((a, b) => (b.publishedAt || b.fetchedAt || "").localeCompare(a.publishedAt || a.fetchedAt || ""))
+    .filter((result: PreviousPerformanceResultPayload) => metricsHasLinkedSignal(result.metrics))
+    .sort((a: PreviousPerformanceResultPayload, b: PreviousPerformanceResultPayload) => (b.publishedAt || b.fetchedAt || "").localeCompare(a.publishedAt || a.fetchedAt || ""))
     .slice(0, 30);
   if (!filteredResults.length) return null;
   const ctrAverage = averageMetric(filteredResults, "impressionClickThroughRate");
@@ -3637,7 +3789,7 @@ export async function improveYoutubeIdea(userId: number, idea: { title?: string;
   if (!profile) throw new Error("Connect YouTube before improving ideas");
   const plans = await db.select().from(youtubeWeeklyPlansTable).where(eq(youtubeWeeklyPlansTable.userId, userId)).orderBy(desc(youtubeWeeklyPlansTable.weekNumber));
   const ideaFeedbackSummary = await getPersistedIdeaFeedbackSummary(userId, profile, plans);
-  const recentVideos = Array.isArray(profile.recentVideos) ? profile.recentVideos.map((video) => asRecord(video)) : [];
+  const recentVideos = Array.isArray(profile.recentVideos) ? profile.recentVideos.map((video: unknown) => asRecord(video)) : [];
   const topVideos = [...recentVideos]
     .sort((a, b) => parseNumber(asRecord(b).viewCount) - parseNumber(asRecord(a).viewCount))
     .slice(0, 10)
@@ -3648,7 +3800,7 @@ export async function improveYoutubeIdea(userId: number, idea: { title?: string;
       viewCount: parseNumber(video.viewCount),
       publishedAt: asString(video.publishedAt),
     }));
-  const recentLanguageSamples = recentVideos.slice(0, 12).map((video) => ({
+  const recentLanguageSamples = recentVideos.slice(0, 12).map((video: JsonRecord) => ({
     title: asString(video.title),
     description: asString(video.description)?.slice(0, 500),
     tags: asArray(video.tags).map((tag) => String(tag)).filter(Boolean).slice(0, 10),
@@ -3658,18 +3810,18 @@ export async function improveYoutubeIdea(userId: number, idea: { title?: string;
     .from(youtubeCompetitorsTable)
     .where(eq(youtubeCompetitorsTable.userId, userId))
     .limit(8);
-  const competitorExamples = competitors.map((competitor) => ({
+  const competitorExamples = competitors.map((competitor: typeof youtubeCompetitorsTable.$inferSelect) => ({
     channelName: competitor.channelName,
-    mostViewedRecentVideos: asArray(competitor.mostViewedRecentVideos).map((video) => {
+    mostViewedRecentVideos: asArray(competitor.mostViewedRecentVideos).map((video: unknown) => {
       const item = asRecord(video);
       return {
         title: asString(item.title),
         viewCount: asString(item.viewCount),
       };
-    }).filter((video) => video.title).slice(0, 5),
+    }).filter((video: { title: string | null; viewCount: string | null }) => Boolean(video.title)).slice(0, 5),
   }));
   const performanceSignals = derivePerformanceSignals(
-    recentVideos.map((video) => normalizeVideo(video)),
+    recentVideos.map((video: JsonRecord) => normalizeVideo(video)),
     [],
     [],
     competitors,
@@ -3957,7 +4109,7 @@ export async function regenerateYoutubePlanIdea(userId: number, planId: number, 
 
   const plans = await db.select().from(youtubeWeeklyPlansTable).where(eq(youtubeWeeklyPlansTable.userId, userId)).orderBy(desc(youtubeWeeklyPlansTable.weekNumber));
   const { plan, day } = await updatePlanDay(userId, planId, dayIndex, (existingDay) => existingDay);
-  const latestSignals = asRecord(asRecord(plan.contextSnapshot).performanceSignals);
+  const latestSignals = normalizePerformanceSignalSummary(asRecord(asRecord(plan.contextSnapshot).performanceSignals));
   const ideaFeedbackSummary = await getPersistedIdeaFeedbackSummary(userId, profile, plans);
   const siblingIdeas = asPlanDays(asArray(asRecord(plan.plan).days))
     .filter((item) => parsePlanDayIndex(item.day, -1) !== dayIndex)
@@ -4123,9 +4275,9 @@ export async function savePlanResults(userId: number, planId: number, results: A
     if (seenVideoIds.has(videoId)) throw new Error("One YouTube video cannot be linked to more than one content idea");
     seenVideoIds.add(videoId);
     const videoUrl = result.videoUrl || `https://www.youtube.com/watch?v=${videoId}`;
-    const conflicting = existing.find((row) => row.videoId === videoId && row.dayIndex !== result.dayIndex);
+    const conflicting = existing.find((row: typeof youtubePlanResultsTable.$inferSelect) => row.videoId === videoId && row.dayIndex !== result.dayIndex);
     if (conflicting) throw new Error("One YouTube video cannot be linked to more than one content idea");
-    const match = existing.find((row) => row.dayIndex === result.dayIndex);
+    const match = existing.find((row: typeof youtubePlanResultsTable.$inferSelect) => row.dayIndex === result.dayIndex);
     const now = new Date();
     let row;
     if (match) {
