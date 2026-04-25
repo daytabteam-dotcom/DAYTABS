@@ -51,24 +51,6 @@ const YOUTUBE_CREATOR_GROWTH_PLAYBOOK_RULES = `Creator Growth Playbook for YouTu
 - For Shorts/TikTok covers, think in opening-frame and selected-frame terms. For long-form YouTube, think in true thumbnail terms.
 - Use category logic when evidence supports it: podcasts need tension or a quotable turn, demos show result first, cooking shows sensory payoff first, art shows transformation or texture, gaming leads with the outcome, ads lead with pain/result/proof.
 - If giving feedback or generated ideas, be concrete. Say exactly what should be shown first, said first, cut, moved earlier, or emphasized instead of using generic advice.`;
-const LANGUAGE_CODE_TO_NAME: Record<string, string> = {
-  ar: "Arabic",
-  de: "German",
-  en: "English",
-  es: "Spanish",
-  fr: "French",
-  hi: "Hindi",
-  it: "Italian",
-  ja: "Japanese",
-  ko: "Korean",
-  nl: "Dutch",
-  pt: "Portuguese",
-  ru: "Russian",
-  tr: "Turkish",
-  uk: "Ukrainian",
-  zh: "Simplified Chinese",
-};
-
 export const YOUTUBE_SCOPES = [
   "https://www.googleapis.com/auth/youtube.readonly",
   "https://www.googleapis.com/auth/yt-analytics.readonly",
@@ -80,25 +62,33 @@ function languageNameFromCode(input?: string | null) {
   if (!input) return null;
   const normalized = input.trim().toLowerCase();
   if (!normalized) return null;
-  const direct = LANGUAGE_CODE_TO_NAME[normalized];
-  if (direct) return direct;
   const base = normalized.split(/[-_]/)[0] || normalized;
-  return LANGUAGE_CODE_TO_NAME[base] || null;
+  try {
+    const displayNames = new Intl.DisplayNames(["en"], { type: "language" });
+    const displayName = displayNames.of(base);
+    return displayName && displayName.toLowerCase() !== base ? displayName : base;
+  } catch {
+    return base;
+  }
 }
 
 function detectLanguageNameFromText(sample: string) {
   const text = sample.trim();
   if (!text) return null;
-  if (/[ğĞıİşŞçÇöÖüÜ]/.test(text)) return "Turkish";
   if (/[\u3040-\u30ff]/.test(text)) return "Japanese";
   if (/[\uac00-\ud7af]/.test(text)) return "Korean";
   if (/[\u0600-\u06ff]/.test(text)) return "Arabic";
   if (/[\u0900-\u097f]/.test(text)) return "Hindi";
   if (/[\u4e00-\u9fff]/.test(text)) return "Simplified Chinese";
-  if (/[А-Яа-яЁёІіЇїЄє]/.test(text)) return "Russian";
-  const lower = text.toLowerCase();
-  const turkishHits = [" bir ", " ve ", " ile ", " ama ", " icin ", " nasil ", " video ", " kanali ", " daha "].filter((token) => lower.includes(token)).length;
-  if (turkishHits >= 2) return "Turkish";
+  if (/[А-Яа-яЁёІіЇїЄє]/.test(text)) return "a Cyrillic-script language";
+  if (/[\u0590-\u05ff]/.test(text)) return "Hebrew";
+  if (/[\u0e00-\u0e7f]/.test(text)) return "Thai";
+  if (/[\u0980-\u09ff]/.test(text)) return "Bengali";
+  if (/[\u0a00-\u0a7f]/.test(text)) return "Punjabi";
+  if (/[\u0b80-\u0bff]/.test(text)) return "Tamil";
+  if (/[\u0c00-\u0c7f]/.test(text)) return "Telugu";
+  if (/[\u0c80-\u0cff]/.test(text)) return "Kannada";
+  if (/[\u0d00-\u0d7f]/.test(text)) return "Malayalam";
   return null;
 }
 
@@ -114,7 +104,7 @@ function inferOutputLanguage(options: {
   if (explicit) {
     return {
       label: explicit,
-      instruction: `Write every user-facing output in ${explicit}. Do not translate the response to English. Keep summaries, explanations, titles, descriptions, hooks, tags, thumbnail ideas, and recommendations in ${explicit}.`,
+      instruction: `Write every user-facing output in ${explicit}. Do not translate the response to English. Keep summaries, explanations, titles, descriptions, hooks, tags, thumbnail ideas, and recommendations in ${explicit}. If the source evidence contains mixed languages, follow the main transcript/caption language.`,
     };
   }
 
@@ -129,11 +119,23 @@ function inferOutputLanguage(options: {
       ...(video.tags ?? []),
     ])),
   ].filter(Boolean);
-  const detected = detectLanguageNameFromText(sampleParts.join(" ").slice(0, 6000)) || "English";
+  const sample = sampleParts.join(" ").slice(0, 6000);
+  const detected = detectLanguageNameFromText(sample);
+  if (detected) {
+    return {
+      label: detected,
+      instruction: `Write every user-facing output in ${detected}. Do not translate the response to English. Keep summaries, explanations, titles, descriptions, hooks, tags, thumbnail ideas, and recommendations in the same language used by the source evidence.`,
+    };
+  }
   return {
-    label: detected,
-    instruction: `Write every user-facing output in ${detected}. Do not translate the response to English. Keep summaries, explanations, titles, descriptions, hooks, tags, thumbnail ideas, and recommendations in ${detected}.`,
+    label: "same-as-source",
+    instruction: "Write every user-facing output in the same language used by the source transcript, captions, titles, descriptions, and tags. Do not translate the response to English. Mirror the language that dominates the supplied evidence, even if it is not English or not named explicitly.",
   };
+}
+
+function getChannelDescriptionFromProfile(profile: { nicheProfile?: unknown }) {
+  const nicheProfile = asRecord(profile.nicheProfile);
+  return asString(nicheProfile.channelDescription) || asString(nicheProfile.summary) || "";
 }
 
 export interface YoutubeRecentVideo {
@@ -941,11 +943,16 @@ async function buildYoutubeThumbnailPrompt(
 ) {
   const hasSourceImages = payload.sourceImages.length > 0;
   const shouldPreserveImage = hasSourceImages && payload.preserveUploadedImage;
-  const thumbnailOutputLanguage = payload.outputLanguage || inferOutputLanguage({
+  const inferredThumbnailOutputLanguage = inferOutputLanguage({
     title: payload.title,
     description: payload.description,
     tags: payload.tags,
   }).label;
+  const thumbnailOutputLanguage =
+    payload.outputLanguage ||
+    (inferredThumbnailOutputLanguage === "same-as-source"
+      ? "the same language as the source video metadata and transcript evidence"
+      : inferredThumbnailOutputLanguage);
   const thumbnailStrategyRules = `Thumbnail strategy rules:
 - CORE THUMBNAIL RULE: the thumbnail must communicate exactly ONE idea, through ONE focal subject, triggering ONE clear emotion, and be understandable in under 1 second on mobile.
 - THE ONE RULE: a thumbnail must communicate ONE clear idea in under 1 second.
@@ -3987,7 +3994,7 @@ export async function generateYoutubeWeeklyPlan(userId: number) {
   const tagEvidence = buildYoutubeTagEvidenceSummary(recentVideos, competitors, performanceSignals);
   const outputLanguage = inferOutputLanguage({
     title: asString(profile.channelName),
-    description: asString(profile.channelDescription),
+    description: getChannelDescriptionFromProfile(profile),
     recentVideos: recentVideos.slice(0, 12).map((video: JsonRecord) => ({
       title: asString(video.title),
       description: asString(video.description),
@@ -4186,7 +4193,7 @@ export async function improveYoutubeIdea(userId: number, idea: { title?: string;
   const tagEvidence = buildYoutubeTagEvidenceSummary(recentVideos, competitors, performanceSignals);
   const outputLanguage = inferOutputLanguage({
     title: asString(profile.channelName),
-    description: asString(profile.channelDescription),
+    description: getChannelDescriptionFromProfile(profile),
     recentVideos: recentVideos.slice(0, 12).map((video: JsonRecord) => ({
       title: asString(video.title),
       description: asString(video.description),
@@ -4500,7 +4507,7 @@ export async function regenerateYoutubePlanIdea(userId: number, planId: number, 
     .filter((item) => item.title || item.targetKeyword);
   const outputLanguage = inferOutputLanguage({
     title: asString(profile.channelName),
-    description: asString(profile.channelDescription),
+    description: getChannelDescriptionFromProfile(profile),
     recentVideos: Array.isArray(profile.recentVideos)
       ? profile.recentVideos.slice(0, 12).map((video: unknown) => {
           const item = asRecord(video);
