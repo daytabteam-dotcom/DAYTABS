@@ -2,6 +2,7 @@ import os from "os";
 import { db, analysisJobsTable, usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { logger } from "./lib/logger";
+import { setupYtDlpCookies } from "./lib/ytDlpCookies";
 import {
   claimNextAnalysisJob,
   ensureAnalysisJobQueueColumns,
@@ -27,6 +28,8 @@ const CANONICAL_APP_ORIGIN = (
   process.env.NEXT_PUBLIC_URL ||
   "https://daytabs.com"
 ).replace(/\/$/, "");
+
+setupYtDlpCookies();
 
 function buildVideoAnalyzerReportUrl(jobId: string) {
   const url = new URL("/?tab=video-analyzer", CANONICAL_APP_ORIGIN);

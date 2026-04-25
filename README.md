@@ -118,9 +118,18 @@ Server dependencies needed outside npm:
 
 Optional: authenticated cookies for yt-dlp (helps with IP-based bot checks)
 
-- Create a cookies file (Netscape format) and mount it as a secret at `YTDLP_COOKIES_PATH` (example: `/app/secrets/youtube-cookies.txt`).
 - Do not commit `youtube-cookies.txt` to Git.
-- In Docker images built from this repo, if you mount the file at `/app/secrets/youtube-cookies.txt`, the server will auto-detect it even if you don't set `YTDLP_COOKIES_PATH`.
+
+Two supported ways to provide cookies:
+
+1) **Env var (recommended for most hosts)**
+   - Set `YTDLP_COOKIES_CONTENT` to the full `cookies.txt` content
+   - Set `YTDLP_COOKIES_PATH=/tmp/youtube-cookies.txt`
+   - On server startup, the API will write the file and log `yt-dlp cookies file created from env`
+
+2) **File mount (Docker/Kubernetes)**
+   - Mount a cookies file (Netscape format) at `YTDLP_COOKIES_PATH` (example: `/app/secrets/youtube-cookies.txt`).
+   - In Docker images built from this repo, if you mount the file at `/app/secrets/youtube-cookies.txt`, the server will auto-detect it even if you don't set `YTDLP_COOKIES_PATH`.
 
 For Docker:
 

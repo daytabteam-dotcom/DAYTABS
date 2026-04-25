@@ -3,6 +3,7 @@ import { logger } from "./lib/logger";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { ensureAnalysisJobQueueColumns } from "./lib/analysisJobQueueDb";
+import { setupYtDlpCookies } from "./lib/ytDlpCookies";
 
 /**
  * Apply any pending schema changes that couldn't run via drizzle-kit during the build phase.
@@ -139,6 +140,7 @@ async function runStartupMigrations() {
 
 const PORT = parseInt(process.env.PORT ?? '3000', 10);
 
+setupYtDlpCookies();
 await runStartupMigrations();
 
 const server = app.listen(PORT, '0.0.0.0', () => {
