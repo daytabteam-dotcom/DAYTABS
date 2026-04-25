@@ -651,7 +651,7 @@ function sanitizeSourceImageDataUrls(value: unknown) {
   return asArray(value)
     .map((item) => asString(item)?.trim() || "")
     .filter((item) => {
-      const match = item.match(/^data:image\/(?:jpeg|jpg);base64,(.+)$/i);
+      const match = item.match(/^data:image\/(?:jpeg|jpg|png|webp);base64,(.+)$/i);
       if (!match) return false;
       return Buffer.from(match[1], "base64").byteLength <= YOUTUBE_THUMBNAIL_MAX_BYTES;
     })
@@ -659,8 +659,8 @@ function sanitizeSourceImageDataUrls(value: unknown) {
 }
 
 function dataUrlToImageFile(dataUrl: string, index: number) {
-  const match = dataUrl.match(/^data:(image\/(?:jpeg|jpg));base64,(.+)$/i);
-  if (!match) throw new Error("Source images must be JPG thumbnails under 2 MB");
+  const match = dataUrl.match(/^data:(image\/(?:jpeg|jpg|png|webp));base64,(.+)$/i);
+  if (!match) throw new Error("Source images must be JPG, PNG, or WEBP thumbnails under 2 MB");
   const mimeType = match[1].toLowerCase() === "image/jpg" ? "image/jpeg" : match[1].toLowerCase();
   const buffer = Buffer.from(match[2], "base64");
   if (buffer.byteLength > YOUTUBE_THUMBNAIL_MAX_BYTES) {
@@ -2073,6 +2073,26 @@ async function fetchImageAsBase64(url?: string | null) {
   return buffer.toString("base64");
 }
 
+async function fetchImageAsDataUrl(url?: string | null) {
+  const target = asString(url);
+  if (!target) return null;
+  const response = await fetch(target);
+  if (!response.ok) throw new Error(`Image fetch failed with ${response.status}`);
+  const contentType = response.headers.get("content-type")?.split(";")[0]?.toLowerCase() || "";
+  const inferredType = target.match(/\.(jpe?g|png|webp)(?:[?#]|$)/i)?.[1]?.toLowerCase();
+  const mimeType =
+    contentType.match(/^image\/(?:jpeg|jpg|png|webp)$/)
+      ? contentType.replace("image/jpg", "image/jpeg")
+      : inferredType === "jpg"
+        ? "image/jpeg"
+        : inferredType
+          ? `image/${inferredType}`
+          : "image/jpeg";
+  const buffer = Buffer.from(await response.arrayBuffer());
+  if (buffer.byteLength > YOUTUBE_THUMBNAIL_MAX_BYTES) return null;
+  return `data:${mimeType};base64,${buffer.toString("base64")}`;
+}
+
 function likelyYoutubeFormatFromVideo(video: YoutubeRecentVideo) {
   const durationSec = parseYoutubeIsoDuration(video.duration);
   if (video.url.includes("/shorts/") || durationSec <= 180) return "youtube_shorts";
@@ -2155,11 +2175,94 @@ function extractBalancedJson(source: string, marker: string) {
 
 function normalizeYoutubeTranscriptText(text: string) {
   return text
+    .replace(/<br\s*\/?>/gi, "\n")
     .replace(/\u00a0/g, " ")
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .replace(/[ \t]{2,}/g, " ")
     .trim();
+}
+
+function decodeHtmlEntities(value: string) {
+  return value
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, "\"")
+    .replace(/&apos;/g, "'")
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
+    .replace(/&#x([\da-f]+);/gi, (_, code) => String.fromCharCode(parseInt(code, 16)));
+}
+
+function appendUrlParam(url: string, key: string, value: string | null) {
+  const parsed = new URL(url);
+  if (value == null) parsed.searchParams.delete(key);
+  else parsed.searchParams.set(key, value);
+  return parsed.toString();
+}
+
+function captionTracksFromPlayerResponse(playerResponse: JsonRecord) {
+  return asArray(asRecord(asRecord(playerResponse.captions).playerCaptionsTracklistRenderer).captionTracks)
+    .map((item) => asRecord(item))
+    .filter((item) => asString(item.baseUrl));
+}
+
+function parseTimedTextTrackList(videoId: string, xml: string) {
+  const tracks: JsonRecord[] = [];
+  for (const match of xml.matchAll(/<track\b([^>]*)\/?>/gi)) {
+    const attrs: JsonRecord = {};
+    for (const attr of (match[1] || "").matchAll(/([\w:-]+)="([^"]*)"/g)) {
+      attrs[attr[1]] = decodeHtmlEntities(attr[2]);
+    }
+    const lang = asString(attrs.lang_code);
+    if (!lang) continue;
+    const params = new URLSearchParams({ v: videoId, lang, fmt: "json3" });
+    const name = asString(attrs.name);
+    const kind = asString(attrs.kind);
+    if (name) params.set("name", name);
+    if (kind) params.set("kind", kind);
+    tracks.push({
+      baseUrl: `https://www.youtube.com/api/timedtext?${params.toString()}`,
+      languageCode: lang,
+      kind: kind || null,
+      name,
+    });
+  }
+  return tracks;
+}
+
+function parseTranscriptXml(xml: string) {
+  const segments = [...xml.matchAll(/<text\b[^>]*>([\s\S]*?)<\/text>/gi)]
+    .map((match) => normalizeYoutubeTranscriptText(decodeHtmlEntities(match[1]).replace(/\s+/g, " ")))
+    .filter(Boolean);
+  return segments.length ? normalizeYoutubeTranscriptText(segments.join("\n")) : null;
+}
+
+async function fetchTranscriptFromTrack(track: JsonRecord, requestHeaders: Record<string, string>) {
+  const baseUrl = asString(track.baseUrl);
+  if (!baseUrl) return null;
+  const jsonUrl = appendUrlParam(baseUrl, "fmt", "json3");
+  const jsonResponse = await fetch(jsonUrl, { headers: requestHeaders }).catch(() => null);
+  if (jsonResponse?.ok) {
+    const transcriptJson = asRecord(await jsonResponse.json().catch(() => ({})));
+    const events = asArray(transcriptJson.events).map((item) => asRecord(item));
+    const segments = events
+      .map((event) =>
+        asArray(event.segs)
+          .map((seg) => asString(asRecord(seg).utf8) || "")
+          .join("")
+          .replace(/\s+/g, " ")
+          .trim(),
+      )
+      .filter(Boolean);
+    if (segments.length) return normalizeYoutubeTranscriptText(segments.join("\n"));
+  }
+
+  const xmlUrl = appendUrlParam(baseUrl, "fmt", null);
+  const xmlResponse = await fetch(xmlUrl, { headers: requestHeaders }).catch(() => null);
+  if (!xmlResponse?.ok) return null;
+  return parseTranscriptXml(await xmlResponse.text());
 }
 
 function recommendThumbnailStyle(video: YoutubeRecentVideo, nicheProfile: YoutubeNicheProfile) {
@@ -2180,22 +2283,25 @@ async function fetchPublicYoutubeTranscript(videoId: string) {
   };
 
   let captionTracks: JsonRecord[] = [];
+  let watchHtml = "";
 
   const watchResponse = await fetch(`https://www.youtube.com/watch?v=${videoId}&hl=en`, {
     headers: requestHeaders,
   }).catch(() => null);
   if (watchResponse?.ok) {
-    const html = await watchResponse.text();
-    const playerResponseJson =
-      extractBalancedJson(html, "var ytInitialPlayerResponse = ") ||
-      extractBalancedJson(html, "ytInitialPlayerResponse = ") ||
-      extractBalancedJson(html, "window['ytInitialPlayerResponse'] = ") ||
-      extractBalancedJson(html, "window[\"ytInitialPlayerResponse\"] = ");
-    if (playerResponseJson) {
-      const playerResponse = asRecord(JSON.parse(playerResponseJson));
-      captionTracks = asArray(asRecord(asRecord(playerResponse.captions).playerCaptionsTracklistRenderer).captionTracks)
-        .map((item) => asRecord(item))
-        .filter((item) => asString(item.baseUrl));
+    watchHtml = await watchResponse.text();
+    try {
+      const playerResponseJson =
+        extractBalancedJson(watchHtml, "var ytInitialPlayerResponse = ") ||
+        extractBalancedJson(watchHtml, "ytInitialPlayerResponse = ") ||
+        extractBalancedJson(watchHtml, "window['ytInitialPlayerResponse'] = ") ||
+        extractBalancedJson(watchHtml, "window[\"ytInitialPlayerResponse\"] = ");
+      if (playerResponseJson) {
+        const playerResponse = asRecord(JSON.parse(playerResponseJson));
+        captionTracks = captionTracksFromPlayerResponse(playerResponse);
+      }
+    } catch {
+      captionTracks = [];
     }
   }
 
@@ -2208,45 +2314,66 @@ async function fetchPublicYoutubeTranscript(videoId: string) {
       const params = new URLSearchParams(raw);
       const playerResponseRaw = params.get("player_response");
       if (playerResponseRaw) {
-        const playerResponse = asRecord(JSON.parse(playerResponseRaw));
-        captionTracks = asArray(asRecord(asRecord(playerResponse.captions).playerCaptionsTracklistRenderer).captionTracks)
-          .map((item) => asRecord(item))
-          .filter((item) => asString(item.baseUrl));
+        try {
+          const playerResponse = asRecord(JSON.parse(playerResponseRaw));
+          captionTracks = captionTracksFromPlayerResponse(playerResponse);
+        } catch {
+          captionTracks = [];
+        }
       }
+    }
+  }
+
+  if (!captionTracks.length && watchHtml) {
+    const apiKey = watchHtml.match(/"INNERTUBE_API_KEY":"([^"]+)"/)?.[1];
+    const clientVersion = watchHtml.match(/"INNERTUBE_CLIENT_VERSION":"([^"]+)"/)?.[1] || "2.20240101.00.00";
+    if (apiKey) {
+      const playerResponse = await fetch(`https://www.youtube.com/youtubei/v1/player?key=${apiKey}`, {
+        method: "POST",
+        headers: { ...requestHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          context: { client: { clientName: "WEB", clientVersion, hl: "en", gl: "US" } },
+          videoId,
+        }),
+      }).catch(() => null);
+      if (playerResponse?.ok) {
+        captionTracks = captionTracksFromPlayerResponse(asRecord(await playerResponse.json().catch(() => ({}))));
+      }
+    }
+  }
+
+  if (!captionTracks.length) {
+    const listResponse = await fetch(`https://www.youtube.com/api/timedtext?type=list&v=${encodeURIComponent(videoId)}`, {
+      headers: requestHeaders,
+    }).catch(() => null);
+    if (listResponse?.ok) {
+      captionTracks = parseTimedTextTrackList(videoId, await listResponse.text());
     }
   }
 
   if (!captionTracks.length) return null;
 
-  const preferredTrack =
-    captionTracks.find((track) => !asString(track.kind) && asString(track.languageCode) === "en") ||
-    captionTracks.find((track) => !asString(track.kind)) ||
-    captionTracks.find((track) => asString(track.languageCode) === "en") ||
-    captionTracks[0];
-  const baseUrl = asString(preferredTrack.baseUrl);
-  if (!baseUrl) return null;
+  const orderedTracks = [
+    ...captionTracks.filter((track) => !asString(track.kind) && asString(track.languageCode) === "en"),
+    ...captionTracks.filter((track) => !asString(track.kind) && asString(track.languageCode) !== "en"),
+    ...captionTracks.filter((track) => asString(track.kind) && asString(track.languageCode) === "en"),
+    ...captionTracks.filter((track) => asString(track.kind) && asString(track.languageCode) !== "en"),
+  ].filter((track, index, array) => {
+    const baseUrl = asString(track.baseUrl);
+    return Boolean(baseUrl) && array.findIndex((item) => asString(item.baseUrl) === baseUrl) === index;
+  });
 
-  const transcriptResponse = await fetch(`${baseUrl}&fmt=json3`, { headers: requestHeaders });
-  if (!transcriptResponse.ok) return null;
+  for (const track of orderedTracks) {
+    const text = await fetchTranscriptFromTrack(track, requestHeaders);
+    if (!text) continue;
+    return {
+      source: asString(track.kind) === "asr" ? "auto" as const : "manual" as const,
+      language: asString(track.languageCode),
+      text,
+    };
+  }
 
-  const transcriptJson = asRecord(await transcriptResponse.json().catch(() => ({})));
-  const events = asArray(transcriptJson.events).map((item) => asRecord(item));
-  const segments = events
-    .map((event) =>
-      asArray(event.segs)
-        .map((seg) => asString(asRecord(seg).utf8) || "")
-        .join("")
-        .replace(/\s+/g, " ")
-        .trim(),
-    )
-    .filter(Boolean);
-  if (!segments.length) return null;
-
-  return {
-    source: asString(preferredTrack.kind) === "asr" ? "auto" as const : "manual" as const,
-    language: asString(preferredTrack.languageCode),
-    text: normalizeYoutubeTranscriptText(segments.join("\n")),
-  };
+  return null;
 }
 
 export async function getYoutubeVideoAuditPreview(userId: number, videoUrl: string): Promise<YoutubeVideoAuditPreview> {
@@ -3601,12 +3728,21 @@ export async function generateYoutubeAuditThumbnail(
     tags?: string[];
     textPreference?: string | null;
     sourceImages?: unknown;
+    fallbackSourceImageUrl?: string | null;
     preserveUploadedImage?: unknown;
     stylePreference?: string | null;
     analysisNotes?: string | null;
   },
 ) {
-  const sourceImages = sanitizeSourceImageDataUrls(input.sourceImages);
+  const uploadedSourceImages = sanitizeSourceImageDataUrls(input.sourceImages);
+  const fallbackSourceImage = uploadedSourceImages.length
+    ? null
+    : await fetchImageAsDataUrl(input.fallbackSourceImageUrl).catch(() => null);
+  const sourceImages = uploadedSourceImages.length
+    ? uploadedSourceImages
+    : fallbackSourceImage
+      ? [fallbackSourceImage]
+      : [];
   const preserveUploadedImage = sourceImages.length > 0 && input.preserveUploadedImage !== false;
   const prompt = await buildYoutubeThumbnailPrompt(userId, {
     title: input.title,

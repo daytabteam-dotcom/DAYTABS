@@ -208,6 +208,7 @@ router.post("/audit-thumbnail", requireAuth, async (req, res) => {
       tags: Array.isArray(req.body?.tags) ? req.body.tags : [],
       textPreference: typeof req.body?.textPreference === "string" ? req.body.textPreference : null,
       sourceImages: req.body?.sourceImages,
+      fallbackSourceImageUrl: typeof req.body?.fallbackSourceImageUrl === "string" ? req.body.fallbackSourceImageUrl : null,
       preserveUploadedImage: req.body?.preserveUploadedImage,
       stylePreference: typeof req.body?.stylePreference === "string" ? req.body.stylePreference : null,
       analysisNotes: typeof req.body?.analysisNotes === "string" ? req.body.analysisNotes : null,

@@ -434,6 +434,7 @@ export default function YouTubeAuditTab() {
           tags: report.fixes.tags.length ? report.fixes.tags : preview.video.tags,
           textPreference: thumbnailTextPreference.trim() || null,
           sourceImages: thumbnailSourceImages.map((image) => image.dataUrl),
+          fallbackSourceImageUrl: thumbnailSourceImages.length ? null : preview.video.thumbnailUrl,
           preserveUploadedImage: preserveThumbnailSourceImage,
           stylePreference: thumbnailStyle,
           analysisNotes,
