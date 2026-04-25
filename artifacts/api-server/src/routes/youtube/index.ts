@@ -3,12 +3,13 @@ import multer from "multer";
 import jwt from "jsonwebtoken";
 import { toFile } from "openai";
 import { OAuth2Client } from "google-auth-library";
-import { eq } from "drizzle-orm";
+import { and, eq, lte } from "drizzle-orm";
+import { spawn } from "child_process";
 import fs from "fs/promises";
 import os from "os";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
-import { db, youtubeChannelProfilesTable } from "@workspace/db";
+import { db, youtubeApiCacheTable, youtubeChannelProfilesTable } from "@workspace/db";
 import { requireAuth } from "../../middlewares/auth";
 import { extractAudio, execAsync, getMediaDuration, transcribeAudio } from "../analysis/services";
 import { openai } from "../../lib/openai";
@@ -19,6 +20,7 @@ import {
   createYoutubeAuthUrl,
   deleteYoutubePlanDay,
   discoverCompetitors,
+  extractYoutubeVideoId,
   generateYoutubeWeeklyPlan,
   generateYoutubeIdeaThumbnail,
   generateYoutubeAuditThumbnail,
@@ -57,6 +59,16 @@ const auditUploadDir = path.join(os.tmpdir(), "daytabs-youtube-audit-uploads");
 const auditExportDir = path.join(os.tmpdir(), "daytabs-youtube-audit-exports");
 const avatarCacheDir = path.join(auditExportDir, "avatar-cache");
 const MAX_AUDIT_TRANSCRIPT_DURATION_SEC = 2 * 60 * 60;
+const MAX_YOUTUBE_AUTO_TRANSCRIBE_BYTES = 250 * 1024 * 1024;
+const YOUTUBE_TRANSCRIPT_CACHE_TTL_DAYS = Number(process.env.YOUTUBE_TRANSCRIPT_CACHE_TTL_DAYS || 180);
+const YOUTUBE_TRANSCRIPT_PROCESSING_TTL_MINUTES = Number(process.env.YOUTUBE_TRANSCRIPT_PROCESSING_TTL_MINUTES || 45);
+const YOUTUBE_AUDIO_FALLBACK_SYNC_MAX_DURATION_SEC = Number(
+  process.env.YOUTUBE_AUDIO_FALLBACK_SYNC_MAX_DURATION_SEC || 20 * 60,
+);
+const YOUTUBE_TRANSCRIPT_MAX_DURATION_SEC = Number(process.env.YOUTUBE_TRANSCRIPT_MAX_DURATION_SEC || MAX_AUDIT_TRANSCRIPT_DURATION_SEC);
+const YOUTUBE_TRANSCRIPT_MAX_AUDIO_BYTES = Number(process.env.YOUTUBE_TRANSCRIPT_MAX_AUDIO_BYTES || MAX_YOUTUBE_AUTO_TRANSCRIBE_BYTES);
+const YOUTUBE_TRANSCRIPT_RATE_LIMIT_WINDOW_MS = Number(process.env.YOUTUBE_TRANSCRIPT_RATE_LIMIT_WINDOW_MS || 60_000);
+const YOUTUBE_TRANSCRIPT_RATE_LIMIT_MAX = Number(process.env.YOUTUBE_TRANSCRIPT_RATE_LIMIT_MAX || 8);
 const VALID_TTS_VOICES = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"] as const;
 const TTS_VOICE_GENDER: Record<(typeof VALID_TTS_VOICES)[number], "male" | "female"> = {
   alloy: "male",
@@ -73,6 +85,309 @@ const MAX_TRANSLATION_VIDEO_DURATION_SEC = 15 * 60;
 fs.mkdir(auditUploadDir, { recursive: true }).catch(() => {});
 fs.mkdir(auditExportDir, { recursive: true }).catch(() => {});
 fs.mkdir(avatarCacheDir, { recursive: true }).catch(() => {});
+
+type TranscriptPipelineSource = "youtube_caption" | "audio_transcription";
+type TranscriptCaptionType = "manual" | "auto" | "generated";
+
+type CachedYoutubeTranscriptPayload =
+  | {
+      kind: "youtubeTranscriptV1";
+      status: "processing";
+      preferredLanguage: string | null;
+      step: string;
+      startedAt: string;
+      updatedAt: string;
+    }
+  | {
+      kind: "youtubeTranscriptV1";
+      status: "complete";
+      preferredLanguage: string | null;
+      transcript: {
+        source: TranscriptPipelineSource;
+        captionType: TranscriptCaptionType;
+        language: string | null;
+        text: string;
+        segments: YoutubeTranscriptSegment[];
+      };
+      createdAt: string;
+      updatedAt: string;
+    }
+  | {
+      kind: "youtubeTranscriptV1";
+      status: "error";
+      preferredLanguage: string | null;
+      message: string;
+      failedAt: string;
+      updatedAt: string;
+    };
+
+const transcriptRequests = new Map<number, { count: number; resetAt: number }>();
+const runningTranscriptTasks = new Map<string, Promise<void>>();
+
+function checkTranscriptRateLimit(userId: number) {
+  const now = Date.now();
+  const entry = transcriptRequests.get(userId);
+  if (!entry || now > entry.resetAt) {
+    transcriptRequests.set(userId, { count: 1, resetAt: now + YOUTUBE_TRANSCRIPT_RATE_LIMIT_WINDOW_MS });
+    return true;
+  }
+  if (entry.count >= YOUTUBE_TRANSCRIPT_RATE_LIMIT_MAX) return false;
+  entry.count += 1;
+  return true;
+}
+
+function transcriptCacheKey(videoId: string, preferredLanguage: string | null) {
+  const lang = (preferredLanguage || "auto").trim().toLowerCase();
+  return `youtube-transcript:${videoId}:${lang}`;
+}
+
+function safeYoutubeTempBase(videoId: string) {
+  return `daytabs-youtube-${videoId.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 24) || "video"}`;
+}
+
+function isAllowedYoutubeUrl(videoUrl: string): boolean {
+  try {
+    const parsed = new URL(videoUrl);
+    const host = parsed.hostname.toLowerCase();
+    return host === "youtube.com" || host === "www.youtube.com" || host === "m.youtube.com" || host === "youtu.be";
+  } catch {
+    return false;
+  }
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<T>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
+async function readCachedYoutubeTranscript(cacheKey: string): Promise<CachedYoutubeTranscriptPayload | null> {
+  const now = new Date();
+  const [row] = await db
+    .select({ payload: youtubeApiCacheTable.payload, expiresAt: youtubeApiCacheTable.expiresAt })
+    .from(youtubeApiCacheTable)
+    .where(eq(youtubeApiCacheTable.cacheKey, cacheKey))
+    .limit(1);
+  if (!row) return null;
+  if (row.expiresAt <= now) return null;
+  const payload = row.payload as CachedYoutubeTranscriptPayload;
+  if (!payload || payload.kind !== "youtubeTranscriptV1") return null;
+  return payload;
+}
+
+async function writeCachedYoutubeTranscript(
+  cacheKey: string,
+  payload: CachedYoutubeTranscriptPayload,
+  ttlMs: number,
+) {
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + ttlMs);
+  await db
+    .insert(youtubeApiCacheTable)
+    .values({
+      cacheKey,
+      payload,
+      userId: null,
+      quotaCost: 0,
+      expiresAt,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: youtubeApiCacheTable.cacheKey,
+      set: { payload, userId: null, quotaCost: 0, expiresAt, updatedAt: now },
+    });
+}
+
+async function tryAcquireTranscriptProcessingLock(cacheKey: string, preferredLanguage: string | null, step: string) {
+  const now = new Date();
+  const ttlMs = Math.max(1, YOUTUBE_TRANSCRIPT_PROCESSING_TTL_MINUTES) * 60_000;
+  const expiresAt = new Date(now.getTime() + ttlMs);
+  const processingPayload: CachedYoutubeTranscriptPayload = {
+    kind: "youtubeTranscriptV1",
+    status: "processing",
+    preferredLanguage,
+    step,
+    startedAt: now.toISOString(),
+    updatedAt: now.toISOString(),
+  };
+
+  const updatedRows = await db
+    .update(youtubeApiCacheTable)
+    .set({ payload: processingPayload, userId: null, quotaCost: 0, expiresAt, updatedAt: now })
+    .where(and(eq(youtubeApiCacheTable.cacheKey, cacheKey), lte(youtubeApiCacheTable.expiresAt, now)))
+    .returning({ cacheKey: youtubeApiCacheTable.cacheKey });
+
+  if (updatedRows.length) return true;
+
+  const insertedRows = await db
+    .insert(youtubeApiCacheTable)
+    .values({ cacheKey, payload: processingPayload, userId: null, quotaCost: 0, expiresAt, updatedAt: now })
+    .onConflictDoNothing({ target: youtubeApiCacheTable.cacheKey })
+    .returning({ cacheKey: youtubeApiCacheTable.cacheKey });
+
+  return insertedRows.length > 0;
+}
+
+async function updateTranscriptProcessingStep(cacheKey: string, preferredLanguage: string | null, step: string) {
+  const now = new Date();
+  const ttlMs = Math.max(1, YOUTUBE_TRANSCRIPT_PROCESSING_TTL_MINUTES) * 60_000;
+  const expiresAt = new Date(now.getTime() + ttlMs);
+  const processingPayload: CachedYoutubeTranscriptPayload = {
+    kind: "youtubeTranscriptV1",
+    status: "processing",
+    preferredLanguage,
+    step,
+    startedAt: now.toISOString(),
+    updatedAt: now.toISOString(),
+  };
+  await db
+    .update(youtubeApiCacheTable)
+    .set({ payload: processingPayload, expiresAt, updatedAt: now })
+    .where(eq(youtubeApiCacheTable.cacheKey, cacheKey));
+}
+
+async function runCommandCaptureStdout(
+  command: string,
+  args: string[],
+  timeoutMs: number,
+  logger: { info: (...args: any[]) => void; warn: (...args: any[]) => void },
+) {
+  return await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
+    const startedAt = Date.now();
+    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
+    let settled = false;
+
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      child.kill("SIGKILL");
+      reject(new Error(`${command} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdoutChunks.push(chunk);
+      stdoutBytes += chunk.length;
+      while (stdoutBytes > 256 * 1024 && stdoutChunks.length > 1) {
+        const removed = stdoutChunks.shift();
+        stdoutBytes -= removed?.length ?? 0;
+      }
+    });
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderrChunks.push(chunk);
+      stderrBytes += chunk.length;
+      while (stderrBytes > 256 * 1024 && stderrChunks.length > 1) {
+        const removed = stderrChunks.shift();
+        stderrBytes -= removed?.length ?? 0;
+      }
+    });
+
+    child.on("error", (err: NodeJS.ErrnoException) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (err.code === "ENOENT") {
+        reject(new Error(`${command} is not installed on this server. Please install ${command}.`));
+        return;
+      }
+      reject(err);
+    });
+
+    child.on("close", (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      const stdout = Buffer.concat(stdoutChunks).toString("utf8");
+      const stderr = Buffer.concat(stderrChunks).toString("utf8");
+      logger.info({ command, code, durationMs: Date.now() - startedAt }, "External command finished");
+      resolve({ code, stdout, stderr });
+    });
+  });
+}
+
+async function getYtDlpInfo(
+  videoUrl: string,
+  logger: { info: (...args: any[]) => void; warn: (...args: any[]) => void },
+): Promise<{ durationSec: number; isLive: boolean }> {
+  const result = await runCommandCaptureStdout(
+    "yt-dlp",
+    ["--no-playlist", "--skip-download", "--no-warnings", "-J", videoUrl],
+    30_000,
+    logger,
+  );
+  if (result.code !== 0) {
+    logger.warn({ stderr: result.stderr.trim() }, "yt-dlp info probe failed");
+    throw new Error("yt-dlp failed");
+  }
+  const parsed = JSON.parse(result.stdout || "{}") as { duration?: unknown; is_live?: unknown; live_status?: unknown };
+  const durationSec = Number(parsed.duration ?? 0);
+  const isLive =
+    Boolean(parsed.is_live) ||
+    String(parsed.live_status ?? "").toLowerCase().includes("is_live") ||
+    String(parsed.live_status ?? "").toLowerCase() === "live";
+  return { durationSec: Number.isFinite(durationSec) ? durationSec : 0, isLive };
+}
+
+async function downloadYoutubeAudioMp3WithYtDlp(
+  videoUrl: string,
+  videoId: string,
+  maxBytes: number,
+  logger: { info: (...args: any[]) => void; warn: (...args: any[]) => void },
+) {
+  const base = safeYoutubeTempBase(videoId);
+  const exportId = uuidv4();
+  const outputTemplate = path.join(os.tmpdir(), `${base}-${exportId}.%(ext)s`);
+  const args = [
+    "-f",
+    "bestaudio/best",
+    "--extract-audio",
+    "--audio-format",
+    "mp3",
+    "--audio-quality",
+    "5",
+    "--no-playlist",
+    "--no-warnings",
+    "--no-progress",
+    "--socket-timeout",
+    "20",
+    "--retries",
+    "2",
+    "--fragment-retries",
+    "2",
+    "--concurrent-fragments",
+    "1",
+    ...(Number.isFinite(maxBytes) && maxBytes > 0 ? ["--max-filesize", String(Math.floor(maxBytes))] : []),
+    "--print",
+    "after_move:filepath",
+    "-o",
+    outputTemplate,
+    videoUrl,
+  ];
+  logger.info({ videoId }, "Starting yt-dlp audio extraction");
+  const result = await runCommandCaptureStdout("yt-dlp", args, 12 * 60_000, logger);
+  if (result.code !== 0) {
+    logger.warn({ stderr: result.stderr.trim(), stdout: result.stdout.trim() }, "yt-dlp audio extraction failed");
+    throw new Error("yt-dlp failed");
+  }
+  const printed = result.stdout
+    .split(/\r?\n/g)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const audioPath = printed[printed.length - 1] || outputTemplate.replace("%(ext)s", "mp3");
+  const stat = await fs.stat(audioPath).catch(() => null);
+  if (!stat || stat.size <= 0) throw new Error("yt-dlp did not produce an audio file");
+  if (Number.isFinite(maxBytes) && maxBytes > 0 && stat.size > maxBytes) {
+    throw new Error("Audio file too large");
+  }
+  return { audioPath, bytes: stat.size };
+}
 
 function sanitizeAuditFilenamePart(value: string) {
   return value
@@ -101,6 +416,35 @@ function normalizeAuditTranscriptSegments(value: unknown): YoutubeTranscriptSegm
       ...item,
       end: item.end > item.start ? item.end : item.start + 0.8,
     }));
+}
+
+async function transcribeYoutubeAudioFallback(
+  videoUrl: string,
+  logger: { info: (...args: any[]) => void; warn: (...args: any[]) => void },
+) {
+  if (!isAllowedYoutubeUrl(videoUrl)) throw new Error("Enter a valid YouTube video URL");
+  const videoId = extractYoutubeVideoId(videoUrl);
+  if (!videoId) throw new Error("Enter a valid YouTube video URL");
+
+  const info = await withTimeout(getYtDlpInfo(videoUrl, logger), 35_000, "YouTube metadata probe");
+  if (info.isLive) throw new Error("Live streams cannot be auto-transcribed. Upload an audio/video file instead.");
+  if (info.durationSec > 0 && info.durationSec > YOUTUBE_TRANSCRIPT_MAX_DURATION_SEC) {
+    throw new Error("This video is too long to auto-transcribe. Upload a shorter audio/video file instead.");
+  }
+
+  let audioPath: string | null = null;
+  try {
+    const downloaded = await withTimeout(
+      downloadYoutubeAudioMp3WithYtDlp(videoUrl, videoId, YOUTUBE_TRANSCRIPT_MAX_AUDIO_BYTES, logger),
+      15 * 60_000,
+      "YouTube audio download",
+    );
+    audioPath = downloaded.audioPath;
+    const transcript = await withTimeout(transcribeAudio(audioPath), 25 * 60_000, "Audio transcription");
+    return { ...transcript, segments: normalizeAuditTranscriptSegments(transcript.segments) };
+  } finally {
+    if (audioPath) await fs.unlink(audioPath).catch(() => {});
+  }
 }
 
 function buildAtempoFilter(speedMultiplier: number) {
@@ -544,13 +888,275 @@ router.post("/transcript", requireAuth, async (req, res) => {
       });
       return;
     }
+    const rateLimitOk = checkTranscriptRateLimit(req.auth!.user_id);
+    if (!rateLimitOk) {
+      res.status(429).json({ error: "Too many transcript requests. Please wait a moment and try again." });
+      return;
+    }
     const videoUrl = typeof req.body?.videoUrl === "string" ? req.body.videoUrl.trim() : "";
     if (!videoUrl) {
       res.status(400).json({ error: "A YouTube video URL is required" });
       return;
     }
-    const editableTranscript = await getYoutubeEditableTranscript(videoUrl);
-    res.json({ editableTranscript });
+    if (!isAllowedYoutubeUrl(videoUrl)) {
+      res.status(400).json({ error: "Enter a valid YouTube video URL (youtube.com or youtu.be)" });
+      return;
+    }
+    const videoId = extractYoutubeVideoId(videoUrl);
+    if (!videoId) {
+      res.status(400).json({ error: "Enter a valid YouTube video URL" });
+      return;
+    }
+
+    const preferredLanguage = getUiLocaleFromRequest(req);
+    const cacheKey = transcriptCacheKey(videoId, preferredLanguage);
+    type EditableTranscript = Awaited<ReturnType<typeof getYoutubeEditableTranscript>>;
+    const emptyEditableTranscript = (): EditableTranscript => ({
+      videoId,
+      canonicalUrl: `https://www.youtube.com/watch?v=${videoId}`,
+      captions: {
+        available: false,
+        downloadable: false,
+        source: null,
+        language: null,
+        languages: [],
+      },
+      transcript: {
+        available: false,
+        source: null,
+        language: null,
+        text: null,
+        segments: [],
+      },
+      needsUploadFallback: false,
+    });
+
+    const cached = await readCachedYoutubeTranscript(cacheKey);
+    if (cached?.status === "complete") {
+      const transcript = cached.transcript;
+      const isCaption = transcript.source === "youtube_caption";
+      const editableTranscript = {
+        videoId,
+        canonicalUrl: `https://www.youtube.com/watch?v=${videoId}`,
+        captions: {
+          available: isCaption,
+          downloadable: isCaption,
+          source: transcript.captionType === "manual" ? "manual" : transcript.captionType === "auto" ? "auto" : null,
+          language: transcript.language,
+          languages: transcript.language ? [transcript.language] : [],
+        },
+        transcript: {
+          available: true,
+          source:
+            transcript.captionType === "manual"
+              ? "manual"
+              : transcript.captionType === "auto"
+                ? "auto"
+                : "transcribed_audio",
+          language: transcript.language,
+          text: transcript.text,
+          segments: transcript.segments,
+        },
+        needsUploadFallback: false,
+      };
+      res.json({ editableTranscript, transcriptResult: transcript, status: { state: "complete", message: "Transcript ready." } });
+      return;
+    }
+
+    if (cached?.status === "processing") {
+      let editableTranscript = emptyEditableTranscript();
+      try {
+        editableTranscript = await withTimeout(
+          getYoutubeEditableTranscript(videoUrl, { preferredLanguages: [preferredLanguage, "en"] }),
+          20_000,
+          "Checking YouTube captions",
+        );
+      } catch (err) {
+        req.log.warn({ err, videoId }, "YouTube caption check failed while transcript job is processing");
+      }
+      editableTranscript.needsUploadFallback = false;
+      res.json({ editableTranscript, status: { state: "processing", message: cached.step } });
+      return;
+    }
+
+    if (cached?.status === "error") {
+      let editableTranscript = emptyEditableTranscript();
+      try {
+        editableTranscript = await withTimeout(
+          getYoutubeEditableTranscript(videoUrl, { preferredLanguages: [preferredLanguage, "en"] }),
+          20_000,
+          "Checking YouTube captions",
+        );
+      } catch (err) {
+        req.log.warn({ err, videoId }, "YouTube caption check failed while returning transcript job error");
+      }
+      editableTranscript.needsUploadFallback = false;
+      res.json({ editableTranscript, status: { state: "error", message: cached.message } });
+      return;
+    }
+
+    // 1) Try YouTube captions first (manual or auto), with language preference.
+    let editableTranscript = emptyEditableTranscript();
+    try {
+      editableTranscript = await withTimeout(
+        getYoutubeEditableTranscript(videoUrl, { preferredLanguages: [preferredLanguage, "en"] }),
+        20_000,
+        "Checking YouTube captions",
+      );
+    } catch (err) {
+      req.log.warn({ err, videoId }, "YouTube caption extraction failed; falling back to audio transcription");
+    }
+
+    if (editableTranscript.transcript.available && editableTranscript.transcript.text) {
+      const now = new Date();
+      const ttlMs = Math.max(1, YOUTUBE_TRANSCRIPT_CACHE_TTL_DAYS) * 24 * 60 * 60_000;
+      const transcriptResult = {
+        source: "youtube_caption" as const,
+        captionType: editableTranscript.transcript.source === "auto" ? "auto" as const : "manual" as const,
+        language: editableTranscript.transcript.language,
+        text: editableTranscript.transcript.text,
+        segments: editableTranscript.transcript.segments,
+      };
+      const payload: CachedYoutubeTranscriptPayload = {
+        kind: "youtubeTranscriptV1",
+        status: "complete",
+        preferredLanguage,
+        transcript: {
+          ...transcriptResult,
+        },
+        createdAt: now.toISOString(),
+        updatedAt: now.toISOString(),
+      };
+      await writeCachedYoutubeTranscript(cacheKey, payload, ttlMs).catch(() => {});
+      res.json({ editableTranscript, transcriptResult, status: { state: "complete", message: "Transcript ready." } });
+      return;
+    }
+
+    const shouldAutoTranscribe = req.body?.autoTranscribe !== false;
+    if (!shouldAutoTranscribe) {
+      res.json({ editableTranscript, status: { state: "complete", message: "Checking YouTube captions..." } });
+      return;
+    }
+
+    // 2) Captions missing/restricted: fall back to audio transcription automatically.
+    const info = await getYtDlpInfo(editableTranscript.canonicalUrl, req.log).catch((err) => {
+      req.log.warn({ err, videoId, canonicalUrl: editableTranscript.canonicalUrl }, "yt-dlp probe failed");
+      return null;
+    });
+    const durationSec = info?.durationSec ?? 0;
+    const isLive = Boolean(info?.isLive);
+
+    if (isLive) {
+      res.status(422).json({ error: "We couldn’t access captions or audio for this video. This can happen with live streams. Please upload the video/audio file to generate a transcript." });
+      return;
+    }
+    if (durationSec > 0 && durationSec > YOUTUBE_TRANSCRIPT_MAX_DURATION_SEC) {
+      res.status(422).json({ error: "This video is too long to auto-transcribe. Please upload a shorter audio/video file to generate a transcript." });
+      return;
+    }
+
+    const initialStep = editableTranscript.captions.available && !editableTranscript.captions.downloadable
+      ? "Captions are restricted, generating transcript from audio..."
+      : "Generating transcript from audio...";
+
+    if (durationSec > 0 && durationSec > YOUTUBE_AUDIO_FALLBACK_SYNC_MAX_DURATION_SEC) {
+      const acquired = await tryAcquireTranscriptProcessingLock(cacheKey, preferredLanguage, initialStep);
+      if (acquired && !runningTranscriptTasks.has(cacheKey)) {
+        const task = (async () => {
+          try {
+            await updateTranscriptProcessingStep(cacheKey, preferredLanguage, initialStep);
+            await updateTranscriptProcessingStep(cacheKey, preferredLanguage, "Transcribing audio...");
+            const fallback = await transcribeYoutubeAudioFallback(editableTranscript.canonicalUrl, req.log);
+            const text = (fallback.text || "").trim();
+            if (!text) throw new Error("Empty transcript");
+            const now = new Date();
+            const ttlMs = Math.max(1, YOUTUBE_TRANSCRIPT_CACHE_TTL_DAYS) * 24 * 60 * 60_000;
+            const payload: CachedYoutubeTranscriptPayload = {
+              kind: "youtubeTranscriptV1",
+              status: "complete",
+              preferredLanguage,
+              transcript: {
+                source: "audio_transcription",
+                captionType: "generated",
+                language: null,
+                text,
+                segments: normalizeAuditTranscriptSegments(fallback.segments),
+              },
+              createdAt: now.toISOString(),
+              updatedAt: now.toISOString(),
+            };
+            await writeCachedYoutubeTranscript(cacheKey, payload, ttlMs);
+          } catch (err) {
+            req.log.warn({ err, videoId, cacheKey }, "Background YouTube audio transcription failed");
+            const now = new Date();
+            const payload: CachedYoutubeTranscriptPayload = {
+              kind: "youtubeTranscriptV1",
+              status: "error",
+              preferredLanguage,
+              message:
+                "We couldn’t access captions or audio for this video. This can happen with private, age-restricted, region-locked, or protected videos. Please upload the video/audio file to generate a transcript.",
+              failedAt: now.toISOString(),
+              updatedAt: now.toISOString(),
+            };
+            await writeCachedYoutubeTranscript(cacheKey, payload, 10 * 60_000).catch(() => {});
+          } finally {
+            runningTranscriptTasks.delete(cacheKey);
+          }
+        })();
+        runningTranscriptTasks.set(cacheKey, task);
+      }
+
+      editableTranscript.needsUploadFallback = false;
+      res.json({ editableTranscript, status: { state: "processing", message: initialStep } });
+      return;
+    }
+
+    try {
+      const fallback = await transcribeYoutubeAudioFallback(editableTranscript.canonicalUrl, req.log);
+      const text = (fallback.text || "").trim();
+      if (!text) {
+        res.status(422).json({ error: "Could not detect speech in this video’s audio. Please upload the video/audio file to generate a transcript." });
+        return;
+      }
+      editableTranscript.transcript = {
+        available: true,
+        source: "transcribed_audio",
+        language: null,
+        text,
+        segments: normalizeAuditTranscriptSegments(fallback.segments),
+      };
+      editableTranscript.needsUploadFallback = false;
+
+      const now = new Date();
+      const ttlMs = Math.max(1, YOUTUBE_TRANSCRIPT_CACHE_TTL_DAYS) * 24 * 60 * 60_000;
+      const transcriptResult = {
+        source: "audio_transcription" as const,
+        captionType: "generated" as const,
+        language: null,
+        text,
+        segments: editableTranscript.transcript.segments,
+      };
+      const payload: CachedYoutubeTranscriptPayload = {
+        kind: "youtubeTranscriptV1",
+        status: "complete",
+        preferredLanguage,
+        transcript: {
+          ...transcriptResult,
+        },
+        createdAt: now.toISOString(),
+        updatedAt: now.toISOString(),
+      };
+      await writeCachedYoutubeTranscript(cacheKey, payload, ttlMs).catch(() => {});
+      res.json({ editableTranscript, transcriptResult, status: { state: "complete", message: "Transcript ready." } });
+      return;
+    } catch (err) {
+      req.log.warn({ err, videoId }, "YouTube transcript audio fallback failed");
+      res.status(422).json({
+        error:
+          "We couldn’t access captions or audio for this video. This can happen with private, age-restricted, region-locked, or protected videos. Please upload the video/audio file to generate a transcript.",
+      });
+      return;
+    }
   } catch (err) {
     req.log.error({ err }, "YouTube transcript fetch error");
     res.status(500).json({ error: err instanceof Error ? err.message : "Failed to fetch YouTube transcript" });

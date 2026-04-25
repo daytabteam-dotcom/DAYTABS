@@ -1,4 +1,4 @@
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useMemo, useRef, useState } from "react";
 import { Download, ExternalLink, Loader2, Upload, Youtube } from "lucide-react";
 import { PanelCard, PanelHeader, PanelPage, PanelSubtitle, PanelTitle } from "@/components/panel-system";
 import { Button } from "@/components/ui/button";
@@ -26,6 +26,17 @@ type EditableTranscriptResponse = {
       segments: TranscriptSegment[];
     };
     needsUploadFallback: boolean;
+  };
+  status?: {
+    state: "processing" | "complete" | "error";
+    message: string;
+  };
+  transcriptResult?: {
+    source: "youtube_caption" | "audio_transcription";
+    captionType: "manual" | "auto" | "generated";
+    language: string | null;
+    text: string;
+    segments: TranscriptSegment[];
   };
 };
 
@@ -151,6 +162,8 @@ export default function YouTubeTranscriptTab() {
   const [editable, setEditable] = useState<EditableTranscriptResponse["editableTranscript"] | null>(null);
   const [segments, setSegments] = useState<TranscriptSegment[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState<EditableTranscriptResponse["status"] | null>(null);
+  const requestIdRef = useRef(0);
 
   const [uploading, setUploading] = useState(false);
 
@@ -179,6 +192,7 @@ export default function YouTubeTranscriptTab() {
   async function handleFetchTranscript(event: FormEvent) {
     event.preventDefault();
     setError(null);
+    setStatus({ state: "processing", message: "Checking YouTube captions..." });
     setTranslation(null);
     setTranslatedSegments([]);
     setAudioResult(null);
@@ -186,18 +200,68 @@ export default function YouTubeTranscriptTab() {
     setEditable(null);
     setSegments([]);
     setLoadingTranscript(true);
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
     try {
-      const payload = await jsonFetch<EditableTranscriptResponse>("/api/youtube/transcript", {
+      const fetchOnce = async () => await jsonFetch<EditableTranscriptResponse>("/api/youtube/transcript", {
         method: "POST",
         body: JSON.stringify({ videoUrl }),
       });
-      setEditable(payload.editableTranscript);
-      setSegments(payload.editableTranscript.transcript.segments || []);
-      if (!payload.editableTranscript.transcript.available) {
-        setError(payload.editableTranscript.needsUploadFallback
-          ? "Captions exist, but YouTube did not allow downloading them. Upload audio/video to generate a transcript."
-          : "Transcript not available. Upload audio/video to generate a transcript.");
+
+      const applyPayload = (payload: EditableTranscriptResponse) => {
+        setEditable(payload.editableTranscript);
+        setSegments(payload.editableTranscript.transcript.segments || []);
+        setStatus(payload.status ?? null);
+      };
+
+      const payload = await fetchOnce();
+      applyPayload(payload);
+
+      if (payload.status?.state === "error") {
+        setError(payload.status.message || "Failed to fetch transcript");
+        return;
       }
+
+      if (payload.status?.state === "processing") {
+        setError(null);
+        setLoadingTranscript(false);
+
+        const poll = async (attempt: number) => {
+          if (requestIdRef.current !== requestId) return;
+          if (attempt > 40) return;
+          await new Promise((resolve) => setTimeout(resolve, 2500));
+          if (requestIdRef.current !== requestId) return;
+          try {
+            const next = await fetchOnce();
+            applyPayload(next);
+            if (next.status?.state === "processing") {
+              await poll(attempt + 1);
+              return;
+            }
+            if (next.status?.state === "error") {
+              setError(next.status.message || "Failed to fetch transcript");
+              return;
+            }
+            if (next.editableTranscript.transcript.available) {
+              setError(null);
+              return;
+            }
+            setError("Transcript not available. Please upload the video/audio file to generate a transcript.");
+          } catch (err) {
+            setError(err instanceof Error ? err.message : "Failed to fetch transcript");
+          }
+        };
+
+        await poll(0);
+        return;
+      }
+
+      if (!payload.editableTranscript.transcript.available) {
+        setError("Transcript not available. Please upload the video/audio file to generate a transcript.");
+        return;
+      }
+
+      setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to fetch transcript");
     } finally {
@@ -207,6 +271,7 @@ export default function YouTubeTranscriptTab() {
 
   async function handleUpload(file: File) {
     setError(null);
+    setStatus(null);
     setUploading(true);
     setTranslation(null);
     setTranslatedSegments([]);
@@ -241,6 +306,7 @@ export default function YouTubeTranscriptTab() {
         },
         needsUploadFallback: false,
       }) : null);
+      setStatus({ state: "complete", message: "Transcript ready." });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to transcribe upload");
     } finally {
@@ -398,8 +464,14 @@ export default function YouTubeTranscriptTab() {
               Captions: {editable.captions.available ? "available" : "none"}
               {editable.captions.language ? ` · ${editable.captions.language}` : ""}
               {editable.captions.source ? ` · ${editable.captions.source}` : ""}
-              {editable.needsUploadFallback ? " · upload required" : ""}
+              {status?.state === "processing" ? " · generating transcript from audio" : ""}
+              {editable.needsUploadFallback && status?.state !== "processing" ? " · captions restricted" : ""}
             </span>
+          </div>
+        ) : null}
+        {status?.message && status.state !== "error" ? (
+          <div className="mt-4 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white/70">
+            {status.message}
           </div>
         ) : null}
         {error ? (

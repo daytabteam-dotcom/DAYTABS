@@ -69,6 +69,7 @@
 - pnpm 9+
 - PostgreSQL database
 - ffmpeg installed on the system
+- yt-dlp installed on the system (used for YouTube audio fallback transcription)
 
 ### Environment Variables
 
@@ -91,6 +92,9 @@ PADDLE_WEBHOOK_SECRET=
 # Install dependencies
 pnpm install
 
+# (Alternative) If you use npm instead of pnpm:
+npm install
+
 # Push database schema
 pnpm --filter @workspace/db run push
 
@@ -102,6 +106,21 @@ pnpm --filter @workspace/daytabs run dev
 
 # Start landing page (dev)
 pnpm --filter @workspace/landing run dev
+```
+
+### YouTube Transcript Fallback Dependencies
+
+Server dependencies needed outside npm:
+
+- yt-dlp
+- ffmpeg
+
+For Docker:
+
+```dockerfile
+RUN apt-get update && apt-get install -y ffmpeg python3 python3-pip \\
+  && pip3 install yt-dlp \\
+  && apt-get clean
 ```
 
 ### Codegen

@@ -2899,6 +2899,63 @@ function baseLanguageCode(value: unknown) {
   return raw.split(/[-_]/)[0] || raw;
 }
 
+function normalizePreferredLanguageCodes(preferredLanguages: Array<string | null | undefined>) {
+  const normalized: string[] = [];
+  const seen = new Set<string>();
+  for (const lang of preferredLanguages) {
+    const base = baseLanguageCode(lang);
+    if (!base || seen.has(base)) continue;
+    seen.add(base);
+    normalized.push(base);
+  }
+  return normalized;
+}
+
+function orderCaptionTracks(tracks: JsonRecord[], preferredBaseCodes: string[]) {
+  const unique: JsonRecord[] = [];
+  const seenBaseUrl = new Set<string>();
+  for (const track of tracks) {
+    const baseUrl = asString(asRecord(track).baseUrl);
+    if (!baseUrl || seenBaseUrl.has(baseUrl)) continue;
+    seenBaseUrl.add(baseUrl);
+    unique.push(track);
+  }
+
+  const manual: JsonRecord[] = [];
+  const auto: JsonRecord[] = [];
+  for (const track of unique) {
+    (asString(asRecord(track).kind) === "asr" ? auto : manual).push(track);
+  }
+
+  const ordered: JsonRecord[] = [];
+  const used = new Set<string>();
+  const pushMatches = (pool: JsonRecord[], baseCode: string) => {
+    for (const track of pool) {
+      const lang = baseLanguageCode(asRecord(track).languageCode);
+      const baseUrl = asString(asRecord(track).baseUrl);
+      if (!baseUrl || used.has(baseUrl)) continue;
+      if (lang !== baseCode) continue;
+      used.add(baseUrl);
+      ordered.push(track);
+    }
+  };
+
+  for (const code of preferredBaseCodes) {
+    pushMatches(manual, code);
+    pushMatches(auto, code);
+  }
+
+  // Remaining tracks: manual first, then auto.
+  for (const track of manual.concat(auto)) {
+    const baseUrl = asString(asRecord(track).baseUrl);
+    if (!baseUrl || used.has(baseUrl)) continue;
+    used.add(baseUrl);
+    ordered.push(track);
+  }
+
+  return ordered;
+}
+
 function parseTimedTextTrackList(videoId: string, xml: string) {
   const tracks: JsonRecord[] = [];
   for (const match of xml.matchAll(/<track\b([^>]*)\/?>/gi)) {
@@ -3142,7 +3199,7 @@ function recommendThumbnailStyle(video: YoutubeRecentVideo, nicheProfile: Youtub
   return "Realistic";
 }
 
-async function probeYoutubeCaptionAvailability(videoId: string) {
+async function probeYoutubeCaptionAvailability(videoId: string, preferredLanguages: Array<string | null> = []) {
   const cookieJar = new Map<string, string>();
   seedYoutubeConsentCookies(cookieJar);
   const baseHeaders: Record<string, string> = {
@@ -3240,15 +3297,9 @@ async function probeYoutubeCaptionAvailability(videoId: string) {
   }
 
   const hasCaptions = captionTracks.length > 0;
-  const orderedTracks = [
-    ...captionTracks.filter((track) => baseLanguageCode(track.languageCode) === "en" && !asString(track.kind)),
-    ...captionTracks.filter((track) => baseLanguageCode(track.languageCode) === "en" && asString(track.kind)),
-    ...captionTracks.filter((track) => baseLanguageCode(track.languageCode) !== "en" && !asString(track.kind)),
-    ...captionTracks.filter((track) => baseLanguageCode(track.languageCode) !== "en" && asString(track.kind)),
-  ].filter((track, index, array) => {
-    const baseUrl = asString(asRecord(track).baseUrl);
-    return Boolean(baseUrl) && array.findIndex((item) => asString(asRecord(item).baseUrl) === baseUrl) === index;
-  });
+  const preferredBaseCodes = normalizePreferredLanguageCodes(preferredLanguages);
+  if (!preferredBaseCodes.includes("en")) preferredBaseCodes.push("en");
+  const orderedTracks = orderCaptionTracks(captionTracks, preferredBaseCodes);
 
   const firstTrack = hasCaptions ? asRecord(orderedTracks[0] ?? captionTracks[0]) : null;
   const downloadableTranscript = firstTrack?.baseUrl
@@ -3264,11 +3315,10 @@ async function probeYoutubeCaptionAvailability(videoId: string) {
     ? (asString(firstTrack?.kind) === "asr" ? "auto" as const : "manual" as const)
     : null;
   const language = hasCaptions ? (asString(firstTrack?.languageCode) || null) : null;
-  const languages = [...new Set(
-    captionTracks
-      .map((track) => asString(asRecord(track).languageCode))
-      .filter(Boolean) as string[],
-  )];
+  const languageCandidates = (orderedTracks.length ? orderedTracks : captionTracks)
+    .map((track) => asString(asRecord(track).languageCode))
+    .filter(Boolean) as string[];
+  const languages = [...new Set(languageCandidates)];
 
   return {
     available: hasCaptions,
@@ -3279,7 +3329,7 @@ async function probeYoutubeCaptionAvailability(videoId: string) {
   };
 }
 
-async function fetchPublicYoutubeTranscript(videoId: string) {
+async function fetchPublicYoutubeTranscript(videoId: string, preferredLanguages: Array<string | null> = []) {
   // Use a real browser UA and persist cookies across requests.
   // YouTube will often classify custom UAs as bots/crawlers and omit/deny caption data.
   const cookieJar = new Map<string, string>();
@@ -3412,19 +3462,19 @@ async function fetchPublicYoutubeTranscript(videoId: string) {
     }
   }
 
+  const preferredBaseCodes = normalizePreferredLanguageCodes(preferredLanguages);
+  if (!preferredBaseCodes.includes("en")) preferredBaseCodes.push("en");
+
   if (!captionTracks.length) {
-    return fetchYoutubeTranscriptPackageFallback(videoId, [...discoveredLanguages]).catch(() => null);
+    const fallbackLanguages = [
+      ...preferredLanguages.filter(Boolean),
+      ...(!preferredLanguages.some((lang) => baseLanguageCode(lang) === "en") ? ["en"] : []),
+      ...discoveredLanguages,
+    ];
+    return fetchYoutubeTranscriptPackageFallback(videoId, fallbackLanguages).catch(() => null);
   }
 
-  const orderedTracks = [
-    ...captionTracks.filter((track) => baseLanguageCode(track.languageCode) === "en" && !asString(track.kind)),
-    ...captionTracks.filter((track) => baseLanguageCode(track.languageCode) === "en" && asString(track.kind)),
-    ...captionTracks.filter((track) => baseLanguageCode(track.languageCode) !== "en" && !asString(track.kind)),
-    ...captionTracks.filter((track) => baseLanguageCode(track.languageCode) !== "en" && asString(track.kind)),
-  ].filter((track, index, array) => {
-    const baseUrl = asString(track.baseUrl);
-    return Boolean(baseUrl) && array.findIndex((item) => asString(item.baseUrl) === baseUrl) === index;
-  });
+  const orderedTracks = orderCaptionTracks(captionTracks, preferredBaseCodes);
 
   for (const track of orderedTracks) {
     const transcript = await fetchTranscriptFromTrack(track, {
@@ -3443,16 +3493,25 @@ async function fetchPublicYoutubeTranscript(videoId: string) {
     };
   }
 
-  return fetchYoutubeTranscriptPackageFallback(videoId, [...discoveredLanguages]).catch(() => null);
+  const fallbackLanguages = [
+    ...preferredLanguages.filter(Boolean),
+    ...(!preferredLanguages.some((lang) => baseLanguageCode(lang) === "en") ? ["en"] : []),
+    ...discoveredLanguages,
+  ];
+  return fetchYoutubeTranscriptPackageFallback(videoId, fallbackLanguages).catch(() => null);
 }
 
-export async function getYoutubeEditableTranscript(videoUrl: string): Promise<YoutubeEditableTranscript> {
+export async function getYoutubeEditableTranscript(
+  videoUrl: string,
+  options: { preferredLanguages?: Array<string | null> } = {},
+): Promise<YoutubeEditableTranscript> {
   const videoId = extractYoutubeVideoId(videoUrl);
   if (!videoId) throw new Error("Enter a valid YouTube video URL");
 
-  const transcript = await fetchPublicYoutubeTranscript(videoId).catch(() => null);
+  const preferredLanguages = options.preferredLanguages ?? [];
+  const transcript = await fetchPublicYoutubeTranscript(videoId, preferredLanguages).catch(() => null);
   const transcriptAvailable = Boolean(transcript?.text);
-  const captionProbe = transcriptAvailable ? null : await probeYoutubeCaptionAvailability(videoId).catch(() => null);
+  const captionProbe = transcriptAvailable ? null : await probeYoutubeCaptionAvailability(videoId, preferredLanguages).catch(() => null);
 
   const captionsAvailable = transcriptAvailable || Boolean(captionProbe?.available);
   const captionsDownloadable = transcriptAvailable || Boolean(captionProbe?.downloadable);
@@ -3499,8 +3558,8 @@ export async function getYoutubeVideoAuditPreview(userId: number, videoUrl: stri
     totalViewCount: null,
     videoCount: null,
   }, recentVideos.length ? recentVideos : [video]);
-  const transcript = await fetchPublicYoutubeTranscript(videoId).catch(() => null);
-  const captionProbe = transcript?.text ? null : await probeYoutubeCaptionAvailability(videoId).catch(() => null);
+  const transcript = await fetchPublicYoutubeTranscript(videoId, []).catch(() => null);
+  const captionProbe = transcript?.text ? null : await probeYoutubeCaptionAvailability(videoId, []).catch(() => null);
   const captionsAvailable = Boolean(transcript?.text) || Boolean(captionProbe?.available);
   const captionsLanguage = transcript?.language ?? captionProbe?.language ?? null;
 
@@ -3611,9 +3670,9 @@ export async function auditYoutubeVideo(
   const visualAuditRecord = visualAuditRaw ? asRecord(visualAuditRaw) : null;
   const transcript = options?.transcriptOverride?.text
     ? options.transcriptOverride
-    : await fetchPublicYoutubeTranscript(videoId).catch(() => null);
+    : await fetchPublicYoutubeTranscript(videoId, []).catch(() => null);
   const transcriptTextAvailable = Boolean(transcript?.text);
-  const captionProbe = transcriptTextAvailable ? null : await probeYoutubeCaptionAvailability(videoId).catch(() => null);
+  const captionProbe = transcriptTextAvailable ? null : await probeYoutubeCaptionAvailability(videoId, []).catch(() => null);
   const captionsAvailable = transcriptTextAvailable || Boolean(captionProbe?.available);
   const outputLanguage = inferOutputLanguage({
     forceLanguage: options?.uiLocale ?? null,
