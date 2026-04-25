@@ -81,6 +81,7 @@ async function processJob(job: ClaimedAnalysisJob) {
       platform: storedOptions.platform ?? job.platform ?? "youtube_long",
       platforms: storedOptions.platforms ?? [job.platform ?? "youtube_long"],
       modules: storedOptions.modules ?? ["quality", "editing"],
+      outputLanguage: storedOptions.outputLanguage,
       translateSubtitles: storedOptions.translateSubtitles ?? Boolean(job.translateSubtitles),
       subtitleLanguage: storedOptions.subtitleLanguage ?? job.subtitleLanguage ?? undefined,
       audioLanguage: storedOptions.audioLanguage ?? job.audioLanguage ?? undefined,

@@ -23,6 +23,7 @@ import { getActiveAnalysisCount, getDbJobQueueStatus, getDbQueueStatus } from ".
 import { normalizePlan, getLimits, buildFileTooLargeError } from "../../lib/planLimits";
 import { buildVideoTooLongError } from "../../lib/planLimits";
 import { checkVideoAnalysisLimit, getOrCreateUsage } from "../../lib/usageService";
+import { getUiLocaleFromRequest } from "../../lib/uiLocale";
 import {
   buildR2ObjectKey,
   deleteFromB2,
@@ -248,6 +249,7 @@ router.post("/upload", (req, res, next) => {
     const recoveryId = typeof req.body.recoveryId === "string" && req.body.recoveryId.trim()
       ? req.body.recoveryId.trim()
       : null;
+    const uiLocale = getUiLocaleFromRequest(req);
 
     if (await getActiveAnalysisCount() >= 25) {
       await fs.unlink(req.file.path).catch(() => {});
@@ -284,6 +286,7 @@ router.post("/upload", (req, res, next) => {
           audioLanguage: audioLanguage || undefined,
           audioVoice,
           originalFileName,
+          outputLanguage: uiLocale ?? undefined,
           plan: rawPlan,
           maxDurationSeconds,
           durationSeconds: hasDuration ? durationSeconds : undefined,

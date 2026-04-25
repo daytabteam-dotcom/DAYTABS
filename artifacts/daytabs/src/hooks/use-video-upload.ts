@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef } from "react";
+import { DAYTABS_LOCALE_STORAGE_KEY } from "@/lib/i18n";
 
 export interface VideoUploadOptions {
   mode: string;
@@ -28,7 +29,11 @@ function getAuthToken(): string | null {
 
 function authHeaders(): Record<string, string> {
   const token = getAuthToken();
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  const locale = localStorage.getItem(DAYTABS_LOCALE_STORAGE_KEY);
+  return {
+    ...(locale ? { "Accept-Language": locale } : {}),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
 }
 
 const CHUNK_SIZE = 5 * 1024 * 1024;

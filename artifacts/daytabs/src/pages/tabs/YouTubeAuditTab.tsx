@@ -23,6 +23,7 @@ import { PanelCard, PanelCardSoft, PanelHeader, PanelPage, PanelSubtitle, PanelT
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
+import { DAYTABS_LOCALE_STORAGE_KEY } from "@/lib/i18n";
 
 type AuditReport = {
   summary: string;
@@ -193,10 +194,12 @@ const YOUTUBE_THUMBNAIL_MAX_BYTES = 2 * 1024 * 1024;
 
 async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
   const token = localStorage.getItem("daytabs_token");
+  const locale = localStorage.getItem(DAYTABS_LOCALE_STORAGE_KEY);
   const response = await fetch(url, {
     ...init,
     headers: {
       "Content-Type": "application/json",
+      ...(locale ? { "Accept-Language": locale } : {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(init?.headers ?? {}),
     },
@@ -210,8 +213,12 @@ async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
 
 async function downloadAuthenticatedFile(url: string, filename: string) {
   const token = localStorage.getItem("daytabs_token");
+  const locale = localStorage.getItem(DAYTABS_LOCALE_STORAGE_KEY);
   const response = await fetch(url, {
-    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    headers: {
+      ...(locale ? { "Accept-Language": locale } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
   });
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
@@ -570,12 +577,16 @@ export default function YouTubeAuditTab() {
     setError(null);
     try {
       const token = localStorage.getItem("daytabs_token");
+      const locale = localStorage.getItem(DAYTABS_LOCALE_STORAGE_KEY);
       const formData = new FormData();
       formData.append("videoUrl", videoUrl.trim());
       formData.append("media", file);
       const response = await fetch("/api/youtube/audit-transcribe", {
         method: "POST",
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        headers: {
+          ...(locale ? { "Accept-Language": locale } : {}),
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: formData,
       });
       const data = await response.json().catch(() => ({}));

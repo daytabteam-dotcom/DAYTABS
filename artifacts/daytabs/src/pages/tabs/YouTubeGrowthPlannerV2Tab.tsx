@@ -74,6 +74,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { usePlan } from "@/hooks/use-plan";
 import { PanelPage, PanelHeader, PanelTitle, PanelSubtitle, PanelCard, PanelCardSoft, PanelCardStrong, PanelEyebrow } from "@/components/panel-system";
+import { DAYTABS_LOCALE_STORAGE_KEY } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 type Stage = "idea" | "recording" | "editing" | "published" | "draft";
@@ -385,7 +386,11 @@ const leaderboardCompetitorColors = ["#fca5a5", "#93c5fd", "#fcd34d", "#c4b5fd",
 
 function authHeaders(): HeadersInit {
   const token = localStorage.getItem("daytabs_token");
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  const locale = localStorage.getItem(DAYTABS_LOCALE_STORAGE_KEY);
+  return {
+    ...(locale ? { "Accept-Language": locale } : {}),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
 }
 
 async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {

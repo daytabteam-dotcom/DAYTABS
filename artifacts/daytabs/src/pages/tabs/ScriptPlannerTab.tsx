@@ -10,6 +10,7 @@ import { PlanPickerModal } from "@/components/PlanPickerModal";
 import { useUser } from "@/hooks/use-user";
 import { usePlan } from "@/hooks/use-plan";
 import { PanelCard, PanelCardSoft, PanelHeader, PanelTitle, PanelSubtitle, PanelPage } from "@/components/panel-system";
+import { DAYTABS_LOCALE_STORAGE_KEY } from "@/lib/i18n";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -61,8 +62,10 @@ function relativeTime(dateStr: string): string {
 
 function authHeaders(): HeadersInit {
   const token = localStorage.getItem("daytabs_token");
+  const locale = localStorage.getItem(DAYTABS_LOCALE_STORAGE_KEY);
   return {
     "Content-Type": "application/json",
+    ...(locale ? { "Accept-Language": locale } : {}),
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
 }

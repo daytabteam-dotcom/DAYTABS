@@ -10,6 +10,7 @@ import { openai } from "../../lib/openai";
 import { logTokenUsage, usageTokens } from "../../lib/logTokens";
 import { toFile } from "openai";
 import { registerAnalysisCancelHandler } from "../../lib/analysisCancellation";
+import { languageNameFromLocale, normalizeUiLocale } from "../../lib/uiLocale";
 
 export const execAsync = promisify(exec);
 
@@ -1085,7 +1086,16 @@ function parseJson<T>(raw: string, fallback: T): T {
 function buildOutputLanguageInstruction(
   transcript: string,
   speechAnalysis?: SpeechAnalysis,
+  outputLanguage?: string,
 ): string {
+  const forcedLocale = normalizeUiLocale(outputLanguage);
+  if (forcedLocale) {
+    if (forcedLocale === "en") {
+      return "Write all output in English only. Do not use any other language.";
+    }
+    const forcedName = languageNameFromLocale(forcedLocale);
+    return `Write all output in ${forcedName}. Do not translate the response to English.`;
+  }
   if (!speechAnalysis?.hasMeaningfulSpeech) {
     return "Write all output in English only. Do not use any other language.";
   }
@@ -1634,6 +1644,7 @@ export async function analyzeAudio(
   audioPath?: string,
   speechAnalysis?: SpeechAnalysis,
   userId?: number,
+  outputLanguage?: string,
 ): Promise<object> {
   // Expanded filler word list
   const fillerWordPattern = /\b(um+|uh+|er+|ah+|like|you know|basically|literally|actually|so|right\?|kind of|sort of|I mean|you see|hmm+|well|anyway)\b/gi;
@@ -1664,7 +1675,7 @@ export async function analyzeAudio(
   const initialNoiseScore = scoreBackgroundNoise(audioSignals.noiseFloorDb);
   const fillerScore = scoreFillerWords(fillerRatio);
 
-  const languageInstruction = buildOutputLanguageInstruction(transcript, speechAnalysis);
+  const languageInstruction = buildOutputLanguageInstruction(transcript, speechAnalysis, outputLanguage);
   const response = await callOpenAI({
     model: "gpt-4o-mini",
     max_completion_tokens: 800,
@@ -1814,6 +1825,7 @@ export async function analyzeContentAndPackaging(
   videoName?: string,
   formatProfile?: Partial<FormatProfile> | null,
   userId?: number,
+  outputLanguage?: string,
 ): Promise<{ editing?: Record<string, unknown>; seo?: Record<string, Record<string, unknown>> }> {
   const includeEditing = requestedSections.includeEditing;
   const includePublish = requestedSections.includePublish;
@@ -1823,7 +1835,7 @@ export async function analyzeContentAndPackaging(
   const totalDuration = lastSeg?.end ?? 0;
   const isFree = plan === "free";
   const isVisualFirst = speechAnalysis?.mode === "visual_first" || !speechAnalysis?.hasMeaningfulSpeech;
-  const languageInstruction = buildOutputLanguageInstruction(transcript, speechAnalysis);
+  const languageInstruction = buildOutputLanguageInstruction(transcript, speechAnalysis, outputLanguage);
   const strategyContext = segments.length
     ? segments
         .slice(0, Math.min(segments.length, 10))
@@ -2108,6 +2120,7 @@ ${responseShape}`,
               videoName,
               formatProfile,
               userId,
+              outputLanguage,
             ),
           };
         } catch (err) {
@@ -2309,12 +2322,13 @@ export async function analyzeEditingPoints(
   videoName?: string,
   formatProfile?: Partial<FormatProfile> | null,
   userId?: number,
+  outputLanguage?: string,
 ): Promise<object> {
   const lastSeg = segments[segments.length - 1];
   const totalDuration = lastSeg?.end ?? 0;
   const isFree = plan === "free";
   const isVisualFirst = speechAnalysis?.mode === "visual_first" || !speechAnalysis?.hasMeaningfulSpeech;
-  const languageInstruction = buildOutputLanguageInstruction(transcript, speechAnalysis);
+  const languageInstruction = buildOutputLanguageInstruction(transcript, speechAnalysis, outputLanguage);
   const formatHint = formatProfile
     ? `Detected format: ${formatProfile.contentFormat ?? "general_visual"}.
 Primary subject: ${formatProfile.primarySubject ?? "the main subject on screen"}.
@@ -2705,10 +2719,11 @@ export async function generateSeo(
   videoName?: string,
   formatProfile?: Partial<FormatProfile> | null,
   userId?: number,
+  outputLanguage?: string,
 ): Promise<object> {
   const isFree = plan === "free";
   const isVisualFirst = speechAnalysis?.mode === "visual_first" || !speechAnalysis?.hasMeaningfulSpeech;
-  const languageInstruction = buildOutputLanguageInstruction(transcript, speechAnalysis);
+  const languageInstruction = buildOutputLanguageInstruction(transcript, speechAnalysis, outputLanguage);
   const formatHint = formatProfile
     ? `Detected format: ${formatProfile.contentFormat ?? "general_visual"}.
 Primary subject: ${formatProfile.primarySubject ?? "the main subject on screen"}.
@@ -2864,11 +2879,12 @@ export async function generateShortClipIdeas(
   speechAnalysis?: SpeechAnalysis,
   formatProfile?: Partial<FormatProfile> | null,
   userId?: number,
+  outputLanguage?: string,
 ): Promise<object> {
   if (!segments.length) return { clips: [] };
   const isFree = plan === "free";
   const totalDuration = segments[segments.length - 1]!.end;
-  const languageInstruction = buildOutputLanguageInstruction(transcript, speechAnalysis);
+  const languageInstruction = buildOutputLanguageInstruction(transcript, speechAnalysis, outputLanguage);
   const isVisualFirst = speechAnalysis?.mode === "visual_first" || !speechAnalysis?.hasMeaningfulSpeech;
 
   const platformLabels: Record<string, string> = {

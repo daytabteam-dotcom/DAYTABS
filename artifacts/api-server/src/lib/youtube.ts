@@ -141,6 +141,7 @@ function detectLanguageNameFromText(sample: string) {
 }
 
 function inferOutputLanguage(options: {
+  forceLanguage?: string | null;
   explicitLanguage?: string | null;
   transcriptText?: string | null;
   title?: string | null;
@@ -148,6 +149,13 @@ function inferOutputLanguage(options: {
   tags?: string[];
   recentVideos?: Array<{ title?: string | null; description?: string | null; tags?: string[] }>;
 }) {
+  const forced = languageNameFromCode(options.forceLanguage);
+  if (forced) {
+    return {
+      label: forced,
+      instruction: `Write every user-facing output in ${forced}. Do not translate the response to English. Keep summaries, explanations, titles, descriptions, hooks, tags, thumbnail ideas, and recommendations in ${forced}.`,
+    };
+  }
   const primarySample = [
     options.transcriptText || "",
     options.title || "",
@@ -3225,6 +3233,7 @@ export async function auditYoutubeVideo(
   userId: number,
   videoUrl: string,
   options?: {
+    uiLocale?: string | null;
     transcriptOverride?: {
       text: string;
       source: "uploaded";
@@ -3295,6 +3304,7 @@ export async function auditYoutubeVideo(
   const captionProbe = transcriptTextAvailable ? null : await probeYoutubeCaptionAvailability(videoId).catch(() => null);
   const captionsAvailable = transcriptTextAvailable || Boolean(captionProbe?.available);
   const outputLanguage = inferOutputLanguage({
+    forceLanguage: options?.uiLocale ?? null,
     explicitLanguage: transcript?.language ?? null,
     transcriptText: transcript?.text ?? null,
     title: video.title,
@@ -4225,7 +4235,7 @@ async function updatePlanDay(
   return { plan: saved, day: updatedDay };
 }
 
-export async function generateYoutubeWeeklyPlan(userId: number) {
+export async function generateYoutubeWeeklyPlan(userId: number, options?: { uiLocale?: string | null }) {
   const [profile] = await db.select().from(youtubeChannelProfilesTable).where(eq(youtubeChannelProfilesTable.userId, userId)).limit(1);
   if (!profile) throw new Error("Connect YouTube before generating a plan");
   const connection = await getYoutubeConnection(userId);
@@ -4313,6 +4323,7 @@ export async function generateYoutubeWeeklyPlan(userId: number) {
     .map((item) => item.day);
   const tagEvidence = buildYoutubeTagEvidenceSummary(recentVideos, competitors, performanceSignals);
   const outputLanguage = inferOutputLanguage({
+    forceLanguage: options?.uiLocale ?? null,
     title: asString(profile.channelName),
     description: getChannelDescriptionFromProfile(profile),
     recentVideos: recentVideos.slice(0, 12).map((video: JsonRecord) => ({
@@ -4466,7 +4477,7 @@ Return this exact shape:
   return saved;
 }
 
-export async function improveYoutubeIdea(userId: number, idea: { title?: string; angle?: string; date?: string }) {
+export async function improveYoutubeIdea(userId: number, idea: { title?: string; angle?: string; date?: string }, options?: { uiLocale?: string | null }) {
   const [profile] = await db.select().from(youtubeChannelProfilesTable).where(eq(youtubeChannelProfilesTable.userId, userId)).limit(1);
   if (!profile) throw new Error("Connect YouTube before improving ideas");
   const plans = await db.select().from(youtubeWeeklyPlansTable).where(eq(youtubeWeeklyPlansTable.userId, userId)).orderBy(desc(youtubeWeeklyPlansTable.weekNumber));
@@ -4512,6 +4523,7 @@ export async function improveYoutubeIdea(userId: number, idea: { title?: string;
   );
   const tagEvidence = buildYoutubeTagEvidenceSummary(recentVideos, competitors, performanceSignals);
   const outputLanguage = inferOutputLanguage({
+    forceLanguage: options?.uiLocale ?? null,
     title: asString(profile.channelName),
     description: getChannelDescriptionFromProfile(profile),
     recentVideos: recentVideos.slice(0, 12).map((video: JsonRecord) => ({

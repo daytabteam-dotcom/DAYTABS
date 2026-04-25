@@ -6,6 +6,7 @@ import { eq, and, desc } from "drizzle-orm";
 import { normalizePlan, PLAN_LIMITS } from "../../lib/planLimits";
 import { checkAndIncrementScriptGeneration } from "../../lib/usageService";
 import { logTokenUsage, usageTokens } from "../../lib/logTokens";
+import { buildUserFacingOutputLanguageInstruction, getUiLocaleFromRequest } from "../../lib/uiLocale";
 
 const router: IRouter = Router();
 
@@ -392,6 +393,11 @@ router.post("/generate", async (req, res) => {
   }
 
   const systemPrompt = isFree ? SYSTEM_PROMPT_FREE : SYSTEM_PROMPT_FULL;
+  const uiLocale = getUiLocaleFromRequest(req);
+  const languageRule = uiLocale ? buildUserFacingOutputLanguageInstruction(uiLocale) : "";
+  const localizedSystemPrompt = languageRule
+    ? `${systemPrompt}\n\nOUTPUT LANGUAGE RULE:\n- ${languageRule}`
+    : systemPrompt;
   const model = planConfig.script_planner_model;
 
   // FIX: Raised free plan token limit so a complete script + sections JSON
@@ -404,7 +410,7 @@ router.post("/generate", async (req, res) => {
     const completion = await openai.chat.completions.create({
       model,
       messages: [
-        { role: "system", content: systemPrompt },
+        { role: "system", content: localizedSystemPrompt },
         ...history,
       ],
       max_completion_tokens: maxTokens,
@@ -457,7 +463,7 @@ router.post("/generate", async (req, res) => {
         const retryCompletion = await openai.chat.completions.create({
           model,
           messages: [
-            { role: "system", content: systemPrompt },
+            { role: "system", content: localizedSystemPrompt },
             ...history,
             {
               role: "assistant",

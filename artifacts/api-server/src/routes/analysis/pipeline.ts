@@ -142,6 +142,7 @@ export type PipelineMode = "video-analyzer";
 export interface PipelineOptions {
   mode: PipelineMode;
   platform?: string;
+  outputLanguage?: string;
   translateSubtitles?: boolean;
   subtitleLanguage?: string;
   audioLanguage?: string;
@@ -342,6 +343,7 @@ async function runVideoAnalyzer(
         platform: platforms[0] ?? "youtube_long",
         platforms,
         modules,
+        outputLanguage: options.outputLanguage,
         translateSubtitles: options.translateSubtitles,
         subtitleLanguage: options.subtitleLanguage,
         audioLanguage: options.audioLanguage,
@@ -391,7 +393,7 @@ async function runVideoAnalyzer(
       await fs.mkdir(framesDir, { recursive: true }).catch(() => {});
       await stopIfMemoryHigh(jobId, "visual analysis");
       const audioAnalysis = await withTimeout(
-        analyzeAudio(transcriptText, whisperConfidence, audioPath, speechAnalysis, userId),
+        analyzeAudio(transcriptText, whisperConfidence, audioPath, speechAnalysis, userId, options.outputLanguage),
         90000,
         "audio analysis",
         jobId,
@@ -472,6 +474,7 @@ async function runVideoAnalyzer(
           videoName,
           formatProfile,
           userId,
+          options.outputLanguage,
         ),
         90000,
         "content and packaging analysis",

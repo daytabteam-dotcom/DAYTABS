@@ -38,6 +38,7 @@ import {
   updateYoutubeSettings,
 } from "../../lib/youtube";
 import { normalizePlan } from "../../lib/planLimits";
+import { getUiLocaleFromRequest } from "../../lib/uiLocale";
 
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET!;
@@ -325,7 +326,8 @@ router.post("/audit", requireAuth, async (req, res) => {
       res.status(400).json({ error: "A YouTube video URL is required" });
       return;
     }
-    const report = await auditYoutubeVideo(req.auth!.user_id, videoUrl);
+    const uiLocale = getUiLocaleFromRequest(req);
+    const report = await auditYoutubeVideo(req.auth!.user_id, videoUrl, { uiLocale });
     res.json({ report });
   } catch (err) {
     req.log.error({ err }, "YouTube video audit error");
@@ -588,7 +590,8 @@ router.delete("/competitors/:competitorId", requireAuth, async (req, res) => {
 
 router.post("/plans/generate", requireAuth, async (req, res) => {
   try {
-    const plan = await generateYoutubeWeeklyPlan(req.auth!.user_id);
+    const uiLocale = getUiLocaleFromRequest(req);
+    const plan = await generateYoutubeWeeklyPlan(req.auth!.user_id, { uiLocale });
     res.json({ plan });
   } catch (err) {
     req.log.error({ err }, "YouTube plan generation error");
@@ -673,7 +676,8 @@ router.delete("/plans/:planId/days/:dayIndex", requireAuth, async (req, res) => 
 router.post("/ideas/improve", requireAuth, async (req, res) => {
   try {
     const idea = req.body?.idea && typeof req.body.idea === "object" ? req.body.idea : {};
-    const improved = await improveYoutubeIdea(req.auth!.user_id, idea);
+    const uiLocale = getUiLocaleFromRequest(req);
+    const improved = await improveYoutubeIdea(req.auth!.user_id, idea, { uiLocale });
     res.json({ idea: improved });
   } catch (err) {
     req.log.error({ err }, "YouTube idea improvement error");

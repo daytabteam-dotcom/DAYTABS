@@ -36,7 +36,7 @@ export const DAYTABS_LOCALE_LABELS: Record<DayTabsLocale, string> = {
   zh: "Chinese",
 };
 
-const STORAGE_KEY = "daytabs_ui_locale";
+export const DAYTABS_LOCALE_STORAGE_KEY = "daytabs_ui_locale";
 
 const baseCopy = {
   languageLabel: "Language",
@@ -291,8 +291,8 @@ function normalizeLocale(input?: string | null): DayTabsLocale {
 
 function detectInitialLocale(): DayTabsLocale {
   if (typeof window === "undefined") return "en";
-  const stored = normalizeLocale(window.localStorage.getItem(STORAGE_KEY));
-  if (window.localStorage.getItem(STORAGE_KEY)) return stored;
+  const stored = normalizeLocale(window.localStorage.getItem(DAYTABS_LOCALE_STORAGE_KEY));
+  if (window.localStorage.getItem(DAYTABS_LOCALE_STORAGE_KEY)) return stored;
   return normalizeLocale(window.navigator.language);
 }
 
@@ -300,7 +300,7 @@ export function DayTabsI18nProvider({ children }: { children: ReactNode }) {
   const [locale, setLocaleState] = useState<DayTabsLocale>(() => detectInitialLocale());
 
   useEffect(() => {
-    window.localStorage.setItem(STORAGE_KEY, locale);
+    window.localStorage.setItem(DAYTABS_LOCALE_STORAGE_KEY, locale);
     document.documentElement.lang = locale;
   }, [locale]);
 

@@ -20,6 +20,7 @@ import { UpgradeErrorModal, type LimitError } from "@/components/UpgradeErrorMod
 import { PanelPage, PanelHeader, PanelTitle, PanelSubtitle, PanelCard, PanelCardSoft } from "@/components/panel-system";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ToastAction } from "@/components/ui/toast";
+import { DAYTABS_LOCALE_STORAGE_KEY } from "@/lib/i18n";
 
 interface TabProps {
   onDataReady: () => void;
@@ -217,7 +218,11 @@ function getStoredAuthToken() {
 
 function getAuthHeaders(): Record<string, string> {
   const token = getStoredAuthToken();
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  const locale = localStorage.getItem(DAYTABS_LOCALE_STORAGE_KEY);
+  return {
+    ...(locale ? { "Accept-Language": locale } : {}),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
 }
 
 async function recoverPendingAnalysis(recovery: PendingUploadRecovery) {
@@ -229,7 +234,7 @@ async function recoverPendingAnalysis(recovery: PendingUploadRecovery) {
     recoveryId: recovery.recoveryId,
   });
   const res = await fetch(`/api/analysis/recover?${params.toString()}`, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: getAuthHeaders(),
   });
   if (!res.ok) return null;
 
