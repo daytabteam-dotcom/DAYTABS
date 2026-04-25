@@ -50,12 +50,7 @@ type TranscriptTranslation = {
 type TranslateResponse = { translation: TranscriptTranslation };
 
 type TranslationAudioResponse = { downloadUrl: string; filename: string; voice: string };
-type TranslationVideoDirectResponse = {
-  audio: { downloadUrl: string; filename: string };
-  video: { downloadUrl: string; filename: string };
-  voice: string;
-  gender: "male" | "female";
-};
+type TranslationVideoResponse = { downloadUrl: string; filename: string; voice: string; gender: "male" | "female" };
 
 const TRANSLATION_LANGUAGES = [
   "Turkish",
@@ -168,7 +163,7 @@ export default function YouTubeTranscriptTab() {
   const [audioWorking, setAudioWorking] = useState(false);
   const [audioResult, setAudioResult] = useState<TranslationAudioResponse | null>(null);
   const [videoWorking, setVideoWorking] = useState(false);
-  const [videoResult, setVideoResult] = useState<TranslationVideoDirectResponse | null>(null);
+  const [videoResult, setVideoResult] = useState<TranslationVideoResponse | null>(null);
 
   const isStudio = plan.isStudio;
   const sourceLanguage = editable?.transcript.language ?? editable?.captions.language ?? null;
@@ -300,19 +295,22 @@ export default function YouTubeTranscriptTab() {
     }
   }
 
-  async function handleGenerateVideoDirect() {
+  async function handleGenerateVideo() {
     setError(null);
     setVideoWorking(true);
     setVideoResult(null);
     try {
-      const payload = await jsonFetch<TranslationVideoDirectResponse>("/api/youtube/transcript-translation-video-direct", {
+      if (!audioResult?.filename) {
+        throw new Error("Generate translation audio first.");
+      }
+      const payload = await jsonFetch<TranslationVideoResponse>("/api/youtube/transcript-translation-video", {
         method: "POST",
         body: JSON.stringify({
           voice,
           gender: OPENAI_VOICE_GENDER[voice],
           title: exportBaseName,
           targetLanguage: translationLanguage,
-          segments: normalizedTranslatedSegments,
+          audioFilename: audioResult.filename,
         }),
       });
       setVideoResult(payload);
@@ -554,8 +552,8 @@ export default function YouTubeTranscriptTab() {
             </button>
             <Button
               type="button"
-              onClick={() => void handleGenerateVideoDirect()}
-              disabled={videoWorking || !normalizedTranslatedSegments.length}
+              onClick={() => void handleGenerateVideo()}
+              disabled={videoWorking || !normalizedTranslatedSegments.length || !audioResult?.filename}
               className="h-10"
             >
               {videoWorking ? <Loader2 className="h-4 w-4 animate-spin" /> : "Generate video"}
@@ -588,7 +586,7 @@ export default function YouTubeTranscriptTab() {
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => void downloadAuthenticatedFile(videoResult.video.downloadUrl, videoResult.video.filename).catch((err) => setError(err instanceof Error ? err.message : "Download failed"))}
+                  onClick={() => void downloadAuthenticatedFile(videoResult.downloadUrl, videoResult.filename).catch((err) => setError(err instanceof Error ? err.message : "Download failed"))}
                   className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-xs font-semibold text-white/80 hover:bg-white/[0.05]"
                 >
                   <Download className="h-4 w-4" />
@@ -599,7 +597,7 @@ export default function YouTubeTranscriptTab() {
                 </div>
               </div>
             ) : (
-              <div className="mt-2 text-sm text-white/55">Generate video after translating.</div>
+              <div className="mt-2 text-sm text-white/55">Generate audio first, then generate video.</div>
             )}
           </div>
         </div>
@@ -607,4 +605,3 @@ export default function YouTubeTranscriptTab() {
     </PanelPage>
   );
 }
-

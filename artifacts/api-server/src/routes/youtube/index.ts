@@ -55,6 +55,7 @@ const CANONICAL_APP_ORIGIN = (
 const RENDER_HOST = "daytabs.onrender.com";
 const auditUploadDir = path.join(os.tmpdir(), "daytabs-youtube-audit-uploads");
 const auditExportDir = path.join(os.tmpdir(), "daytabs-youtube-audit-exports");
+const avatarCacheDir = path.join(auditExportDir, "avatar-cache");
 const MAX_AUDIT_TRANSCRIPT_DURATION_SEC = 2 * 60 * 60;
 const VALID_TTS_VOICES = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"] as const;
 const TTS_VOICE_GENDER: Record<(typeof VALID_TTS_VOICES)[number], "male" | "female"> = {
@@ -71,6 +72,7 @@ const MAX_TRANSLATION_VIDEO_DURATION_SEC = 15 * 60;
 
 fs.mkdir(auditUploadDir, { recursive: true }).catch(() => {});
 fs.mkdir(auditExportDir, { recursive: true }).catch(() => {});
+fs.mkdir(avatarCacheDir, { recursive: true }).catch(() => {});
 
 function sanitizeAuditFilenamePart(value: string) {
   return value
@@ -219,6 +221,13 @@ async function editImageWithFallback(params: Parameters<typeof openai.images.edi
 }
 
 async function createAvatarBaseImage(tempDir: string, gender: "male" | "female") {
+  const cachedPath = path.join(avatarCacheDir, `avatar_${gender}_base.png`);
+  try {
+    await fs.access(cachedPath);
+    return cachedPath;
+  } catch {
+    // Generate below.
+  }
   const prompt = [
     "A fictional AI character face, head-and-shoulders talking-head portrait.",
     "Stylized 3D animated look (not photorealistic), clean studio lighting, crisp details.",
@@ -237,12 +246,26 @@ async function createAvatarBaseImage(tempDir: string, gender: "male" | "female")
   } as Parameters<typeof openai.images.generate>[0]);
   const base64 = extractGeneratedImageBase64(response);
   if (!base64) throw new Error("Avatar generation did not return an image");
+  const buffer = Buffer.from(base64, "base64");
   const outputPath = path.join(tempDir, "avatar_base.png");
-  await fs.writeFile(outputPath, Buffer.from(base64, "base64"));
-  return outputPath;
+  await fs.writeFile(outputPath, buffer);
+  await fs.writeFile(cachedPath, buffer).catch(() => {});
+  return cachedPath;
 }
 
-async function createAvatarMouthVariant(tempDir: string, basePngPath: string, variant: "mid" | "open") {
+async function createAvatarMouthVariant(
+  tempDir: string,
+  gender: "male" | "female",
+  basePngPath: string,
+  variant: "mid" | "open",
+) {
+  const cachedPath = path.join(avatarCacheDir, `avatar_${gender}_${variant}.png`);
+  try {
+    await fs.access(cachedPath);
+    return cachedPath;
+  } catch {
+    // Generate below.
+  }
   const baseBuffer = await fs.readFile(basePngPath);
   const prompt = variant === "open"
     ? "Keep the exact same fictional character, pose, and style. Edit only the mouth to be clearly open as if speaking a vowel sound. Do not change identity, hairstyle, eyes, face shape, or lighting. No text."
@@ -257,9 +280,11 @@ async function createAvatarMouthVariant(tempDir: string, basePngPath: string, va
   } as Parameters<typeof openai.images.edit>[0]);
   const base64 = extractGeneratedImageBase64(response);
   if (!base64) throw new Error("Avatar mouth edit did not return an image");
+  const buffer = Buffer.from(base64, "base64");
   const outputPath = path.join(tempDir, `avatar_${variant}.png`);
-  await fs.writeFile(outputPath, Buffer.from(base64, "base64"));
-  return outputPath;
+  await fs.writeFile(outputPath, buffer);
+  await fs.writeFile(cachedPath, buffer).catch(() => {});
+  return cachedPath;
 }
 
 async function linkOrCopyFile(source: string, dest: string) {
@@ -288,29 +313,38 @@ async function createTalkingAvatarVideoFromAudio(options: {
     }
 
     const avatarBase = await createAvatarBaseImage(tempDir, options.gender);
-    const avatarMid = await createAvatarMouthVariant(tempDir, avatarBase, "mid");
-    const avatarOpen = await createAvatarMouthVariant(tempDir, avatarBase, "open");
+    const avatarMid = await createAvatarMouthVariant(tempDir, options.gender, avatarBase, "mid");
+    const avatarOpen = await createAvatarMouthVariant(tempDir, options.gender, avatarBase, "open");
 
-    const fps = 12;
-    const frameCount = Math.max(1, Math.ceil(durationSec * fps));
-    for (let frameIndex = 0; frameIndex < frameCount; frameIndex += 1) {
-      const phase = frameIndex % 4;
-      const source = phase === 2 ? avatarOpen : phase === 1 || phase === 3 ? avatarMid : avatarBase;
-      const framePath = path.join(tempDir, `frame_${String(frameIndex).padStart(6, "0")}.png`);
-      await linkOrCopyFile(source, framePath);
+    // Build a tiny looping animation clip (4 frames) and loop it for the full audio duration.
+    const fps = 10;
+    const cycleFrames = [
+      { source: avatarBase, name: "cycle_00.png" },
+      { source: avatarMid, name: "cycle_01.png" },
+      { source: avatarOpen, name: "cycle_02.png" },
+      { source: avatarMid, name: "cycle_03.png" },
+    ];
+    for (const frame of cycleFrames) {
+      await linkOrCopyFile(frame.source, path.join(tempDir, frame.name));
     }
 
     const outputFilename = `${sanitizeAuditFilenamePart(options.baseName)}-${options.voice}-${options.gender}-${exportId}.mp4`;
     const outputPath = path.join(auditExportDir, outputFilename);
-    const inputPattern = path.join(tempDir, "frame_%06d.png");
+    const inputPattern = path.join(tempDir, "cycle_%02d.png");
     const videoFilters = [
       "scale=1280:720:force_original_aspect_ratio=increase",
       "crop=1280:720",
       "format=yuv420p",
     ].join(",");
+
+    const cyclePath = path.join(tempDir, "cycle.mp4");
     await execAsync(
-      `ffmpeg -hide_banner -loglevel error -framerate ${fps} -start_number 0 -i "${inputPattern}" -i "${options.audioPath}" ` +
-      `-vf "${videoFilters}" -c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p -c:a aac -b:a 128k -shortest "${outputPath}" -y`,
+      `ffmpeg -hide_banner -loglevel error -framerate ${fps} -start_number 0 -i "${inputPattern}" -t 1 ` +
+      `-vf "${videoFilters}" -c:v libx264 -preset veryfast -crf 22 -pix_fmt yuv420p "${cyclePath}" -y`,
+    );
+    await execAsync(
+      `ffmpeg -hide_banner -loglevel error -stream_loop -1 -i "${cyclePath}" -i "${options.audioPath}" ` +
+      `-c:v libx264 -preset veryfast -crf 22 -pix_fmt yuv420p -c:a aac -b:a 128k -shortest -movflags +faststart "${outputPath}" -y`,
     );
     return { outputFilename, outputPath };
   } finally {
