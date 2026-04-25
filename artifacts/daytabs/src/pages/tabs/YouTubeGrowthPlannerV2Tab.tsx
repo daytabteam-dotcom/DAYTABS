@@ -74,7 +74,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { usePlan } from "@/hooks/use-plan";
 import { PanelPage, PanelHeader, PanelTitle, PanelSubtitle, PanelCard, PanelCardSoft, PanelCardStrong, PanelEyebrow } from "@/components/panel-system";
-import { DAYTABS_LOCALE_STORAGE_KEY } from "@/lib/i18n";
+import { DAYTABS_LOCALE_STORAGE_KEY, useDayTabsI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 type Stage = "idea" | "recording" | "editing" | "published" | "draft";
@@ -318,7 +318,7 @@ type InsightVisualKind = "heatmap" | "dual-line" | "scatter" | "velocity" | "tag
 interface InsightVisualData {
   kind: InsightVisualKind;
   points?: Array<Record<string, string | number>>;
-  heatmap?: Array<{ day: string; hour: string; value: number; label: string }>;
+  heatmap?: Array<{ day: string; hour: string; value: number; count: number }>;
   tags?: TagOpportunity[];
 }
 
@@ -367,14 +367,6 @@ type WeeklyComparisonWeekdayRow = {
 
 const WEEKDAY_VIEW_COLORS = ["#38bdf8", "#f97316", "#a78bfa", "#f43f5e", "#22c55e", "#eab308", "#14b8a6"];
 
-const stages: Array<{ id: Stage; label: string }> = [
-  { id: "idea", label: "Ideas" },
-  { id: "recording", label: "Recording" },
-  { id: "editing", label: "Editing" },
-  { id: "published", label: "Published" },
-  { id: "draft", label: "Archived / Draft" },
-];
-
 const daysOfWeek = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const hourBuckets = [
   { label: "00:00", start: 0, end: 6 },
@@ -383,6 +375,15 @@ const hourBuckets = [
   { label: "18:00", start: 18, end: 24 },
 ];
 const leaderboardCompetitorColors = ["#fca5a5", "#93c5fd", "#fcd34d", "#c4b5fd", "#fdba74", "#5eead4", "#f9a8d4", "#bef264"];
+
+function localizedWeekdayShort(day: string, locale?: string) {
+  const index = daysOfWeek.indexOf(day);
+  if (index === -1) return day;
+  const baseSunday = new Date(Date.UTC(2026, 0, 4));
+  const date = new Date(baseSunday);
+  date.setUTCDate(baseSunday.getUTCDate() + index);
+  return date.toLocaleDateString(locale || undefined, { weekday: "short" });
+}
 
 function authHeaders(): HeadersInit {
   const token = localStorage.getItem("daytabs_token");
@@ -674,7 +675,6 @@ function deriveBestTimeHeatmap(videos: RecentVideo[]) {
   return [...matrix.values()].map((cell) => ({
     ...cell,
     value: cell.count ? Math.round(cell.value / cell.count) : 0,
-    label: cell.count ? `${cell.day} ${cell.hour}: ${formatNumber(Math.round(cell.value / cell.count))} avg views across ${cell.count} uploads` : `${cell.day} ${cell.hour}: no uploads yet`,
   }));
 }
 
@@ -870,25 +870,25 @@ function isAiIdea(day: PlanDay) {
   return !isManualIdea(day);
 }
 
-function ideaDescription(day: PlanDay) {
-  return day.descriptionSuggestion?.trim() || "AI improve can generate a ready-to-paste description in your channel voice.";
+function ideaDescription(day: PlanDay, ui: ReturnType<typeof useDayTabsI18n>["copy"]["growthPlanner"]) {
+  return day.descriptionSuggestion?.trim() || ui.planner.descriptionFallback;
 }
 
 function ideaTags(day: PlanDay) {
   return (day.tags ?? []).map((tag) => tag.trim()).filter(Boolean);
 }
 
-function ideaThumbnail(day: PlanDay) {
-  return day.thumbnailConcept?.trim() || "AI improve can generate a thumbnail idea based on your niche and top performers.";
+function ideaThumbnail(day: PlanDay, ui: ReturnType<typeof useDayTabsI18n>["copy"]["growthPlanner"]) {
+  return day.thumbnailConcept?.trim() || ui.planner.thumbnailFallback;
 }
 
-function IdeaPackageFields({ day, compact = false }: { day: PlanDay; compact?: boolean }) {
+function IdeaPackageFields({ day, ui, compact = false }: { day: PlanDay; ui: ReturnType<typeof useDayTabsI18n>["copy"]["growthPlanner"]; compact?: boolean }) {
   const tags = ideaTags(day);
   if (compact) {
     return (
       <div className="mt-3 space-y-2">
         <div className="rounded-lg border border-white/10 bg-black/10 p-3">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">Video Title</p>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">{ui.planner.videoTitleLabel}</p>
           <p className="mt-1 line-clamp-2 text-xs font-semibold leading-5 text-white">{day.contentIdea}</p>
         </div>
       </div>
@@ -897,42 +897,42 @@ function IdeaPackageFields({ day, compact = false }: { day: PlanDay; compact?: b
   return (
     <div className="mt-4 space-y-2">
       <div className="rounded-lg border border-white/10 bg-black/10 p-3">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">Video Title</p>
+        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">{ui.planner.videoTitleLabel}</p>
         <p className="mt-1 text-sm font-semibold leading-6 text-white">{day.contentIdea}</p>
       </div>
       <div className="rounded-lg border border-white/10 bg-black/10 p-3">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">Video Description</p>
-        <p className="mt-1 text-sm leading-6 text-white/60">{ideaDescription(day)}</p>
+        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">{ui.planner.videoDescriptionLabel}</p>
+        <p className="mt-1 text-sm leading-6 text-white/60">{ideaDescription(day, ui)}</p>
       </div>
       <div className="rounded-lg border border-white/10 bg-black/10 p-3">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">Tags</p>
+        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">{ui.planner.tagsLabel}</p>
         {tags.length ? (
           <div className="mt-2 flex flex-wrap gap-1.5">
             {tags.slice(0, 10).map((tag) => (
               <span key={tag} className="rounded-full border border-white/10 bg-white/[0.05] px-2 py-1 text-[10px] text-white/65">{tag}</span>
             ))}
           </div>
-        ) : <p className="mt-1 text-xs text-white/35">AI improve can generate niche tags.</p>}
+        ) : <p className="mt-1 text-xs text-white/35">{ui.planner.aiImproveTagsHint}</p>}
       </div>
       <div className="rounded-lg border border-white/10 bg-black/10 p-3">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">Thumbnail Idea</p>
-        <p className="mt-1 text-sm leading-6 text-white/60">{ideaThumbnail(day)}</p>
+        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">{ui.planner.thumbnailIdeaLabel}</p>
+        <p className="mt-1 text-sm leading-6 text-white/60">{ideaThumbnail(day, ui)}</p>
       </div>
     </div>
   );
 }
 
-function ideaOriginMeta(day: PlanDay) {
+function ideaOriginMeta(day: PlanDay, ui: ReturnType<typeof useDayTabsI18n>["copy"]["growthPlanner"]) {
   if (isManualIdea(day)) {
     return {
-      label: "Manual",
+      label: ui.planner.ideaOriginManual,
       chipClassName: "border-sky-300/25 bg-sky-400/10 text-sky-100",
       cardClassName: "border-sky-300/20 bg-sky-500/[0.05] hover:border-sky-300/35",
       accentClassName: "from-sky-300 to-cyan-300",
     };
   }
   return {
-    label: "AI",
+    label: ui.planner.ideaOriginAi,
     chipClassName: "border-amber-300/25 bg-amber-400/10 text-amber-100",
     cardClassName: "border-red-300/20 bg-red-500/[0.05] hover:border-red-300/35",
     accentClassName: "from-red-300 to-amber-300",
@@ -1467,7 +1467,7 @@ function deriveCompetitorCardInsight(competitor: YoutubeCompetitor) {
   return `${competitor.channelName} posts ${competitor.postingFrequency ?? "consistently"} and gets traction with ${style} videos using ${hook} hooks. Test one idea that borrows that structure while keeping your own voice.`;
 }
 
-function deriveBestPostingSlotByDay(cells: Array<{ day: string; hour: string; value: number; label: string }>) {
+function deriveBestPostingSlotByDay(cells: Array<{ day: string; hour: string; value: number; count: number }>) {
   return daysOfWeek.reduce<Record<string, { slot: string; value: number }>>((acc, day) => {
     const best = cells
       .filter((cell) => cell.day === day)
@@ -1515,11 +1515,13 @@ function StatsSkeleton() {
 
 function VideoPicker({
   videos,
+  ui,
   selected,
   disabledIds,
   onSelect,
 }: {
   videos: RecentVideo[];
+  ui: ReturnType<typeof useDayTabsI18n>["copy"]["growthPlanner"];
   selected?: string;
   disabledIds: Set<string>;
   onSelect: (videoId: string) => void;
@@ -1528,7 +1530,7 @@ function VideoPicker({
     () => [...videos].sort((a, b) => new Date(b.publishedAt || 0).getTime() - new Date(a.publishedAt || 0).getTime()),
     [videos],
   );
-  if (!videos.length) return <p className="mt-3 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-white/35">No synced YouTube uploads found yet. Refresh uploaded videos and try again.</p>;
+  if (!videos.length) return <p className="mt-3 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-white/35">{ui.consistencyTracker.emptyNoUploads} {ui.consistencyTracker.emptyRefreshHint}</p>;
   return (
     <div className="mt-3">
       <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
@@ -1744,6 +1746,7 @@ function CommandStat({
 
 function CalendarPreviewCard({
   day,
+  ui,
   linked,
   onDragStart,
   onOpen,
@@ -1752,6 +1755,7 @@ function CalendarPreviewCard({
   onCreateThumbnail,
 }: {
   day: PlanDay;
+  ui: ReturnType<typeof useDayTabsI18n>["copy"]["growthPlanner"];
   linked?: boolean;
   onDragStart: (day: PlanDay) => void;
   onOpen: (day: PlanDay) => void;
@@ -1759,7 +1763,7 @@ function CalendarPreviewCard({
   onQuickPublish: (day: PlanDay) => void;
   onCreateThumbnail: (day: PlanDay) => void;
 }) {
-  const origin = ideaOriginMeta(day);
+  const origin = ideaOriginMeta(day, ui);
   return (
     <HoverCard>
       <HoverCardTrigger asChild>
@@ -1793,8 +1797,8 @@ function CalendarPreviewCard({
               </span>
             </PopoverTrigger>
             <PopoverContent align="end" className="w-40 border-white/10 bg-[#120d1f] p-1 text-white">
-              <button type="button" onClick={(event) => { event.stopPropagation(); onOpen(day); }} className="w-full rounded-md px-3 py-2 text-left text-sm text-white/70 hover:bg-white/[0.06] hover:text-white">Open brief</button>
-              <button type="button" onClick={(event) => { event.stopPropagation(); onDelete(day); }} className="w-full rounded-md px-3 py-2 text-left text-sm text-red-200 hover:bg-red-500/10 hover:text-red-100">Delete</button>
+              <button type="button" onClick={(event) => { event.stopPropagation(); onOpen(day); }} className="w-full rounded-md px-3 py-2 text-left text-sm text-white/70 hover:bg-white/[0.06] hover:text-white">{ui.planner.openBrief}</button>
+              <button type="button" onClick={(event) => { event.stopPropagation(); onDelete(day); }} className="w-full rounded-md px-3 py-2 text-left text-sm text-red-200 hover:bg-red-500/10 hover:text-red-100">{ui.planner.delete}</button>
             </PopoverContent>
           </Popover>
           <div className="p-4">
@@ -1811,7 +1815,7 @@ function CalendarPreviewCard({
                 {origin.label}
               </span>
             </div>
-            <IdeaPackageFields day={day} compact />
+            <IdeaPackageFields day={day} ui={ui} compact />
             <div className="mt-4 flex gap-2">
               <Button
                 type="button"
@@ -1823,7 +1827,7 @@ function CalendarPreviewCard({
                   onOpen(day);
                 }}
               >
-                Open
+                {ui.planner.openButton}
               </Button>
               <Button
                 type="button"
@@ -1834,7 +1838,7 @@ function CalendarPreviewCard({
                   onQuickPublish(day);
                 }}
               >
-                {linked ? "Linked" : "Publish"}
+                {linked ? ui.planner.linkedButton : ui.overviewPanel.publishButton}
               </Button>
             </div>
             <Button
@@ -1848,13 +1852,13 @@ function CalendarPreviewCard({
               }}
             >
               <ImagePlus className="mr-2 h-4 w-4" />
-              {day.generatedThumbnail?.imageDataUrl ? "Regenerate thumbnail" : "Create thumbnail"}
+              {day.generatedThumbnail?.imageDataUrl ? ui.planner.regenerateThumbnailButton : ui.planner.createThumbnailButton}
             </Button>
           </div>
         </div>
       </HoverCardTrigger>
       <HoverCardContent className="border-white/10 bg-[#120d1f] text-white">
-        <p className="text-xs uppercase tracking-[0.16em] text-white/40">Hook</p>
+        <p className="text-xs uppercase tracking-[0.16em] text-white/40">{ui.planner.hookLabel}</p>
         <p className="mt-2 text-sm leading-6 text-white/80">{day.hook}</p>
       </HoverCardContent>
     </HoverCard>
@@ -2061,8 +2065,8 @@ function CurrentWeekConsistencyChart({ rows }: { rows: Array<{ iso: string; day:
   );
 }
 
-function PlannerIdeaCard({ day, onDragStart, onDelete, onOpen, onCreateThumbnail }: { day: PlanDay; onDragStart: (day: PlanDay) => void; onDelete: (day: PlanDay) => void; onOpen: (day: PlanDay) => void; onCreateThumbnail: (day: PlanDay) => void }) {
-  const origin = ideaOriginMeta(day);
+function PlannerIdeaCard({ day, ui, onDragStart, onDelete, onOpen, onCreateThumbnail }: { day: PlanDay; ui: ReturnType<typeof useDayTabsI18n>["copy"]["growthPlanner"]; onDragStart: (day: PlanDay) => void; onDelete: (day: PlanDay) => void; onOpen: (day: PlanDay) => void; onCreateThumbnail: (day: PlanDay) => void }) {
+  const origin = ideaOriginMeta(day, ui);
   return (
     <div
       draggable
@@ -2076,8 +2080,8 @@ function PlannerIdeaCard({ day, onDragStart, onDelete, onOpen, onCreateThumbnail
           </button>
         </PopoverTrigger>
         <PopoverContent align="end" className="w-40 border-white/10 bg-[#120d1f] p-1 text-white">
-          <button type="button" onClick={() => onOpen(day)} className="w-full rounded-md px-3 py-2 text-left text-sm text-white/70 hover:bg-white/[0.06] hover:text-white">Open brief</button>
-          <button type="button" onClick={() => onDelete(day)} className="w-full rounded-md px-3 py-2 text-left text-sm text-red-200 hover:bg-red-500/10 hover:text-red-100">Delete</button>
+          <button type="button" onClick={() => onOpen(day)} className="w-full rounded-md px-3 py-2 text-left text-sm text-white/70 hover:bg-white/[0.06] hover:text-white">{ui.planner.openBrief}</button>
+          <button type="button" onClick={() => onDelete(day)} className="w-full rounded-md px-3 py-2 text-left text-sm text-red-200 hover:bg-red-500/10 hover:text-red-100">{ui.planner.delete}</button>
         </PopoverContent>
       </Popover>
       <div className="flex items-start gap-2">
@@ -2091,7 +2095,7 @@ function PlannerIdeaCard({ day, onDragStart, onDelete, onOpen, onCreateThumbnail
           <span className={cn("inline-flex rounded-full border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]", origin.chipClassName)}>
             {origin.label}
           </span>
-          <IdeaPackageFields day={day} compact />
+          <IdeaPackageFields day={day} ui={ui} compact />
           <Button
             type="button"
             size="sm"
@@ -2100,7 +2104,7 @@ function PlannerIdeaCard({ day, onDragStart, onDelete, onOpen, onCreateThumbnail
             onClick={() => onCreateThumbnail(day)}
           >
             <ImagePlus className="mr-2 h-4 w-4" />
-            {day.generatedThumbnail?.imageDataUrl ? "Regenerate thumbnail" : "Create thumbnail"}
+            {day.generatedThumbnail?.imageDataUrl ? ui.planner.regenerateThumbnailButton : ui.planner.createThumbnailButton}
           </Button>
         </div>
       </div>
@@ -2108,9 +2112,9 @@ function PlannerIdeaCard({ day, onDragStart, onDelete, onOpen, onCreateThumbnail
   );
 }
 
-function InsightFallbackChart({ data }: { data?: Array<Record<string, string | number>> }) {
+function InsightFallbackChart({ data, ui }: { data?: Array<Record<string, string | number>>; ui: ReturnType<typeof useDayTabsI18n>["copy"]["growthPlanner"] }) {
   const items = (data ?? []).slice(0, 5);
-  if (!items.length) return <p className="mt-4 text-xs text-white/35">No chartable data was returned for this insight.</p>;
+  if (!items.length) return <p className="mt-4 text-xs text-white/35">{ui.performanceSignals.noChartableData}</p>;
   const max = Math.max(...items.map((item) => parseNumber(item.value)), 1);
   return (
     <div className="mt-4 space-y-2">
@@ -2129,40 +2133,43 @@ function InsightFallbackChart({ data }: { data?: Array<Record<string, string | n
   );
 }
 
-function BestTimeHeatmap({ cells }: { cells?: Array<{ day: string; hour: string; value: number; label: string }> }) {
-  if (!cells?.length) return <p className="mt-4 text-xs text-white/35">Need more uploads across different publish windows to draw a reliable heatmap.</p>;
+function BestTimeHeatmap({ cells, ui, locale }: { cells?: Array<{ day: string; hour: string; value: number; count: number }>; ui: ReturnType<typeof useDayTabsI18n>["copy"]["growthPlanner"]; locale?: string }) {
+  if (!cells?.length) return <p className="mt-4 text-xs text-white/35">{ui.performanceSignals.needMoreUploadsHeatmap}</p>;
   const max = Math.max(...cells.map((cell) => cell.value), 1);
   return (
     <div className="mt-4 overflow-hidden rounded-lg border border-white/10">
       <div className="grid grid-cols-[64px_repeat(4,minmax(0,1fr))] bg-white/[0.03] text-[11px] text-white/45">
-        <div className="px-3 py-2 text-left">Day</div>
+        <div className="px-3 py-2 text-left">{ui.performanceSignals.heatmapDayHeader}</div>
         {hourBuckets.map((bucket) => <div key={bucket.label} className="px-3 py-2 text-center">{`${bucket.label}-${String(bucket.end).padStart(2, "0")}:00`}</div>)}
       </div>
       {daysOfWeek.map((day) => (
         <div key={day} className="grid grid-cols-[64px_repeat(4,minmax(0,1fr))] border-t border-white/10">
-          <div className="px-3 py-3 text-[11px] text-white/45">{day}</div>
+          <div className="px-3 py-3 text-[11px] text-white/45">{localizedWeekdayShort(day, locale)}</div>
           {hourBuckets.map((bucket) => {
             const cell = cells.find((item) => item.day === day && item.hour === bucket.label);
             const intensity = cell ? Math.max(0.08, cell.value / max) : 0;
+            const hourRange = `${bucket.label}-${String(bucket.end).padStart(2, "0")}:00`;
             return (
               <div
                 key={`${day}-${bucket.label}`}
-                title={cell?.label}
+                title={cell
+                  ? ui.performanceSignals.heatmapTooltip(localizedWeekdayShort(day, locale), hourRange, formatNumber(cell.value), cell.count)
+                  : ui.performanceSignals.heatmapTooltipEmpty(localizedWeekdayShort(day, locale), hourRange)}
                 className="flex min-h-12 items-center justify-center border-l border-white/10 text-[11px] text-white/80"
                 style={{ backgroundColor: `rgba(248, 113, 113, ${intensity})` }}
               >
-                {cell?.value ? formatNumber(cell.value) : "No data"}
+                {cell?.value ? formatNumber(cell.value) : ""}
               </div>
             );
           })}
         </div>
       ))}
       <div className="flex items-center justify-between gap-3 border-t border-white/10 bg-white/[0.03] px-3 py-2 text-[11px] text-white/45">
-        <span>Lower view density</span>
+        <span>{ui.performanceSignals.lowerViewDensity}</span>
         <div className="flex items-center gap-1">
           {[0.2, 0.45, 0.7, 1].map((opacity) => <span key={opacity} className="h-3 w-6 rounded-sm" style={{ backgroundColor: `rgba(248, 113, 113, ${opacity})` }} />)}
         </div>
-        <span>Higher view density</span>
+        <span>{ui.performanceSignals.higherViewDensity}</span>
       </div>
     </div>
   );
@@ -2338,8 +2345,8 @@ function TitleLengthBarChart({ buckets, winnerLabel }: { buckets: TitleLengthBuc
   );
 }
 
-function InsightChart({ insight }: { insight: EnrichedInsight }) {
-  if (insight.visual.kind === "heatmap") return <BestTimeHeatmap cells={insight.visual.heatmap} />;
+function InsightChart({ insight, ui, locale }: { insight: EnrichedInsight; ui: ReturnType<typeof useDayTabsI18n>["copy"]["growthPlanner"]; locale?: string }) {
+  if (insight.visual.kind === "heatmap") return <BestTimeHeatmap cells={insight.visual.heatmap} ui={ui} locale={locale} />;
 
   if (insight.visual.kind === "tag-cloud") {
     const tags = insight.visual.tags ?? [];
@@ -2371,13 +2378,13 @@ function InsightChart({ insight }: { insight: EnrichedInsight }) {
 
   if (insight.visual.kind === "dual-line") {
     const data = insight.visual.points ?? [];
-    if (!data.length) return <InsightFallbackChart data={insight.visual.points} />;
+    if (!data.length) return <InsightFallbackChart data={insight.visual.points} ui={ui} />;
     return (
       <div className="mt-4 h-56">
         <ChartContainer
           config={{
-            uploads: { label: "Uploads", color: "#fca5a5" },
-            views: { label: "Views", color: "#34d399" },
+            uploads: { label: ui.performanceSignals.uploadsLabel, color: "#fca5a5" },
+            views: { label: ui.performanceSignals.viewsLabel, color: "#34d399" },
           }}
           className="h-full w-full"
         >
@@ -2397,10 +2404,10 @@ function InsightChart({ insight }: { insight: EnrichedInsight }) {
 
   if (insight.visual.kind === "scatter") {
     const data = insight.visual.points ?? [];
-    if (!data.length) return <InsightFallbackChart data={insight.visual.points} />;
+    if (!data.length) return <InsightFallbackChart data={insight.visual.points} ui={ui} />;
     return (
       <div className="mt-4 h-56">
-        <ChartContainer config={{ views: { label: "Views", color: "#fca5a5" } }} className="h-full w-full">
+        <ChartContainer config={{ views: { label: ui.performanceSignals.viewsLabel, color: "#fca5a5" } }} className="h-full w-full">
           <ScatterChart margin={{ left: 8, right: 8, top: 12, bottom: 12 }}>
             <CartesianGrid stroke="rgba(255,255,255,0.08)" />
             <XAxis type="number" dataKey="titleLength" tickLine={false} axisLine={false} name="Title length" />
@@ -2427,10 +2434,10 @@ function InsightChart({ insight }: { insight: EnrichedInsight }) {
 
   if (insight.visual.kind === "velocity") {
     const data = insight.visual.points ?? [];
-    if (!data.length) return <InsightFallbackChart data={insight.visual.points} />;
+    if (!data.length) return <InsightFallbackChart data={insight.visual.points} ui={ui} />;
     return (
       <div className="mt-4 h-56">
-        <ChartContainer config={{ subscribersNet: { label: "Subscribers", color: "#34d399" } }} className="h-full w-full">
+        <ChartContainer config={{ subscribersNet: { label: ui.performanceSignals.subscribersLabel, color: "#34d399" } }} className="h-full w-full">
           <LineChart data={data}>
             <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.08)" />
             <XAxis dataKey="date" tickLine={false} axisLine={false} minTickGap={24} />
@@ -2446,14 +2453,18 @@ function InsightChart({ insight }: { insight: EnrichedInsight }) {
     );
   }
 
-  return <InsightFallbackChart data={insight.visual.points} />;
+  return <InsightFallbackChart data={insight.visual.points} ui={ui} />;
 }
 
 function PerformanceInsightCard({
   insight,
+  ui,
+  locale,
   compact = false,
 }: {
   insight: EnrichedInsight;
+  ui: ReturnType<typeof useDayTabsI18n>["copy"]["growthPlanner"];
+  locale?: string;
   compact?: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -2468,7 +2479,7 @@ function PerformanceInsightCard({
         <Badge className={`${confidenceClass(insight.confidence)} hover:brightness-100`}>{insight.confidence}</Badge>
       </div>
       <p className={cn("mt-3 leading-6 text-white/70", compact ? "text-sm" : "text-base")}>{insight.finding}</p>
-      <InsightChart insight={insight} />
+      <InsightChart insight={insight} ui={ui} locale={locale} />
       {compact ? (
         <Collapsible open={open} onOpenChange={setOpen}>
           <CollapsibleTrigger asChild>
@@ -2615,6 +2626,15 @@ function LoadingState() {
 
 export default function YouTubeGrowthPlannerV2Tab() {
   const { plan, loading: planLoading } = usePlan();
+  const { copy, locale } = useDayTabsI18n();
+  const ui = copy.growthPlanner;
+  const stages = useMemo(() => ([
+    { id: "idea" as const, label: ui.stages.idea },
+    { id: "recording" as const, label: ui.stages.recording },
+    { id: "editing" as const, label: ui.stages.editing },
+    { id: "published" as const, label: ui.stages.published },
+    { id: "draft" as const, label: ui.stages.draft },
+  ]), [ui]);
   const lastAutoOpenedTaskCountRef = useRef(0);
   const [status, setStatus] = useState<YoutubeStatus | null>(null);
   const [days, setDays] = useState<PlanDay[]>([]);
@@ -3236,19 +3256,19 @@ export default function YouTubeGrowthPlannerV2Tab() {
           <div className="flex items-center gap-3">
             <CalendarDays className="h-5 w-5 text-red-300" />
             <h2 className="text-2xl font-semibold text-white">
-              {latestPlan ? "This Week Plan" : "Weekly Plan"}
+              {latestPlan ? ui.planner.thisWeekPlanTitle : ui.planner.weeklyPlanTitle}
             </h2>
           </div>
           <p className="mt-2 text-sm text-white/45">{dateRangeLabel(latestPlan?.startDate, latestPlan?.endDate)}</p>
         </div>
         <div className="flex gap-2">
-          <Button variant={viewMode === "calendar" ? "default" : "secondary"} className="rounded-lg" onClick={() => setViewMode("calendar")}><LayoutGrid className="mr-2 h-4 w-4" />Calendar</Button>
-          <Button variant={viewMode === "planner" ? "default" : "secondary"} className="rounded-lg" onClick={() => setViewMode("planner")}><ListChecks className="mr-2 h-4 w-4" />Planner</Button>
+          <Button variant={viewMode === "calendar" ? "default" : "secondary"} className="rounded-lg" onClick={() => setViewMode("calendar")}><LayoutGrid className="mr-2 h-4 w-4" />{ui.viewModes.calendar}</Button>
+          <Button variant={viewMode === "planner" ? "default" : "secondary"} className="rounded-lg" onClick={() => setViewMode("planner")}><ListChecks className="mr-2 h-4 w-4" />{ui.viewModes.planner}</Button>
         </div>
       </div>
       <div className="mt-5 rounded-lg border border-white/10 bg-white/[0.03] p-4">
         <div className="flex items-center justify-between gap-3 text-sm text-white/70">
-          <span>{progressState.planned} planned this week · {progressState.posted} published</span>
+          <span>{ui.planner.plannedThisWeekSummary(progressState.planned, progressState.posted)}</span>
           <span>{progressState.progress}%</span>
         </div>
         <Progress value={progressState.progress} className="mt-3 bg-white/10 [&>div]:bg-red-400" />
@@ -3268,7 +3288,11 @@ export default function YouTubeGrowthPlannerV2Tab() {
                     <p className="text-sm font-semibold text-white">{dayName(date)}</p>
                     <p className="mt-1 text-xs text-white/35">{formatIsoDate(date, { month: "short", day: "numeric" })}</p>
                   </div>
-                  {hasPublished ? <span className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-2 py-1 text-[10px] font-medium text-emerald-200">Published</span> : dateDays.length ? <span className="rounded-full border border-sky-400/25 bg-sky-500/10 px-2 py-1 text-[10px] font-medium text-sky-100">{dateDays.length} planned</span> : <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-[10px] font-medium text-white/35">Open</span>}
+                  {hasPublished
+                    ? <span className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-2 py-1 text-[10px] font-medium text-emerald-200">{ui.planner.publishedChip}</span>
+                    : dateDays.length
+                      ? <span className="rounded-full border border-sky-400/25 bg-sky-500/10 px-2 py-1 text-[10px] font-medium text-sky-100">{ui.planner.plannedChip(dateDays.length)}</span>
+                      : <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-[10px] font-medium text-white/35">{ui.planner.openChip}</span>}
                 </div>
                 {dateDays.length ? (
                   <div className="space-y-3">
@@ -3276,6 +3300,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
                       <CalendarPreviewCard
                         key={toCardId(day)}
                         day={day}
+                        ui={ui}
                         linked={Boolean(resultsByDay.get(day.day))}
                         onDragStart={handleDragStart}
                         onOpen={setDetailDay}
@@ -3312,7 +3337,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
               </div>
             );
           })}
-          {!days.length && <div className="w-full rounded-lg border border-white/10 p-8 text-center text-sm text-white/45">Generate a plan to create exactly {preferredPostsPerWeek} YouTube ideas grounded in your channel data and strongest posting windows.</div>}
+          {!days.length && <div className="w-full rounded-lg border border-white/10 p-8 text-center text-sm text-white/45">{ui.planner.emptyPlan(preferredPostsPerWeek)}</div>}
           </div>
         </div>
       ) : (
@@ -3321,7 +3346,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
             <div key={stage.id} onDragOver={(event) => event.preventDefault()} onDrop={() => handleDropOnStage(stage.id)} className="min-h-[260px] rounded-lg border border-white/10 bg-white/[0.025] p-3">
               <p className="mb-3 text-sm font-semibold text-white">{stage.label}</p>
               <div className="space-y-3">
-                {days.filter((day) => effectivePlannerStage(day, resultsByDay, recentVideoById) === stage.id).map((day) => <PlannerIdeaCard key={toCardId(day)} day={day} onDragStart={handleDragStart} onDelete={deleteDay} onOpen={setDetailDay} onCreateThumbnail={openThumbnailDialog} />)}
+                {days.filter((day) => effectivePlannerStage(day, resultsByDay, recentVideoById) === stage.id).map((day) => <PlannerIdeaCard key={toCardId(day)} day={day} ui={ui} onDragStart={handleDragStart} onDelete={deleteDay} onOpen={setDetailDay} onCreateThumbnail={openThumbnailDialog} />)}
               </div>
             </div>
           ))}
@@ -3336,11 +3361,11 @@ export default function YouTubeGrowthPlannerV2Tab() {
         <div>
           <div className="flex items-center gap-3">
             <CheckCircle2 className="h-5 w-5 text-emerald-300" />
-            <h2 className="text-2xl font-semibold text-white">Consistency Tracker</h2>
+            <h2 className="text-2xl font-semibold text-white">{ui.consistencyTracker.title}</h2>
           </div>
-          <p className="mt-2 text-sm text-white/45">Four weeks of publishing behavior so you can see if growth is a consistency issue, a performance issue, or both.</p>
+          <p className="mt-2 text-sm text-white/45">{ui.consistencyTracker.subtitle}</p>
         </div>
-        <Badge className={`${confidenceClass(recentVideos.length >= 4 ? "high" : "medium")} hover:brightness-100`}>{recentVideos.length >= 4 ? "high" : "medium"}</Badge>
+        <Badge className={`${confidenceClass(recentVideos.length >= 4 ? "high" : "medium")} hover:brightness-100`}>{recentVideos.length >= 4 ? ui.consistencyTracker.confidenceHigh : ui.consistencyTracker.confidenceMedium}</Badge>
       </div>
       <CurrentWeekConsistencyChart rows={currentWeekConsistency} />
     </PanelCard>
@@ -3350,24 +3375,24 @@ export default function YouTubeGrowthPlannerV2Tab() {
     <PanelCard className="border-emerald-300/15 bg-[radial-gradient(circle_at_top_left,rgba(52,211,153,0.18),transparent_38%),linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0.01))] p-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-emerald-100/70">Action queue</p>
-          <h3 className="mt-2 text-xl font-semibold text-white">Sort this week&apos;s unlinked uploads</h3>
-          <p className="mt-1 max-w-3xl text-sm text-white/55">These videos are already live in the current schedule week, but they are not attached to an idea yet. Clearing this list keeps your plan accurate and makes the rest of the week easier to trust.</p>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-emerald-100/70">{ui.overviewPanel.actionQueueEyebrow}</p>
+          <h3 className="mt-2 text-xl font-semibold text-white">{ui.overviewPanel.actionQueueTitle}</h3>
+          <p className="mt-1 max-w-3xl text-sm text-white/55">{ui.overviewPanel.actionQueueSubtitle}</p>
           <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-emerald-300/20 bg-emerald-400/10 px-3 py-1 text-xs text-emerald-100">
             <CheckCircle2 className="h-3.5 w-3.5" />
-            {unlinkedWeekVideos.length} upload{unlinkedWeekVideos.length === 1 ? "" : "s"} waiting for review
+            {ui.overviewPanel.uploadsWaitingForReview(unlinkedWeekVideos.length)}
           </div>
         </div>
         <Button variant="secondary" className="rounded-lg" onClick={() => void syncChannel()} disabled={working === "sync"}>
           {working === "sync" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="mr-2 h-4 w-4" />}
-          Refresh uploads
+          {ui.overviewPanel.syncUploadsButton}
         </Button>
       </div>
       <div className="mt-5 grid gap-3 md:grid-cols-3">
         {[
-          { label: "Review uploads", value: unlinkedWeekVideos.length, caption: "Videos need a decision", tone: "border-white/10 bg-white/[0.04] text-white" },
-          { label: "Link to plan", value: unlinkedWeekVideos.filter((video) => (daysByDate.get(video.publishedAt?.slice(0, 10) ?? "") ?? []).some((day) => !resultsByDay.has(day.day))).length, caption: "Can match an existing idea", tone: "border-emerald-300/20 bg-emerald-400/10 text-emerald-100" },
-          { label: "Create new idea", value: unlinkedWeekVideos.filter((video) => !(daysByDate.get(video.publishedAt?.slice(0, 10) ?? "") ?? []).some((day) => !resultsByDay.has(day.day))).length, caption: "No plan card found yet", tone: "border-amber-300/20 bg-amber-400/10 text-amber-100" },
+          { label: ui.overviewPanel.reviewUploadsLabel, value: unlinkedWeekVideos.length, caption: ui.overviewPanel.reviewUploadsCaption, tone: "border-white/10 bg-white/[0.04] text-white" },
+          { label: ui.overviewPanel.linkToPlanLabel, value: unlinkedWeekVideos.filter((video) => (daysByDate.get(video.publishedAt?.slice(0, 10) ?? "") ?? []).some((day) => !resultsByDay.has(day.day))).length, caption: ui.overviewPanel.linkToPlanCaption, tone: "border-emerald-300/20 bg-emerald-400/10 text-emerald-100" },
+          { label: ui.overviewPanel.createNewIdeaLabel, value: unlinkedWeekVideos.filter((video) => !(daysByDate.get(video.publishedAt?.slice(0, 10) ?? "") ?? []).some((day) => !resultsByDay.has(day.day))).length, caption: ui.overviewPanel.createNewIdeaCaption, tone: "border-amber-300/20 bg-amber-400/10 text-amber-100" },
         ].map((item) => (
           <PanelCardSoft key={item.label} className={cn("border p-4", item.tone)}>
             <p className="text-[11px] uppercase tracking-[0.16em] opacity-70">{item.label}</p>
@@ -3385,7 +3410,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs text-white/65">
                   <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-400/15 text-emerald-100">{index + 1}</span>
-                  Review upload
+                  {ui.overviewPanel.reviewUploadChip}
                 </div>
                 <span className="text-xs text-white/45">{formatIsoDate(video.publishedAt)} · {formatNumber(video.viewCount)} views</span>
               </div>
@@ -3399,7 +3424,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
                 </div>
                 <Button className="rounded-lg bg-white text-black hover:bg-white/90" onClick={() => void addUploadedVideoAsIdea(video)}>
                   <Plus className="mr-2 h-4 w-4" />
-                  This is a new idea
+                  {ui.overviewPanel.newIdeaButton}
                 </Button>
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
@@ -3410,12 +3435,12 @@ export default function YouTubeGrowthPlannerV2Tab() {
                     onClick={() => void linkVideoToPlannedDay(video, day)}
                     className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-left text-sm text-white transition-all hover:-translate-y-0.5 hover:border-emerald-300/35 hover:bg-emerald-500/10"
                   >
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-100/65">Yes, link it here</p>
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-100/65">{ui.overviewPanel.linkItHere}</p>
                     <p className="font-semibold">{day.contentIdea}</p>
                     {day.hook && day.hook !== day.contentIdea ? <p className="mt-1 text-white/55">{day.hook}</p> : null}
                   </button>
                 ))}
-                {!matchingIdeas.length ? <div className="rounded-xl border border-dashed border-white/10 px-4 py-3 text-sm text-white/45">No matching plan card was found for this date. The easiest next step is saving it as a new idea.</div> : null}
+                {!matchingIdeas.length ? <div className="rounded-xl border border-dashed border-white/10 px-4 py-3 text-sm text-white/45">{ui.overviewPanel.noMatchingPlanCard}</div> : null}
               </div>
             </PanelCardSoft>
           );
@@ -3431,11 +3456,11 @@ export default function YouTubeGrowthPlannerV2Tab() {
     accent: string;
     badge?: string;
   }> = [
-    { id: "overview", label: "Overview", Icon: LayoutGrid, accent: "from-sky-300/20 to-cyan-300/8" },
-    { id: "plan", label: "Plan", Icon: CalendarDays, accent: "from-red-300/24 to-orange-300/8" },
-    { id: "competitors", label: "Competitors", Icon: Youtube, accent: "from-rose-300/24 to-red-300/8" },
-    { id: "insights", label: "Insights", Icon: BarChart3, accent: "from-emerald-300/20 to-lime-300/8" },
-    { id: "tasks", label: "Tasks", Icon: ListChecks, accent: "from-amber-300/24 to-yellow-300/8", badge: unlinkedWeekVideos.length ? String(unlinkedWeekVideos.length) : undefined },
+    { id: "overview", label: ui.subtabs.overview, Icon: LayoutGrid, accent: "from-sky-300/20 to-cyan-300/8" },
+    { id: "plan", label: ui.subtabs.plan, Icon: CalendarDays, accent: "from-red-300/24 to-orange-300/8" },
+    { id: "competitors", label: ui.subtabs.competitors, Icon: Youtube, accent: "from-rose-300/24 to-red-300/8" },
+    { id: "insights", label: ui.subtabs.insights, Icon: BarChart3, accent: "from-emerald-300/20 to-lime-300/8" },
+    { id: "tasks", label: ui.subtabs.tasks, Icon: ListChecks, accent: "from-amber-300/24 to-yellow-300/8", badge: unlinkedWeekVideos.length ? String(unlinkedWeekVideos.length) : undefined },
   ];
 
   const subtabNav = (
@@ -3483,23 +3508,23 @@ export default function YouTubeGrowthPlannerV2Tab() {
     <PanelCardSoft className="border-red-300/15 p-4">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/35">Today</p>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/35">{ui.overviewPanel.todayEyebrow}</p>
           {todayPlannedDays.length ? (
             <>
-              <h3 className="mt-2 text-lg font-semibold text-white">Today&apos;s planned cards</h3>
-              <p className="mt-1 text-sm text-white/50">Publish what shipped, or move an idea to a better day without opening the full planner.</p>
+              <h3 className="mt-2 text-lg font-semibold text-white">{ui.overviewPanel.todaysPlannedCardsTitle}</h3>
+              <p className="mt-1 text-sm text-white/50">{ui.overviewPanel.todaysPlannedCardsSubtitle}</p>
             </>
           ) : (
             <>
-              <h3 className="mt-2 text-lg font-semibold text-white">No pending upload</h3>
-              <p className="mt-1 text-sm text-white/50">Add an idea or generate a plan to set your next move.</p>
+              <h3 className="mt-2 text-lg font-semibold text-white">{ui.overviewPanel.noPendingUploadTitle}</h3>
+              <p className="mt-1 text-sm text-white/50">{ui.overviewPanel.noPendingUploadSubtitle}</p>
             </>
           )}
         </div>
         <div className="flex flex-wrap gap-2">
           <Button type="button" variant="secondary" className="rounded-lg" onClick={() => openCustomIdeaForDate(new Date().toISOString().slice(0, 10))}>
             <Plus className="mr-2 h-4 w-4" />
-            Add idea
+            {ui.overviewPanel.addIdeaButton}
           </Button>
         </div>
       </div>
@@ -3511,10 +3536,10 @@ export default function YouTubeGrowthPlannerV2Tab() {
               {day.hook && day.hook !== day.contentIdea ? <p className="mt-2 text-sm text-white/55">{day.hook}</p> : null}
               <div className="mt-4 flex gap-2">
                 <Button type="button" className="flex-1 rounded-lg bg-emerald-500 text-emerald-950 hover:bg-emerald-400" onClick={() => { setDetailDay(day); setLinkingDay(day.day); }}>
-                  Publish
+                  {ui.overviewPanel.publishButton}
                 </Button>
                 <Button type="button" variant="secondary" className="flex-1 rounded-lg transition-all hover:-translate-y-0.5" onClick={() => setMovingDay(day)}>
-                  Move
+                  {ui.overviewPanel.moveButton}
                 </Button>
               </div>
             </PanelCardSoft>
@@ -3531,57 +3556,57 @@ export default function YouTubeGrowthPlannerV2Tab() {
         <PanelCard className="p-5 transition-all hover:-translate-y-1 hover:bg-white/[0.04]">
           <div className="flex items-center gap-3">
             <CalendarDays className="h-5 w-5 text-red-300" />
-            <h3 className="text-xl font-semibold text-white">Plan at a glance</h3>
+            <h3 className="text-xl font-semibold text-white">{ui.overviewPanel.planAtGlanceTitle}</h3>
           </div>
-          <p className="mt-2 text-sm leading-6 text-white/50">Your next week should feel actionable, not crowded. Jump into the planner when you are ready to shape titles, thumbnails, and publish timing.</p>
+          <p className="mt-2 text-sm leading-6 text-white/50">{ui.overviewPanel.planAtGlanceSubtitle}</p>
           <div className="mt-4 grid gap-3 sm:grid-cols-3">
             <PanelCardSoft className="border border-white/10 p-4">
-              <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Planned cards</p>
+              <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">{ui.overviewPanel.plannedCardsLabel}</p>
               <p className="mt-2 text-2xl font-semibold text-white">{days.length}</p>
             </PanelCardSoft>
             <PanelCardSoft className="border border-white/10 p-4">
-              <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Published this week</p>
+              <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">{ui.overviewPanel.publishedThisWeekLabel}</p>
               <p className="mt-2 text-2xl font-semibold text-white">{progressState.posted}</p>
             </PanelCardSoft>
             <PanelCardSoft className="border border-white/10 p-4">
-              <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Best next slot</p>
-              <p className="mt-2 text-lg font-semibold text-white">{bestTime.highest ? `${bestTime.highest.day} ${bestTime.highest.hour}` : "Need more data"}</p>
+              <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">{ui.overviewPanel.bestNextSlotLabel}</p>
+              <p className="mt-2 text-lg font-semibold text-white">{bestTime.highest ? `${bestTime.highest.day} ${bestTime.highest.hour}` : ui.stats.bestSlotNoData}</p>
             </PanelCardSoft>
           </div>
           <Button type="button" className="mt-5 rounded-lg" onClick={() => setActiveSubtab("plan")}>
-            Open planning workspace
+            {ui.overviewPanel.openPlanningWorkspaceButton}
           </Button>
         </PanelCard>
 
         <PanelCard className="p-5 transition-all hover:-translate-y-1 hover:bg-white/[0.04]">
           <div className="flex items-center gap-3">
             <BarChart3 className="h-5 w-5 text-emerald-300" />
-            <h3 className="text-xl font-semibold text-white">What needs attention</h3>
+            <h3 className="text-xl font-semibold text-white">{ui.overviewPanel.needsAttentionTitle}</h3>
           </div>
-          <p className="mt-2 text-sm leading-6 text-white/50">A simple triage view so you know where to go next without scanning the whole page.</p>
+          <p className="mt-2 text-sm leading-6 text-white/50">{ui.overviewPanel.needsAttentionSubtitle}</p>
           <div className="mt-4 grid gap-3 sm:grid-cols-3">
             <PanelCardSoft className="border border-white/10 p-4">
-              <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Tasks waiting</p>
+              <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">{ui.overviewPanel.tasksWaitingLabel}</p>
               <p className="mt-2 text-2xl font-semibold text-white">{unlinkedWeekVideos.length}</p>
             </PanelCardSoft>
             <PanelCardSoft className="border border-white/10 p-4">
-              <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Competitors saved</p>
+              <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">{ui.overviewPanel.competitorsSavedLabel}</p>
               <p className="mt-2 text-2xl font-semibold text-white">{competitorRows.length}</p>
             </PanelCardSoft>
             <PanelCardSoft className="border border-white/10 p-4">
-              <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Insight cards</p>
+              <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">{ui.overview.insightCardsLabel}</p>
               <p className="mt-2 text-2xl font-semibold text-white">{topDiagnostics.length + underperformerDiagnostics.length}</p>
             </PanelCardSoft>
           </div>
           <div className="mt-5 flex flex-wrap gap-2">
             <Button type="button" variant="secondary" className="rounded-lg" onClick={() => setActiveSubtab("tasks")}>
-              Open tasks
+              {ui.overview.openTasks}
             </Button>
             <Button type="button" variant="secondary" className="rounded-lg" onClick={() => setActiveSubtab("competitors")}>
-              Open competitors
+              {ui.overview.openCompetitors}
             </Button>
             <Button type="button" variant="secondary" className="rounded-lg" onClick={() => setActiveSubtab("insights")}>
-              Open insights
+              {ui.overview.openInsights}
             </Button>
           </div>
         </PanelCard>
@@ -3593,23 +3618,23 @@ export default function YouTubeGrowthPlannerV2Tab() {
     <PanelPage className="max-w-7xl space-y-8 py-8">
       <PanelHeader className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
         <div className="space-y-3">
-          <PanelEyebrow>YouTube Growth</PanelEyebrow>
-          <PanelTitle className="text-4xl">Grow your next upload week.</PanelTitle>
-          <PanelSubtitle className="max-w-3xl">A focused workspace for channel patterns, weekly planning, competitor context, and publishing follow-through.</PanelSubtitle>
+          <PanelEyebrow>{ui.header.eyebrow}</PanelEyebrow>
+          <PanelTitle className="text-4xl">{ui.header.title}</PanelTitle>
+          <PanelSubtitle className="max-w-3xl">{ui.header.subtitle}</PanelSubtitle>
         </div>
         {status?.connected && (
           <div className="flex flex-wrap items-start gap-2 lg:justify-end">
             <Button className="rounded-lg bg-red-500 px-5 text-white hover:bg-red-400" onClick={generatePlan} disabled={Boolean(working)}>
               {working === "plan" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Youtube className="mr-2 h-4 w-4" />}
-              Generate next week's plan
+              {ui.actions.generatePlan}
             </Button>
             <Button variant="secondary" className="rounded-lg px-3 text-white/65" onClick={() => setSettingsOpen(true)}>
               <Settings className="mr-2 h-4 w-4" />
-              Settings
+              {ui.actions.settings}
             </Button>
             <Button variant="secondary" className="rounded-lg px-3 text-white/65" onClick={syncChannel} disabled={Boolean(working)}>
               {working === "sync" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="mr-2 h-4 w-4" />}
-              Refresh channel
+              {ui.actions.refreshChannel}
             </Button>
           </div>
         )}
@@ -3625,11 +3650,11 @@ export default function YouTubeGrowthPlannerV2Tab() {
                 <Youtube className="h-6 w-6 text-red-200" />
               </div>
               <div>
-                <PanelEyebrow>Secure connection</PanelEyebrow>
-                <h2 className="mt-3 text-2xl font-semibold text-white">Connect the channel you want to grow.</h2>
-                <p className="mt-3 max-w-2xl text-sm leading-6 text-white/55">Your DayTabs login and YouTube channel can be different Google accounts. DayTabs stores tokens on the backend and refreshes access silently.</p>
+                <PanelEyebrow>{ui.connect.secureConnection}</PanelEyebrow>
+                <h2 className="mt-3 text-2xl font-semibold text-white">{ui.connect.title}</h2>
+                <p className="mt-3 max-w-2xl text-sm leading-6 text-white/55">{ui.connect.body}</p>
                 <div className="mt-6 grid gap-3 sm:grid-cols-3">
-                  {["Channel profile", "Real trends", "Weekly results"].map((item) => (
+                  {[ui.connect.bullets.channelProfile, ui.connect.bullets.realTrends, ui.connect.bullets.weeklyResults].map((item) => (
                     <PanelCardSoft key={item} className="p-4 text-sm text-white/70">
                       <Check className="mb-3 h-4 w-4 text-emerald-300" />
                       {item}
@@ -3641,12 +3666,12 @@ export default function YouTubeGrowthPlannerV2Tab() {
           </PanelCard>
           <PanelCard className="flex flex-col justify-between p-6">
             <div>
-              <p className="text-sm font-medium text-white">Ready when you are.</p>
-              <p className="mt-2 text-sm leading-6 text-white/45">Google will ask for read-only YouTube and Analytics access.</p>
+              <p className="text-sm font-medium text-white">{ui.connect.readyTitle}</p>
+              <p className="mt-2 text-sm leading-6 text-white/45">{ui.connect.readyBody}</p>
             </div>
             <Button className="mt-6 rounded-lg bg-red-500 py-6 text-base text-white hover:bg-red-400" onClick={connectYoutube} disabled={Boolean(working)}>
               {working === "connect" ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Youtube className="mr-2 h-5 w-5" />}
-              Connect to YouTube
+              {ui.connect.connectButton}
             </Button>
           </PanelCard>
         </section>
@@ -3665,35 +3690,35 @@ export default function YouTubeGrowthPlannerV2Tab() {
                   </span>
                 </div>
                 <div className="min-w-0">
-                  <p className="text-[11px] uppercase tracking-[0.18em] text-white/35">Command Center</p>
-                  <h2 className="mt-2 truncate text-2xl font-semibold text-white">{status.channel?.channelName ?? "Connected channel"}</h2>
-                  <p className="mt-1 text-sm text-white/45">{status.channel?.nicheProfile?.niche ?? "Niche profile ready"}</p>
+                  <p className="text-[11px] uppercase tracking-[0.18em] text-white/35">{ui.commandCenter.eyebrow}</p>
+                  <h2 className="mt-2 truncate text-2xl font-semibold text-white">{status.channel?.channelName ?? ui.commandCenter.connectedChannelFallback}</h2>
+                  <p className="mt-1 text-sm text-white/45">{status.channel?.nicheProfile?.niche ?? ui.commandCenter.nicheProfileFallback}</p>
                   <div className="mt-3 flex flex-wrap gap-2 text-xs text-white/45">
-                    <span>{formatNumber(status.channel?.subscriberCount)} subscribers</span>
+                    <span>{formatNumber(status.channel?.subscriberCount)} {ui.commandCenter.subscribersLabel}</span>
                     <span>·</span>
-                    <span>{formatNumber(status.channel?.totalViewCount)} total views</span>
+                    <span>{formatNumber(status.channel?.totalViewCount)} {ui.commandCenter.totalViewsLabel}</span>
                     <span>·</span>
-                    <span>{formatNumber(status.channel?.videoCount)} videos</span>
+                    <span>{formatNumber(status.channel?.videoCount)} {ui.commandCenter.videosLabel}</span>
                   </div>
                 </div>
               </div>
               <div className="grid gap-3 md:grid-cols-3">
                 <CommandStat
-                  label="Weekly target"
-                  value={`${preferredPostsPerWeek} upload${preferredPostsPerWeek === 1 ? "" : "s"}`}
-                  caption="Used when generating plans"
+                  label={ui.stats.weeklyTargetLabel}
+                  value={ui.stats.uploadsLabel(preferredPostsPerWeek)}
+                  caption={ui.stats.weeklyTargetCaption}
                   Icon={CalendarDays}
                 />
                 <CommandStat
-                  label="Progress"
-                  value={`${progressState.posted}/${Math.max(days.length, preferredPostsPerWeek)} published`}
-                  caption="Linked uploads this week"
+                  label={ui.stats.progressLabel}
+                  value={`${progressState.posted}/${Math.max(days.length, preferredPostsPerWeek)} ${ui.stats.publishedLabel(progressState.posted)}`}
+                  caption={ui.stats.progressCaption}
                   Icon={CheckCircle2}
                 />
                 <CommandStat
-                  label="Best slot"
-                  value={bestTime.highest ? `${bestTime.highest.day} ${bestTime.highest.hour}` : "Needs more data"}
-                  caption={bestTime.highest ? `${formatNumber(bestTime.highest.value)} avg views` : "More uploads improve this"}
+                  label={ui.stats.bestSlotLabel}
+                  value={bestTime.highest ? `${bestTime.highest.day} ${bestTime.highest.hour}` : ui.stats.bestSlotNoData}
+                  caption={bestTime.highest ? `${formatNumber(bestTime.highest.value)} ${ui.stats.bestSlotAvgViewsSuffix}` : ui.stats.bestSlotMoreUploads}
                   Icon={Clock}
                 />
               </div>
@@ -3717,9 +3742,9 @@ export default function YouTubeGrowthPlannerV2Tab() {
                   <div>
                     <div className="flex items-center gap-3">
                       <BarChart3 className="h-5 w-5 text-emerald-300" />
-                      <h2 className="text-2xl font-semibold text-white">Repeat or Fix</h2>
+                      <h2 className="text-2xl font-semibold text-white">{ui.repeatOrFix.title}</h2>
                     </div>
-                    <p className="mt-2 max-w-3xl text-sm leading-6 text-white/55">Pick one proven move to repeat and one underperforming video to repair. Each card shows the source upload, the signal behind it, and the next action to try.</p>
+                    <p className="mt-2 max-w-3xl text-sm leading-6 text-white/55">{ui.repeatOrFix.subtitle}</p>
                   </div>
                   <Badge className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-white/65 hover:brightness-100">
                     {topDiagnostics.length + underperformerDiagnostics.length} cards
@@ -3727,22 +3752,22 @@ export default function YouTubeGrowthPlannerV2Tab() {
                 </div>
                 {channelDescription(status.channel) ? (
                   <PanelCardSoft className="mt-5 border border-white/10 p-4">
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/35">Channel context for these recommendations</p>
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/35">{ui.repeatOrFix.contextLabel}</p>
                     <p className="mt-2 text-sm leading-6 text-white/65">{channelDescription(status.channel)}</p>
                   </PanelCardSoft>
                 ) : null}
               </div>
               <div className="grid gap-4 p-5 md:p-6 2xl:grid-cols-2">
                 <AnalysisLane
-                  title="What worked"
-                  subtitle="Your strongest recent videos, broken into the exact creative signals worth repeating."
+                  title={ui.repeatOrFix.whatWorkedTitle}
+                  subtitle={ui.repeatOrFix.whatWorkedSubtitle}
                   Icon={CheckCircle2}
                   diagnostics={topDiagnostics}
                   tone="positive"
                 />
                 <AnalysisLane
-                  title="Needs work"
-                  subtitle="The weakest recent uploads, shown as specific hook, tag, title, concept, and timing issues."
+                  title={ui.repeatOrFix.needsWorkTitle}
+                  subtitle={ui.repeatOrFix.needsWorkSubtitle}
                   Icon={TrendingDown}
                   diagnostics={underperformerDiagnostics}
                   tone="negative"
@@ -3758,9 +3783,9 @@ export default function YouTubeGrowthPlannerV2Tab() {
               <div>
                 <div className="flex items-center gap-3">
                   <BarChart3 className="h-5 w-5 text-emerald-300" />
-                  <h2 className="text-2xl font-semibold text-white">Performance Signals</h2>
+                  <h2 className="text-2xl font-semibold text-white">{ui.performanceSignals.title}</h2>
                 </div>
-                <p className="mt-2 text-sm text-white/45">Signals from your uploads, analytics, and competitors.</p>
+                <p className="mt-2 text-sm text-white/45">{ui.performanceSignals.subtitle}</p>
               </div>
             </div>
             <div className="sticky top-4 z-10 mt-5 flex flex-wrap gap-2 rounded-xl border border-white/10 bg-[#120d1f]/90 p-3 backdrop-blur">
@@ -3780,12 +3805,12 @@ export default function YouTubeGrowthPlannerV2Tab() {
               <PanelCardSoft id="optimal-posting-schedule" className="border border-white/10 p-5 transition-all hover:-translate-y-1 hover:bg-white/[0.05]">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <h3 className="text-xl font-semibold text-white">Best Times to Post</h3>
-                    <p className="mt-2 text-sm text-white/45">Average views by weekday and publish window from your real upload history.</p>
+                    <h3 className="text-xl font-semibold text-white">{ui.performanceSignals.bestTimesTitle}</h3>
+                    <p className="mt-2 text-sm text-white/45">{ui.performanceSignals.bestTimesSubtitle}</p>
                   </div>
                   <Badge className={`${confidenceClass(bestTime.highest ? "high" : "low")} hover:brightness-100`}>{bestTime.highest ? "high" : "low"}</Badge>
                 </div>
-                <BestTimeHeatmap cells={bestTime.cells} />
+                <BestTimeHeatmap cells={bestTime.cells} ui={ui} locale={locale} />
                 {bestTime.highest ? (
                   <p className="mt-4 text-sm text-white/65">
                     Your strongest slot is {bestTime.highest.day} {bestTime.highest.hour === "00:00" ? "00:00-06:00" : bestTime.highest.hour === "06:00" ? "06:00-12:00" : bestTime.highest.hour === "12:00" ? "12:00-18:00" : "18:00-24:00"} at {formatNumber(bestTime.highest.value)} average views, {formatPercent(bestTime.average ? ((bestTime.highest.value - bestTime.average) / bestTime.average) * 100 : 0)} above your channel average. Evidence: {bestTime.sampleVideos.map((video) => `"${video.title}" (${formatNumber(video.viewCount)} views)`).join(" and ")}.
@@ -3797,8 +3822,8 @@ export default function YouTubeGrowthPlannerV2Tab() {
                 <PanelCardSoft id="hook-efficacy-analysis" className="border border-white/10 p-5 transition-all hover:-translate-y-1 hover:bg-white/[0.05]">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <h3 className="text-xl font-semibold text-white">Hooks That Pull Views</h3>
-                      <p className="mt-2 text-sm text-white/45">Average views by hook style across your actual video titles.</p>
+                      <h3 className="text-xl font-semibold text-white">{ui.performanceSignals.hooksTitle}</h3>
+                      <p className="mt-2 text-sm text-white/45">{ui.performanceSignals.hooksSubtitle}</p>
                     </div>
                     <Badge className={`${confidenceClass(hookRows.length >= 3 ? "high" : "medium")} hover:brightness-100`}>{hookRows.length >= 3 ? "high" : "medium"}</Badge>
                   </div>
@@ -3815,8 +3840,8 @@ export default function YouTubeGrowthPlannerV2Tab() {
                 <PanelCardSoft id="optimal-title-length" className="border border-white/10 p-5 transition-all hover:-translate-y-1 hover:bg-white/[0.05]">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <h3 className="text-xl font-semibold text-white">Optimal Title Length</h3>
-                      <p className="mt-2 text-sm text-white/45">Average views by title-length bucket so the winning range is obvious.</p>
+                      <h3 className="text-xl font-semibold text-white">{ui.performanceSignals.optimalTitleLengthTitle}</h3>
+                      <p className="mt-2 text-sm text-white/45">{ui.performanceSignals.optimalTitleLengthSubtitle}</p>
                     </div>
                     <Badge className={`${confidenceClass(titleLengthSummary.points.length >= 8 ? "high" : "medium")} hover:brightness-100`}>{titleLengthSummary.points.length >= 8 ? "high" : "medium"}</Badge>
                   </div>
@@ -3825,10 +3850,10 @@ export default function YouTubeGrowthPlannerV2Tab() {
                     <table className="min-w-full text-sm">
                       <thead className="bg-white/[0.03] text-left text-white/45">
                         <tr>
-                          <th className="px-4 py-3 font-medium">Top 5 titles</th>
-                          <th className="px-4 py-3 font-medium">Chars · Views</th>
-                          <th className="px-4 py-3 font-medium">Bottom 5 titles</th>
-                          <th className="px-4 py-3 font-medium">Chars · Views</th>
+                          <th className="px-4 py-3 font-medium">{ui.performanceSignals.topTitlesHeader}</th>
+                          <th className="px-4 py-3 font-medium">{ui.performanceSignals.charsViewsHeader}</th>
+                          <th className="px-4 py-3 font-medium">{ui.performanceSignals.bottomTitlesHeader}</th>
+                          <th className="px-4 py-3 font-medium">{ui.performanceSignals.charsViewsHeader}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -3859,8 +3884,8 @@ export default function YouTubeGrowthPlannerV2Tab() {
                 <PanelCardSoft id="subscriber-growth-chart" className="border border-white/10 p-5 transition-all hover:-translate-y-1 hover:bg-white/[0.05]">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <h3 className="text-xl font-semibold text-white">Subscriber Growth Chart</h3>
-                      <p className="mt-2 text-sm text-white/45">Net subscriber gain with publish markers from your recent uploads.</p>
+                      <h3 className="text-xl font-semibold text-white">{ui.performanceSignals.subscriberGrowthTitle}</h3>
+                      <p className="mt-2 text-sm text-white/45">{ui.performanceSignals.subscriberGrowthSubtitle}</p>
                     </div>
                     <Badge className={`${confidenceClass(subscriberGrowth.timeline.length >= 14 ? "high" : "medium")} hover:brightness-100`}>{subscriberGrowth.timeline.length >= 14 ? "high" : "medium"}</Badge>
                   </div>
@@ -3880,7 +3905,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
                                 <p className="font-medium">{formatIsoDate(point.rawDate)}</p>
                                 {video ? <p className="mt-1 text-white">{video.title}</p> : null}
                                 {video ? <p className="mt-1 text-white/65">{formatNumber(video.views)} views</p> : null}
-                                <p className="mt-1 text-white/65">Estimated subscriber gain: {formatNumber(point.subscribersNet)}</p>
+                                <p className="mt-1 text-white/65">{ui.performanceSignals.estimatedSubscriberGainLabel}: {formatNumber(point.subscribersNet)}</p>
                               </div>
                             );
                           }}
@@ -3900,12 +3925,12 @@ export default function YouTubeGrowthPlannerV2Tab() {
                 <PanelCardSoft id="your-tag-performance" className="border border-white/10 p-5 transition-all hover:-translate-y-1 hover:bg-white/[0.05]">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <h3 className="text-xl font-semibold text-white">Tags That Help or Hurt</h3>
-                      <p className="mt-2 text-sm text-white/45">Tags pulled from your real uploaded videos and grouped by average performance.</p>
+                      <h3 className="text-xl font-semibold text-white">{ui.performanceSignals.tagsTitle}</h3>
+                      <p className="mt-2 text-sm text-white/45">{ui.performanceSignals.tagsSubtitle}</p>
                     </div>
                     <Badge className={`${confidenceClass(tagPerformance.length >= 6 ? "high" : "medium")} hover:brightness-100`}>{tagPerformance.length >= 6 ? "high" : "medium"}</Badge>
                   </div>
-                  <p className="mt-4 text-sm text-white/55">Green = above average performance · Grey = neutral · Red = below average.</p>
+                  <p className="mt-4 text-sm text-white/55">{ui.performanceSignals.tagsLegend}</p>
                   <div className="mt-4 flex flex-wrap gap-2">
                     {(tagExpanded ? tagPerformance : tagPerformance.slice(0, 15)).map((tag) => (
                       <span key={tag.tag} className={cn("inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm", tag.tone === "positive" && "border-emerald-400/25 bg-emerald-500/10 text-emerald-100", tag.tone === "negative" && "border-red-400/25 bg-red-500/10 text-red-100", tag.tone === "neutral" && "border-white/10 bg-white/[0.05] text-white/70")}>
@@ -3926,8 +3951,8 @@ export default function YouTubeGrowthPlannerV2Tab() {
                 <PanelCardSoft id="trending-tags" className="border border-white/10 p-5 transition-all hover:-translate-y-1 hover:bg-white/[0.05]">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <h3 className="text-xl font-semibold text-white">Niche Tags to Test</h3>
-                      <p className="mt-2 text-sm text-white/45">Trend tags that do not overlap with your current tag set.</p>
+                      <h3 className="text-xl font-semibold text-white">{ui.performanceSignals.nicheTagsTitle}</h3>
+                      <p className="mt-2 text-sm text-white/45">{ui.performanceSignals.nicheTagsSubtitle}</p>
                     </div>
                     <Badge className={`${confidenceClass("medium")} hover:brightness-100`}>medium</Badge>
                   </div>
@@ -3936,7 +3961,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
                       <span key={tag.tag} className="inline-flex items-center gap-2 rounded-full border border-amber-300/20 bg-amber-400/10 px-3 py-1.5 text-sm text-amber-50">
                         <Flame className="h-3.5 w-3.5" />
                         #{tag.tag}
-                        <span className="text-xs text-amber-100/70">signal {tag.signal || 1}</span>
+                        <span className="text-xs text-amber-100/70">{ui.performanceSignals.signalLabel(tag.signal || 1)}</span>
                       </span>
                     ))}
                   </div>
@@ -3956,25 +3981,25 @@ export default function YouTubeGrowthPlannerV2Tab() {
             <PanelCard className="p-6 transition-all hover:-translate-y-1 hover:bg-white/[0.04]">
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
-                  <h2 className="text-2xl font-semibold text-white">Competitor Playbook</h2>
-                  <p className="mt-1 text-sm text-white/45">Use this like a coach&apos;s scouting report: who you can catch now, who is just ahead, and who defines the playbook for your niche.</p>
+                  <h2 className="text-2xl font-semibold text-white">{ui.competitorsPanel.title}</h2>
+                  <p className="mt-1 text-sm text-white/45">{ui.competitorsPanel.subtitle}</p>
                 </div>
                 <div className="flex w-full flex-col gap-3 md:w-auto md:min-w-[360px]">
                   <Button variant="secondary" className="rounded-lg" onClick={discoverCompetitorsOnly} disabled={Boolean(working)}>
                     {working === "competitors" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="mr-2 h-4 w-4" />}
-                    Discover competitors
+                    {ui.competitorsPanel.refreshCompetitors}
                   </Button>
                   <form onSubmit={(event) => void addCompetitorFromUrl(event)} className="flex flex-col gap-2 sm:flex-row">
                     <Input
                       value={manualCompetitorUrl}
                       onChange={(event) => setManualCompetitorUrl(event.target.value)}
-                      placeholder="Add competitor by YouTube channel URL"
+                      placeholder={ui.competitorsPanel.addCompetitorPlaceholder}
                       disabled={Boolean(working)}
                       className="border-white/10 bg-white/[0.04] text-white placeholder:text-white/30"
                     />
                     <Button type="submit" className="rounded-lg" disabled={!manualCompetitorUrl.trim() || Boolean(working)}>
                       {working === "competitor-add" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
-                      Add competitor
+                      {ui.competitorsPanel.addCompetitorButton}
                     </Button>
                   </form>
                 </div>
@@ -3982,8 +4007,8 @@ export default function YouTubeGrowthPlannerV2Tab() {
               <div className="mt-5 space-y-6">
                 <div className="space-y-3">
                     <div>
-                      <h3 className="text-lg font-semibold text-white">Channels You Can Beat</h3>
-                      <p className="mt-1 text-sm text-white/50">These are the channels close enough to race right now. Treat them like proof that your next push can move the leaderboard.</p>
+                      <h3 className="text-lg font-semibold text-white">{ui.competitorsPanel.channelsYouCanBeatTitle}</h3>
+                      <p className="mt-1 text-sm text-white/50">{ui.competitorsPanel.channelsYouCanBeatSubtitle}</p>
                     </div>
                     <div className="grid gap-4 md:grid-cols-2">
                       {reachableCompetitors.map((competitor) => {
@@ -4019,7 +4044,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
                               </div>
                             </div>
                             <p className="mt-4 text-sm leading-6 text-white/70">{storedMeta.reportSummary || deriveCompetitorCardInsight(competitor)}</p>
-                            {storedMeta.source === "manual" ? <p className="mt-2 text-xs text-sky-100/70">Added by you{storedMeta.addedFromUrl ? " from a channel URL" : ""}.</p> : null}
+                            {storedMeta.source === "manual" ? <p className="mt-2 text-xs text-sky-100/70">{ui.competitorsPanel.addedByYou(Boolean(storedMeta.addedFromUrl))}</p> : null}
                             {topVideo ? (
                               <a href={topVideo.url} target="_blank" rel="noreferrer" className="mt-3 block text-sm text-red-200 transition-colors hover:text-red-100">
                                 Top video: {topVideo.title}
@@ -4028,11 +4053,11 @@ export default function YouTubeGrowthPlannerV2Tab() {
                           </PanelCardSoft>
                         );
                       })}
-                      {!reachableCompetitors.length ? <PanelCardSoft className="p-4 text-sm text-white/55 md:col-span-2">No matching channels yet. Refresh competitors and DayTabs will keep scouting your niche.</PanelCardSoft> : null}
+                      {!reachableCompetitors.length ? <PanelCardSoft className="p-4 text-sm text-white/55 md:col-span-2">{ui.competitorsPanel.emptyReachableCompetitors}</PanelCardSoft> : null}
                     </div>
                     {weeklyComparison ? (
                       <PanelCardSoft className="border border-emerald-400/20 p-4">
-                        <h4 className="text-base font-semibold text-white">This Week&apos;s Friendly Leaderboard</h4>
+                        <h4 className="text-base font-semibold text-white">{ui.competitorsPanel.friendlyLeaderboardTitle}</h4>
                         <p className="mt-1 text-sm text-white/50">{weeklyComparison.windowLabel}: uploads and views for you and competitors based on published videos.</p>
                         <WeeklyComparisonChart rows={weeklyComparison.rows} weekdayRows={weeklyComparison.weekdayRows} />
                         <p className="mt-3 text-sm text-white/55">{weeklyComparison.windowDescription}</p>
@@ -4049,10 +4074,10 @@ export default function YouTubeGrowthPlannerV2Tab() {
 
       <Dialog open={Boolean(detailDay)} onOpenChange={(open) => !open && setDetailDay(null)}>
         <DialogContent className="max-h-[80vh] max-w-2xl overflow-y-auto pt-10">
-          <DialogHeader>
-            <DialogTitle>{detailDay?.contentIdea}</DialogTitle>
-            <DialogDescription>Full content brief for this planned upload.</DialogDescription>
-          </DialogHeader>
+        <DialogHeader>
+          <DialogTitle>{detailDay?.contentIdea}</DialogTitle>
+          <DialogDescription>{ui.planner.fullBriefSubtitle}</DialogDescription>
+        </DialogHeader>
           {detailDay ? (
             <div className="space-y-4 text-sm text-white/70">
               {(() => {
@@ -4063,7 +4088,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
                 const titleRange = titleLengthSummary.winningBucket ? rangeLabelForBucket(titleLengthSummary.winningBucket.label) : "35-55";
                 const selectedVideoId = resultSelections[detailDay.day] ?? linked?.videoId ?? "";
                 const disabledIds = new Set([...linkedVideoIds, ...selectedVideoIds].filter((videoId) => videoId !== selectedVideoId && videoId !== linked?.videoId));
-                const origin = ideaOriginMeta(detailDay);
+                const origin = ideaOriginMeta(detailDay, ui);
                 const showGeneratedSections = isAiIdea(detailDay);
                 return (
                   <>
@@ -4132,7 +4157,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
                     ) : null}
                     <PanelCardSoft className="p-4">
                       <div className="flex items-center justify-between gap-3">
-                        <p className="text-xs uppercase tracking-[0.16em] text-white/40">Publish package</p>
+                        <p className="text-xs uppercase tracking-[0.16em] text-white/40">{ui.planner.publishPackageLabel}</p>
                         <div className="flex items-center gap-2">
                           <p className="text-xs text-white/45">{detailDay.contentIdea.length} chars · Sweet spot: {titleRange}</p>
                           <Button type="button" size="sm" variant="secondary" className="rounded-lg" onClick={() => openThumbnailDialog(detailDay)}>
@@ -4146,11 +4171,11 @@ export default function YouTubeGrowthPlannerV2Tab() {
                           <img src={detailDay.generatedThumbnail.imageDataUrl} alt={`${detailDay.contentIdea} thumbnail`} className="w-full object-cover" />
                         </div>
                       ) : null}
-                      <IdeaPackageFields day={detailDay} />
+                      <IdeaPackageFields day={detailDay} ui={ui} />
                     </PanelCardSoft>
                     {(detailDay.outline ?? []).length ? (
                       <PanelCardSoft className="p-4">
-                        <p className="text-xs uppercase tracking-[0.16em] text-white/40">Outline</p>
+                        <p className="text-xs uppercase tracking-[0.16em] text-white/40">{ui.planner.outlineLabel}</p>
                         <div className="mt-3 space-y-2">
                           {(detailDay.outline ?? []).map((item, index) => (
                             <p key={`${detailDay.day}-outline-${index}`} className="leading-6 text-white/70">
@@ -4162,13 +4187,13 @@ export default function YouTubeGrowthPlannerV2Tab() {
                     ) : null}
                     {detailDay.competitorReference ? (
                       <PanelCardSoft className="p-4">
-                        <p className="text-xs uppercase tracking-[0.16em] text-white/40">Competitor reference</p>
+                        <p className="text-xs uppercase tracking-[0.16em] text-white/40">{ui.planner.competitorReferenceLabel}</p>
                         <p className="mt-3 leading-6 text-white/70">{detailDay.competitorReference}</p>
                       </PanelCardSoft>
                     ) : null}
                     <PanelCardSoft className="p-4">
                       <div className="mb-3 flex items-center justify-between gap-3">
-                        <p className="text-xs uppercase tracking-[0.16em] text-white/40">Publish sync</p>
+                        <p className="text-xs uppercase tracking-[0.16em] text-white/40">{ui.planner.publishSyncLabel}</p>
                         <Button
                           type="button"
                           size="sm"
@@ -4183,11 +4208,12 @@ export default function YouTubeGrowthPlannerV2Tab() {
                       </div>
                       {!linked ? (
                         <>
-                          {saveConfirmationDay === detailDay.day ? <p className="mb-3 text-xs text-emerald-300">Saved</p> : null}
+                          {saveConfirmationDay === detailDay.day ? <p className="mb-3 text-xs text-emerald-300">{ui.planner.savedLabel}</p> : null}
                           {linkingDay === detailDay.day ? (
                             <>
                               <VideoPicker
                                 videos={publishableVideos}
+                                ui={ui}
                                 selected={selectedVideoId}
                                 disabledIds={disabledIds}
                                 onSelect={(videoId) => setResultSelections((current) => ({ ...current, [detailDay.day]: videoId }))}
@@ -4226,12 +4252,13 @@ export default function YouTubeGrowthPlannerV2Tab() {
                                 <p className="mt-1 text-xs text-white/45">{linkedVideo ? formatIsoDate(linkedVideo.publishedAt) : "Published"}{linkedVideo?.viewCount ? ` · ${formatNumber(linkedVideo.viewCount)} views` : ""}</p>
                               </div>
                             </div>
-                            <button type="button" onClick={() => setLinkingDay(linkingDay === detailDay.day ? null : detailDay.day)} className="text-xs text-white/55 hover:text-white">Change</button>
+                            <button type="button" onClick={() => setLinkingDay(linkingDay === detailDay.day ? null : detailDay.day)} className="text-xs text-white/55 hover:text-white">{ui.planner.changeButton}</button>
                           </div>
                           {linkingDay === detailDay.day ? (
                             <>
                               <VideoPicker
                                 videos={publishableVideos}
+                                ui={ui}
                                 selected={selectedVideoId}
                                 disabledIds={disabledIds}
                                 onSelect={(videoId) => setResultSelections((current) => ({ ...current, [detailDay.day]: videoId }))}
@@ -4262,8 +4289,8 @@ export default function YouTubeGrowthPlannerV2Tab() {
       <Dialog open={Boolean(movingDay)} onOpenChange={(open) => !open && setMovingDay(null)}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Move idea</DialogTitle>
-            <DialogDescription>Choose a new day for this card, or delete it if it no longer fits the week.</DialogDescription>
+            <DialogTitle>{ui.planner.moveIdeaTitle}</DialogTitle>
+            <DialogDescription>{ui.planner.moveIdeaSubtitle}</DialogDescription>
           </DialogHeader>
           {movingDay ? (
             <div className="space-y-4">
@@ -4293,7 +4320,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
                   setMovingDay(null);
                 }}
               >
-                Delete idea
+                {ui.planner.delete}
               </Button>
             </div>
           ) : null}
@@ -4303,21 +4330,21 @@ export default function YouTubeGrowthPlannerV2Tab() {
       <Dialog open={Boolean(thumbnailDay)} onOpenChange={(open) => !open && closeThumbnailDialog()}>
         <DialogContent className="max-h-[85vh] max-w-3xl overflow-y-auto pt-10">
           <DialogHeader>
-            <DialogTitle>Create Thumbnail</DialogTitle>
-            <DialogDescription>Upload optional source images, set optional text, and generate a saved thumbnail for this idea card.</DialogDescription>
+            <DialogTitle>{ui.thumbnailDialog.title}</DialogTitle>
+            <DialogDescription>{ui.thumbnailDialog.subtitle}</DialogDescription>
           </DialogHeader>
           {thumbnailDay ? (
             <div className="space-y-4">
               <PanelCardSoft className="p-4">
-                <p className="text-xs uppercase tracking-[0.16em] text-white/40">Idea</p>
+                <p className="text-xs uppercase tracking-[0.16em] text-white/40">{ui.thumbnailDialog.ideaLabel}</p>
                 <p className="mt-2 text-base font-semibold text-white">{thumbnailDay.contentIdea}</p>
                 {thumbnailDay.descriptionSuggestion ? <p className="mt-2 text-sm text-white/55">{thumbnailDay.descriptionSuggestion}</p> : null}
               </PanelCardSoft>
 
               <PanelCardSoft className="p-4">
-                <p className="text-xs uppercase tracking-[0.16em] text-white/40">Source images</p>
-                <p className="mt-2 text-sm text-white/55">Add up to 4 images. Preserve mode uses your upload as the base image and only edits lighting, clarity, text, overlays, and focus.</p>
-                <p className="mt-2 text-xs text-white/40">Requirements: JPG, 16:9 thumbnail output, 1280 x 720px, minimum source width 640px, max 2 MB.</p>
+                <p className="text-xs uppercase tracking-[0.16em] text-white/40">{ui.thumbnailDialog.sourceImagesLabel}</p>
+                <p className="mt-2 text-sm text-white/55">{ui.thumbnailDialog.sourceImagesHelp}</p>
+                <p className="mt-2 text-xs text-white/40">{ui.thumbnailDialog.requirementsLabel}</p>
                 <div className="mt-3 flex flex-wrap gap-3">
                   {thumbnailSourceImages.map((image, index) => (
                     <div key={`${image.name}-${index}`} className="relative overflow-hidden rounded-xl border border-white/10 bg-black/20">
@@ -4335,7 +4362,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
                   {thumbnailSourceImages.length < 4 ? (
                     <label className="flex h-28 w-40 cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-white/10 bg-white/[0.03] text-center text-sm text-white/45 hover:border-white/20 hover:text-white/70">
                       <ImagePlus className="mb-2 h-5 w-5" />
-                      Add image
+                      {ui.thumbnailDialog.addImageButton}
                       <input
                         type="file"
                         accept="image/jpeg,.jpg,.jpeg"
@@ -4356,8 +4383,8 @@ export default function YouTubeGrowthPlannerV2Tab() {
                         preserveThumbnailSourceImage ? "border-emerald-300/35 bg-emerald-400/10 text-white" : "border-white/10 bg-white/[0.03] text-white/55 hover:bg-white/[0.06] hover:text-white",
                       )}
                     >
-                      <span className="text-sm font-semibold">Preserve my image</span>
-                      <span className="mt-1 block text-xs leading-5 text-white/45">Recommended. Keeps the exact subject, pose, scene, and composition.</span>
+                      <span className="text-sm font-semibold">{ui.thumbnailDialog.preserveMyImageTitle}</span>
+                      <span className="mt-1 block text-xs leading-5 text-white/45">{ui.thumbnailDialog.preserveMyImageSubtitle}</span>
                     </button>
                     <button
                       type="button"
@@ -4367,19 +4394,19 @@ export default function YouTubeGrowthPlannerV2Tab() {
                         !preserveThumbnailSourceImage ? "border-red-300/35 bg-red-400/10 text-white" : "border-white/10 bg-white/[0.03] text-white/55 hover:bg-white/[0.06] hover:text-white",
                       )}
                     >
-                      <span className="text-sm font-semibold">Allow AI to redesign</span>
-                      <span className="mt-1 block text-xs leading-5 text-white/45">Uses uploads as references, but can create a new thumbnail scene.</span>
+                      <span className="text-sm font-semibold">{ui.thumbnailDialog.allowRedesignTitle}</span>
+                      <span className="mt-1 block text-xs leading-5 text-white/45">{ui.thumbnailDialog.allowRedesignSubtitle}</span>
                     </button>
                   </div>
                 ) : null}
               </PanelCardSoft>
 
               <PanelCardSoft className="p-4">
-                <p className="text-xs uppercase tracking-[0.16em] text-white/40">Text on thumbnail</p>
+                <p className="text-xs uppercase tracking-[0.16em] text-white/40">{ui.thumbnailDialog.textOnThumbnailLabel}</p>
                 <Textarea
                   value={thumbnailTextPreference}
                   onChange={(event) => setThumbnailTextPreference(event.target.value)}
-                  placeholder="Optional. Leave empty and AI will generate the strongest thumbnail text."
+                  placeholder={ui.thumbnailDialog.textOnThumbnailPlaceholder}
                   className="mt-3 min-h-24"
                 />
               </PanelCardSoft>
@@ -4388,8 +4415,8 @@ export default function YouTubeGrowthPlannerV2Tab() {
                 <PanelCardSoft className="p-4">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
-                      <p className="text-xs uppercase tracking-[0.16em] text-white/40">Generated thumbnail</p>
-                      <p className="mt-2 text-sm text-white/55">Saved on this idea card and ready to download.</p>
+                      <p className="text-xs uppercase tracking-[0.16em] text-white/40">{ui.planner.generatedThumbnailLabel}</p>
+                      <p className="mt-2 text-sm text-white/55">{ui.planner.generatedThumbnailReady}</p>
                     </div>
                     <a
                       href={thumbnailDay.generatedThumbnail.imageDataUrl}
@@ -4412,7 +4439,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
                 </Button>
                 <Button type="button" className="rounded-lg" onClick={() => void generateThumbnailForDay()} disabled={working === "thumbnail"}>
                   {working === "thumbnail" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-                  {thumbnailDay.generatedThumbnail?.imageDataUrl ? "Generate again" : "Generate thumbnail"}
+                  {thumbnailDay.generatedThumbnail?.imageDataUrl ? ui.planner.generateAgain : ui.planner.generateThumbnail}
                 </Button>
               </div>
             </div>
@@ -4464,7 +4491,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
         <DialogContent className="max-w-xl">
           <DialogHeader>
             <DialogTitle>{status?.channel?.channelName}</DialogTitle>
-            <DialogDescription>Full connected channel details.</DialogDescription>
+            <DialogDescription>{ui.channelDetailsDialog.subtitle}</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 text-sm text-white/70">
             <div className="flex items-center gap-4">
@@ -4474,21 +4501,21 @@ export default function YouTubeGrowthPlannerV2Tab() {
               </Avatar>
               <div className="grid flex-1 gap-2 sm:grid-cols-3">
                 <PanelCardSoft className="p-3">
-                  <p className="text-xs uppercase tracking-[0.16em] text-white/40">Subscribers</p>
+                  <p className="text-xs uppercase tracking-[0.16em] text-white/40">{ui.channelDetailsDialog.subscribersLabel}</p>
                   <p className="mt-2 text-white">{formatNumber(status?.channel?.subscriberCount)}</p>
                 </PanelCardSoft>
                 <PanelCardSoft className="p-3">
-                  <p className="text-xs uppercase tracking-[0.16em] text-white/40">Total Views</p>
+                  <p className="text-xs uppercase tracking-[0.16em] text-white/40">{ui.channelDetailsDialog.totalViewsLabel}</p>
                   <p className="mt-2 text-white">{formatNumber(status?.channel?.totalViewCount)}</p>
                 </PanelCardSoft>
                 <PanelCardSoft className="p-3">
-                  <p className="text-xs uppercase tracking-[0.16em] text-white/40">Videos</p>
+                  <p className="text-xs uppercase tracking-[0.16em] text-white/40">{ui.channelDetailsDialog.videosLabel}</p>
                   <p className="mt-2 text-white">{formatNumber(status?.channel?.videoCount)}</p>
                 </PanelCardSoft>
               </div>
             </div>
             <PanelCardSoft className="p-4">
-              <p className="text-xs uppercase tracking-[0.16em] text-white/40">Description</p>
+              <p className="text-xs uppercase tracking-[0.16em] text-white/40">{ui.channelDetailsDialog.descriptionLabel}</p>
               <p className="mt-3 whitespace-pre-wrap text-white/70">{channelDescription(status?.channel) || "No description available."}</p>
             </PanelCardSoft>
           </div>
@@ -4498,19 +4525,19 @@ export default function YouTubeGrowthPlannerV2Tab() {
       <Dialog open={customOpen} onOpenChange={setCustomOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Add custom idea</DialogTitle>
-            <DialogDescription>Add your own concept, then let AI sharpen it for your niche and current plan.</DialogDescription>
+            <DialogTitle>{ui.customIdeaDialog.title}</DialogTitle>
+            <DialogDescription>{ui.customIdeaDialog.subtitle}</DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
-            <Input value={customIdea.title} onChange={(event) => setCustomIdea((current) => ({ ...current, title: event.target.value }))} placeholder="Idea title" />
+            <Input value={customIdea.title} onChange={(event) => setCustomIdea((current) => ({ ...current, title: event.target.value }))} placeholder={ui.customIdeaDialog.titlePlaceholder} />
             <Input type="date" value={customIdea.date} onChange={(event) => setCustomIdea((current) => ({ ...current, date: event.target.value }))} />
-            <Textarea value={customIdea.angle} onChange={(event) => setCustomIdea((current) => ({ ...current, angle: event.target.value }))} placeholder="Angle, rough hook, or notes" className="min-h-28" />
-            <Textarea value={customIdea.description} onChange={(event) => setCustomIdea((current) => ({ ...current, description: event.target.value }))} placeholder="Video description" className="min-h-24" />
-            <Input value={customIdea.tags} onChange={(event) => setCustomIdea((current) => ({ ...current, tags: event.target.value }))} placeholder="Tags, separated by commas" />
-            <Textarea value={customIdea.thumbnail} onChange={(event) => setCustomIdea((current) => ({ ...current, thumbnail: event.target.value }))} placeholder="Thumbnail idea" className="min-h-20" />
+            <Textarea value={customIdea.angle} onChange={(event) => setCustomIdea((current) => ({ ...current, angle: event.target.value }))} placeholder={ui.customIdeaDialog.anglePlaceholder} className="min-h-28" />
+            <Textarea value={customIdea.description} onChange={(event) => setCustomIdea((current) => ({ ...current, description: event.target.value }))} placeholder={ui.customIdeaDialog.descriptionPlaceholder} className="min-h-24" />
+            <Input value={customIdea.tags} onChange={(event) => setCustomIdea((current) => ({ ...current, tags: event.target.value }))} placeholder={ui.customIdeaDialog.tagsPlaceholder} />
+            <Textarea value={customIdea.thumbnail} onChange={(event) => setCustomIdea((current) => ({ ...current, thumbnail: event.target.value }))} placeholder={ui.customIdeaDialog.thumbnailPlaceholder} className="min-h-20" />
             <div className="flex gap-2">
-              <Button variant="secondary" className="flex-1 rounded-lg" onClick={improveCustomIdea} disabled={working === "improve"}>{working === "improve" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}AI improve</Button>
-              <Button className="flex-1 rounded-lg" onClick={addCustomIdea}><Plus className="mr-2 h-4 w-4" />Add idea</Button>
+              <Button variant="secondary" className="flex-1 rounded-lg" onClick={improveCustomIdea} disabled={working === "improve"}>{working === "improve" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}{ui.customIdeaDialog.aiImproveButton}</Button>
+              <Button className="flex-1 rounded-lg" onClick={addCustomIdea}><Plus className="mr-2 h-4 w-4" />{ui.customIdeaDialog.addIdeaButton}</Button>
             </div>
           </div>
         </DialogContent>
