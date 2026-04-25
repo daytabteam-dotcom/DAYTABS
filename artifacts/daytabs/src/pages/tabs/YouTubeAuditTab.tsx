@@ -861,6 +861,11 @@ export default function YouTubeAuditTab() {
                         ? `Transcript: ${(report?.transcript ?? preview.transcript).source === "manual" ? "Manual" : (report?.transcript ?? preview.transcript).source === "uploaded" ? "Uploaded" : "Auto"}${(report?.transcript ?? preview.transcript).language ? ` · ${(report?.transcript ?? preview.transcript).language}` : ""}`
                         : "Transcript unavailable"}
                     </span>
+                    <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-semibold text-white/70">
+                      {(report?.captions ?? preview.captions).available
+                        ? `Captions: ${(report?.captions ?? preview.captions).source === "manual" ? "Manual" : "Auto"}${(report?.captions ?? preview.captions).language ? ` · ${(report?.captions ?? preview.captions).language}` : ""}`
+                        : "Captions not detected"}
+                    </span>
                   </div>
                   <p className="mt-3 text-xs leading-5 text-white/45">
                     Niche confidence: {(report?.nicheInference ?? preview.nicheInference).confidence} · {(report?.nicheInference ?? preview.nicheInference).basis}

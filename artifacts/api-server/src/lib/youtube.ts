@@ -259,6 +259,12 @@ export interface YoutubeVideoAuditReport {
     confidence: "high" | "medium" | "low";
     basis: string;
   };
+  captions: {
+    available: boolean;
+    source: "manual" | "auto" | "uploaded" | null;
+    language: string | null;
+    languages: string[];
+  };
   transcript: {
     available: boolean;
     source: "manual" | "auto" | "uploaded" | null;
@@ -339,6 +345,12 @@ export interface YoutubeVideoAuditPreview {
     basis: string;
   };
   recommendedThumbnailStyle: string;
+  captions: {
+    available: boolean;
+    source: "manual" | "auto" | null;
+    language: string | null;
+    languages: string[];
+  };
   transcript: {
     available: boolean;
     source: "manual" | "auto" | null;
@@ -2614,6 +2626,29 @@ function appendUrlParam(url: string, key: string, value: string | null) {
   return parsed.toString();
 }
 
+function parseSetCookieHeader(value: string) {
+  const firstPart = value.split(";", 1)[0] || "";
+  const eqIndex = firstPart.indexOf("=");
+  if (eqIndex <= 0) return null;
+  const name = firstPart.slice(0, eqIndex).trim();
+  const cookieValue = firstPart.slice(eqIndex + 1).trim();
+  if (!name) return null;
+  return { name, value: cookieValue };
+}
+
+function mergeCookies(jar: Map<string, string>, setCookieHeaders: string[]) {
+  for (const header of setCookieHeaders) {
+    const parsed = parseSetCookieHeader(header);
+    if (!parsed) continue;
+    jar.set(parsed.name, parsed.value);
+  }
+}
+
+function cookieHeaderFromJar(jar: Map<string, string>) {
+  if (!jar.size) return "";
+  return [...jar.entries()].map(([name, value]) => `${name}=${value}`).join("; ");
+}
+
 function captionTracksFromPlayerResponse(playerResponse: JsonRecord) {
   return asArray(asRecord(asRecord(playerResponse.captions).playerCaptionsTracklistRenderer).captionTracks)
     .map((item) => asRecord(item))
@@ -2841,19 +2876,122 @@ function recommendThumbnailStyle(video: YoutubeRecentVideo, nicheProfile: Youtub
   return "Realistic";
 }
 
-async function fetchPublicYoutubeTranscript(videoId: string) {
-  const requestHeaders = {
-    "User-Agent": "Mozilla/5.0 DayTabsAudit/1.0",
+async function probeYoutubeCaptionAvailability(videoId: string) {
+  const cookieJar = new Map<string, string>();
+  const baseHeaders: Record<string, string> = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Accept-Language": "en-US,en;q=0.9",
+  };
+  const watchUrl = `https://www.youtube.com/watch?v=${videoId}&hl=en`;
+
+  const fetchWithCookies = async (url: string, init: RequestInit = {}, extraHeaders: Record<string, string> = {}) => {
+    const cookieHeader = cookieHeaderFromJar(cookieJar);
+    const headers = {
+      ...baseHeaders,
+      ...(cookieHeader ? { Cookie: cookieHeader } : {}),
+      ...(init.headers ? (init.headers as Record<string, string>) : {}),
+      ...extraHeaders,
+    };
+    const response = await fetch(url, { ...init, headers }).catch(() => null);
+    if (response) mergeCookies(cookieJar, response.headers.getSetCookie());
+    return response;
+  };
+
+  let watchHtml = "";
+  let captionTracks: JsonRecord[] = [];
+
+  const watchResponse = await fetchWithCookies(
+    watchUrl,
+    {},
+    { Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" },
+  );
+  if (watchResponse?.ok) {
+    watchHtml = await watchResponse.text();
+    try {
+      const playerResponseJson =
+        extractBalancedJson(watchHtml, "var ytInitialPlayerResponse = ") ||
+        extractBalancedJson(watchHtml, "ytInitialPlayerResponse = ") ||
+        extractBalancedJson(watchHtml, "window['ytInitialPlayerResponse'] = ") ||
+        extractBalancedJson(watchHtml, "window[\"ytInitialPlayerResponse\"] = ");
+      if (playerResponseJson) {
+        const playerResponse = asRecord(JSON.parse(playerResponseJson));
+        captionTracks = captionTracksFromPlayerResponse(playerResponse);
+      }
+    } catch {
+      captionTracks = [];
+    }
+  }
+
+  if (!captionTracks.length && watchHtml) {
+    const apiKey = watchHtml.match(/"INNERTUBE_API_KEY":"([^"]+)"/)?.[1];
+    const clientVersion = watchHtml.match(/"INNERTUBE_CLIENT_VERSION":"([^"]+)"/)?.[1] || "2.20240101.00.00";
+    if (apiKey) {
+      const playerResponse = await fetchWithCookies(
+        `https://www.youtube.com/youtubei/v1/player?key=${apiKey}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            context: { client: { clientName: "WEB", clientVersion, hl: "en", gl: "US" } },
+            videoId,
+          }),
+        },
+        { Accept: "application/json", Referer: watchUrl, Origin: "https://www.youtube.com" },
+      );
+      if (playerResponse?.ok) {
+        captionTracks = captionTracksFromPlayerResponse(asRecord(await playerResponse.json().catch(() => ({}))));
+      }
+    }
+  }
+
+  const hasCaptions = captionTracks.length > 0;
+  const firstTrack = hasCaptions ? asRecord(captionTracks[0]) : null;
+  const source = hasCaptions
+    ? (asString(firstTrack?.kind) === "asr" ? "auto" as const : "manual" as const)
+    : null;
+  const language = hasCaptions ? (asString(firstTrack?.languageCode) || null) : null;
+  const languages = [...new Set(
+    captionTracks
+      .map((track) => asString(asRecord(track).languageCode))
+      .filter(Boolean) as string[],
+  )];
+
+  return {
+    available: hasCaptions,
+    source,
+    language,
+    languages,
+  };
+}
+
+async function fetchPublicYoutubeTranscript(videoId: string) {
+  // Use a real browser UA and persist cookies across requests.
+  // YouTube will often classify custom UAs as bots/crawlers and omit/deny caption data.
+  const cookieJar = new Map<string, string>();
+  const baseHeaders: Record<string, string> = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept-Language": "en-US,en;q=0.9",
+  };
+
+  const watchUrl = `https://www.youtube.com/watch?v=${videoId}&hl=en`;
+  const fetchWithCookies = async (url: string, init: RequestInit = {}, extraHeaders: Record<string, string> = {}) => {
+    const cookieHeader = cookieHeaderFromJar(cookieJar);
+    const headers = {
+      ...baseHeaders,
+      ...(cookieHeader ? { Cookie: cookieHeader } : {}),
+      ...(init.headers ? (init.headers as Record<string, string>) : {}),
+      ...extraHeaders,
+    };
+    const response = await fetch(url, { ...init, headers }).catch(() => null);
+    if (response) mergeCookies(cookieJar, response.headers.getSetCookie());
+    return response;
   };
 
   let captionTracks: JsonRecord[] = [];
   let watchHtml = "";
   const discoveredLanguages = new Set<string>();
 
-  const watchResponse = await fetch(`https://www.youtube.com/watch?v=${videoId}&hl=en`, {
-    headers: requestHeaders,
-  }).catch(() => null);
+  const watchResponse = await fetchWithCookies(watchUrl, {}, { Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" });
   if (watchResponse?.ok) {
     watchHtml = await watchResponse.text();
     try {
@@ -2876,9 +3014,11 @@ async function fetchPublicYoutubeTranscript(videoId: string) {
   }
 
   if (!captionTracks.length) {
-    const infoResponse = await fetch(`https://www.youtube.com/get_video_info?video_id=${videoId}&el=detailpage&hl=en`, {
-      headers: requestHeaders,
-    }).catch(() => null);
+    const infoResponse = await fetchWithCookies(
+      `https://www.youtube.com/get_video_info?video_id=${videoId}&el=detailpage&hl=en`,
+      {},
+      { Accept: "*/*", Referer: watchUrl, Origin: "https://www.youtube.com" },
+    );
     if (infoResponse?.ok) {
       const raw = await infoResponse.text();
       const params = new URLSearchParams(raw);
@@ -2902,14 +3042,14 @@ async function fetchPublicYoutubeTranscript(videoId: string) {
     const apiKey = watchHtml.match(/"INNERTUBE_API_KEY":"([^"]+)"/)?.[1];
     const clientVersion = watchHtml.match(/"INNERTUBE_CLIENT_VERSION":"([^"]+)"/)?.[1] || "2.20240101.00.00";
     if (apiKey) {
-      const playerResponse = await fetch(`https://www.youtube.com/youtubei/v1/player?key=${apiKey}`, {
+      const playerResponse = await fetchWithCookies(`https://www.youtube.com/youtubei/v1/player?key=${apiKey}`, {
         method: "POST",
-        headers: { ...requestHeaders, "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           context: { client: { clientName: "WEB", clientVersion, hl: "en", gl: "US" } },
           videoId,
         }),
-      }).catch(() => null);
+      }, { Accept: "application/json", Referer: watchUrl, Origin: "https://www.youtube.com" });
       if (playerResponse?.ok) {
         captionTracks = captionTracksFromPlayerResponse(asRecord(await playerResponse.json().catch(() => ({}))));
         for (const track of captionTracks) {
@@ -2921,9 +3061,11 @@ async function fetchPublicYoutubeTranscript(videoId: string) {
   }
 
   if (!captionTracks.length) {
-    const listResponse = await fetch(`https://www.youtube.com/api/timedtext?type=list&v=${encodeURIComponent(videoId)}`, {
-      headers: requestHeaders,
-    }).catch(() => null);
+    const listResponse = await fetchWithCookies(
+      `https://www.youtube.com/api/timedtext?type=list&v=${encodeURIComponent(videoId)}`,
+      {},
+      { Accept: "*/*", Referer: watchUrl, Origin: "https://www.youtube.com" },
+    );
     if (listResponse?.ok) {
       captionTracks = parseTimedTextTrackList(videoId, await listResponse.text());
       for (const track of captionTracks) {
@@ -2948,7 +3090,13 @@ async function fetchPublicYoutubeTranscript(videoId: string) {
   });
 
   for (const track of orderedTracks) {
-    const transcript = await fetchTranscriptFromTrack(track, requestHeaders);
+    const transcript = await fetchTranscriptFromTrack(track, {
+      ...baseHeaders,
+      ...(cookieJar.size ? { Cookie: cookieHeaderFromJar(cookieJar) } : {}),
+      Accept: "*/*",
+      Referer: watchUrl,
+      Origin: "https://www.youtube.com",
+    });
     if (!transcript) continue;
     return {
       source: asString(track.kind) === "asr" ? "auto" as const : "manual" as const,
@@ -2977,6 +3125,9 @@ export async function getYoutubeVideoAuditPreview(userId: number, videoUrl: stri
     videoCount: null,
   }, recentVideos.length ? recentVideos : [video]);
   const transcript = await fetchPublicYoutubeTranscript(videoId).catch(() => null);
+  const captionProbe = transcript?.text ? null : await probeYoutubeCaptionAvailability(videoId).catch(() => null);
+  const captionsAvailable = Boolean(transcript?.text) || Boolean(captionProbe?.available);
+  const captionsLanguage = transcript?.language ?? captionProbe?.language ?? null;
 
   return {
     video: {
@@ -3000,6 +3151,12 @@ export async function getYoutubeVideoAuditPreview(userId: number, videoUrl: stri
       basis: "Inferred from the title, description, tags, and recent channel uploads.",
     },
     recommendedThumbnailStyle: recommendThumbnailStyle(video, nicheProfile),
+    captions: {
+      available: captionsAvailable,
+      source: transcript?.source ?? captionProbe?.source ?? null,
+      language: captionsLanguage,
+      languages: captionsLanguage ? [captionsLanguage] : (captionProbe?.languages ?? []),
+    },
     transcript: {
       available: Boolean(transcript?.text),
       source: transcript?.source ?? null,
@@ -3078,6 +3235,9 @@ export async function auditYoutubeVideo(
   const transcript = options?.transcriptOverride?.text
     ? options.transcriptOverride
     : await fetchPublicYoutubeTranscript(videoId).catch(() => null);
+  const transcriptTextAvailable = Boolean(transcript?.text);
+  const captionProbe = transcriptTextAvailable ? null : await probeYoutubeCaptionAvailability(videoId).catch(() => null);
+  const captionsAvailable = transcriptTextAvailable || Boolean(captionProbe?.available);
   const outputLanguage = inferOutputLanguage({
     explicitLanguage: transcript?.language ?? null,
     transcriptText: transcript?.text ?? null,
@@ -3243,8 +3403,8 @@ Return JSON only:
             competitorMedianViews,
           },
           transcriptAvailable: Boolean(transcript?.text),
-          transcriptSource: transcript?.source ?? null,
-          transcriptLanguage: transcript?.language ?? null,
+          transcriptSource: transcript?.source ?? captionProbe?.source ?? null,
+          transcriptLanguage: transcript?.language ?? captionProbe?.language ?? null,
           outputLanguage: outputLanguage.label,
           transcriptExcerpt: transcript?.text?.slice(0, 5000) ?? null,
         }),
@@ -3262,7 +3422,7 @@ Return JSON only:
   });
 
   const parsed = asRecord(parseAiJson(completion.choices[0]?.message?.content ?? "{}"));
-  const transcriptAvailable = Boolean(transcript?.text);
+  const transcriptAvailable = transcriptTextAvailable;
   const diagnosis = asArray(parsed.diagnosis).map((item) => {
     const record = asRecord(item);
     return {
@@ -3276,7 +3436,7 @@ Return JSON only:
       priority: Math.min(3, Math.max(1, parseNumber(record.priority) || 3)) as 1 | 2 | 3,
     };
   }).filter((item) => item.issue)
-    .filter((item) => transcriptAvailable || item.area !== "script")
+    .filter((item) => transcriptTextAvailable || item.area !== "script")
     .filter((item) => item.area !== "quality")
     .sort((a, b) => a.priority - b.priority || (a.confidence === "high" ? -1 : a.confidence === "medium" ? 0 : 1) - (b.confidence === "high" ? -1 : b.confidence === "medium" ? 0 : 1))
     .slice(0, 3);
@@ -3342,6 +3502,12 @@ Return JSON only:
       confidence: ((asString(nicheInference.confidence) as "high" | "medium" | "low") || "medium"),
       basis: asString(nicheInference.basis) || "Inferred from the video title, description, tags, and nearby comparable videos.",
     },
+    captions: {
+      available: captionsAvailable,
+      source: transcript?.source ?? captionProbe?.source ?? null,
+      language: transcript?.language ?? captionProbe?.language ?? null,
+      languages: transcript?.language ? [transcript.language] : (captionProbe?.languages ?? []),
+    },
     transcript: {
       available: transcriptAvailable,
       source: transcript?.source ?? null,
@@ -3372,8 +3538,8 @@ Return JSON only:
       tags: asArray(fixes.tags).map((item) => String(item)).filter(Boolean).slice(0, 12),
       thumbnailIdea: asString(fixes.thumbnailIdea) || "",
       recommendedThumbnailStyle: recommendThumbnailStyle(video, nicheProfile),
-      hookRewrite: transcriptAvailable ? rawHookRewrite : "",
-      scriptDirection: transcriptAvailable ? (asString(fixes.scriptDirection) || "") : "",
+      hookRewrite: transcriptTextAvailable ? rawHookRewrite : "",
+      scriptDirection: transcriptTextAvailable ? (asString(fixes.scriptDirection) || "") : "",
       qualityFixes,
       packagingStrategy: asString(fixes.packagingStrategy) || asString(asRecord(seoDraft).packagingStrategy) || "",
     },
@@ -3382,7 +3548,9 @@ Return JSON only:
         ? transcript.source === "uploaded"
           ? "Transcript was generated from the media file you uploaded for this audit."
           : ""
-        : "Public transcript was not available for this video, so script analysis fell back to title, description, tags, and competitor context.",
+        : captionProbe?.available
+          ? "Captions were detected for this video, but the transcript text could not be retrieved from YouTube. Script analysis fell back to title, description, tags, and competitor context."
+          : "Public transcript was not available for this video, so script analysis fell back to title, description, tags, and competitor context.",
       "Thumbnail notes are based on the public thumbnail only, not on full frame-by-frame video quality analysis.",
     ]).filter(Boolean).filter((value, index, array) => array.indexOf(value) === index),
   };
