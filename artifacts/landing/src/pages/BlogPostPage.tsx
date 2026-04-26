@@ -80,17 +80,19 @@ async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 function buildShareLinks(postUrl: string, title: string, description: string) {
-  const encodedTitle = encodeURIComponent(title);
+  const shareLead = "I found this interesting article here:";
+  const shareText = `${shareLead}\n\n${title}\n\n${postUrl}`;
+  const encodedTitle = encodeURIComponent(`${shareLead} ${title}`);
   const encodedDescription = encodeURIComponent(description);
   const encodedUrl = encodeURIComponent(postUrl);
   return {
     x: `https://twitter.com/intent/tweet?text=${encodedTitle}&url=${encodedUrl}`,
     linkedin: `https://www.linkedin.com/sharing/share-offsite/?url=${encodedUrl}`,
     reddit: `https://www.reddit.com/submit?url=${encodedUrl}&title=${encodedTitle}`,
-    whatsapp: `https://wa.me/?text=${encodeURIComponent(`${title}\n\n${postUrl}`)}`,
-    telegram: `https://t.me/share/url?url=${encodedUrl}&text=${encodedTitle}`,
-    copyText: `Short-form or long-form video?\n\n${description}\n\nRead the full guide:\n${postUrl}`,
-    nativeText: `${title}\n\n${description}\n\n${postUrl}`,
+    whatsapp: `https://wa.me/?text=${encodeURIComponent(shareText)}`,
+    telegram: `https://t.me/share/url?url=${encodedUrl}&text=${encodeURIComponent(`${shareLead} ${title}`)}`,
+    copyText: `${shareLead}\n\n${title}\n\n${description}\n\n${postUrl}`,
+    nativeText: `${shareLead}\n\n${title}\n\n${description}\n\n${postUrl}`,
     description: encodedDescription,
   };
 }
@@ -280,7 +282,7 @@ async function createShareCard(target: ShareTarget): Promise<{ file: File; dataU
   const filename = `daytabs-${target.slug}-${target.kind}.jpg`;
   const file = new File([blob], filename, { type: "image/jpeg" });
   const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
-  const caption = `Useful section from DayTabs:\n\n${target.title}\n\nRead here:\n${target.postUrl}`;
+  const caption = `I found this interesting section here:\n\n${target.title}\n\n${target.postUrl}`;
 
   return { file, dataUrl, caption };
 }
@@ -444,7 +446,7 @@ export default function BlogPostPage() {
     if (!post) return;
     setCopied(false);
     try {
-      await navigator.clipboard.writeText(postUrl);
+      await navigator.clipboard.writeText(shareLinks.copyText);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1500);
     } catch {
@@ -824,7 +826,7 @@ export default function BlogPostPage() {
                       className="flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white/75 hover:bg-white/[0.06] hover:text-white"
                     >
                       {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                      {copied ? "Copied" : "Copy link"}
+                      {copied ? "Copied" : "Copy share text"}
                     </button>
                     <a
                       href={shareLinks.x}
