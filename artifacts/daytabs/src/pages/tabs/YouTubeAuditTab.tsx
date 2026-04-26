@@ -22,6 +22,7 @@ import { usePdfExport } from "@/hooks/use-pdf-export";
 import { PanelCard, PanelCardSoft, PanelHeader, PanelPage, PanelSubtitle, PanelTitle } from "@/components/panel-system";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { DAYTABS_LOCALE_STORAGE_KEY } from "@/lib/i18n";
 
@@ -473,7 +474,11 @@ export default function YouTubeAuditTab() {
   const [translationAudioWorking, setTranslationAudioWorking] = useState(false);
   const [translationAudio, setTranslationAudio] = useState<TranslationAudioResponse | null>(null);
 
+  const [savedAuditsOpen, setSavedAuditsOpen] = useState(false);
+  const [reportSection, setReportSection] = useState<"overview" | "packaging" | "competitors" | "transcript" | "limitations">("overview");
+
   const isStudio = plan.isStudio;
+  const isRunningAudit = loadingPreview || loadingReport;
   const exportBaseName = (preview?.video.title || report?.video.title || "youtube-audit")
     .replace(/[^a-z0-9]+/gi, "-")
     .replace(/^-+|-+$/g, "")
@@ -508,6 +513,8 @@ export default function YouTubeAuditTab() {
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     if (!videoUrl.trim()) return;
+    setSavedAuditsOpen(false);
+    setReportSection("overview");
     setLoadingPreview(true);
     setLoadingReport(false);
     setError(null);
@@ -913,13 +920,21 @@ export default function YouTubeAuditTab() {
               className="h-12 w-full rounded-xl border border-white/10 bg-white/[0.03] pl-10 pr-4 text-sm text-white outline-none transition-colors placeholder:text-white/30 focus:border-primary/35"
             />
           </div>
-          <button
-            type="submit"
-            disabled={loadingPreview || loadingReport || !videoUrl.trim()}
-            className="inline-flex h-12 items-center justify-center rounded-xl bg-primary px-5 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {loadingPreview || loadingReport ? <Loader2 className="h-4 w-4 animate-spin" /> : "Run Audit"}
-          </button>
+          <div className="flex gap-2">
+            <button
+              type="submit"
+              disabled={loadingPreview || loadingReport || !videoUrl.trim()}
+              className="inline-flex h-12 flex-1 items-center justify-center rounded-xl bg-primary px-5 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60 sm:flex-none"
+            >
+              {loadingPreview || loadingReport ? <Loader2 className="h-4 w-4 animate-spin" /> : "Run Audit"}
+            </button>
+            {savedAudits.length ? (
+              <Button type="button" variant="secondary" className="h-12 rounded-xl px-4" onClick={() => setSavedAuditsOpen(true)} disabled={isRunningAudit}>
+                <Eye className="mr-2 h-4 w-4" />
+                Saved audits ({savedAudits.length})
+              </Button>
+            ) : null}
+          </div>
         </form>
         <p className="mt-3 text-xs text-white/40">
           Current v1 uses public metadata, real comparable videos, public transcripts when available, and thumbnail-only packaging analysis.
@@ -931,39 +946,72 @@ export default function YouTubeAuditTab() {
         ) : null}
       </PanelCard>
 
-      {savedAudits.length ? (
-        <PanelCard className="p-5">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Saved audits</p>
-              <p className="mt-2 text-sm text-white/55">Reload a previous YouTube audit card without running the whole report again.</p>
+      <Dialog open={savedAuditsOpen} onOpenChange={setSavedAuditsOpen}>
+        <DialogContent className="max-h-[80vh] max-w-4xl overflow-y-auto pt-10">
+          <DialogHeader>
+            <DialogTitle>Saved audits</DialogTitle>
+            <DialogDescription>Reload a previous YouTube audit card without running the whole report again.</DialogDescription>
+          </DialogHeader>
+          {savedAudits.length ? (
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {savedAudits.map((card) => (
+                <button
+                  key={card.id}
+                  type="button"
+                  onClick={() => {
+                    loadSavedAudit(card);
+                    setReportSection("overview");
+                    setSavedAuditsOpen(false);
+                  }}
+                  className={`rounded-2xl border p-4 text-left transition-colors ${activeAuditId === card.id ? "border-primary/30 bg-primary/10" : "border-white/10 bg-white/[0.03] hover:border-white/20"}`}
+                >
+                  <p className="text-sm font-semibold text-white">{card.preview.video.title}</p>
+                  <p className="mt-1 text-xs text-white/40">{card.preview.video.channelName}</p>
+                  <p className="mt-2 text-xs text-white/35">{new Date(card.savedAt).toLocaleString()}</p>
+                </button>
+              ))}
             </div>
-            {report ? (
-              <Button type="button" variant="secondary" className="rounded-lg" onClick={() => void exportPdf()} disabled={isPdfExporting}>
-                {isPdfExporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
-                Export report
-              </Button>
-            ) : null}
-          </div>
-          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {savedAudits.map((card) => (
-              <button
-                key={card.id}
-                type="button"
-                onClick={() => loadSavedAudit(card)}
-                className={`rounded-2xl border p-4 text-left transition-colors ${activeAuditId === card.id ? "border-primary/30 bg-primary/10" : "border-white/10 bg-white/[0.03] hover:border-white/20"}`}
-              >
-                <p className="text-sm font-semibold text-white">{card.preview.video.title}</p>
-                <p className="mt-1 text-xs text-white/40">{card.preview.video.channelName}</p>
-                <p className="mt-2 text-xs text-white/35">{new Date(card.savedAt).toLocaleString()}</p>
-              </button>
-            ))}
+          ) : (
+            <PanelCardSoft className="p-4 text-sm text-white/60">No saved audits yet.</PanelCardSoft>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {loadingPreview && !preview ? (
+        <PanelCard className="p-5">
+          <div className="flex items-center gap-3">
+            <Loader2 className="h-4 w-4 animate-spin text-primary" />
+            <div>
+              <p className="text-sm font-semibold text-white">Loading video metadata</p>
+              <p className="text-xs leading-6 text-white/45">Fetching public title, channel info, thumbnail, tags, and transcript availability.</p>
+            </div>
           </div>
         </PanelCard>
       ) : null}
 
       {preview ? (
         <div ref={pdfExportRef} data-pdf-export-root="true" className="space-y-6">
+          {report ? (
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Audit report</p>
+                <p className="mt-2 text-sm text-white/55">Jump between sections—export prints the full report.</p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {savedAudits.length ? (
+                  <Button type="button" variant="secondary" className="rounded-lg" onClick={() => setSavedAuditsOpen(true)} disabled={isRunningAudit}>
+                    <Eye className="mr-2 h-4 w-4" />
+                    Saved audits
+                  </Button>
+                ) : null}
+                <Button type="button" variant="secondary" className="rounded-lg" onClick={() => void exportPdf()} disabled={isPdfExporting}>
+                  {isPdfExporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+                  Export report
+                </Button>
+              </div>
+            </div>
+          ) : null}
+
           <div className="grid gap-4 lg:grid-cols-[1.1fr,0.9fr]">
             <PanelCard className="p-5">
               <div className="flex gap-4">
@@ -1041,464 +1089,501 @@ export default function YouTubeAuditTab() {
           ) : null}
 
           {report ? (
-            <>
-          <div className="grid gap-4 xl:grid-cols-[1fr,1fr]">
-            <PanelCardSoft className="p-5">
-              <div className="flex items-center gap-2">
-                <AlertTriangle className="h-4 w-4 text-amber-300" />
-                <p className="text-sm font-semibold text-white">What likely hurt performance</p>
+            <Tabs
+              value={reportSection}
+              onValueChange={(value) => setReportSection(value as "overview" | "packaging" | "competitors" | "transcript" | "limitations")}
+              className="space-y-4"
+              data-audit-report-tabs="true"
+            >
+              <div className="sticky top-3 z-10 rounded-2xl border border-white/10 bg-black/40 p-2 backdrop-blur">
+                <TabsList className="h-auto w-full flex-wrap justify-start gap-1 bg-transparent p-0 text-white/60">
+                  <TabsTrigger value="overview" className="rounded-xl px-3 py-2 text-xs font-semibold text-white/60 data-[state=active]:bg-white/[0.08] data-[state=active]:text-white">
+                    Overview
+                  </TabsTrigger>
+                  <TabsTrigger value="packaging" className="rounded-xl px-3 py-2 text-xs font-semibold text-white/60 data-[state=active]:bg-white/[0.08] data-[state=active]:text-white">
+                    Packaging
+                  </TabsTrigger>
+                  <TabsTrigger value="competitors" className="rounded-xl px-3 py-2 text-xs font-semibold text-white/60 data-[state=active]:bg-white/[0.08] data-[state=active]:text-white">
+                    Competitors
+                  </TabsTrigger>
+                  <TabsTrigger value="transcript" className="rounded-xl px-3 py-2 text-xs font-semibold text-white/60 data-[state=active]:bg-white/[0.08] data-[state=active]:text-white">
+                    Transcript
+                  </TabsTrigger>
+                  <TabsTrigger value="limitations" className="rounded-xl px-3 py-2 text-xs font-semibold text-white/60 data-[state=active]:bg-white/[0.08] data-[state=active]:text-white">
+                    Limitations
+                  </TabsTrigger>
+                </TabsList>
               </div>
-              <div className="mt-4 space-y-3">
-                {report.diagnosis.map((item, index) => (
-                  <div key={`${item.area}-${index}`} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-sm font-semibold capitalize text-white">{item.area}</p>
-                      <div className="flex items-center gap-2">
-                        <span className="rounded-full border border-sky-400/20 bg-sky-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-sky-200">
-                          {priorityLabel(item.priority)}
-                        </span>
-                        <span className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] ${confidenceClass(item.confidence)}`}>{item.confidence}</span>
-                      </div>
+
+              <TabsContent value="overview" forceMount data-pdf-tab-section="true" className="mt-0 space-y-4">
+                <div className="grid gap-4 xl:grid-cols-[1fr,1fr]">
+                  <PanelCardSoft className="p-5">
+                    <div className="flex items-center gap-2">
+                      <AlertTriangle className="h-4 w-4 text-amber-300" />
+                      <p className="text-sm font-semibold text-white">What likely hurt performance</p>
                     </div>
-                    <p className="mt-2 text-sm text-white/78">{item.issue}</p>
-                    <p className="mt-2 text-xs leading-6 text-white/50">{item.whyItHurts}</p>
-                    {item.evidence ? (
-                      <div className="mt-3 rounded-xl border border-white/8 bg-black/15 p-3">
-                        <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">What in the script caused this</p>
-                        <p className="mt-2 text-sm leading-6 text-white/78">{item.evidence}</p>
-                      </div>
-                    ) : null}
-                    {item.recommendedChange ? (
-                      <div className="mt-3 rounded-xl border border-emerald-400/10 bg-emerald-500/5 p-3">
-                        <p className="text-[11px] uppercase tracking-[0.14em] text-emerald-100/55">How to improve it</p>
-                        <p className="mt-2 text-sm leading-6 text-white/82">{item.recommendedChange}</p>
-                      </div>
-                    ) : null}
-                    <p className="mt-2 text-[11px] uppercase tracking-[0.14em] text-white/30">{item.sourceLabel}</p>
-                  </div>
-                ))}
-              </div>
-            </PanelCardSoft>
-
-            <PanelCardSoft className="p-5">
-              <div className="flex items-center gap-2">
-                <Target className="h-4 w-4 text-sky-300" />
-                <p className="text-sm font-semibold text-white">Fixes to test next</p>
-              </div>
-              <div className="mt-4 space-y-4">
-                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                  <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">Better titles</p>
-                  <ul className="mt-3 space-y-2">
-                    {report.fixes.titles.map((title, index) => (
-                      <li key={`${title}-${index}`} className="text-sm text-white/82">{index + 1}. {title}</li>
-                    ))}
-                  </ul>
-                </div>
-                {report.transcript.available ? (
-                  <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                    <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">Better hook</p>
-                    <p className="mt-3 text-sm text-white/82">{report.fixes.hookRewrite || "No hook rewrite returned yet."}</p>
-                    {report.fixes.scriptDirection ? (
-                      <div className="mt-4 rounded-xl border border-white/8 bg-black/15 p-3">
-                        <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">Script changes to make</p>
-                        <p className="mt-2 text-sm leading-6 text-white/78">{report.fixes.scriptDirection}</p>
-                      </div>
-                    ) : null}
-                  </div>
-                ) : (
-                  <div className="rounded-2xl border border-amber-400/15 bg-amber-500/10 p-4">
-                    <p className="text-[11px] uppercase tracking-[0.14em] text-amber-100/55">Transcript unavailable</p>
-                    <p className="mt-3 text-sm leading-6 text-amber-50/75">
-                      This audit was generated without full script analysis. Use the Transcript tools below to fetch or upload a transcript, then translate and generate aligned audio.
-                    </p>
-                  </div>
-                )}
-                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                  <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">Thumbnail idea</p>
-                  <p className="mt-3 text-sm leading-6 text-white/82">{report.fixes.thumbnailIdea || "No thumbnail direction returned yet."}</p>
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    <Button type="button" className="rounded-lg" onClick={openThumbnailModal}>
-                      <Sparkles className="mr-2 h-4 w-4" />
-                      Generate thumbnail
-                    </Button>
-                    <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-semibold text-white/65">
-                      Suggested style: {report.fixes.recommendedThumbnailStyle}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </PanelCardSoft>
-          </div>
-
-          <div className="grid gap-4 xl:grid-cols-[1fr,1fr]">
-            <PanelCard className="p-5">
-              <div className="flex items-center gap-2">
-                <Tag className="h-4 w-4 text-primary" />
-                <p className="text-sm font-semibold text-white">Description and tags</p>
-              </div>
-              <p className="mt-4 text-sm leading-6 text-white/78">{report.fixes.description}</p>
-              <div className="mt-4 flex flex-wrap gap-2">
-                {report.fixes.tags.map((tag, index) => (
-                  <span key={`${tag}-${index}`} className="rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
-                    {tag}
-                  </span>
-                ))}
-              </div>
-              <div className="mt-5 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">Packaging strategy</p>
-                <p className="mt-2 text-sm leading-6 text-white/75">{report.fixes.packagingStrategy}</p>
-              </div>
-            </PanelCard>
-
-            <PanelCard className="p-5">
-              <div className="flex items-center gap-2">
-                <Eye className="h-4 w-4 text-violet-300" />
-                <p className="text-sm font-semibold text-white">Thumbnail packaging notes</p>
-              </div>
-              {report.visualAudit ? (
-                <div className="mt-4 space-y-3">
-                  <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                    <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">Assessment basis</p>
-                    <p className="mt-2 text-sm text-white/78">Public thumbnail only. This is packaging feedback, not a full video quality audit.</p>
-                    <p className="mt-3 text-sm text-white/78">{report.visualAudit.topFix}</p>
-                  </div>
-                  {[
-                    ["Lighting", report.visualAudit.lighting],
-                    ["Framing", report.visualAudit.framing],
-                    ["Sharpness", report.visualAudit.sharpness],
-                  ].map(([label, value]) => (
-                    <div key={label} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                      <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">{label}</p>
-                      <p className="mt-2 text-sm leading-6 text-white/75">{value || "No note returned."}</p>
+                    <div className="mt-4 space-y-3">
+                      {report.diagnosis.map((item, index) => (
+                        <div key={`${item.area}-${index}`} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="text-sm font-semibold capitalize text-white">{item.area}</p>
+                            <div className="flex items-center gap-2">
+                              <span className="rounded-full border border-sky-400/20 bg-sky-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-sky-200">
+                                {priorityLabel(item.priority)}
+                              </span>
+                              <span className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] ${confidenceClass(item.confidence)}`}>{item.confidence}</span>
+                            </div>
+                          </div>
+                          <p className="mt-2 text-sm text-white/78">{item.issue}</p>
+                          <p className="mt-2 text-xs leading-6 text-white/50">{item.whyItHurts}</p>
+                          {item.evidence ? (
+                            <div className="mt-3 rounded-xl border border-white/8 bg-black/15 p-3">
+                              <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">What in the script caused this</p>
+                              <p className="mt-2 text-sm leading-6 text-white/78">{item.evidence}</p>
+                            </div>
+                          ) : null}
+                          {item.recommendedChange ? (
+                            <div className="mt-3 rounded-xl border border-emerald-400/10 bg-emerald-500/5 p-3">
+                              <p className="text-[11px] uppercase tracking-[0.14em] text-emerald-100/55">How to improve it</p>
+                              <p className="mt-2 text-sm leading-6 text-white/82">{item.recommendedChange}</p>
+                            </div>
+                          ) : null}
+                          <p className="mt-2 text-[11px] uppercase tracking-[0.14em] text-white/30">{item.sourceLabel}</p>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="mt-4 text-sm text-white/55">Visual audit was not available for this video.</p>
-              )}
-              {report.fixes.qualityFixes.length ? (
-                <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                  <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">Packaging notes from thumbnail</p>
-                  <ul className="mt-3 space-y-2">
-                    {report.fixes.qualityFixes.map((item, index) => (
-                      <li key={`${item}-${index}`} className="text-sm text-white/78">{item}</li>
-                    ))}
-                  </ul>
-                </div>
-              ) : null}
-              {generatedThumbnail ? (
-                <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">Generated thumbnail</p>
-                      <p className="mt-2 text-sm text-white/55">Created from your selected style, notes, and optional source images.</p>
-                    </div>
-                    <a
-                      href={generatedThumbnail.imageDataUrl}
-                      download={`${exportBaseName || "youtube-audit-thumbnail"}.${thumbnailDownloadExtension(generatedThumbnail.imageDataUrl)}`}
-                      className="inline-flex items-center rounded-lg border border-white/10 px-3 py-2 text-sm text-white/75 transition-colors hover:bg-white/[0.06] hover:text-white"
-                    >
-                      <Download className="mr-2 h-4 w-4" />
-                      Download
-                    </a>
-                  </div>
-                  <div className="mt-4 overflow-hidden rounded-xl border border-white/10 bg-black/20">
-                    <img src={generatedThumbnail.imageDataUrl} alt="Generated audit thumbnail" className="w-full object-cover" />
-                  </div>
-                </div>
-              ) : null}
-            </PanelCard>
-          </div>
-
-          <div className="grid gap-4 xl:grid-cols-[1fr,1fr]">
-            <PanelCardSoft className="p-5">
-              <div className="flex items-center gap-2">
-                <BarChart3 className="h-4 w-4 text-emerald-300" />
-                <p className="text-sm font-semibold text-white">Top creators in this lane</p>
-              </div>
-              <div className="mt-4 space-y-3">
-                {report.topCreators.length ? report.topCreators.map((creator, index) => (
-                  <div key={`${creator.channelName}-${index}`} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                    <p className="text-sm font-semibold text-white">{creator.channelName}</p>
-                    <p className="mt-1 text-xs text-white/40">
-                      Avg views: {formatNumber(creator.averageViews)}
-                      {creator.subscriberCount > 0 ? ` · Subs: ${formatNumber(creator.subscriberCount)}` : ""}
-                    </p>
-                    <p className="mt-2 text-sm leading-6 text-white/72">{creator.whyTheyMatter}</p>
-                  </div>
-                )) : (
-                  <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm leading-6 text-white/55">
-                    We could not find enough strong comparable creators for this topic yet. Try another video or a more search-specific title.
-                  </div>
-                )}
-              </div>
-            </PanelCardSoft>
-
-            <PanelCardSoft className="p-5">
-              <div className="flex items-center gap-2">
-                <Sparkles className="h-4 w-4 text-amber-300" />
-                <p className="text-sm font-semibold text-white">Competitor videos worth studying</p>
-              </div>
-              <div className="mt-4 space-y-3">
-                {report.competitorExamples.length ? report.competitorExamples.map((video, index) => (
-                  <a key={`${video.url}-${index}`} href={video.url} target="_blank" rel="noreferrer" className="block rounded-2xl border border-white/10 bg-white/[0.03] p-4 transition-colors hover:border-primary/30">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-semibold text-white">{video.title}</p>
-                        <p className="mt-1 text-xs text-white/40">{video.channelName} · {formatNumber(video.viewCount)} views</p>
-                      </div>
-                      <ExternalLink className="mt-0.5 h-4 w-4 shrink-0 text-white/30" />
-                    </div>
-                    <p className="mt-2 text-sm leading-6 text-white/72">{video.whyItWins}</p>
-                  </a>
-                )) : (
-                  <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm leading-6 text-white/55">
-                    No strong comparable videos were found for this audit yet.
-                  </div>
-                )}
-              </div>
-            </PanelCardSoft>
-          </div>
-
-          {isStudio ? (
-            <PanelCard className="p-5">
-              <details>
-                <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold text-white">Transcript tools</p>
-                    <p className="mt-2 text-sm text-white/55">
-                      Fetch a YouTube transcript, translate it, and generate aligned AI voice audio (audio only).
-                    </p>
-                  </div>
-                  <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-semibold text-white/60">
-                    {segments.length ? `${segments.length} segments` : "No transcript"}
-                  </span>
-                </summary>
-
-                <div className="mt-5 space-y-4">
-                  <PanelCardSoft className="p-4">
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Button type="button" className="rounded-lg" onClick={() => void handleFetchTranscript()} disabled={loadingTranscript || !videoUrl.trim()}>
-                          {loadingTranscript ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                          {loadingTranscript ? "Fetching" : "Fetch transcript"}
-                        </Button>
-                        <label className="inline-flex cursor-pointer items-center rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm font-semibold text-white/80 transition-colors hover:bg-white/[0.05]">
-                          {uploadingTranscript ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
-                          {uploadingTranscript ? "Uploading" : "Upload audio/video"}
-                          <input
-                            type="file"
-                            className="hidden"
-                            disabled={uploadingTranscript}
-                            accept=".mp3,.m4a,.wav,.webm,.mp4,.mov,.avi,.mkv"
-                            onChange={(event) => {
-                              const file = event.target.files?.[0];
-                              if (!file) return;
-                              void handleUploadTranscript(file);
-                              event.target.value = "";
-                            }}
-                          />
-                        </label>
-                      </div>
-
-                      {editableTranscript?.canonicalUrl ? (
-                        <a
-                          href={editableTranscript.canonicalUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex items-center gap-1 rounded-lg border border-white/10 bg-white/[0.03] px-2 py-1 text-xs text-white/70 hover:text-white"
-                        >
-                          Open on YouTube <ExternalLink className="h-3 w-3" />
-                        </a>
-                      ) : null}
-                    </div>
-
-                    {editableTranscript ? (
-                      <div className="mt-3 text-xs text-white/45">
-                        Captions: {editableTranscript.captions.available ? "available" : "none"}
-                        {editableTranscript.captions.language ? ` · ${editableTranscript.captions.language}` : ""}
-                        {editableTranscript.captions.source ? ` · ${editableTranscript.captions.source}` : ""}
-                        {status?.state === "processing" ? " · generating transcript from audio" : ""}
-                        {editableTranscript.needsUploadFallback && status?.state !== "processing" ? " · captions restricted" : ""}
-                      </div>
-                    ) : null}
-
-                    {status?.message && status.state !== "error" ? (
-                      <div className="mt-4 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white/70">
-                        {status.message}
-                      </div>
-                    ) : null}
                   </PanelCardSoft>
 
-                  <PanelCardSoft className="p-4">
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">Transcript segments</p>
-                        <p className="mt-2 text-sm text-white/55">Edit text per timestamp. Start/end times are preserved for translation audio alignment.</p>
-                      </div>
-                      <span className="text-xs text-white/40">{normalizedSegments.length ? `${normalizedSegments.length} segments` : "No transcript yet"}</span>
+                  <PanelCardSoft className="p-5">
+                    <div className="flex items-center gap-2">
+                      <Target className="h-4 w-4 text-sky-300" />
+                      <p className="text-sm font-semibold text-white">Fixes to test next</p>
                     </div>
-
-                    {!normalizedSegments.length ? (
-                      <div className="mt-4 rounded-xl border border-white/10 bg-white/[0.02] p-4 text-sm text-white/55">
-                        Fetch a transcript (or upload audio/video) to start.
+                    <div className="mt-4 space-y-4">
+                      <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                        <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">Better titles</p>
+                        <ul className="mt-3 space-y-2">
+                          {report.fixes.titles.map((title, index) => (
+                            <li key={`${title}-${index}`} className="text-sm text-white/82">{index + 1}. {title}</li>
+                          ))}
+                        </ul>
                       </div>
-                    ) : (
-                      <div className="mt-4 max-h-[28rem] space-y-3 overflow-y-auto pr-1">
-                        {segments.map((segment, index) => (
-                          <div key={`${segment.start}-${segment.end}-${index}`} className="rounded-xl border border-white/8 bg-black/15 p-3">
-                            <div className="flex items-center justify-between gap-3">
-                              <div className="text-xs font-semibold text-white/70">
-                                {formatTimestamp(segment.start)} → {formatTimestamp(segment.end)}
-                              </div>
-                              <div className="text-[11px] text-white/35">#{index + 1}</div>
+                      {report.transcript.available ? (
+                        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                          <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">Better hook</p>
+                          <p className="mt-3 text-sm text-white/82">{report.fixes.hookRewrite || "No hook rewrite returned yet."}</p>
+                          {report.fixes.scriptDirection ? (
+                            <div className="mt-4 rounded-xl border border-white/8 bg-black/15 p-3">
+                              <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">Script changes to make</p>
+                              <p className="mt-2 text-sm leading-6 text-white/78">{report.fixes.scriptDirection}</p>
                             </div>
-                            <Textarea
-                              value={segment.text}
-                              onChange={(event) => {
-                                const next = [...segments];
-                                next[index] = { ...segment, text: event.target.value };
-                                setSegments(next);
-                              }}
-                              className="mt-3 min-h-[88px] text-sm leading-6"
-                            />
+                          ) : null}
+                        </div>
+                      ) : (
+                        <div className="rounded-2xl border border-amber-400/15 bg-amber-500/10 p-4">
+                          <p className="text-[11px] uppercase tracking-[0.14em] text-amber-100/55">Transcript unavailable</p>
+                          <p className="mt-3 text-sm leading-6 text-amber-50/75">
+                            This audit was generated without full script analysis. Use the Transcript tools below to fetch or upload a transcript, then translate and generate aligned audio.
+                          </p>
+                        </div>
+                      )}
+                      <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                        <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">Thumbnail idea</p>
+                        <p className="mt-3 text-sm leading-6 text-white/82">{report.fixes.thumbnailIdea || "No thumbnail direction returned yet."}</p>
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          <Button type="button" className="rounded-lg" onClick={openThumbnailModal}>
+                            <Sparkles className="mr-2 h-4 w-4" />
+                            Generate thumbnail
+                          </Button>
+                          <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-semibold text-white/65">
+                            Suggested style: {report.fixes.recommendedThumbnailStyle}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </PanelCardSoft>
+                </div>
+              </TabsContent>
+
+              <TabsContent value="packaging" forceMount data-pdf-tab-section="true" className="mt-0 space-y-4">
+                <div className="grid gap-4 xl:grid-cols-[1fr,1fr]">
+                  <PanelCard className="p-5">
+                    <div className="flex items-center gap-2">
+                      <Tag className="h-4 w-4 text-primary" />
+                      <p className="text-sm font-semibold text-white">Description and tags</p>
+                    </div>
+                    <p className="mt-4 text-sm leading-6 text-white/78">{report.fixes.description}</p>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      {report.fixes.tags.map((tag, index) => (
+                        <span key={`${tag}-${index}`} className="rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                    <div className="mt-5 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                      <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">Packaging strategy</p>
+                      <p className="mt-2 text-sm leading-6 text-white/75">{report.fixes.packagingStrategy}</p>
+                    </div>
+                  </PanelCard>
+
+                  <PanelCard className="p-5">
+                    <div className="flex items-center gap-2">
+                      <Eye className="h-4 w-4 text-violet-300" />
+                      <p className="text-sm font-semibold text-white">Thumbnail packaging notes</p>
+                    </div>
+                    {report.visualAudit ? (
+                      <div className="mt-4 space-y-3">
+                        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                          <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">Assessment basis</p>
+                          <p className="mt-2 text-sm text-white/78">Public thumbnail only. This is packaging feedback, not a full video quality audit.</p>
+                          <p className="mt-3 text-sm text-white/78">{report.visualAudit.topFix}</p>
+                        </div>
+                        {[
+                          ["Lighting", report.visualAudit.lighting],
+                          ["Framing", report.visualAudit.framing],
+                          ["Sharpness", report.visualAudit.sharpness],
+                        ].map(([label, value]) => (
+                          <div key={label} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                            <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">{label}</p>
+                            <p className="mt-2 text-sm leading-6 text-white/75">{value || "No note returned."}</p>
                           </div>
                         ))}
                       </div>
-                    )}
-                  </PanelCardSoft>
-
-                  <PanelCardSoft className="p-4">
-                    <div className="flex flex-wrap items-end gap-3">
-                      <div className="min-w-[180px] flex-1">
-                        <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">Translate to</p>
-                        <select
-                          value={translationLanguage}
-                          onChange={(event) => {
-                            setTranslationLanguage(event.target.value);
-                            setTranslation(null);
-                            setTranslatedSegments([]);
-                            setTranslationAudio(null);
-                          }}
-                          className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 text-sm text-white outline-none focus:border-primary/35"
-                        >
-                          {TRANSLATION_LANGUAGES.map((language) => (
-                            <option key={language} value={language} className="bg-slate-950">
-                              {language}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <Button type="button" className="rounded-lg" onClick={() => void handleTranslate()} disabled={translationWorking || !normalizedSegments.length}>
-                        {translationWorking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                        {translationWorking ? "Translating" : "Translate"}
-                      </Button>
-                    </div>
-
-                    {translation ? (
-                      <div className="mt-4 rounded-xl border border-white/10 bg-black/15 p-3">
-                        <div className="text-xs text-white/55">
-                          {translation.targetLanguage} translation · {new Date(translation.createdAt).toLocaleString()}
-                        </div>
-                        <div className="mt-3 max-h-[22rem] space-y-3 overflow-y-auto pr-1">
-                          {translatedSegments.map((segment, index) => (
-                            <div key={`${segment.start}-${segment.end}-${index}`} className="rounded-xl border border-white/8 bg-background/20 p-3">
-                              <div className="text-xs font-semibold text-white/70">
-                                {formatTimestamp(segment.start)} → {formatTimestamp(segment.end)}
-                              </div>
-                              <Textarea
-                                value={segment.text}
-                                onChange={(event) => {
-                                  const next = [...translatedSegments];
-                                  next[index] = { ...segment, text: event.target.value };
-                                  setTranslatedSegments(next);
-                                }}
-                                className="mt-3 min-h-[88px] text-sm leading-6"
-                              />
-                            </div>
-                          ))}
-                        </div>
-                      </div>
                     ) : (
-                      <div className="mt-4 rounded-xl border border-white/10 bg-white/[0.02] p-4 text-sm text-white/55">
-                        No translation yet.
-                      </div>
+                      <p className="mt-4 text-sm text-white/55">Visual audit was not available for this video.</p>
                     )}
-                  </PanelCardSoft>
-
-                  <PanelCardSoft className="p-4">
-                    <div className="flex flex-wrap items-end gap-3">
-                      <div className="min-w-[180px] flex-1">
-                        <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">AI voice</p>
-                        <select
-                          value={translationVoice}
-                          onChange={(event) => {
-                            setTranslationVoice(event.target.value as (typeof OPENAI_VOICES)[number]);
-                            setTranslationAudio(null);
-                          }}
-                          className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 text-sm text-white outline-none focus:border-primary/35"
-                        >
-                          {OPENAI_VOICES.map((voice) => (
-                            <option key={voice} value={voice} className="bg-slate-950">
-                              {voice}
-                            </option>
+                    {report.fixes.qualityFixes.length ? (
+                      <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                        <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">Packaging notes from thumbnail</p>
+                        <ul className="mt-3 space-y-2">
+                          {report.fixes.qualityFixes.map((item, index) => (
+                            <li key={`${item}-${index}`} className="text-sm text-white/78">{item}</li>
                           ))}
-                        </select>
+                        </ul>
                       </div>
-                      <div className="flex flex-wrap gap-2">
-                        <Button type="button" className="rounded-lg" onClick={() => void handleGenerateAudio()} disabled={translationAudioWorking || !normalizedTranslatedSegments.length}>
-                          {translationAudioWorking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                          {translationAudioWorking ? "Generating audio" : "Generate audio"}
-                        </Button>
-                        {translationAudio ? (
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            className="rounded-lg"
-                            onClick={() => {
-                              void downloadAuthenticatedFile(translationAudio.downloadUrl, translationAudio.filename).catch((err) => {
-                                setError(err instanceof Error ? err.message : "Could not download translated audio");
-                              });
-                            }}
+                    ) : null}
+                    {generatedThumbnail ? (
+                      <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">Generated thumbnail</p>
+                            <p className="mt-2 text-sm text-white/55">Created from your selected style, notes, and optional source images.</p>
+                          </div>
+                          <a
+                            href={generatedThumbnail.imageDataUrl}
+                            download={`${exportBaseName || "youtube-audit-thumbnail"}.${thumbnailDownloadExtension(generatedThumbnail.imageDataUrl)}`}
+                            className="inline-flex items-center rounded-lg border border-white/10 px-3 py-2 text-sm text-white/75 transition-colors hover:bg-white/[0.06] hover:text-white"
                           >
                             <Download className="mr-2 h-4 w-4" />
-                            Download MP3
-                          </Button>
-                        ) : null}
+                            Download
+                          </a>
+                        </div>
+                        <div className="mt-4 overflow-hidden rounded-xl border border-white/10 bg-black/20">
+                          <img src={generatedThumbnail.imageDataUrl} alt="Generated audit thumbnail" className="w-full object-cover" />
+                        </div>
                       </div>
-                    </div>
+                    ) : null}
+                  </PanelCard>
+                </div>
+              </TabsContent>
 
-                    <div className="mt-3 flex flex-wrap items-center gap-3">
-                      <p className="text-xs text-white/45">Preview selected voice:</p>
-                      <audio controls preload="none" src={`/api/analysis/voice-preview/${translationVoice}`} className="h-10 max-w-full" />
+              <TabsContent value="competitors" forceMount data-pdf-tab-section="true" className="mt-0 space-y-4">
+                <div className="grid gap-4 xl:grid-cols-[1fr,1fr]">
+                  <PanelCardSoft className="p-5">
+                    <div className="flex items-center gap-2">
+                      <BarChart3 className="h-4 w-4 text-emerald-300" />
+                      <p className="text-sm font-semibold text-white">Top creators in this lane</p>
                     </div>
-                    <p className="mt-3 text-xs leading-5 text-white/45">
-                      The generated audio is forced to the original timeline. If a translated line runs long, the wording is shortened at translation time and the speech is tightened to stay inside the original segment length.
-                    </p>
-                    <p className="mt-2 text-xs leading-5 text-white/35">
-                      Output base name: {transcriptExportBaseName}
-                    </p>
+                    <div className="mt-4 space-y-3">
+                      {report.topCreators.length ? report.topCreators.map((creator, index) => (
+                        <div key={`${creator.channelName}-${index}`} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                          <p className="text-sm font-semibold text-white">{creator.channelName}</p>
+                          <p className="mt-1 text-xs text-white/40">
+                            Avg views: {formatNumber(creator.averageViews)}
+                            {creator.subscriberCount > 0 ? ` · Subs: ${formatNumber(creator.subscriberCount)}` : ""}
+                          </p>
+                          <p className="mt-2 text-sm leading-6 text-white/72">{creator.whyTheyMatter}</p>
+                        </div>
+                      )) : (
+                        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm leading-6 text-white/55">
+                          We could not find enough strong comparable creators for this topic yet. Try another video or a more search-specific title.
+                        </div>
+                      )}
+                    </div>
+                  </PanelCardSoft>
+
+                  <PanelCardSoft className="p-5">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="h-4 w-4 text-amber-300" />
+                      <p className="text-sm font-semibold text-white">Competitor videos worth studying</p>
+                    </div>
+                    <div className="mt-4 space-y-3">
+                      {report.competitorExamples.length ? report.competitorExamples.map((video, index) => (
+                        <a key={`${video.url}-${index}`} href={video.url} target="_blank" rel="noreferrer" className="block rounded-2xl border border-white/10 bg-white/[0.03] p-4 transition-colors hover:border-primary/30">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="text-sm font-semibold text-white">{video.title}</p>
+                              <p className="mt-1 text-xs text-white/40">{video.channelName} · {formatNumber(video.viewCount)} views</p>
+                            </div>
+                            <ExternalLink className="mt-0.5 h-4 w-4 shrink-0 text-white/30" />
+                          </div>
+                          <p className="mt-2 text-sm leading-6 text-white/72">{video.whyItWins}</p>
+                        </a>
+                      )) : (
+                        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm leading-6 text-white/55">
+                          No strong comparable videos were found for this audit yet.
+                        </div>
+                      )}
+                    </div>
                   </PanelCardSoft>
                 </div>
-              </details>
-            </PanelCard>
-          ) : null}
+              </TabsContent>
 
-          <PanelCard className="p-5">
-            <div className="flex items-center gap-2">
-              <Lightbulb className="h-4 w-4 text-amber-300" />
-              <p className="text-sm font-semibold text-white">Current limitations</p>
-            </div>
-            <ul className="mt-4 space-y-2">
-              {report.limitations.map((item, index) => (
-                <li key={`${item}-${index}`} className="flex items-start gap-2 text-sm text-white/65">
-                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-white/30" />
-                  <span>{item}</span>
-                </li>
-              ))}
-            </ul>
-          </PanelCard>
-            </>
+              <TabsContent value="transcript" forceMount data-pdf-tab-section="true" className="mt-0 space-y-4">
+                {isStudio ? (
+                  <PanelCard className="p-5">
+                    <details>
+                      <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-white">Transcript tools</p>
+                          <p className="mt-2 text-sm text-white/55">
+                            Fetch a YouTube transcript, translate it, and generate aligned AI voice audio (audio only).
+                          </p>
+                        </div>
+                        <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-semibold text-white/60">
+                          {segments.length ? `${segments.length} segments` : "No transcript"}
+                        </span>
+                      </summary>
+
+                      <div className="mt-5 space-y-4">
+                        <PanelCardSoft className="p-4">
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Button type="button" className="rounded-lg" onClick={() => void handleFetchTranscript()} disabled={loadingTranscript || !videoUrl.trim()}>
+                                {loadingTranscript ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                                {loadingTranscript ? "Fetching" : "Fetch transcript"}
+                              </Button>
+                              <label className="inline-flex cursor-pointer items-center rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm font-semibold text-white/80 transition-colors hover:bg-white/[0.05]">
+                                {uploadingTranscript ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
+                                {uploadingTranscript ? "Uploading" : "Upload audio/video"}
+                                <input
+                                  type="file"
+                                  className="hidden"
+                                  disabled={uploadingTranscript}
+                                  accept=".mp3,.m4a,.wav,.webm,.mp4,.mov,.avi,.mkv"
+                                  onChange={(event) => {
+                                    const file = event.target.files?.[0];
+                                    if (!file) return;
+                                    void handleUploadTranscript(file);
+                                    event.target.value = "";
+                                  }}
+                                />
+                              </label>
+                            </div>
+
+                            {editableTranscript?.canonicalUrl ? (
+                              <a
+                                href={editableTranscript.canonicalUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-1 rounded-lg border border-white/10 bg-white/[0.03] px-2 py-1 text-xs text-white/70 hover:text-white"
+                              >
+                                Open on YouTube <ExternalLink className="h-3 w-3" />
+                              </a>
+                            ) : null}
+                          </div>
+
+                          {editableTranscript ? (
+                            <div className="mt-3 text-xs text-white/45">
+                              Captions: {editableTranscript.captions.available ? "available" : "none"}
+                              {editableTranscript.captions.language ? ` · ${editableTranscript.captions.language}` : ""}
+                              {editableTranscript.captions.source ? ` · ${editableTranscript.captions.source}` : ""}
+                              {status?.state === "processing" ? " · generating transcript from audio" : ""}
+                              {editableTranscript.needsUploadFallback && status?.state !== "processing" ? " · captions restricted" : ""}
+                            </div>
+                          ) : null}
+
+                          {status?.message && status.state !== "error" ? (
+                            <div className="mt-4 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white/70">
+                              {status.message}
+                            </div>
+                          ) : null}
+                        </PanelCardSoft>
+
+                        <PanelCardSoft className="p-4">
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">Transcript segments</p>
+                              <p className="mt-2 text-sm text-white/55">Edit text per timestamp. Start/end times are preserved for translation audio alignment.</p>
+                            </div>
+                            <span className="text-xs text-white/40">{normalizedSegments.length ? `${normalizedSegments.length} segments` : "No transcript yet"}</span>
+                          </div>
+
+                          {!normalizedSegments.length ? (
+                            <div className="mt-4 rounded-xl border border-white/10 bg-white/[0.02] p-4 text-sm text-white/55">
+                              Fetch a transcript (or upload audio/video) to start.
+                            </div>
+                          ) : (
+                            <div className="mt-4 max-h-[28rem] space-y-3 overflow-y-auto pr-1">
+                              {segments.map((segment, index) => (
+                                <div key={`${segment.start}-${segment.end}-${index}`} className="rounded-xl border border-white/8 bg-black/15 p-3">
+                                  <div className="flex items-center justify-between gap-3">
+                                    <div className="text-xs font-semibold text-white/70">
+                                      {formatTimestamp(segment.start)} → {formatTimestamp(segment.end)}
+                                    </div>
+                                    <div className="text-[11px] text-white/35">#{index + 1}</div>
+                                  </div>
+                                  <Textarea
+                                    value={segment.text}
+                                    onChange={(event) => {
+                                      const next = [...segments];
+                                      next[index] = { ...segment, text: event.target.value };
+                                      setSegments(next);
+                                    }}
+                                    className="mt-3 min-h-[88px] text-sm leading-6"
+                                  />
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </PanelCardSoft>
+
+                        <PanelCardSoft className="p-4">
+                          <div className="flex flex-wrap items-end gap-3">
+                            <div className="min-w-[180px] flex-1">
+                              <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">Translate to</p>
+                              <select
+                                value={translationLanguage}
+                                onChange={(event) => {
+                                  setTranslationLanguage(event.target.value);
+                                  setTranslation(null);
+                                  setTranslatedSegments([]);
+                                  setTranslationAudio(null);
+                                }}
+                                className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 text-sm text-white outline-none focus:border-primary/35"
+                              >
+                                {TRANSLATION_LANGUAGES.map((language) => (
+                                  <option key={language} value={language} className="bg-slate-950">
+                                    {language}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <Button type="button" className="rounded-lg" onClick={() => void handleTranslate()} disabled={translationWorking || !normalizedSegments.length}>
+                              {translationWorking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                              {translationWorking ? "Translating" : "Translate"}
+                            </Button>
+                          </div>
+
+                          {translation ? (
+                            <div className="mt-4 rounded-xl border border-white/10 bg-black/15 p-3">
+                              <div className="text-xs text-white/55">
+                                {translation.targetLanguage} translation · {new Date(translation.createdAt).toLocaleString()}
+                              </div>
+                              <div className="mt-3 max-h-[22rem] space-y-3 overflow-y-auto pr-1">
+                                {translatedSegments.map((segment, index) => (
+                                  <div key={`${segment.start}-${segment.end}-${index}`} className="rounded-xl border border-white/8 bg-background/20 p-3">
+                                    <div className="text-xs font-semibold text-white/70">
+                                      {formatTimestamp(segment.start)} → {formatTimestamp(segment.end)}
+                                    </div>
+                                    <Textarea
+                                      value={segment.text}
+                                      onChange={(event) => {
+                                        const next = [...translatedSegments];
+                                        next[index] = { ...segment, text: event.target.value };
+                                        setTranslatedSegments(next);
+                                      }}
+                                      className="mt-3 min-h-[88px] text-sm leading-6"
+                                    />
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="mt-4 rounded-xl border border-white/10 bg-white/[0.02] p-4 text-sm text-white/55">
+                              No translation yet.
+                            </div>
+                          )}
+                        </PanelCardSoft>
+
+                        <PanelCardSoft className="p-4">
+                          <div className="flex flex-wrap items-end gap-3">
+                            <div className="min-w-[180px] flex-1">
+                              <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">AI voice</p>
+                              <select
+                                value={translationVoice}
+                                onChange={(event) => {
+                                  setTranslationVoice(event.target.value as (typeof OPENAI_VOICES)[number]);
+                                  setTranslationAudio(null);
+                                }}
+                                className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 text-sm text-white outline-none focus:border-primary/35"
+                              >
+                                {OPENAI_VOICES.map((voice) => (
+                                  <option key={voice} value={voice} className="bg-slate-950">
+                                    {voice}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              <Button type="button" className="rounded-lg" onClick={() => void handleGenerateAudio()} disabled={translationAudioWorking || !normalizedTranslatedSegments.length}>
+                                {translationAudioWorking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                                {translationAudioWorking ? "Generating audio" : "Generate audio"}
+                              </Button>
+                              {translationAudio ? (
+                                <Button
+                                  type="button"
+                                  variant="secondary"
+                                  className="rounded-lg"
+                                  onClick={() => {
+                                    void downloadAuthenticatedFile(translationAudio.downloadUrl, translationAudio.filename).catch((err) => {
+                                      setError(err instanceof Error ? err.message : "Could not download translated audio");
+                                    });
+                                  }}
+                                >
+                                  <Download className="mr-2 h-4 w-4" />
+                                  Download MP3
+                                </Button>
+                              ) : null}
+                            </div>
+                          </div>
+
+                          <div className="mt-3 flex flex-wrap items-center gap-3">
+                            <p className="text-xs text-white/45">Preview selected voice:</p>
+                            <audio controls preload="none" src={`/api/analysis/voice-preview/${translationVoice}`} className="h-10 max-w-full" />
+                          </div>
+                          <p className="mt-3 text-xs leading-5 text-white/45">
+                            The generated audio is forced to the original timeline. If a translated line runs long, the wording is shortened at translation time and the speech is tightened to stay inside the original segment length.
+                          </p>
+                          <p className="mt-2 text-xs leading-5 text-white/35">
+                            Output base name: {transcriptExportBaseName}
+                          </p>
+                        </PanelCardSoft>
+                      </div>
+                    </details>
+                  </PanelCard>
+                ) : (
+                  <PanelCard className="p-5 text-sm text-white/60">Transcript tools are available on the Studio plan.</PanelCard>
+                )}
+              </TabsContent>
+
+              <TabsContent value="limitations" forceMount data-pdf-tab-section="true" className="mt-0">
+                <PanelCard className="p-5">
+                  <div className="flex items-center gap-2">
+                    <Lightbulb className="h-4 w-4 text-amber-300" />
+                    <p className="text-sm font-semibold text-white">Current limitations</p>
+                  </div>
+                  <ul className="mt-4 space-y-2">
+                    {report.limitations.map((item, index) => (
+                      <li key={`${item}-${index}`} className="flex items-start gap-2 text-sm text-white/65">
+                        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-white/30" />
+                        <span>{item}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </PanelCard>
+              </TabsContent>
+            </Tabs>
           ) : null}
         </div>
       ) : null}

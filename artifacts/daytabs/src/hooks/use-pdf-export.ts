@@ -62,6 +62,16 @@ export function usePdfExport(filename: string) {
       break-inside: avoid;
       page-break-inside: avoid;
     }
+    /* Ensure tabbed report sections are visible in print/PDF. */
+    [data-pdf-export-root="true"] [role="tablist"] {
+      display: none !important;
+    }
+    [data-pdf-export-root="true"] [role="tabpanel"][hidden] {
+      display: block !important;
+    }
+    [data-pdf-export-root="true"] [role="tabpanel"][data-state="inactive"] {
+      display: block !important;
+    }
     @media print {
       html, body { padding: 0; }
     }
