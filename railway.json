@@ -1,5 +1,5 @@
 {
-  "$schema": "https://railway.com/railway.schema.json",
+  "$schema": "./railway.schema.json",
   "build": {
     "buildCommand": "pnpm run build:prod"
   },
