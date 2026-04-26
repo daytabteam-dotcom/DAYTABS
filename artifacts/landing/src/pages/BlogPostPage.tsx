@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useRoute } from "wouter";
 import { Helmet } from "react-helmet-async";
 import { motion } from "framer-motion";
-import { Clock, Calendar, ArrowLeft, ArrowRight, Zap, ChevronDown, ChevronUp, Eye, Heart, MessageCircle, Share2, Copy, Check } from "lucide-react";
+import { Clock, Calendar, ArrowLeft, ArrowRight, Zap, ChevronDown, ChevronUp, Eye, Heart, MessageCircle, Share2, Copy, Check, Image as ImageIcon } from "lucide-react";
 import { getPostBySlug, getRelatedPosts, SITE_URL } from "../data/blogPosts";
 import Navbar from "../components/Navbar";
 
@@ -95,6 +95,196 @@ function buildShareLinks(postUrl: string, title: string, description: string) {
   };
 }
 
+function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number) {
+  const words = text.trim().split(/\s+/);
+  const lines: string[] = [];
+  let current = "";
+  for (const word of words) {
+    const next = current ? `${current} ${word}` : word;
+    if (ctx.measureText(next).width <= maxWidth) {
+      current = next;
+      continue;
+    }
+    if (current) lines.push(current);
+    current = word;
+  }
+  if (current) lines.push(current);
+  return lines;
+}
+
+function drawRoundedRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+  const radius = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + radius, y);
+  ctx.arcTo(x + w, y, x + w, y + h, radius);
+  ctx.arcTo(x + w, y + h, x, y + h, radius);
+  ctx.arcTo(x, y + h, x, y, radius);
+  ctx.arcTo(x, y, x + w, y, radius);
+  ctx.closePath();
+}
+
+function elementText(el: Element) {
+  return (el.textContent ?? "").replace(/\s+/g, " ").trim();
+}
+
+type ShareTarget =
+  | { kind: "table"; title: string; slug: string; postUrl: string; headers: string[]; rows: string[][] }
+  | { kind: "image"; title: string; slug: string; postUrl: string; src: string; alt: string };
+
+async function createShareCard(target: ShareTarget): Promise<{ file: File; dataUrl: string; caption: string }> {
+  const width = 1200;
+  const height = 630;
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas unavailable");
+
+  // Background
+  const gradient = ctx.createLinearGradient(0, 0, width, height);
+  gradient.addColorStop(0, "#0b0b12");
+  gradient.addColorStop(1, "#120a1e");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, width, height);
+
+  // Accent blob
+  ctx.fillStyle = "rgba(124,58,237,0.22)";
+  ctx.beginPath();
+  ctx.ellipse(width * 0.76, height * 0.18, 340, 220, 0.3, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Header
+  ctx.fillStyle = "rgba(255,255,255,0.10)";
+  drawRoundedRect(ctx, 44, 44, 260, 54, 18);
+  ctx.fill();
+  ctx.fillStyle = "rgba(255,255,255,0.88)";
+  ctx.font = "700 20px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+  ctx.fillText("DayTabs", 70, 78);
+
+  // Title
+  ctx.fillStyle = "rgba(255,255,255,0.92)";
+  ctx.font = "800 34px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+  const titleLines = wrapText(ctx, target.title, width - 88);
+  const titleMaxLines = 2;
+  const shownTitle = titleLines.slice(0, titleMaxLines);
+  const titleY = 132;
+  shownTitle.forEach((line, index) => {
+    ctx.fillText(line, 44, titleY + index * 40);
+  });
+
+  const contentTop = 228;
+  const contentLeft = 44;
+  const contentWidth = width - 88;
+  const contentHeight = 320;
+
+  // Content card
+  ctx.fillStyle = "rgba(0,0,0,0.32)";
+  drawRoundedRect(ctx, contentLeft, contentTop, contentWidth, contentHeight, 28);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(255,255,255,0.10)";
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  if (target.kind === "image") {
+    const image = new Image();
+    image.crossOrigin = "anonymous";
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error("Could not load image for share card"));
+      image.src = target.src;
+    });
+
+    const padding = 22;
+    const boxX = contentLeft + padding;
+    const boxY = contentTop + padding;
+    const boxW = contentWidth - padding * 2;
+    const boxH = contentHeight - padding * 2;
+
+    const scale = Math.min(boxW / image.width, boxH / image.height);
+    const drawW = Math.round(image.width * scale);
+    const drawH = Math.round(image.height * scale);
+    const drawX = boxX + Math.round((boxW - drawW) / 2);
+    const drawY = boxY + Math.round((boxH - drawH) / 2);
+
+    ctx.save();
+    drawRoundedRect(ctx, boxX, boxY, boxW, boxH, 18);
+    ctx.clip();
+    ctx.drawImage(image, drawX, drawY, drawW, drawH);
+    ctx.restore();
+  } else {
+    const padding = 22;
+    const tableX = contentLeft + padding;
+    const tableY = contentTop + padding;
+    const tableW = contentWidth - padding * 2;
+    const tableH = contentHeight - padding * 2;
+
+    ctx.fillStyle = "rgba(255,255,255,0.04)";
+    drawRoundedRect(ctx, tableX, tableY, tableW, tableH, 18);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,0.08)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    const columns = Math.max(1, Math.min(4, target.headers.length || (target.rows[0]?.length ?? 1)));
+    const colW = tableW / columns;
+    const rowHeight = 38;
+
+    ctx.font = "700 16px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+    ctx.fillStyle = "rgba(255,255,255,0.82)";
+    const header = (target.headers.length ? target.headers : Array.from({ length: columns }).map((_, i) => `Col ${i + 1}`)).slice(0, columns);
+    header.forEach((cell, i) => {
+      ctx.fillText(cell.slice(0, 24), tableX + i * colW + 14, tableY + 26);
+    });
+
+    ctx.strokeStyle = "rgba(255,255,255,0.08)";
+    ctx.beginPath();
+    ctx.moveTo(tableX, tableY + 36);
+    ctx.lineTo(tableX + tableW, tableY + 36);
+    ctx.stroke();
+
+    ctx.font = "500 15px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+    ctx.fillStyle = "rgba(255,255,255,0.75)";
+    const maxRows = Math.floor((tableH - 48) / rowHeight);
+    const shownRows = target.rows.slice(0, Math.max(1, Math.min(maxRows, 7)));
+    shownRows.forEach((row, rowIndex) => {
+      const y = tableY + 36 + rowHeight * (rowIndex + 1);
+      row.slice(0, columns).forEach((cell, colIndex) => {
+        const text = cell.length > 38 ? `${cell.slice(0, 37)}…` : cell;
+        ctx.fillText(text, tableX + colIndex * colW + 14, y - 12);
+      });
+      ctx.strokeStyle = "rgba(255,255,255,0.06)";
+      ctx.beginPath();
+      ctx.moveTo(tableX, y);
+      ctx.lineTo(tableX + tableW, y);
+      ctx.stroke();
+    });
+
+    if (target.rows.length > shownRows.length) {
+      ctx.fillStyle = "rgba(255,255,255,0.55)";
+      ctx.font = "600 14px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+      ctx.fillText(`+${target.rows.length - shownRows.length} more rows`, tableX + 14, tableY + tableH - 14);
+    }
+  }
+
+  // Footer CTA
+  ctx.fillStyle = "rgba(255,255,255,0.70)";
+  ctx.font = "600 18px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+  ctx.fillText("Read the full guide on DayTabs", 44, 584);
+  ctx.fillStyle = "rgba(167,139,250,0.95)";
+  ctx.font = "700 18px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+  ctx.fillText(target.postUrl, 44, 610);
+
+  const blob: Blob = await new Promise((resolve, reject) => {
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Could not export image"))), "image/jpeg", 0.92);
+  });
+  const filename = `daytabs-${target.slug}-${target.kind}.jpg`;
+  const file = new File([blob], filename, { type: "image/jpeg" });
+  const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
+  const caption = `Useful section from DayTabs:\n\n${target.title}\n\nRead here:\n${target.postUrl}`;
+
+  return { file, dataUrl, caption };
+}
+
 function TableOfContentsMobile({ headings }: { headings: { id: string; text: string }[] }) {
   const [open, setOpen] = useState(false);
 
@@ -144,6 +334,11 @@ export default function BlogPostPage() {
   const [commentText, setCommentText] = useState("");
   const [commentWorking, setCommentWorking] = useState(false);
   const [commentNotice, setCommentNotice] = useState<string | null>(null);
+  const [sectionShareOpen, setSectionShareOpen] = useState(false);
+  const [sectionShareLoading, setSectionShareLoading] = useState(false);
+  const [sectionShareImage, setSectionShareImage] = useState<string | null>(null);
+  const [sectionShareFile, setSectionShareFile] = useState<File | null>(null);
+  const [sectionShareCaption, setSectionShareCaption] = useState<string>("");
 
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -299,6 +494,76 @@ export default function BlogPostPage() {
       setCommentWorking(false);
     }
   }
+
+  async function openSectionShare(target: ShareTarget) {
+    setSectionShareOpen(true);
+    setSectionShareLoading(true);
+    setSectionShareImage(null);
+    setSectionShareFile(null);
+    setSectionShareCaption("");
+    setEngagementError(null);
+    try {
+      const result = await createShareCard(target);
+      setSectionShareImage(result.dataUrl);
+      setSectionShareFile(result.file);
+      setSectionShareCaption(result.caption);
+    } catch (err) {
+      setEngagementError(err instanceof Error ? err.message : "Could not create share image");
+      setSectionShareOpen(false);
+    } finally {
+      setSectionShareLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!post) return;
+    const root = document.querySelector(".prose-content");
+    if (!root) return;
+
+    root.querySelectorAll(".blog-share-button").forEach((node) => node.remove());
+
+    const addButton = (wrapper: HTMLElement, target: ShareTarget) => {
+      wrapper.classList.add("blog-shareable");
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "blog-share-button";
+      button.innerText = "Share";
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        void openSectionShare(target);
+      });
+      wrapper.appendChild(button);
+    };
+
+    // Tables
+    root.querySelectorAll(".blog-table-wrap").forEach((wrap) => {
+      const wrapper = wrap as HTMLElement;
+      const table = wrapper.querySelector("table");
+      if (!table) return;
+      const headers = Array.from(table.querySelectorAll("thead th")).map((th) => elementText(th)).filter(Boolean);
+      const rows = Array.from(table.querySelectorAll("tbody tr")).map((tr) => Array.from(tr.querySelectorAll("td")).map((td) => elementText(td)));
+      addButton(wrapper, { kind: "table", title: post.title, slug: post.slug, postUrl, headers, rows });
+    });
+
+    // Images (wrap)
+    root.querySelectorAll("img").forEach((img) => {
+      const image = img as HTMLImageElement;
+      const src = image.currentSrc || image.src;
+      if (!src) return;
+      const parent = image.parentElement;
+      const wrapper = parent?.classList.contains("blog-image-wrap")
+        ? parent
+        : (() => {
+            const next = document.createElement("div");
+            next.className = "blog-image-wrap";
+            parent?.insertBefore(next, image);
+            next.appendChild(image);
+            return next;
+          })();
+      addButton(wrapper, { kind: "image", title: post.title, slug: post.slug, postUrl, src, alt: image.alt || "" });
+    });
+  }, [post, postUrl]);
 
   if (!post) {
     return (
@@ -616,6 +881,128 @@ export default function BlogPostPage() {
                         Native share
                       </button>
                     ) : null}
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {sectionShareOpen ? (
+              <div className="fixed inset-0 z-[120] flex items-center justify-center px-6">
+                <button
+                  type="button"
+                  className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+                  onClick={() => setSectionShareOpen(false)}
+                  aria-label="Close share image modal"
+                />
+                <div className="relative w-full max-w-2xl glass rounded-2xl border border-white/10 p-6">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-sm font-semibold text-white">Share as image</p>
+                      <p className="mt-1 text-xs text-white/45">Dark background, optimized for social (1200×630).</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setSectionShareOpen(false)}
+                      className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-white/70 hover:bg-white/[0.06] hover:text-white"
+                    >
+                      Close
+                    </button>
+                  </div>
+
+                  <div className="mt-5">
+                    {sectionShareLoading ? (
+                      <div className="flex items-center justify-center h-[320px] rounded-xl border border-dashed border-white/10 text-sm text-white/55">
+                        Creating image...
+                      </div>
+                    ) : sectionShareImage ? (
+                      <div className="overflow-hidden rounded-xl border border-white/10 bg-black/20">
+                        <img src={sectionShareImage} alt="Share card preview" className="w-full object-cover" />
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (!sectionShareCaption) return;
+                        try {
+                          await navigator.clipboard.writeText(sectionShareCaption);
+                        } catch {
+                          setEngagementError("Could not copy caption");
+                        }
+                      }}
+                      className="flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white/75 hover:bg-white/[0.06] hover:text-white"
+                      disabled={!sectionShareCaption}
+                    >
+                      <Copy className="w-4 h-4" />
+                      Copy caption
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!sectionShareFile || !sectionShareImage) return;
+                        const a = document.createElement("a");
+                        a.href = sectionShareImage;
+                        a.download = sectionShareFile.name;
+                        a.click();
+                      }}
+                      className="flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-purple-500 px-4 py-3 text-sm font-medium text-white hover:from-violet-500 hover:to-purple-400 disabled:opacity-50"
+                      disabled={!sectionShareImage || !sectionShareFile}
+                    >
+                      <ImageIcon className="w-4 h-4" />
+                      Download image
+                    </button>
+
+                    {sectionShareFile && typeof navigator !== "undefined" && "canShare" in navigator && "share" in navigator ? (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                            const nav = navigator as any;
+                            if (!nav?.canShare?.({ files: [sectionShareFile] })) return;
+                            await nav.share({ files: [sectionShareFile], text: sectionShareCaption, title: post.title });
+                          } catch {
+                            // cancelled
+                          }
+                        }}
+                        className="sm:col-span-2 flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white/75 hover:bg-white/[0.06] hover:text-white"
+                      >
+                        <Share2 className="w-4 h-4" />
+                        Native share (with image)
+                      </button>
+                    ) : null}
+                  </div>
+
+                  <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                    <a
+                      href={shareLinks.x}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white/75 hover:bg-white/[0.06] hover:text-white"
+                    >
+                      <Share2 className="w-4 h-4" />
+                      X
+                    </a>
+                    <a
+                      href={shareLinks.linkedin}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white/75 hover:bg-white/[0.06] hover:text-white"
+                    >
+                      <Share2 className="w-4 h-4" />
+                      LinkedIn
+                    </a>
+                    <a
+                      href={shareLinks.reddit}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white/75 hover:bg-white/[0.06] hover:text-white"
+                    >
+                      <Share2 className="w-4 h-4" />
+                      Reddit
+                    </a>
                   </div>
                 </div>
               </div>

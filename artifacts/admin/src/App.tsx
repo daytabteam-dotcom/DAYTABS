@@ -82,6 +82,18 @@ interface TokensResponse {
   period: Period;
 }
 
+type CommentStatus = "pending" | "approved";
+
+interface ModerationComment {
+  id: number;
+  blog: { id: number; slug: string; title: string };
+  user: { id: number; email: string; name: string | null };
+  content: string;
+  status: CommentStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
 const featureLabels: Record<string, string> = {
   videoAnalysis: "Video analysis",
   ytPlanGenerate: "YT plans",
@@ -194,6 +206,29 @@ function StatCard({ label, value, hint }: { label: string; value: string; hint: 
   );
 }
 
+function NavBar({ active }: { active: "dashboard" | "blog-comments" }) {
+  return (
+    <div className="topbar-nav">
+      <button
+        type="button"
+        className="ghost-button"
+        data-active={active === "dashboard" ? "true" : "false"}
+        onClick={() => window.location.assign(ADMIN_APP_PATH)}
+      >
+        Dashboard
+      </button>
+      <button
+        type="button"
+        className="ghost-button"
+        data-active={active === "blog-comments" ? "true" : "false"}
+        onClick={() => window.location.assign(`${ADMIN_APP_PATH}/blog-comments`)}
+      >
+        Blog comments
+      </button>
+    </div>
+  );
+}
+
 function DashboardView() {
   const [stats, setStats] = useState<StatsResponse | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -293,7 +328,10 @@ function DashboardView() {
           <p className="eyebrow">DayTabs control</p>
           <h1>Admin Console</h1>
         </div>
-        <button className="ghost-button" type="button" onClick={logout}>Log out</button>
+        <div className="topbar-actions">
+          <NavBar active="dashboard" />
+          <button className="ghost-button" type="button" onClick={logout}>Log out</button>
+        </div>
       </header>
 
       {error ? <div className="notice">{error}</div> : null}
@@ -533,17 +571,169 @@ function DashboardView() {
   );
 }
 
+function BlogCommentsModerationView() {
+  const [status, setStatus] = useState<CommentStatus>("pending");
+  const [comments, setComments] = useState<ModerationComment[]>([]);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [workingId, setWorkingId] = useState<number | null>(null);
+
+  async function logout() {
+    await fetch(ADMIN_AUTH_LOGOUT_URL, { method: "POST", credentials: "include" }).catch(() => null);
+    window.location.assign(ADMIN_LOGIN_PATH);
+  }
+
+  async function load() {
+    setLoading(true);
+    setError("");
+    try {
+      const data = await apiFetch<{ status: CommentStatus; comments: ModerationComment[] }>(`/api/admin/blog-comments?status=${status}`);
+      setComments(data.comments ?? []);
+    } catch (err) {
+      if (err instanceof Error && err.message === "Unauthorized") return;
+      setError("Could not load blog comments");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status]);
+
+  async function approve(id: number) {
+    if (workingId) return;
+    setWorkingId(id);
+    setError("");
+    try {
+      const response = await fetch(`/api/admin/blog-comments/${id}/approve`, { method: "POST", credentials: "include" });
+      const body = await response.json().catch(() => ({}));
+      if (response.status === 401) {
+        window.location.assign(ADMIN_LOGIN_PATH);
+        return;
+      }
+      if (!response.ok) throw new Error((body as { error?: string }).error || "Request failed");
+      setComments((current) => current.filter((item) => item.id !== id));
+    } catch {
+      setError("Could not approve comment");
+    } finally {
+      setWorkingId(null);
+    }
+  }
+
+  async function reject(id: number) {
+    if (workingId) return;
+    if (!window.confirm("Reject and delete this comment?")) return;
+    setWorkingId(id);
+    setError("");
+    try {
+      const response = await fetch(`/api/admin/blog-comments/${id}/reject`, { method: "POST", credentials: "include" });
+      const body = await response.json().catch(() => ({}));
+      if (response.status === 401) {
+        window.location.assign(ADMIN_LOGIN_PATH);
+        return;
+      }
+      if (!response.ok) throw new Error((body as { error?: string }).error || "Request failed");
+      setComments((current) => current.filter((item) => item.id !== id));
+    } catch {
+      setError("Could not reject comment");
+    } finally {
+      setWorkingId(null);
+    }
+  }
+
+  return (
+    <main className="admin-shell">
+      <header className="topbar">
+        <div>
+          <p className="eyebrow">DayTabs control</p>
+          <h1>Blog Comments</h1>
+        </div>
+        <div className="topbar-actions">
+          <NavBar active="blog-comments" />
+          <button className="ghost-button" type="button" onClick={logout}>Log out</button>
+        </div>
+      </header>
+
+      {error ? <div className="notice">{error}</div> : null}
+
+      <section className="panel">
+        <div className="panel-heading">
+          <div>
+            <p className="eyebrow">Moderation</p>
+            <h2>Queue</h2>
+          </div>
+          <div className="period-switcher" aria-label="Comment status">
+            {(["pending", "approved"] as CommentStatus[]).map((value) => (
+              <button key={value} className={status === value ? "active" : ""} type="button" onClick={() => setStatus(value)}>
+                {value}
+              </button>
+            ))}
+            <button type="button" className="ghost-button" onClick={() => void load()} disabled={loading}>
+              {loading ? "Loading..." : "Refresh"}
+            </button>
+          </div>
+        </div>
+
+        <div className="panel-body">
+          {loading ? (
+            <p className="empty">Loading comments...</p>
+          ) : comments.length ? (
+            <div className="comment-list">
+              {comments.map((comment) => (
+                <article key={comment.id} className="comment-card">
+                  <header>
+                    <div>
+                      <p className="comment-meta">
+                        <span className="comment-pill">{comment.status}</span>
+                        <span>#{comment.id}</span>
+                        <span>{formatDate(comment.createdAt)}</span>
+                      </p>
+                      <h3>{comment.blog.title}</h3>
+                      <p className="comment-sub">
+                        <span>/{comment.blog.slug}</span>
+                        <span>·</span>
+                        <span>{comment.user.email}</span>
+                      </p>
+                    </div>
+                    <div className="comment-actions">
+                      {comment.status !== "approved" ? (
+                        <button type="button" className="ghost-button" onClick={() => void approve(comment.id)} disabled={workingId === comment.id}>
+                          {workingId === comment.id ? "Working..." : "Approve"}
+                        </button>
+                      ) : null}
+                      <button type="button" className="ghost-button danger" onClick={() => void reject(comment.id)} disabled={workingId === comment.id}>
+                        {workingId === comment.id ? "Working..." : "Reject"}
+                      </button>
+                    </div>
+                  </header>
+                  <pre className="comment-content">{comment.content}</pre>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <p className="empty">No comments in this queue.</p>
+          )}
+        </div>
+      </section>
+    </main>
+  );
+}
+
 export default function App() {
   const currentPath = window.location.pathname.replace(/\/$/, "") || "/";
   const loginPath = ADMIN_LOGIN_PATH.replace(/\/$/, "") || "/";
   const appPath = ADMIN_APP_PATH.replace(/\/$/, "");
   const isLogin = currentPath === loginPath;
   const isApp = currentPath === appPath || currentPath.startsWith(`${appPath}/`);
+  const isBlogComments = currentPath.startsWith(`${appPath}/blog-comments`);
 
   if (!isLogin && !isApp) {
     window.location.replace(ADMIN_LOGIN_PATH);
     return null;
   }
 
-  return isLogin ? <LoginView /> : <DashboardView />;
+  if (isLogin) return <LoginView />;
+  return isBlogComments ? <BlogCommentsModerationView /> : <DashboardView />;
 }

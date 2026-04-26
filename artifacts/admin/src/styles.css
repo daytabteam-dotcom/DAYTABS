@@ -199,6 +199,111 @@ input:focus {
   margin-bottom: 1rem;
 }
 
+.topbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.topbar-nav {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.topbar-nav .ghost-button[data-active="true"] {
+  border-color: rgba(220, 255, 125, 0.55);
+  box-shadow: 0 0 0 4px rgba(220, 255, 125, 0.08);
+}
+
+.comment-list {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.comment-card {
+  border: 1px solid var(--line);
+  border-radius: 1.25rem;
+  padding: 1rem;
+  background: rgba(9, 20, 16, 0.55);
+}
+
+.comment-card header {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.comment-card h3 {
+  margin-top: 0.35rem;
+  font-size: 1.05rem;
+}
+
+.comment-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin: 0;
+  color: var(--quiet);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+}
+
+.comment-sub {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.comment-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  justify-content: flex-end;
+}
+
+.ghost-button.danger {
+  border-color: rgba(255, 110, 110, 0.28);
+  color: #ffd5d5;
+}
+
+.ghost-button.danger:hover {
+  background: rgba(255, 110, 110, 0.12);
+}
+
+.comment-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--lime);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-weight: 800;
+  font-size: 0.66rem;
+}
+
+.comment-content {
+  margin: 0.9rem 0 0;
+  padding: 0.9rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--ink);
+  white-space: pre-wrap;
+  font-family: var(--font-body);
+  line-height: 1.6;
+}
+
 .topbar h1,
 .hero-panel h2 {
   font-size: clamp(2.2rem, 5vw, 4.8rem);

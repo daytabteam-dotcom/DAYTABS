@@ -311,6 +311,153 @@ router.get("/users", async (req, res) => {
   }
 });
 
+router.get("/blog-comments", async (req, res) => {
+  const auth = await requireAdmin(req, res);
+  if (auth !== true) return;
+
+  try {
+    const status = String(req.query.status ?? "pending");
+    const limitRaw = Number(req.query.limit ?? 200);
+    const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(500, Math.trunc(limitRaw))) : 200;
+    const normalizedStatus =
+      status === "approved" || status === "pending" || status === "rejected"
+        ? status
+        : "pending";
+
+    const { rows } = await pool.query<{
+      id: number;
+      blog_id: number;
+      blog_slug: string;
+      blog_title: string;
+      user_id: number;
+      user_email: string;
+      user_name: string | null;
+      content: string;
+      status: string;
+      created_at: Date;
+      updated_at: Date;
+    }>(`
+      SELECT
+        bc.id,
+        bc.blog_id,
+        b.slug AS blog_slug,
+        b.title AS blog_title,
+        bc.user_id,
+        u.email AS user_email,
+        u.name AS user_name,
+        bc.content,
+        bc.status,
+        bc.created_at,
+        bc.updated_at
+      FROM blog_comments bc
+      JOIN blogs b ON b.id = bc.blog_id
+      JOIN users u ON u.id = bc.user_id
+      WHERE bc.status = $1
+      ORDER BY bc.created_at ASC
+      LIMIT $2
+    `, [normalizedStatus, limit]);
+
+    res.json({
+      status: normalizedStatus,
+      comments: rows.map((row) => ({
+        id: row.id,
+        blog: { id: row.blog_id, slug: row.blog_slug, title: row.blog_title },
+        user: { id: row.user_id, email: row.user_email, name: row.user_name },
+        content: row.content,
+        status: row.status,
+        createdAt: row.created_at.toISOString(),
+        updatedAt: row.updated_at.toISOString(),
+      })),
+    });
+  } catch (err) {
+    req.log.error({ err }, "Admin blog comments list error");
+    res.status(500).json({ error: "Failed to load blog comments" });
+  }
+});
+
+router.post("/blog-comments/:commentId/approve", async (req, res) => {
+  const auth = await requireAdmin(req, res);
+  if (auth !== true) return;
+
+  const commentId = Number(req.params.commentId);
+  if (!Number.isInteger(commentId) || commentId <= 0) {
+    res.status(400).json({ error: "Invalid comment id" });
+    return;
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const existing = await client.query<{ blog_id: number; status: string }>(
+      "SELECT blog_id, status FROM blog_comments WHERE id = $1 FOR UPDATE",
+      [commentId],
+    );
+    const row = existing.rows[0];
+    if (!row) {
+      await client.query("ROLLBACK");
+      res.status(404).json({ error: "Comment not found" });
+      return;
+    }
+
+    if (row.status !== "approved") {
+      await client.query("UPDATE blog_comments SET status = 'approved', updated_at = now() WHERE id = $1", [commentId]);
+      await client.query("UPDATE blogs SET comment_count = comment_count + 1, updated_at = now() WHERE id = $1", [row.blog_id]);
+    }
+
+    await client.query("COMMIT");
+    res.json({ ok: true, id: commentId, status: "approved" });
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => null);
+    req.log.error({ err }, "Admin blog comment approve error");
+    res.status(500).json({ error: "Failed to approve comment" });
+  } finally {
+    client.release();
+  }
+});
+
+router.post("/blog-comments/:commentId/reject", async (req, res) => {
+  const auth = await requireAdmin(req, res);
+  if (auth !== true) return;
+
+  const commentId = Number(req.params.commentId);
+  if (!Number.isInteger(commentId) || commentId <= 0) {
+    res.status(400).json({ error: "Invalid comment id" });
+    return;
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const existing = await client.query<{ blog_id: number; status: string }>(
+      "SELECT blog_id, status FROM blog_comments WHERE id = $1 FOR UPDATE",
+      [commentId],
+    );
+    const row = existing.rows[0];
+    if (!row) {
+      await client.query("ROLLBACK");
+      res.status(404).json({ error: "Comment not found" });
+      return;
+    }
+
+    if (row.status === "approved") {
+      await client.query("UPDATE blogs SET comment_count = GREATEST(comment_count - 1, 0), updated_at = now() WHERE id = $1", [row.blog_id]);
+    }
+
+    await client.query("DELETE FROM blog_comments WHERE id = $1", [commentId]);
+
+    await client.query("COMMIT");
+    res.json({ ok: true, id: commentId, deleted: true });
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => null);
+    req.log.error({ err }, "Admin blog comment reject error");
+    res.status(500).json({ error: "Failed to reject comment" });
+  } finally {
+    client.release();
+  }
+});
+
 router.get("/users/:id", async (req, res) => {
   const auth = await requireAdmin(req, res);
   if (auth !== true) return;
