@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, type ReactNode } from "react";
 
 export const SUPPORTED_DAYTABS_LOCALES = [
   "en",
@@ -642,11 +642,11 @@ const baseCopy: DayTabsCopy = {
       title: "Competitor Playbook",
       subtitle: "Use this like a coach's scouting report: who you can catch now, who is just ahead, and who defines the playbook for your niche.",
       refreshCompetitors: "Refresh competitors",
-      addCompetitorPlaceholder: "Add competitor by YouTube channel URL",
+      addCompetitorPlaceholder: "Add competitor (URL, @handle, or channel name)",
       addCompetitorButton: "Add competitor",
-      channelsYouCanBeatTitle: "Channels You Can Beat",
-      channelsYouCanBeatSubtitle: "These are the channels close enough to race right now. Treat them like proof that your next push can move the leaderboard.",
-      emptyReachableCompetitors: "No matching channels yet. Refresh competitors and DayTabs will keep scouting your niche.",
+      channelsYouCanBeatTitle: "Competitors",
+      channelsYouCanBeatSubtitle: "Saved competitors show as cards. Weekly charts include comparable channels (and anything you added manually).",
+      emptyReachableCompetitors: "No competitors yet. Refresh competitors or add one manually.",
       friendlyLeaderboardTitle: "This Week's Friendly Leaderboard",
       addedByYou: (fromUrl: boolean) => `Added by you${fromUrl ? " from a channel URL" : ""}.`,
       competitorTierUnknown: "Unknown",
@@ -944,11 +944,11 @@ const localeOverrides: Partial<Record<DayTabsLocale, DeepPartial<DayTabsCopy>>> 
         title: "Rakip Oyun Plani",
         subtitle: "Bunu bir koçun raporu gibi kullan: simdi yakalayabileceklerin, az onde olanlar ve nisinin oyun kitabini yazanlar.",
         refreshCompetitors: "Rakipleri yenile",
-        addCompetitorPlaceholder: "YouTube kanal URL'si ile rakip ekle",
+        addCompetitorPlaceholder: "Rakip ekle (URL, @handle veya kanal adi)",
         addCompetitorButton: "Rakip ekle",
-        channelsYouCanBeatTitle: "Gecilebilecek Kanallar",
-        channelsYouCanBeatSubtitle: "Bunlar su an yarisabilecegin kadar yakin kanallar. Bir sonraki hamlenin siralamayi degistirebilecegine kanit gibi dusun.",
-        emptyReachableCompetitors: "Henuz eslesen kanal yok. Rakipleri yenile; DayTabs nisini izlemeye devam edecek.",
+        channelsYouCanBeatTitle: "Rakipler",
+        channelsYouCanBeatSubtitle: "Kayitli rakipler kart olarak gorunur. Haftalik grafikler benzer kanallari (ve manuel eklediklerini) dahil eder.",
+        emptyReachableCompetitors: "Henuz rakip yok. Rakipleri yenile veya manuel ekle.",
         friendlyLeaderboardTitle: "Bu Haftanin Dostca Siralamasi",
         addedByYou: (fromUrl: boolean) => `Sen ekledin${fromUrl ? " (kanal URL'sinden)" : ""}.`,
         competitorTierUnknown: "Bilinmiyor",
@@ -1179,21 +1179,15 @@ const DayTabsI18nContext = createContext<{
 } | null>(null);
 
 function normalizeLocale(input?: string | null): DayTabsLocale {
-  if (!input) return "en";
-  const lowered = input.trim().toLowerCase();
-  const base = lowered.split(/[-_]/)[0] as DayTabsLocale;
-  return SUPPORTED_DAYTABS_LOCALES.includes(base) ? base : "en";
+  return "en";
 }
 
 function detectInitialLocale(): DayTabsLocale {
-  if (typeof window === "undefined") return "en";
-  const stored = normalizeLocale(window.localStorage.getItem(DAYTABS_LOCALE_STORAGE_KEY));
-  if (window.localStorage.getItem(DAYTABS_LOCALE_STORAGE_KEY)) return stored;
-  return normalizeLocale(window.navigator.language);
+  return normalizeLocale();
 }
 
 export function DayTabsI18nProvider({ children }: { children: ReactNode }) {
-  const [locale, setLocaleState] = useState<DayTabsLocale>(() => detectInitialLocale());
+  const locale = detectInitialLocale();
 
   useEffect(() => {
     window.localStorage.setItem(DAYTABS_LOCALE_STORAGE_KEY, locale);
@@ -1202,7 +1196,7 @@ export function DayTabsI18nProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo(() => ({
     locale,
-    setLocale: (nextLocale: DayTabsLocale) => setLocaleState(normalizeLocale(nextLocale)),
+    setLocale: () => {},
     copy: mergeCopy(baseCopy, localeOverrides[locale]),
   }), [locale]);
 

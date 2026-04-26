@@ -39,7 +39,7 @@ import {
   PanelCard,
   PanelCardSoft,
 } from "@/components/panel-system";
-import { DAYTABS_LOCALE_LABELS, SUPPORTED_DAYTABS_LOCALES, useDayTabsI18n, type DayTabsLocale } from "@/lib/i18n";
+import { useDayTabsI18n } from "@/lib/i18n";
 
 const TABS = [
   { id: "dashboard", icon: LayoutDashboard },
@@ -517,7 +517,7 @@ function Dashboard({
 }
 
 export default function Home() {
-  const { locale, setLocale, copy } = useDayTabsI18n();
+  const { copy } = useDayTabsI18n();
   const [activeTab, setActiveTab] = useState<TabId>(() => getTabFromUrl());
   const [activeTabHasData, setActiveTabHasData] = useState(false);
   const [showPlanModal, setShowPlanModal] = useState(false);
@@ -587,20 +587,6 @@ export default function Home() {
             </span>
           </div>
           <div className="flex items-center gap-3">
-            <label className="hidden items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs text-white/60 sm:flex">
-              <span>{copy.languageLabel}</span>
-              <select
-                value={locale}
-                onChange={(event) => setLocale(event.target.value as DayTabsLocale)}
-                className="bg-transparent text-white outline-none"
-              >
-                {SUPPORTED_DAYTABS_LOCALES.map((item) => (
-                  <option key={item} value={item} className="bg-slate-950">
-                    {DAYTABS_LOCALE_LABELS[item]}
-                  </option>
-                ))}
-              </select>
-            </label>
             <NotificationBell
               onOpenGrowthPlanner={() => handleTabClick("growth-planner")}
             />

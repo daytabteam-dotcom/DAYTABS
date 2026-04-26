@@ -1288,7 +1288,11 @@ function deriveCompetitorRows(ownSubscribers: number, recentVideos: RecentVideo[
 }
 
 function filterReachableCompetitors(ownSubscribers: number, competitors: Array<ReturnType<typeof deriveCompetitorRows>[number]>) {
-  return competitors.filter((item) => ownSubscribers > 0 && item.subscribers > 0 && item.subscribers <= ownSubscribers * 5);
+  return competitors.filter((item) => {
+    const storedMeta = readCompetitorStoredMeta(item);
+    if (storedMeta.source === "manual") return true;
+    return ownSubscribers > 0 && item.subscribers > 0 && item.subscribers <= ownSubscribers * 5;
+  });
 }
 
 function deriveWeeklyComparisonData(
@@ -2657,7 +2661,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
   const [movingDay, setMovingDay] = useState<PlanDay | null>(null);
   const [postingFrequencyInput, setPostingFrequencyInput] = useState("3");
   const [savingSettings, setSavingSettings] = useState(false);
-  const [manualCompetitorUrl, setManualCompetitorUrl] = useState("");
+  const [competitorReference, setCompetitorReference] = useState("");
   const [thumbnailDay, setThumbnailDay] = useState<PlanDay | null>(null);
   const [thumbnailTextPreference, setThumbnailTextPreference] = useState("");
   const [thumbnailSourceImages, setThumbnailSourceImages] = useState<ThumbnailSourceImage[]>([]);
@@ -2957,18 +2961,18 @@ export default function YouTubeGrowthPlannerV2Tab() {
     }
   }
 
-  async function addCompetitorFromUrl(event: FormEvent<HTMLFormElement>) {
+  async function addCompetitor(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const channelUrl = manualCompetitorUrl.trim();
-    if (!channelUrl) return;
+    const reference = competitorReference.trim();
+    if (!reference) return;
     setWorking("competitor-add");
     setError(null);
     try {
       await jsonFetch<{ competitor: YoutubeCompetitor }>("/api/youtube/competitors", {
         method: "POST",
-        body: JSON.stringify({ channelUrl }),
+        body: JSON.stringify({ reference }),
       });
-      setManualCompetitorUrl("");
+      setCompetitorReference("");
       await loadStatus();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not add competitor");
@@ -2996,15 +3000,31 @@ export default function YouTubeGrowthPlannerV2Tab() {
   }
 
   async function handleThumbnailSourceFiles(files: FileList | null) {
-    const nextFiles = Array.from(files ?? []).slice(0, 4);
+    const slots = Math.max(0, 4 - thumbnailSourceImages.length);
+    const nextFiles = Array.from(files ?? []).slice(0, slots);
     if (!nextFiles.length) return;
     setError(null);
     try {
-      const processed = await Promise.all(nextFiles.map(async (file) => ({
-        name: file.name,
-        dataUrl: await resizeImageFileToDataUrl(file),
-      })));
-      setThumbnailSourceImages((current) => [...current, ...processed].slice(0, 4));
+      const processed: ThumbnailSourceImage[] = [];
+      const failures: string[] = [];
+
+      for (const file of nextFiles) {
+        try {
+          processed.push({
+            name: file.name,
+            dataUrl: await resizeImageFileToDataUrl(file),
+          });
+        } catch (err) {
+          failures.push(err instanceof Error ? err.message : `Could not read ${file.name}`);
+        }
+      }
+
+      if (processed.length) {
+        setThumbnailSourceImages((current) => [...current, ...processed].slice(0, 4));
+      }
+      if (failures.length) {
+        setError(failures.length === 1 ? failures[0]! : `${failures[0]} (+${failures.length - 1} more)`);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not read source images");
     }
@@ -3989,15 +4009,15 @@ export default function YouTubeGrowthPlannerV2Tab() {
                     {working === "competitors" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="mr-2 h-4 w-4" />}
                     {ui.competitorsPanel.refreshCompetitors}
                   </Button>
-                  <form onSubmit={(event) => void addCompetitorFromUrl(event)} className="flex flex-col gap-2 sm:flex-row">
+                  <form onSubmit={(event) => void addCompetitor(event)} className="flex flex-col gap-2 sm:flex-row">
                     <Input
-                      value={manualCompetitorUrl}
-                      onChange={(event) => setManualCompetitorUrl(event.target.value)}
+                      value={competitorReference}
+                      onChange={(event) => setCompetitorReference(event.target.value)}
                       placeholder={ui.competitorsPanel.addCompetitorPlaceholder}
                       disabled={Boolean(working)}
                       className="border-white/10 bg-white/[0.04] text-white placeholder:text-white/30"
                     />
-                    <Button type="submit" className="rounded-lg" disabled={!manualCompetitorUrl.trim() || Boolean(working)}>
+                    <Button type="submit" className="rounded-lg" disabled={!competitorReference.trim() || Boolean(working)}>
                       {working === "competitor-add" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
                       {ui.competitorsPanel.addCompetitorButton}
                     </Button>
@@ -4011,12 +4031,13 @@ export default function YouTubeGrowthPlannerV2Tab() {
                       <p className="mt-1 text-sm text-white/50">{ui.competitorsPanel.channelsYouCanBeatSubtitle}</p>
                     </div>
                     <div className="grid gap-4 md:grid-cols-2">
-                      {reachableCompetitors.map((competitor) => {
+                      {competitorRows.map((competitor) => {
                         const insight = planPayload.competitorInsights?.find((item) => item.channelName === competitor.channelName);
                         const storedMeta = readCompetitorStoredMeta(competitor);
                         const url = insight?.channelUrl || `https://www.youtube.com/channel/${competitor.channelId ?? ""}`;
                         const topVideo = [...(competitor.mostViewedRecentVideos ?? [])].sort((a, b) => parseNumber(b.viewCount) - parseNumber(a.viewCount))[0];
                         const isRemoving = working === `competitor-remove:${competitor.id}`;
+                        const relative = relativeCompetitorLabel(competitor, ownSubscribers);
                         return (
                           <PanelCardSoft key={competitor.id} className="border border-emerald-400/25 p-4 transition-all hover:-translate-y-0.5 hover:bg-white/[0.05]">
                             <div className="flex items-start justify-between gap-3">
@@ -4027,7 +4048,10 @@ export default function YouTubeGrowthPlannerV2Tab() {
                                 </Avatar>
                                 <div>
                                   <p className="font-medium text-white">{competitor.channelName}</p>
-                                  <p className="mt-1 text-xs text-white/40">{formatNumber(competitor.subscriberCount)} subscribers · {competitor.videosPerWeekLabel}</p>
+                                  <p className="mt-1 text-xs text-white/40">
+                                    {formatNumber(competitor.subscriberCount)} subscribers · {competitor.videosPerWeekLabel}
+                                    {relative.label !== "Unknown" ? ` · ${relative.label}` : ""}
+                                  </p>
                                 </div>
                               </div>
                               <div className="flex items-center gap-2">
@@ -4053,7 +4077,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
                           </PanelCardSoft>
                         );
                       })}
-                      {!reachableCompetitors.length ? <PanelCardSoft className="p-4 text-sm text-white/55 md:col-span-2">{ui.competitorsPanel.emptyReachableCompetitors}</PanelCardSoft> : null}
+                      {!competitorRows.length ? <PanelCardSoft className="p-4 text-sm text-white/55 md:col-span-2">{ui.competitorsPanel.emptyReachableCompetitors}</PanelCardSoft> : null}
                     </div>
                     {weeklyComparison ? (
                       <PanelCardSoft className="border border-emerald-400/20 p-4">
@@ -4368,7 +4392,10 @@ export default function YouTubeGrowthPlannerV2Tab() {
                         accept="image/jpeg,.jpg,.jpeg"
                         multiple
                         className="hidden"
-                        onChange={(event) => void handleThumbnailSourceFiles(event.target.files)}
+                        onChange={(event) => {
+                          void handleThumbnailSourceFiles(event.currentTarget.files);
+                          event.currentTarget.value = "";
+                        }}
                       />
                     </label>
                   ) : null}

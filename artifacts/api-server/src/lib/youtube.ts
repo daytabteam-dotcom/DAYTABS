@@ -1056,7 +1056,15 @@ async function buildYoutubeThumbnailPrompt(
     (inferredThumbnailOutputLanguage === "same-as-source"
       ? "the same language as the source video metadata and transcript evidence"
       : inferredThumbnailOutputLanguage);
-  const thumbnailStrategyRules = `Thumbnail strategy rules:
+  const thumbnailStrategyRules = `You are a professional YouTube thumbnail designer, not an AI artist.
+Your goal is to create a HIGH-CTR thumbnail that looks REAL, not AI-generated.
+
+Strict realism + editing rules:
+- Prefer editing over generating. If unsure, do less.
+- Avoid AI-looking results: no "AI glow", no overly smooth/plastic textures, no fake HDR lighting, no unnatural shadows.
+- If the output looks AI-generated, you have failed. Regenerate with more realism.
+
+Thumbnail strategy rules:
 - CORE THUMBNAIL RULE: the thumbnail must communicate exactly ONE idea, through ONE focal subject, triggering ONE clear emotion, and be understandable in under 1 second on mobile.
 - THE ONE RULE: a thumbnail must communicate ONE clear idea in under 1 second.
 - Viewer test: the viewer should instantly understand what this is about and why they should care. If they need to think, it is weak. If they get it instantly, it is strong.
@@ -1069,7 +1077,7 @@ async function buildYoutubeThumbnailPrompt(
 - Optimize for the right click plus watch time/retention, not clickbait CTR alone.
 - Build around one focal subject, one idea, and one payoff; remove visual noise.
 - Design for phone-size legibility: large subject, strong subject/background separation, high contrast, and text that reads instantly.
-- Use thumbnail text only when it adds value beyond the title; keep it bold, non-redundant, and about 3-5 words.
+- Use thumbnail text only when it adds value beyond the title; keep it bold, non-redundant, and 1–4 words max.
 - Match the title, description, hook, and first 30 seconds so the thumbnail promise fits the actual video.
 - For YouTube long-form, create a true 16:9 custom thumbnail concept that is accurate, uncluttered, high-resolution, and testable.
 - For YouTube Shorts or vertical concepts, think in poster-frame terms: the first frame or selected frame should be a strong cover with centered subject, readable text, and no important detail near crop/UI edges.
@@ -1154,18 +1162,20 @@ IMPORTANT: ${payload.sourceImageKind === "current_thumbnail" ? "The provided ima
 ${thumbnailStrategyRules}
 
 STRICT RULES (MUST FOLLOW):
-- The provided image MUST remain the base of the final thumbnail
-- DO NOT recreate, redraw, or reinterpret the scene
+- If a source image is provided, you MUST use it exactly as the base visual
+- DO NOT recreate, redraw, or reinterpret the subject
+- DO NOT change the face, hands, or main objects
 - DO NOT replace the person or objects
 - If there are any faces, preserve identity, facial structure, expression, skin texture, hair, age, gaze direction, and pose exactly
 - Do not beautify, age, de-age, stylize, cartoon, or alter any face
 - You may ONLY:
   - enhance colors, contrast, exposure, and local lighting
   - improve sharpness and clarity without changing facial features
-  - add tasteful rim light, glow, vignette, depth, or background separation
+  - add subtle depth/background separation (blur/simplify) without changing the subject
   - slightly blur, darken, or simplify the background for focus without changing the subject
   - add bold readable text, arrows, outlines, highlights, or graphic accents in empty/non-face areas
-- The final result should look like a polished high-performing YouTube thumbnail made from the original thumbnail, not like a new AI image
+- The final result must look like a real photo edited by a human designer (Photoshop), not a new AI image
+- Avoid overly smooth textures, artificial lighting, "AI glow", and unrealistic shadows
 
 OUTPUT:
 Return ONLY the final image editing prompt.
@@ -1322,17 +1332,23 @@ async function runYoutubeThumbnailImageRequest(
 Do NOT reuse the original thumbnail composition. You must redesign the layout and visual storytelling while preserving only necessary elements (like the same face/identity if present).
 You may crop/zoom/reframe, reposition the subject, replace the background, add/remove supporting elements, and add strong readable text/graphics.
 If a real face exists in the input image, do NOT generate a different person and do NOT change identity.
-Avoid AI-looking glossy/plastic results. Keep one clear idea and one focal point.`;
+Avoid AI-looking results: no "AI glow", no overly smooth/plastic textures, no fake HDR lighting, no unrealistic shadows. Keep it like a real Photoshop edit.
+If the result looks AI-generated, you have failed. Regenerate with more realism.
+Keep one clear idea and one focal point.`;
     }
     if (editPolicy === "reference_transform") {
       return `Use the input image(s) as strong visual references and/or starting layers.
 You may redesign the background and composition, but if any real faces exist, keep the same identity (do not generate a different person).
-Avoid AI-looking glossy/plastic results. Keep one clear idea and one focal point.`;
+Avoid AI-looking results: no "AI glow", no overly smooth/plastic textures, no fake HDR lighting, no unrealistic shadows. Keep it like a real Photoshop edit.
+If the result looks AI-generated, you have failed. Regenerate with more realism.
+Keep one clear idea and one focal point.`;
     }
     return `Use the input image(s) as the base visuals.
 Do NOT change identity, faces, pose, or the main subject.
 You MAY improve lighting, contrast, sharpness, and color; you MAY replace/simplify the background; you MAY crop/zoom/reframe without distorting faces; you MAY add text, arrows, outlines, and tasteful graphic accents.
-Avoid AI-looking glossy/plastic results. Keep one clear idea and one focal point.`;
+Avoid AI-looking results: no "AI glow", no overly smooth/plastic textures, no fake HDR lighting, no unrealistic shadows. Keep it like a real Photoshop edit.
+If the result looks AI-generated, you have failed. Regenerate with more realism.
+Keep one clear idea and one focal point.`;
   })();
 
   if (sourceImages.length) {
@@ -2209,6 +2225,91 @@ async function resolveYoutubeChannelIdFromUrl(channelUrl: string) {
   throw new Error("That URL does not appear to be a valid public YouTube channel");
 }
 
+function looksLikeYoutubeChannelId(input: string) {
+  return /^UC[\w-]{22}$/.test(input.trim());
+}
+
+function normalizeYoutubeChannelReferenceToUrl(reference: string) {
+  const trimmed = reference.trim();
+  if (!trimmed) throw new Error("Enter a YouTube channel URL or @handle");
+  if (looksLikeYoutubeChannelId(trimmed)) return `https://www.youtube.com/channel/${trimmed}`;
+  if (trimmed.startsWith("@")) return `https://www.youtube.com/${trimmed}`;
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  if (/^(?:www\.)?(?:m\.)?youtube\.com\//i.test(trimmed)) return `https://${trimmed.replace(/^https?:\/\//i, "")}`;
+  return null;
+}
+
+async function resolveYoutubeChannelIdFromReference(userId: number, reference: string) {
+  const url = normalizeYoutubeChannelReferenceToUrl(reference);
+  if (url) return await resolveYoutubeChannelIdFromUrl(url);
+
+  const query = reference.trim();
+  const candidates = await searchChannelIds(userId, query, 8);
+  if (!candidates.length) {
+    throw new Error("No YouTube channels found for that search. Try pasting a channel URL or @handle instead.");
+  }
+
+  const channels = await fetchChannelsByIds(userId, candidates.slice(0, 8));
+  const normalizedCandidates = channels
+    .map((item) => {
+      const channel = asRecord(item);
+      const snippet = asRecord(channel.snippet);
+      const stats = asRecord(channel.statistics);
+      return {
+        channelId: asString(channel.id),
+        title: asString(snippet.title),
+        description: asString(snippet.description),
+        customUrl: asString(snippet.customUrl),
+        subscriberCount: asString(stats.subscriberCount),
+      };
+    })
+    .filter((item): item is {
+      channelId: string;
+      title: string | null;
+      description: string | null;
+      customUrl: string | null;
+      subscriberCount: string | null;
+    } => Boolean(item.channelId));
+
+  if (normalizedCandidates.length === 1) return normalizedCandidates[0]!.channelId;
+
+  const completion = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [
+      {
+        role: "system",
+        content: `You select the best matching YouTube channel from candidates.
+Return JSON only with shape: {"channelId": string}
+Rules:
+- Only pick a channelId present in candidates.
+- Prefer an exact match on handle/name if obvious.
+- If ambiguous, pick the most likely official/primary channel for the query.`,
+      },
+      {
+        role: "user",
+        content: JSON.stringify({ query, candidates: normalizedCandidates }),
+      },
+    ],
+    response_format: { type: "json_object" },
+    max_completion_tokens: 220,
+  });
+
+  await logTokenUsage({
+    userId,
+    feature: "youtubeCompetitorResolve",
+    model: "gpt-4o-mini",
+    ...usageTokens(completion.usage),
+  });
+
+  const raw = completion.choices[0]?.message?.content ?? "{}";
+  const parsed = asRecord(parseAiJson(raw));
+  const selected = asString(parsed.channelId);
+  const allowed = new Set(normalizedCandidates.map((item) => item.channelId));
+  if (selected && allowed.has(selected)) return selected;
+
+  return normalizedCandidates[0]!.channelId;
+}
+
 async function generateCompetitorReportSummary(
   userId: number,
   creatorProfile: typeof youtubeChannelProfilesTable.$inferSelect,
@@ -2521,6 +2622,38 @@ export async function getYoutubeStatus(userId: number) {
       profile = await syncYoutubeChannel(userId);
     } catch {
       // Keep returning the saved profile even if YouTube refresh fails.
+    }
+  }
+
+  const competitorRefreshCutoff = Date.now() - (6 * 60 * 60 * 1000);
+  const staleCompetitors = connection && profile
+    ? competitors
+      .filter((competitor: typeof youtubeCompetitorsTable.$inferSelect) => {
+        const fetchedAt = competitor.fetchedAt?.getTime?.() ?? 0;
+        const recent = Array.isArray(competitor.mostViewedRecentVideos) ? competitor.mostViewedRecentVideos : [];
+        return fetchedAt < competitorRefreshCutoff || recent.length === 0 || !competitor.subscriberCount;
+      })
+      .slice(0, 6)
+    : [];
+
+  if (staleCompetitors.length) {
+    try {
+      await Promise.all(staleCompetitors.map(async (competitor: typeof youtubeCompetitorsTable.$inferSelect) => {
+        const channelId = asString(competitor.channelId);
+        if (!channelId) return;
+        await upsertYoutubeCompetitor(userId, profile!, channelId, {
+          existingCompetitor: competitor,
+          preserveManualSource: true,
+          generateAiReport: false,
+        });
+      }));
+      competitors = await db
+        .select()
+        .from(youtubeCompetitorsTable)
+        .where(eq(youtubeCompetitorsTable.userId, userId))
+        .orderBy(desc(youtubeCompetitorsTable.fetchedAt));
+    } catch {
+      // Keep returning the saved competitors even if refresh fails.
     }
   }
 
@@ -4300,6 +4433,38 @@ export async function addYoutubeCompetitorByUrl(userId: number, channelUrl: stri
   return await upsertYoutubeCompetitor(userId, profile, channelId, {
     source: "manual",
     requestedUrl: channelUrl.trim(),
+    existingCompetitor: existing,
+    preserveManualSource: true,
+    generateAiReport: true,
+  });
+}
+
+export async function addYoutubeCompetitorByReference(userId: number, reference: string) {
+  const trimmed = reference.trim();
+  if (!trimmed) throw new Error("A YouTube channel reference is required");
+
+  const [profile] = await db
+    .select()
+    .from(youtubeChannelProfilesTable)
+    .where(eq(youtubeChannelProfilesTable.userId, userId))
+    .limit(1);
+  if (!profile) throw new Error("Connect YouTube before adding competitors");
+
+  const channelId = looksLikeYoutubeChannelId(trimmed)
+    ? trimmed
+    : await resolveYoutubeChannelIdFromReference(userId, trimmed);
+
+  const existingCompetitors = await db
+    .select()
+    .from(youtubeCompetitorsTable)
+    .where(eq(youtubeCompetitorsTable.userId, userId));
+  const existing = existingCompetitors.find((competitor: typeof youtubeCompetitorsTable.$inferSelect) => competitor.channelId === channelId) ?? null;
+
+  const requestedUrl = normalizeYoutubeChannelReferenceToUrl(trimmed);
+
+  return await upsertYoutubeCompetitor(userId, profile, channelId, {
+    source: "manual",
+    requestedUrl,
     existingCompetitor: existing,
     preserveManualSource: true,
     generateAiReport: true,

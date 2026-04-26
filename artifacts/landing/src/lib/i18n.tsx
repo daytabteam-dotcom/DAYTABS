@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, type ReactNode } from "react";
 
 export type LandingLocale = "en" | "tr";
 
@@ -372,23 +372,22 @@ const LandingI18nContext = createContext<{
 } | null>(null);
 
 function detectInitialLocale(): LandingLocale {
-  if (typeof window === "undefined") return "en";
-  const stored = window.localStorage.getItem(STORAGE_KEY);
-  if (stored === "en" || stored === "tr") return stored;
-  return window.navigator.language.toLowerCase().startsWith("tr") ? "tr" : "en";
+  return "en";
 }
 
 export function LandingI18nProvider({ children }: { children: ReactNode }) {
-  const [locale, setLocaleState] = useState<LandingLocale>(() => detectInitialLocale());
+  const locale = detectInitialLocale();
 
   useEffect(() => {
-    window.localStorage.setItem(STORAGE_KEY, locale);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(STORAGE_KEY, locale);
+    }
     document.documentElement.lang = locale;
   }, [locale]);
 
   const value = useMemo(() => ({
     locale,
-    setLocale: (nextLocale: LandingLocale) => setLocaleState(nextLocale),
+    setLocale: () => {},
     copy: copy[locale],
   }), [locale]);
 

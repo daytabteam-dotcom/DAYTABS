@@ -13,6 +13,7 @@ import { requireAuth } from "../../middlewares/auth";
 import { extractAudio, execAsync, getMediaDuration, transcribeAudio } from "../analysis/services";
 import { openai } from "../../lib/openai";
 import {
+  addYoutubeCompetitorByReference,
   addYoutubeCompetitorByUrl,
   auditYoutubeVideo,
   createYoutubePlanDay,
@@ -1380,11 +1381,15 @@ router.get("/audit-download/:filename", requireAuth, async (req, res) => {
 router.post("/competitors", requireAuth, async (req, res) => {
   try {
     const channelUrl = typeof req.body?.channelUrl === "string" ? req.body.channelUrl.trim() : "";
-    if (!channelUrl) {
-      res.status(400).json({ error: "A YouTube channel URL is required" });
+    const reference = typeof req.body?.reference === "string" ? req.body.reference.trim() : "";
+    const value = reference || channelUrl;
+    if (!value) {
+      res.status(400).json({ error: "A YouTube channel reference is required" });
       return;
     }
-    const competitor = await addYoutubeCompetitorByUrl(req.auth!.user_id, channelUrl);
+    const competitor = reference
+      ? await addYoutubeCompetitorByReference(req.auth!.user_id, reference)
+      : await addYoutubeCompetitorByUrl(req.auth!.user_id, channelUrl);
     res.json({ competitor });
   } catch (err) {
     req.log.error({ err }, "YouTube competitor add error");
