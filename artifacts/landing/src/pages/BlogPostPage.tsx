@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useRoute } from "wouter";
 import { Helmet } from "react-helmet-async";
 import { motion } from "framer-motion";
-import { Clock, Calendar, ArrowLeft, ArrowRight, Zap, ChevronDown, ChevronUp } from "lucide-react";
+import { Clock, Calendar, ArrowLeft, ArrowRight, Zap, ChevronDown, ChevronUp, Eye, Heart, MessageCircle, Share2, Copy, Check } from "lucide-react";
 import { getPostBySlug, getRelatedPosts, SITE_URL } from "../data/blogPosts";
 import Navbar from "../components/Navbar";
 
@@ -42,6 +42,57 @@ function enhanceTables(html: string): string {
   return html
     .replace(/<table>/gi, '<div class="blog-table-wrap"><table class="blog-table">')
     .replace(/<\/table>/gi, "</table></div>");
+}
+
+function getOrCreateVisitorId() {
+  const key = "daytabs_visitor_id";
+  const existing = document.cookie
+    .split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(`${key}=`));
+  const value = existing ? decodeURIComponent(existing.split("=").slice(1).join("=")) : "";
+  if (value) return value;
+
+  const id = typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  document.cookie = `${key}=${encodeURIComponent(id)}; path=/; max-age=${60 * 60 * 24 * 365}; samesite=lax`;
+  return id;
+}
+
+function authHeaders(): HeadersInit {
+  const token = localStorage.getItem("daytabs_token");
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      ...(init?.body ? { "Content-Type": "application/json" } : {}),
+      ...authHeaders(),
+      ...(init?.headers ?? {}),
+    },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((data as { error?: string }).error || "Request failed");
+  return data as T;
+}
+
+function buildShareLinks(postUrl: string, title: string, description: string) {
+  const encodedTitle = encodeURIComponent(title);
+  const encodedDescription = encodeURIComponent(description);
+  const encodedUrl = encodeURIComponent(postUrl);
+  return {
+    x: `https://twitter.com/intent/tweet?text=${encodedTitle}&url=${encodedUrl}`,
+    linkedin: `https://www.linkedin.com/sharing/share-offsite/?url=${encodedUrl}`,
+    reddit: `https://www.reddit.com/submit?url=${encodedUrl}&title=${encodedTitle}`,
+    whatsapp: `https://wa.me/?text=${encodeURIComponent(`${title}\n\n${postUrl}`)}`,
+    telegram: `https://t.me/share/url?url=${encodedUrl}&text=${encodedTitle}`,
+    copyText: `Short-form or long-form video?\n\n${description}\n\nRead the full guide:\n${postUrl}`,
+    nativeText: `${title}\n\n${description}\n\n${postUrl}`,
+    description: encodedDescription,
+  };
 }
 
 function TableOfContentsMobile({ headings }: { headings: { id: string; text: string }[] }) {
@@ -84,10 +135,170 @@ export default function BlogPostPage() {
   const slug = params?.slug ?? "";
   const post = getPostBySlug(slug);
   const related = getRelatedPosts(slug);
+  const [stats, setStats] = useState<{ viewCount: number; likeCount: number; commentCount: number; likedByMe: boolean } | null>(null);
+  const [engagementError, setEngagementError] = useState<string | null>(null);
+  const [likeWorking, setLikeWorking] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [comments, setComments] = useState<Array<{ id: number; userId: number; parentCommentId: number | null; content: string; createdAt: string }>>([]);
+  const [commentText, setCommentText] = useState("");
+  const [commentWorking, setCommentWorking] = useState(false);
+  const [commentNotice, setCommentNotice] = useState<string | null>(null);
 
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [slug]);
+
+  const headings = useMemo(
+    () => (post ? extractHeadings(post.content) : []),
+    [post?.content],
+  );
+  const contentWithIds = useMemo(
+    () => (post ? enhanceTables(injectIds(post.content)) : ""),
+    [post?.content],
+  );
+  const postUrl = post ? `${SITE_URL}/blog/${post.slug}` : "";
+  const share = useMemo(
+    () => (post ? buildShareLinks(postUrl, post.title, post.metaDescription) : null),
+    [post, postUrl],
+  );
+  const hasAuthToken = typeof window !== "undefined" && Boolean(localStorage.getItem("daytabs_token"));
+
+  const articleSchema = {
+    "@context": "https://schema.org",
+    "@type": "Article",
+    headline: post?.title ?? "",
+    datePublished: post?.publishedAt ?? "",
+    author: { "@type": "Organization", name: "DayTabs" },
+    publisher: { "@type": "Organization", name: "DayTabs" },
+    description: post?.metaDescription ?? "",
+    url: postUrl,
+  };
+
+  useEffect(() => {
+    if (!post) return;
+    setStats(null);
+    setEngagementError(null);
+    setCommentNotice(null);
+
+    const visitorId = getOrCreateVisitorId();
+    void (async () => {
+      try {
+        const data = await jsonFetch<{
+          stats: { viewCount: number; likeCount: number; commentCount: number; likedByMe: boolean };
+        }>(`/api/blogs/slug/${post.slug}/view`, {
+          method: "POST",
+          body: JSON.stringify({
+            visitorId,
+            blog: {
+              title: post.title,
+              description: post.metaDescription,
+              content: post.content,
+              coverImage: null,
+            },
+          }),
+        });
+        setStats(data.stats);
+      } catch (err) {
+        setEngagementError(err instanceof Error ? err.message : "Could not load engagement stats");
+      }
+    })();
+
+    void (async () => {
+      try {
+        const data = await jsonFetch<{ comments: Array<{ id: number; userId: number; parentCommentId: number | null; content: string; createdAt: string }> }>(
+          `/api/blogs/slug/${post.slug}/comments`,
+        );
+        setComments(data.comments ?? []);
+      } catch {
+        setComments([]);
+      }
+    })();
+  }, [post?.slug, post?.title, post?.metaDescription, post?.content]);
+
+  async function toggleLike() {
+    if (!post) return;
+    if (likeWorking) return;
+    setLikeWorking(true);
+    setEngagementError(null);
+    const visitorId = getOrCreateVisitorId();
+    try {
+      const data = await jsonFetch<{
+        stats: { viewCount: number; likeCount: number; commentCount: number; likedByMe: boolean };
+      }>(`/api/blogs/slug/${post.slug}/like`, {
+        method: "POST",
+        body: JSON.stringify({
+          visitorId,
+          blog: {
+            title: post.title,
+            description: post.metaDescription,
+            content: post.content,
+            coverImage: null,
+          },
+        }),
+      });
+      setStats(data.stats);
+    } catch (err) {
+      setEngagementError(err instanceof Error ? err.message : "Could not toggle like");
+    } finally {
+      setLikeWorking(false);
+    }
+  }
+
+  async function copyLink() {
+    if (!post) return;
+    setCopied(false);
+    try {
+      await navigator.clipboard.writeText(postUrl);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      setEngagementError("Could not copy link");
+    }
+  }
+
+  async function shareNative() {
+    if (!post) return;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const nav = navigator as any;
+      if (!nav?.share) return;
+      const payload = share ?? buildShareLinks(postUrl, post.title, post.metaDescription);
+      await nav.share({ title: post.title, text: payload.nativeText, url: postUrl });
+    } catch {
+      // user cancelled
+    }
+  }
+
+  async function submitComment() {
+    if (!post) return;
+    if (commentWorking) return;
+    setCommentWorking(true);
+    setEngagementError(null);
+    setCommentNotice(null);
+    const visitorId = getOrCreateVisitorId();
+    try {
+      await jsonFetch(`/api/blogs/slug/${post.slug}/comments`, {
+        method: "POST",
+        body: JSON.stringify({
+          visitorId,
+          blog: {
+            title: post.title,
+            description: post.metaDescription,
+            content: post.content,
+            coverImage: null,
+          },
+          content: commentText,
+        }),
+      });
+      setCommentText("");
+      setCommentNotice("Comment submitted for review.");
+    } catch (err) {
+      setEngagementError(err instanceof Error ? err.message : "Could not submit comment");
+    } finally {
+      setCommentWorking(false);
+    }
+  }
 
   if (!post) {
     return (
@@ -104,20 +315,7 @@ export default function BlogPostPage() {
     );
   }
 
-  const headings = extractHeadings(post.content);
-  const contentWithIds = enhanceTables(injectIds(post.content));
-  const postUrl = `${SITE_URL}/blog/${post.slug}`;
-
-  const articleSchema = {
-    "@context": "https://schema.org",
-    "@type": "Article",
-    headline: post.title,
-    datePublished: post.publishedAt,
-    author: { "@type": "Organization", name: "DayTabs" },
-    publisher: { "@type": "Organization", name: "DayTabs" },
-    description: post.metaDescription,
-    url: postUrl,
-  };
+  const shareLinks = share ?? buildShareLinks(postUrl, post.title, post.metaDescription);
 
   return (
     <div className="min-h-screen bg-background text-foreground overflow-x-hidden">
@@ -176,7 +374,17 @@ export default function BlogPostPage() {
                   {post.category}
                 </span>
 
-                <h1 className="text-3xl md:text-4xl font-bold leading-tight mb-4">{post.title}</h1>
+                <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+                  <h1 className="text-3xl md:text-4xl font-bold leading-tight">{post.title}</h1>
+                  <button
+                    type="button"
+                    onClick={() => setShareOpen(true)}
+                    className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2 text-sm text-white/70 hover:bg-white/[0.06] hover:text-white transition-colors cursor-pointer"
+                  >
+                    <Share2 className="w-4 h-4" />
+                    Share
+                  </button>
+                </div>
 
                 <div className="flex flex-wrap items-center gap-4 text-sm text-white/40 mb-8 pb-8 border-b border-white/8">
                   <span className="flex items-center gap-1.5">
@@ -187,8 +395,32 @@ export default function BlogPostPage() {
                     <Calendar className="w-4 h-4" />
                     {formatDate(post.publishedAt)}
                   </span>
+                  <span className="flex items-center gap-1.5 text-white/45">
+                    <Eye className="w-4 h-4" />
+                    {stats ? stats.viewCount : "—"}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => void toggleLike()}
+                    disabled={likeWorking}
+                    className={`flex items-center gap-1.5 transition-colors cursor-pointer ${stats?.likedByMe ? "text-rose-200 hover:text-rose-100" : "text-white/45 hover:text-white"}`}
+                    aria-label="Like"
+                  >
+                    <Heart className={`w-4 h-4 ${stats?.likedByMe ? "fill-current" : ""}`} />
+                    {stats ? stats.likeCount : "—"}
+                  </button>
+                  <span className="flex items-center gap-1.5 text-white/45">
+                    <MessageCircle className="w-4 h-4" />
+                    {stats ? stats.commentCount : "—"}
+                  </span>
                   <span className="text-white/30">by DayTabs Team</span>
                 </div>
+
+                {engagementError ? (
+                  <div className="mb-6 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">
+                    {engagementError}
+                  </div>
+                ) : null}
 
                 <div className="h-56 glass rounded-2xl border border-white/8 mb-8 flex items-center justify-center">
                   <div className="text-7xl opacity-15 font-black gradient-text select-none">
@@ -202,6 +434,85 @@ export default function BlogPostPage() {
                   className="prose-content"
                   dangerouslySetInnerHTML={{ __html: contentWithIds }}
                 />
+
+                <div className="mt-14 glass rounded-2xl border border-white/8 p-6">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-3 text-sm text-white/55">
+                      <span className="flex items-center gap-2">
+                        <Eye className="w-4 h-4" />
+                        {stats ? stats.viewCount : "—"} views
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => void toggleLike()}
+                        disabled={likeWorking}
+                        className={`flex items-center gap-2 transition-colors cursor-pointer ${stats?.likedByMe ? "text-rose-200 hover:text-rose-100" : "text-white/55 hover:text-white"}`}
+                      >
+                        <Heart className={`w-4 h-4 ${stats?.likedByMe ? "fill-current" : ""}`} />
+                        {stats ? stats.likeCount : "—"} likes
+                      </button>
+                      <span className="flex items-center gap-2">
+                        <MessageCircle className="w-4 h-4" />
+                        {stats ? stats.commentCount : "—"} comments
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShareOpen(true)}
+                      className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2 text-sm text-white/70 hover:bg-white/[0.06] hover:text-white transition-colors cursor-pointer"
+                    >
+                      <Share2 className="w-4 h-4" />
+                      Share
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-10 glass rounded-2xl border border-white/8 p-6">
+                  <h2 className="text-lg font-semibold mb-2">Comments</h2>
+                  <p className="text-sm text-white/50 mb-5">Comments are shown after approval.</p>
+
+                  {commentNotice ? (
+                    <div className="mb-4 rounded-xl border border-emerald-400/25 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-100">
+                      {commentNotice}
+                    </div>
+                  ) : null}
+
+                  {hasAuthToken ? (
+                    <div className="space-y-3">
+                      <textarea
+                        value={commentText}
+                        onChange={(event) => setCommentText(event.target.value)}
+                        placeholder="Write a comment..."
+                        className="w-full min-h-28 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-violet-500/30"
+                      />
+                      <div className="flex justify-end">
+                        <button
+                          type="button"
+                          onClick={() => void submitComment()}
+                          disabled={commentWorking || !commentText.trim()}
+                          className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-violet-600 to-purple-500 text-white text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                        >
+                          {commentWorking ? "Submitting..." : "Submit comment"}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-4 text-sm text-white/60">
+                      <span className="text-white/80 font-medium">Log in to comment.</span> Your DayTabs session will carry over if you’re already signed in.
+                    </div>
+                  )}
+
+                  <div className="mt-6 space-y-4">
+                    {comments.length ? comments.map((comment) => (
+                      <div key={comment.id} className="rounded-xl border border-white/10 bg-white/[0.02] px-4 py-3">
+                        <p className="text-xs text-white/35">User #{comment.userId} · {new Date(comment.createdAt).toLocaleString("en-US")}</p>
+                        <p className="mt-2 text-sm text-white/75 whitespace-pre-wrap">{comment.content}</p>
+                      </div>
+                    )) : (
+                      <p className="text-sm text-white/50">No approved comments yet.</p>
+                    )}
+                  </div>
+                </div>
 
                 <div className="mt-16 glass rounded-2xl border border-violet-500/30 p-8 text-center bg-gradient-to-br from-violet-900/20 to-purple-900/10">
                   <h2 className="text-2xl font-bold mb-2">Analyze your next video with DayTabs</h2>
@@ -217,6 +528,98 @@ export default function BlogPostPage() {
                 </div>
               </div>
             </motion.article>
+
+            {shareOpen ? (
+              <div className="fixed inset-0 z-[100] flex items-center justify-center px-6">
+                <button
+                  type="button"
+                  className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+                  onClick={() => setShareOpen(false)}
+                  aria-label="Close share modal"
+                />
+                <div className="relative w-full max-w-lg glass rounded-2xl border border-white/10 p-6">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-sm font-semibold text-white">Share this post</p>
+                      <p className="mt-1 text-xs text-white/45 break-words">{postUrl}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShareOpen(false)}
+                      className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-white/70 hover:bg-white/[0.06] hover:text-white"
+                    >
+                      Close
+                    </button>
+                  </div>
+
+                  <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => void copyLink()}
+                      className="flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white/75 hover:bg-white/[0.06] hover:text-white"
+                    >
+                      {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                      {copied ? "Copied" : "Copy link"}
+                    </button>
+                    <a
+                      href={shareLinks.x}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white/75 hover:bg-white/[0.06] hover:text-white"
+                    >
+                      <Share2 className="w-4 h-4" />
+                      Share on X
+                    </a>
+                    <a
+                      href={shareLinks.linkedin}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white/75 hover:bg-white/[0.06] hover:text-white"
+                    >
+                      <Share2 className="w-4 h-4" />
+                      Share on LinkedIn
+                    </a>
+                    <a
+                      href={shareLinks.reddit}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white/75 hover:bg-white/[0.06] hover:text-white"
+                    >
+                      <Share2 className="w-4 h-4" />
+                      Share on Reddit
+                    </a>
+                    <a
+                      href={shareLinks.whatsapp}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white/75 hover:bg-white/[0.06] hover:text-white"
+                    >
+                      <Share2 className="w-4 h-4" />
+                      WhatsApp
+                    </a>
+                    <a
+                      href={shareLinks.telegram}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white/75 hover:bg-white/[0.06] hover:text-white"
+                    >
+                      <Share2 className="w-4 h-4" />
+                      Telegram
+                    </a>
+                    {typeof navigator !== "undefined" && "share" in navigator ? (
+                      <button
+                        type="button"
+                        onClick={() => void shareNative()}
+                        className="sm:col-span-2 flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-purple-500 px-4 py-3 text-sm font-medium text-white hover:from-violet-500 hover:to-purple-400"
+                      >
+                        <Share2 className="w-4 h-4" />
+                        Native share
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            ) : null}
 
             <div className="hidden lg:block sticky top-28 self-start w-64 shrink-0">
               {headings.length > 0 && (

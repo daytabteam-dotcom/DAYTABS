@@ -131,6 +131,53 @@ async function runStartupMigrations() {
       ADD COLUMN IF NOT EXISTS idea_feedback_summary JSONB NOT NULL DEFAULT '{"liked":[],"disliked":[],"deleted":[]}'::jsonb
     `);
     await db.execute(sql`ALTER TABLE youtube_competitors ADD COLUMN IF NOT EXISTS thumbnail_url TEXT`);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS blogs (
+        id SERIAL PRIMARY KEY,
+        slug TEXT NOT NULL UNIQUE,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        content TEXT NOT NULL DEFAULT '',
+        cover_image TEXT,
+        view_count INTEGER NOT NULL DEFAULT 0,
+        like_count INTEGER NOT NULL DEFAULT 0,
+        comment_count INTEGER NOT NULL DEFAULT 0,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      )
+    `);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS blog_views (
+        id SERIAL PRIMARY KEY,
+        blog_id INTEGER NOT NULL REFERENCES blogs(id) ON DELETE CASCADE,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        visitor_id TEXT,
+        ip_hash TEXT,
+        user_agent_hash TEXT,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+      )
+    `);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS blog_likes (
+        id SERIAL PRIMARY KEY,
+        blog_id INTEGER NOT NULL REFERENCES blogs(id) ON DELETE CASCADE,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        visitor_id TEXT,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+      )
+    `);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS blog_comments (
+        id SERIAL PRIMARY KEY,
+        blog_id INTEGER NOT NULL REFERENCES blogs(id) ON DELETE CASCADE,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        parent_comment_id INTEGER,
+        content TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      )
+    `);
     await ensureAnalysisJobQueueColumns();
     logger.info("Startup migrations applied");
   } catch (err) {

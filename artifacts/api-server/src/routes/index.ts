@@ -10,6 +10,7 @@ import userRouter from "./user/index";
 import uploadRouter from "./upload/index";
 import youtubeRouter from "./youtube/index";
 import adminRouter from "./admin/index";
+import blogsRouter from "./blogs/index";
 
 const router: IRouter = Router();
 
@@ -22,6 +23,7 @@ router.use("/script-planner", scriptPlannerRouter);
 router.use("/dubbing", dubbingRouter);
 router.use("/growth-planner", growthPlannerRouter);
 router.use("/youtube", youtubeRouter);
+router.use("/blogs", blogsRouter);
 router.use("/user", userRouter);
 router.use("/admin", adminRouter);
 

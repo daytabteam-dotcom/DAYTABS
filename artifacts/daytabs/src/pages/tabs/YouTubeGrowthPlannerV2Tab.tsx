@@ -1881,26 +1881,21 @@ function WeeklyComparisonChart({
     youUploads: { label: "You", color: "#34d399" },
     ...Object.fromEntries(competitors.map((competitor) => [`${competitor.key}Uploads`, { label: competitor.name, color: competitor.fill }])),
   };
-  const viewPieData = weekdayRows.map((point, index) => {
-    const breakdown = [
-      { label: "You", value: Number(point.youViews ?? 0), color: "#34d399" },
-      ...competitors.map((competitor) => ({
-        label: competitor.name,
-        value: Number(point[`${competitor.key}Views`] ?? 0),
-        color: competitor.fill,
-      })),
-    ];
-    return {
-      day: point.day,
-      iso: point.iso,
-      views: breakdown.reduce((sum, item) => sum + item.value, 0),
-      fill: WEEKDAY_VIEW_COLORS[index % WEEKDAY_VIEW_COLORS.length],
-      breakdown,
-    };
-  });
-  const hasViewPieData = viewPieData.some((point) => point.views > 0);
-  const viewsConfig: Record<string, { label: string; color: string }> = Object.fromEntries(
-    viewPieData.map((point) => [point.day, { label: point.day, color: point.fill }]),
+  const weeklyViewTotals = useMemo(() => {
+    const totals: Array<{ id: string; label: string; views: number; fill: string }> = [];
+    const youViews = weekdayRows.reduce((sum, point) => sum + Number(point.youViews ?? 0), 0);
+    totals.push({ id: "you", label: "You", views: youViews, fill: "#34d399" });
+
+    for (const competitor of competitors) {
+      const views = weekdayRows.reduce((sum, point) => sum + Number(point[`${competitor.key}Views`] ?? 0), 0);
+      totals.push({ id: competitor.key, label: competitor.name, views, fill: competitor.fill });
+    }
+
+    return totals;
+  }, [competitors, weekdayRows]);
+  const hasWeeklyViews = weeklyViewTotals.some((row) => row.views > 0);
+  const weeklyViewsConfig: Record<string, { label: string; color: string }> = Object.fromEntries(
+    weeklyViewTotals.map((row) => [row.id, { label: row.label, color: row.fill }]),
   );
 
   return (
@@ -1941,50 +1936,38 @@ function WeeklyComparisonChart({
         </div>
       </PanelCardSoft>
       <PanelCardSoft className="p-4">
-        <h5 className="text-sm font-semibold text-white">Views by weekday</h5>
-        <p className="mt-1 text-xs text-white/45">Current scheduled week view totals, sourced from published videos in this window.</p>
+        <h5 className="text-sm font-semibold text-white">Total views this week</h5>
+        <p className="mt-1 text-xs text-white/45">Week totals for you and each competitor, sourced from published videos in this window.</p>
         <div className="mt-4 h-56">
-          <ChartContainer config={viewsConfig} className="h-full w-full">
-            {hasViewPieData ? (
-              <PieChart margin={{ left: 6, right: 6, top: 8, bottom: 8 }}>
+          <ChartContainer config={weeklyViewsConfig} className="h-full w-full">
+            {hasWeeklyViews ? (
+              <BarChart data={weeklyViewTotals} margin={{ left: 6, right: 6, top: 12, bottom: 32 }}>
+                <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.08)" />
+                <XAxis dataKey="label" tickLine={false} axisLine={false} interval={0} height={42} />
+                <YAxis tickLine={false} axisLine={false} />
                 <ChartTooltip
+                  shared={false}
                   content={({ active, payload }: TooltipProps<number, string>) => {
                     if (!active || !payload?.length) return null;
-                    const point = payload[0]?.payload as (typeof viewPieData)[number] | undefined;
+                    const point = payload[0]?.payload as (typeof weeklyViewTotals)[number] | undefined;
                     if (!point) return null;
                     return (
                       <div className="rounded-lg border border-white/10 bg-[#120d1f] px-3 py-2 text-xs text-white shadow-xl">
-                        <p className="font-medium">{point.day} · {formatIsoDate(point.iso)}</p>
-                        <p className="mt-1 text-white/70">{formatNumber(point.views)} total views</p>
-                        {point.breakdown.map((item) => (
-                          <p key={`${point.iso}-${item.label}-views-tooltip`} className="mt-1 text-white/55">
-                            {item.label}: {formatNumber(item.value)}
-                          </p>
-                        ))}
+                        <p className="font-medium">{point.label}</p>
+                        <p className="mt-1 text-white/70">{formatNumber(point.views)} views</p>
                       </div>
                     );
                   }}
                 />
-                <Pie
-                  data={viewPieData}
-                  dataKey="views"
-                  nameKey="day"
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={46}
-                  outerRadius={82}
-                  paddingAngle={2}
-                  stroke="rgba(18,13,31,0.9)"
-                  strokeWidth={2}
-                >
-                  {viewPieData.map((point) => (
-                    <Cell key={`weekday-views-${point.iso}`} fill={point.fill} />
+                <Bar dataKey="views" radius={[8, 8, 0, 0]}>
+                  {weeklyViewTotals.map((row) => (
+                    <Cell key={`weekly-views-${row.id}`} fill={row.fill} />
                   ))}
-                </Pie>
-              </PieChart>
+                </Bar>
+              </BarChart>
             ) : (
               <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-white/10 text-sm text-white/45">
-                No weekday view data yet.
+                No weekly view data yet.
               </div>
             )}
           </ChartContainer>
