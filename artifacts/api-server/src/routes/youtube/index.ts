@@ -1,7 +1,6 @@
 import { Router } from "express";
 import multer from "multer";
 import jwt from "jsonwebtoken";
-import { toFile } from "openai";
 import { OAuth2Client } from "google-auth-library";
 import { and, eq, lte } from "drizzle-orm";
 import { spawn } from "child_process";
@@ -57,7 +56,6 @@ const CANONICAL_APP_ORIGIN = (
 const RENDER_HOST = "daytabs.onrender.com";
 const auditUploadDir = path.join(os.tmpdir(), "daytabs-youtube-audit-uploads");
 const auditExportDir = path.join(os.tmpdir(), "daytabs-youtube-audit-exports");
-const avatarCacheDir = path.join(auditExportDir, "avatar-cache");
 const MAX_AUDIT_TRANSCRIPT_DURATION_SEC = 2 * 60 * 60;
 const MAX_YOUTUBE_AUTO_TRANSCRIBE_BYTES = 250 * 1024 * 1024;
 const YOUTUBE_TRANSCRIPT_CACHE_TTL_DAYS = Number(process.env.YOUTUBE_TRANSCRIPT_CACHE_TTL_DAYS || 180);
@@ -70,22 +68,10 @@ const YOUTUBE_TRANSCRIPT_MAX_AUDIO_BYTES = Number(process.env.YOUTUBE_TRANSCRIPT
 const YOUTUBE_TRANSCRIPT_RATE_LIMIT_WINDOW_MS = Number(process.env.YOUTUBE_TRANSCRIPT_RATE_LIMIT_WINDOW_MS || 60_000);
 const YOUTUBE_TRANSCRIPT_RATE_LIMIT_MAX = Number(process.env.YOUTUBE_TRANSCRIPT_RATE_LIMIT_MAX || 8);
 const VALID_TTS_VOICES = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"] as const;
-const TTS_VOICE_GENDER: Record<(typeof VALID_TTS_VOICES)[number], "male" | "female"> = {
-  alloy: "male",
-  echo: "male",
-  onyx: "male",
-  fable: "female",
-  nova: "female",
-  shimmer: "female",
-};
-const AVATAR_IMAGE_MODEL = process.env.YOUTUBE_THUMBNAIL_IMAGE_MODEL || "gpt-image-2";
-const AVATAR_IMAGE_FALLBACK_MODEL = "gpt-image-1";
-const MAX_TRANSLATION_VIDEO_DURATION_SEC = 15 * 60;
 const AUDIT_EXPORT_FILE_TTL_MS = Number(process.env.AUDIT_EXPORT_FILE_TTL_MS || 60 * 60_000);
 
 fs.mkdir(auditUploadDir, { recursive: true }).catch(() => {});
 fs.mkdir(auditExportDir, { recursive: true }).catch(() => {});
-fs.mkdir(avatarCacheDir, { recursive: true }).catch(() => {});
 
 function scheduleAuditExportCleanup(filePath: string) {
   if (!AUDIT_EXPORT_FILE_TTL_MS || AUDIT_EXPORT_FILE_TTL_MS <= 0) return;
@@ -606,168 +592,6 @@ async function createAlignedTranslationAudio(
     const outputFilename = `${sanitizeAuditFilenamePart(baseName)}-${voice}-${exportId}.mp3`;
     const outputPath = path.join(auditExportDir, outputFilename);
     await execAsync(`ffmpeg -f concat -safe 0 -i "${concatList}" -af "apad=pad_dur=${totalDuration.toFixed(3)},atrim=0:${totalDuration.toFixed(3)}" -ar 24000 -ac 1 -c:a libmp3lame -q:a 2 "${outputPath}" -y`);
-    scheduleAuditExportCleanup(outputPath);
-    return { outputFilename, outputPath };
-  } finally {
-    await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
-  }
-}
-
-function extractGeneratedImageBase64(response: unknown) {
-  const record = response && typeof response === "object" ? response as Record<string, unknown> : {};
-  const data = Array.isArray(record.data) ? record.data : [];
-  for (const item of data) {
-    const row = item && typeof item === "object" ? item as Record<string, unknown> : {};
-    const base64 = typeof row.b64_json === "string" ? row.b64_json.trim() : "";
-    if (base64) return base64;
-  }
-  return null;
-}
-
-async function generateImageWithFallback(params: Parameters<typeof openai.images.generate>[0]) {
-  try {
-    return await openai.images.generate(params);
-  } catch (err) {
-    if (params.model === AVATAR_IMAGE_FALLBACK_MODEL) throw err;
-    return await openai.images.generate({ ...params, model: AVATAR_IMAGE_FALLBACK_MODEL });
-  }
-}
-
-async function editImageWithFallback(params: Parameters<typeof openai.images.edit>[0]) {
-  try {
-    return await openai.images.edit(params);
-  } catch (err) {
-    if (params.model === AVATAR_IMAGE_FALLBACK_MODEL) throw err;
-    return await openai.images.edit({ ...params, model: AVATAR_IMAGE_FALLBACK_MODEL });
-  }
-}
-
-async function createAvatarBaseImage(tempDir: string, gender: "male" | "female") {
-  const cachedPath = path.join(avatarCacheDir, `avatar_${gender}_base.png`);
-  try {
-    await fs.access(cachedPath);
-    return cachedPath;
-  } catch {
-    // Generate below.
-  }
-  const prompt = [
-    "A fictional AI character face, head-and-shoulders talking-head portrait.",
-    "Stylized 3D animated look (not photorealistic), clean studio lighting, crisp details.",
-    "Centered front-facing head, neutral friendly expression, mouth closed, eyes open.",
-    "Simple soft gradient background, high contrast separation.",
-    gender === "female" ? "Feminine-presenting character." : "Masculine-presenting character.",
-    "No text, no logos, no watermark.",
-    "Do not resemble any real person or public figure.",
-  ].join(" ");
-  const response = await generateImageWithFallback({
-    model: AVATAR_IMAGE_MODEL,
-    prompt,
-    size: "1024x1024",
-    quality: "high",
-    output_format: "png",
-  } as Parameters<typeof openai.images.generate>[0]);
-  const base64 = extractGeneratedImageBase64(response);
-  if (!base64) throw new Error("Avatar generation did not return an image");
-  const buffer = Buffer.from(base64, "base64");
-  const outputPath = path.join(tempDir, "avatar_base.png");
-  await fs.writeFile(outputPath, buffer);
-  await fs.writeFile(cachedPath, buffer).catch(() => {});
-  return cachedPath;
-}
-
-async function createAvatarMouthVariant(
-  tempDir: string,
-  gender: "male" | "female",
-  basePngPath: string,
-  variant: "mid" | "open",
-) {
-  const cachedPath = path.join(avatarCacheDir, `avatar_${gender}_${variant}.png`);
-  try {
-    await fs.access(cachedPath);
-    return cachedPath;
-  } catch {
-    // Generate below.
-  }
-  const baseBuffer = await fs.readFile(basePngPath);
-  const prompt = variant === "open"
-    ? "Keep the exact same fictional character, pose, and style. Edit only the mouth to be clearly open as if speaking a vowel sound. Do not change identity, hairstyle, eyes, face shape, or lighting. No text."
-    : "Keep the exact same fictional character, pose, and style. Edit only the mouth to be slightly open as if speaking softly. Do not change identity, hairstyle, eyes, face shape, or lighting. No text.";
-  const response = await editImageWithFallback({
-    model: AVATAR_IMAGE_MODEL,
-    image: [await toFile(baseBuffer, "avatar_base.png", { type: "image/png" })],
-    prompt,
-    size: "1024x1024",
-    quality: "high",
-    output_format: "png",
-  } as Parameters<typeof openai.images.edit>[0]);
-  const base64 = extractGeneratedImageBase64(response);
-  if (!base64) throw new Error("Avatar mouth edit did not return an image");
-  const buffer = Buffer.from(base64, "base64");
-  const outputPath = path.join(tempDir, `avatar_${variant}.png`);
-  await fs.writeFile(outputPath, buffer);
-  await fs.writeFile(cachedPath, buffer).catch(() => {});
-  return cachedPath;
-}
-
-async function linkOrCopyFile(source: string, dest: string) {
-  try {
-    await fs.link(source, dest);
-  } catch {
-    await fs.copyFile(source, dest);
-  }
-}
-
-async function createTalkingAvatarVideoFromAudio(options: {
-  audioPath: string;
-  voice: (typeof VALID_TTS_VOICES)[number];
-  gender: "male" | "female";
-  baseName: string;
-}) {
-  const exportId = uuidv4();
-  const tempDir = path.join(auditExportDir, `talk_${exportId}`);
-  await fs.mkdir(tempDir, { recursive: true });
-
-  try {
-    const durationSec = await getMediaDuration(options.audioPath).catch(() => 0);
-    if (!durationSec || durationSec <= 0.05) throw new Error("Translated audio duration is unavailable");
-    if (durationSec > MAX_TRANSLATION_VIDEO_DURATION_SEC) {
-      throw new Error(`Translation video generation currently supports up to ${Math.round(MAX_TRANSLATION_VIDEO_DURATION_SEC / 60)} minutes of audio. Shorten the transcript or download the audio only.`);
-    }
-
-    const avatarBase = await createAvatarBaseImage(tempDir, options.gender);
-    const avatarMid = await createAvatarMouthVariant(tempDir, options.gender, avatarBase, "mid");
-    const avatarOpen = await createAvatarMouthVariant(tempDir, options.gender, avatarBase, "open");
-
-    // Build a tiny looping animation clip (4 frames) and loop it for the full audio duration.
-    const fps = 10;
-    const cycleFrames = [
-      { source: avatarBase, name: "cycle_00.png" },
-      { source: avatarMid, name: "cycle_01.png" },
-      { source: avatarOpen, name: "cycle_02.png" },
-      { source: avatarMid, name: "cycle_03.png" },
-    ];
-    for (const frame of cycleFrames) {
-      await linkOrCopyFile(frame.source, path.join(tempDir, frame.name));
-    }
-
-    const outputFilename = `${sanitizeAuditFilenamePart(options.baseName)}-${options.voice}-${options.gender}-${exportId}.mp4`;
-    const outputPath = path.join(auditExportDir, outputFilename);
-    const inputPattern = path.join(tempDir, "cycle_%02d.png");
-    const videoFilters = [
-      "scale=1280:720:force_original_aspect_ratio=increase",
-      "crop=1280:720",
-      "format=yuv420p",
-    ].join(",");
-
-    const cyclePath = path.join(tempDir, "cycle.mp4");
-    await execAsync(
-      `ffmpeg -hide_banner -loglevel error -framerate ${fps} -start_number 0 -i "${inputPattern}" -t 1 ` +
-      `-vf "${videoFilters}" -c:v libx264 -preset veryfast -crf 22 -pix_fmt yuv420p "${cyclePath}" -y`,
-    );
-    await execAsync(
-      `ffmpeg -hide_banner -loglevel error -stream_loop -1 -i "${cyclePath}" -i "${options.audioPath}" ` +
-      `-c:v libx264 -preset veryfast -crf 22 -pix_fmt yuv420p -c:a aac -b:a 128k -shortest -movflags +faststart "${outputPath}" -y`,
-    );
     scheduleAuditExportCleanup(outputPath);
     return { outputFilename, outputPath };
   } finally {
@@ -1468,238 +1292,23 @@ router.post("/transcript-translation-audio", requireAuth, async (req, res) => {
 });
 
 router.post("/transcript-translation-video", requireAuth, async (req, res) => {
-  try {
-    const plan = normalizePlan(req.auth?.plan ?? "free");
-    if (plan !== "studio") {
-      res.status(403).json({
-        code: "STUDIO_REQUIRED",
-        error: "YouTube transcript translation video is available on the Studio plan.",
-      });
-      return;
-    }
-    const voice = typeof req.body?.voice === "string" ? req.body.voice.trim() : "";
-    const title = typeof req.body?.title === "string" ? req.body.title.trim() : "youtube-transcript";
-    const targetLanguage = typeof req.body?.targetLanguage === "string" ? req.body.targetLanguage.trim() : "translated";
-    const audioFilename = typeof req.body?.audioFilename === "string" ? req.body.audioFilename.trim() : "";
-    const requestedGender = typeof req.body?.gender === "string" ? req.body.gender.trim().toLowerCase() : "";
-    if (!VALID_TTS_VOICES.includes(voice as (typeof VALID_TTS_VOICES)[number])) {
-      res.status(400).json({ error: "Choose a valid OpenAI voice." });
-      return;
-    }
-    if (!audioFilename || audioFilename.includes("..") || audioFilename.includes("/") || audioFilename.includes("\\")) {
-      res.status(400).json({ error: "A valid translation audio file is required before generating video." });
-      return;
-    }
-    const audioPath = path.join(auditExportDir, audioFilename);
-    try {
-      await fs.access(audioPath);
-    } catch {
-      res.status(404).json({ error: "Translation audio file not found or has expired. Generate audio again." });
-      return;
-    }
-    const gender: "male" | "female" =
-      requestedGender === "female" || requestedGender === "male"
-        ? (requestedGender as "male" | "female")
-        : (TTS_VOICE_GENDER[voice as (typeof VALID_TTS_VOICES)[number]] ?? "male");
-
-    const baseName = `${title}-${targetLanguage}`;
-    const { outputFilename } = await createTalkingAvatarVideoFromAudio({
-      audioPath,
-      voice: voice as (typeof VALID_TTS_VOICES)[number],
-      gender,
-      baseName,
-    });
-    res.json({
-      filename: outputFilename,
-      downloadUrl: `/api/youtube/audit-download/${encodeURIComponent(outputFilename)}`,
-      voice,
-      gender,
-    });
-  } catch (err) {
-    req.log.error({ err }, "YouTube transcript translation video error");
-    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to generate translation video" });
-  }
+  res.status(410).json({ error: "Translation video generation has been removed. Generate audio only." });
 });
 
 router.post("/transcript-translation-video-direct", requireAuth, async (req, res) => {
-  try {
-    const plan = normalizePlan(req.auth?.plan ?? "free");
-    if (plan !== "studio") {
-      res.status(403).json({
-        code: "STUDIO_REQUIRED",
-        error: "YouTube transcript translation video is available on the Studio plan.",
-      });
-      return;
-    }
-    const voice = typeof req.body?.voice === "string" ? req.body.voice.trim() : "";
-    const title = typeof req.body?.title === "string" ? req.body.title.trim() : "youtube-transcript";
-    const targetLanguage = typeof req.body?.targetLanguage === "string" ? req.body.targetLanguage.trim() : "translated";
-    const requestedGender = typeof req.body?.gender === "string" ? req.body.gender.trim().toLowerCase() : "";
-    const segments = normalizeAuditTranscriptSegments(req.body?.segments);
-    if (!VALID_TTS_VOICES.includes(voice as (typeof VALID_TTS_VOICES)[number])) {
-      res.status(400).json({ error: "Choose a valid OpenAI voice." });
-      return;
-    }
-    if (!segments.length) {
-      res.status(400).json({ error: "A translated timestamped transcript is required before generating video." });
-      return;
-    }
-    const gender: "male" | "female" =
-      requestedGender === "female" || requestedGender === "male"
-        ? (requestedGender as "male" | "female")
-        : (TTS_VOICE_GENDER[voice as (typeof VALID_TTS_VOICES)[number]] ?? "male");
-
-    const baseName = `${title}-${targetLanguage}`;
-    const { outputFilename: audioFilename, outputPath: audioPath } = await createAlignedTranslationAudio(
-      segments,
-      voice as (typeof VALID_TTS_VOICES)[number],
-      baseName,
-    );
-    const { outputFilename: videoFilename } = await createTalkingAvatarVideoFromAudio({
-      audioPath,
-      voice: voice as (typeof VALID_TTS_VOICES)[number],
-      gender,
-      baseName,
-    });
-
-    res.json({
-      audio: {
-        filename: audioFilename,
-        downloadUrl: `/api/youtube/audit-download/${encodeURIComponent(audioFilename)}`,
-      },
-      video: {
-        filename: videoFilename,
-        downloadUrl: `/api/youtube/audit-download/${encodeURIComponent(videoFilename)}`,
-      },
-      voice,
-      gender,
-    });
-  } catch (err) {
-    req.log.error({ err }, "YouTube transcript direct translation video error");
-    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to generate translation video" });
-  }
+  res.status(410).json({ error: "Translation video generation has been removed. Generate audio only." });
 });
 
 router.post("/audit-translate", requireAuth, async (req, res) => {
-  try {
-    const plan = normalizePlan(req.auth?.plan ?? "free");
-    if (plan !== "studio") {
-      res.status(403).json({
-        code: "STUDIO_REQUIRED",
-        error: "YouTube audit transcript translation is available on the Studio plan.",
-      });
-      return;
-    }
-    const targetLanguage = typeof req.body?.targetLanguage === "string" ? req.body.targetLanguage.trim() : "";
-    const sourceLanguage = typeof req.body?.sourceLanguage === "string" ? req.body.sourceLanguage.trim() : null;
-    const segments = normalizeAuditTranscriptSegments(req.body?.segments);
-    if (!targetLanguage) {
-      res.status(400).json({ error: "Choose a target language." });
-      return;
-    }
-    if (!segments.length) {
-      res.status(400).json({ error: "A timestamped transcript is required before translation." });
-      return;
-    }
-    const translation = await translateYoutubeAuditTranscript(req.auth!.user_id, segments, targetLanguage, sourceLanguage);
-    res.json({ translation });
-  } catch (err) {
-    req.log.error({ err }, "YouTube audit transcript translation error");
-    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to translate transcript" });
-  }
+  res.status(410).json({ error: "Audit transcript translation has moved to the transcript tools." });
 });
 
 router.post("/audit-translation-audio", requireAuth, async (req, res) => {
-  try {
-    const plan = normalizePlan(req.auth?.plan ?? "free");
-    if (plan !== "studio") {
-      res.status(403).json({
-        code: "STUDIO_REQUIRED",
-        error: "YouTube audit translation audio is available on the Studio plan.",
-      });
-      return;
-    }
-    const voice = typeof req.body?.voice === "string" ? req.body.voice.trim() : "";
-    const title = typeof req.body?.title === "string" ? req.body.title.trim() : "youtube-audit";
-    const targetLanguage = typeof req.body?.targetLanguage === "string" ? req.body.targetLanguage.trim() : "translated";
-    const segments = normalizeAuditTranscriptSegments(req.body?.segments);
-    if (!VALID_TTS_VOICES.includes(voice as (typeof VALID_TTS_VOICES)[number])) {
-      res.status(400).json({ error: "Choose a valid OpenAI voice." });
-      return;
-    }
-    if (!segments.length) {
-      res.status(400).json({ error: "A translated timestamped transcript is required before generating audio." });
-      return;
-    }
-    const baseName = `${title}-${targetLanguage}`;
-    const { outputFilename } = await createAlignedTranslationAudio(
-      segments,
-      voice as (typeof VALID_TTS_VOICES)[number],
-      baseName,
-    );
-    res.json({
-      filename: outputFilename,
-      downloadUrl: `/api/youtube/audit-download/${encodeURIComponent(outputFilename)}`,
-      voice,
-    });
-  } catch (err) {
-    req.log.error({ err }, "YouTube audit translation audio error");
-    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to generate translation audio" });
-  }
+  res.status(410).json({ error: "Audit translation audio has moved to the transcript tools." });
 });
 
 router.post("/audit-translation-video", requireAuth, async (req, res) => {
-  try {
-    const plan = normalizePlan(req.auth?.plan ?? "free");
-    if (plan !== "studio") {
-      res.status(403).json({
-        code: "STUDIO_REQUIRED",
-        error: "YouTube audit translation video is available on the Studio plan.",
-      });
-      return;
-    }
-    const voice = typeof req.body?.voice === "string" ? req.body.voice.trim() : "";
-    const title = typeof req.body?.title === "string" ? req.body.title.trim() : "youtube-audit";
-    const targetLanguage = typeof req.body?.targetLanguage === "string" ? req.body.targetLanguage.trim() : "translated";
-    const audioFilename = typeof req.body?.audioFilename === "string" ? req.body.audioFilename.trim() : "";
-    const requestedGender = typeof req.body?.gender === "string" ? req.body.gender.trim().toLowerCase() : "";
-    if (!VALID_TTS_VOICES.includes(voice as (typeof VALID_TTS_VOICES)[number])) {
-      res.status(400).json({ error: "Choose a valid OpenAI voice." });
-      return;
-    }
-    if (!audioFilename || audioFilename.includes("..") || audioFilename.includes("/") || audioFilename.includes("\\")) {
-      res.status(400).json({ error: "A valid translation audio file is required before generating video." });
-      return;
-    }
-    const audioPath = path.join(auditExportDir, audioFilename);
-    try {
-      await fs.access(audioPath);
-    } catch {
-      res.status(404).json({ error: "Translation audio file not found or has expired. Generate audio again." });
-      return;
-    }
-    const gender: "male" | "female" =
-      requestedGender === "female" || requestedGender === "male"
-        ? (requestedGender as "male" | "female")
-        : (TTS_VOICE_GENDER[voice as (typeof VALID_TTS_VOICES)[number]] ?? "male");
-
-    const baseName = `${title}-${targetLanguage}`;
-    const { outputFilename } = await createTalkingAvatarVideoFromAudio({
-      audioPath,
-      voice: voice as (typeof VALID_TTS_VOICES)[number],
-      gender,
-      baseName,
-    });
-    res.json({
-      filename: outputFilename,
-      downloadUrl: `/api/youtube/audit-download/${encodeURIComponent(outputFilename)}`,
-      voice,
-      gender,
-    });
-  } catch (err) {
-    req.log.error({ err }, "YouTube audit translation video error");
-    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to generate translation video" });
-  }
+  res.status(410).json({ error: "Translation video generation has been removed. Generate audio only." });
 });
 
 router.post("/audit-thumbnail", requireAuth, async (req, res) => {

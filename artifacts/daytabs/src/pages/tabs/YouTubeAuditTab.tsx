@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   BarChart3,
@@ -177,18 +177,56 @@ type SavedAuditCard = {
   generatedThumbnail: GeneratedAuditThumbnail | null;
 };
 
-type TranslationAudioResult = {
-  downloadUrl: string;
-  filename: string;
-  voice: string;
+type TranscriptSegment = { start: number; end: number; text: string };
+
+type EditableTranscriptResponse = {
+  editableTranscript: {
+    videoId: string;
+    canonicalUrl: string;
+    captions: {
+      available: boolean;
+      downloadable: boolean;
+      source: "manual" | "auto" | null;
+      language: string | null;
+      languages: string[];
+    };
+    transcript: {
+      available: boolean;
+      source: "manual" | "auto" | "transcribed_audio" | null;
+      language: string | null;
+      text: string | null;
+      segments: TranscriptSegment[];
+    };
+    needsUploadFallback: boolean;
+  };
+  status?: {
+    state: "processing" | "complete" | "error";
+    message: string;
+    code?: string;
+  };
 };
 
-type TranslationVideoResult = {
-  downloadUrl: string;
-  filename: string;
-  voice: string;
-  gender: "male" | "female";
+type TranscriptTranscribeResponse = {
+  transcript: {
+    available: boolean;
+    source: "transcribed_audio";
+    language: string | null;
+    text: string;
+    segments: TranscriptSegment[];
+  };
 };
+
+type TranscriptTranslation = {
+  targetLanguage: string;
+  sourceLanguage: string | null;
+  fullText: string;
+  segments: TranscriptSegment[];
+  createdAt: string;
+};
+
+type TranslateResponse = { translation: TranscriptTranslation };
+
+type TranslationAudioResponse = { downloadUrl: string; filename: string; voice: string };
 
 const AUDIT_HISTORY_KEY = "daytabs_youtube_audit_history_v1";
 const THUMBNAIL_STYLES = ["Professional", "Realistic", "Minimal", "Cartoon", "Cinematic", "Bold"] as const;
@@ -207,14 +245,6 @@ const TRANSLATION_LANGUAGES = [
   "Russian",
 ];
 const OPENAI_VOICES = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"] as const;
-const OPENAI_VOICE_GENDER: Record<(typeof OPENAI_VOICES)[number], "male" | "female"> = {
-  alloy: "male",
-  echo: "male",
-  onyx: "male",
-  fable: "female",
-  nova: "female",
-  shimmer: "female",
-};
 const YOUTUBE_THUMBNAIL_WIDTH = 1280;
 const YOUTUBE_THUMBNAIL_HEIGHT = 720;
 const YOUTUBE_THUMBNAIL_MIN_WIDTH = 640;
@@ -296,30 +326,28 @@ function buildAuditStorageId(videoId: string, savedAt: string) {
   return `${videoId}:${savedAt}`;
 }
 
-function formatTranscriptTime(seconds: number) {
-  if (!Number.isFinite(seconds)) return "00:00";
-  const total = Math.max(0, Math.floor(seconds));
-  const hours = Math.floor(total / 3600);
-  const minutes = Math.floor((total % 3600) / 60);
-  const secs = total % 60;
-  if (hours > 0) {
-    return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
-  }
-  return `${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+function formatTimestamp(seconds: number) {
+  const rounded = Math.max(0, Math.floor(seconds));
+  const mins = Math.floor(rounded / 60);
+  const secs = rounded % 60;
+  const hours = Math.floor(mins / 60);
+  const remMins = mins % 60;
+  if (hours > 0) return `${String(hours)}:${String(remMins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+  return `${String(remMins)}:${String(secs).padStart(2, "0")}`;
 }
 
-function parseTranscriptTimeInput(value: string) {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  const parts = trimmed.split(":").map((part) => Number(part));
-  if (parts.some((part) => !Number.isFinite(part) || part < 0)) return null;
-  if (parts.length === 2) {
-    return parts[0]! * 60 + parts[1]!;
-  }
-  if (parts.length === 3) {
-    return parts[0]! * 3600 + parts[1]! * 60 + parts[2]!;
-  }
-  return null;
+function sanitizeSegments(transcriptSegments: TranscriptSegment[]) {
+  return transcriptSegments
+    .map((segment) => ({
+      start: Number.isFinite(segment.start) ? Math.max(0, segment.start) : 0,
+      end: Number.isFinite(segment.end) ? Math.max(0, segment.end) : 0,
+      text: segment.text.trim(),
+    }))
+    .filter((segment) => segment.text)
+    .map((segment) => ({
+      ...segment,
+      end: segment.end > segment.start ? segment.end : segment.start + 0.8,
+    }));
 }
 
 function loadSavedAudits(): SavedAuditCard[] {
@@ -428,14 +456,22 @@ export default function YouTubeAuditTab() {
   const [thumbnailStyle, setThumbnailStyle] = useState<string>("Professional");
   const [generatedThumbnail, setGeneratedThumbnail] = useState<GeneratedAuditThumbnail | null>(null);
   const [thumbnailWorking, setThumbnailWorking] = useState(false);
-  const [transcriptWorking, setTranscriptWorking] = useState(false);
+
+  const [loadingTranscript, setLoadingTranscript] = useState(false);
+  const [editableTranscript, setEditableTranscript] = useState<EditableTranscriptResponse["editableTranscript"] | null>(null);
+  const [segments, setSegments] = useState<TranscriptSegment[]>([]);
+  const [status, setStatus] = useState<EditableTranscriptResponse["status"] | null>(null);
+  const transcriptRequestIdRef = useRef(0);
+  const [uploadingTranscript, setUploadingTranscript] = useState(false);
+
   const [translationLanguage, setTranslationLanguage] = useState("Turkish");
-  const [translationVoice, setTranslationVoice] = useState<(typeof OPENAI_VOICES)[number]>("alloy");
   const [translationWorking, setTranslationWorking] = useState(false);
+  const [translation, setTranslation] = useState<TranscriptTranslation | null>(null);
+  const [translatedSegments, setTranslatedSegments] = useState<TranscriptSegment[]>([]);
+
+  const [translationVoice, setTranslationVoice] = useState<(typeof OPENAI_VOICES)[number]>("alloy");
   const [translationAudioWorking, setTranslationAudioWorking] = useState(false);
-  const [translationAudio, setTranslationAudio] = useState<TranslationAudioResult | null>(null);
-  const [translationVideoWorking, setTranslationVideoWorking] = useState(false);
-  const [translationVideo, setTranslationVideo] = useState<TranslationVideoResult | null>(null);
+  const [translationAudio, setTranslationAudio] = useState<TranslationAudioResponse | null>(null);
 
   const isStudio = plan.isStudio;
   const exportBaseName = (preview?.video.title || report?.video.title || "youtube-audit")
@@ -465,12 +501,9 @@ export default function YouTubeAuditTab() {
     setThumbnailStyle(recommendedStyle);
   }, [preview, report]);
 
-  const selectedTranslation = useMemo(() => {
-    if (!report?.transcript.translations?.length) return null;
-    return report.transcript.translations.find((item) => item.targetLanguage === translationLanguage)
-      || report.transcript.translations[report.transcript.translations.length - 1]
-      || null;
-  }, [report, translationLanguage]);
+  const sourceLanguage = editableTranscript?.transcript.language ?? editableTranscript?.captions.language ?? null;
+  const normalizedSegments = useMemo(() => sanitizeSegments(segments), [segments]);
+  const normalizedTranslatedSegments = useMemo(() => sanitizeSegments(translatedSegments), [translatedSegments]);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -481,9 +514,12 @@ export default function YouTubeAuditTab() {
     setPreview(null);
     setReport(null);
     setGeneratedThumbnail(null);
-    setTranscriptWorking(false);
+    setEditableTranscript(null);
+    setSegments([]);
+    setStatus(null);
+    setTranslation(null);
+    setTranslatedSegments([]);
     setTranslationAudio(null);
-    setTranslationVideo(null);
     try {
       const previewData = await jsonFetch<{ preview: AuditPreview }>("/api/youtube/audit-preview", {
         method: "POST",
@@ -536,9 +572,12 @@ export default function YouTubeAuditTab() {
     setReport(normalizedCard.report);
     setGeneratedThumbnail(normalizedCard.generatedThumbnail);
     setActiveAuditId(normalizedCard.id);
-    setTranscriptWorking(false);
+    setEditableTranscript(null);
+    setSegments([]);
+    setStatus(null);
+    setTranslation(null);
+    setTranslatedSegments([]);
     setTranslationAudio(null);
-    setTranslationVideo(null);
     setError(null);
   }
 
@@ -560,171 +599,189 @@ export default function YouTubeAuditTab() {
     });
   }
 
-  function updateTranscriptSegment(
-    index: number,
-    field: "start" | "end" | "text",
-    value: string,
-  ) {
-    if (!report) return;
-    const currentSegments = report.transcript.segments;
-    if (!currentSegments[index]) return;
-    const nextSegments = currentSegments.map((segment, segmentIndex) => {
-      if (segmentIndex !== index) return segment;
-      if (field === "text") {
-        return { ...segment, text: value };
-      }
-      const parsed = parseTranscriptTimeInput(value);
-      if (parsed == null) return segment;
-      return { ...segment, [field]: parsed };
-    }).map((segment, segmentIndex, array) => {
-      const previousEnd = segmentIndex > 0 ? array[segmentIndex - 1]!.end : 0;
-      const nextStart = segmentIndex < array.length - 1 ? array[segmentIndex + 1]!.start : null;
-      const start = Math.max(0, Math.min(segment.start, segment.end - 0.1));
-      const boundedStart = Math.max(segmentIndex > 0 ? previousEnd : 0, start);
-      const maxEnd = nextStart != null ? Math.max(boundedStart + 0.1, nextStart) : null;
-      const end = Math.max(boundedStart + 0.1, segment.end);
-      return {
-        ...segment,
-        start: boundedStart,
-        end: maxEnd != null ? Math.min(end, maxEnd) : end,
-        text: segment.text.trim(),
-      };
-    });
+  const transcriptExportBaseName = useMemo(() => {
+    const base = editableTranscript?.videoId
+      ? `youtube-${editableTranscript.videoId}`
+      : preview?.video.id
+        ? `youtube-${preview.video.id}`
+        : "youtube-transcript";
+    return base.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "youtube-transcript";
+  }, [editableTranscript?.videoId, preview?.video.id]);
 
-    const nextReport: AuditReport = {
-      ...report,
-      transcript: {
-        ...report.transcript,
-        text: nextSegments.map((segment) => segment.text).filter(Boolean).join("\n"),
-        segments: nextSegments,
-        translations: [],
-      },
-    };
-    setReport(nextReport);
+  async function handleFetchTranscript() {
+    if (!videoUrl.trim()) return;
+    setError(null);
+    setStatus({ state: "processing", message: "Checking YouTube captions..." });
+    setTranslation(null);
+    setTranslatedSegments([]);
     setTranslationAudio(null);
-    setTranslationVideo(null);
-    updateSavedAuditReport(nextReport);
+    setEditableTranscript(null);
+    setSegments([]);
+    setLoadingTranscript(true);
+    const requestId = transcriptRequestIdRef.current + 1;
+    transcriptRequestIdRef.current = requestId;
+    try {
+      const fetchOnce = async () => await jsonFetch<EditableTranscriptResponse>("/api/youtube/transcript", {
+        method: "POST",
+        body: JSON.stringify({ videoUrl }),
+      });
+
+      const applyPayload = (payload: EditableTranscriptResponse) => {
+        setEditableTranscript(payload.editableTranscript);
+        setSegments(payload.editableTranscript.transcript.segments || []);
+        setStatus(payload.status ?? null);
+      };
+
+      const payload = await fetchOnce();
+      applyPayload(payload);
+
+      if (payload.status?.state === "error") {
+        if (payload.status.code === "YOUTUBE_BOT_CHECK") {
+          setError("YouTube blocked server access for this video. Upload the video/audio file and we’ll generate the transcript from it.");
+        } else {
+          setError(payload.status.message || "Failed to fetch transcript");
+        }
+        return;
+      }
+
+      if (payload.status?.state === "processing") {
+        setError(null);
+        setLoadingTranscript(false);
+
+        const poll = async (attempt: number) => {
+          if (transcriptRequestIdRef.current !== requestId) return;
+          if (attempt > 40) return;
+          await new Promise((resolve) => setTimeout(resolve, 2500));
+          if (transcriptRequestIdRef.current !== requestId) return;
+          try {
+            const next = await fetchOnce();
+            applyPayload(next);
+            if (next.status?.state === "processing") {
+              await poll(attempt + 1);
+              return;
+            }
+            if (next.status?.state === "error") {
+              if (next.status.code === "YOUTUBE_BOT_CHECK") {
+                setError("YouTube blocked server access for this video. Upload the video/audio file and we’ll generate the transcript from it.");
+              } else {
+                setError(next.status.message || "Failed to fetch transcript");
+              }
+              return;
+            }
+            if (next.editableTranscript.transcript.available) {
+              setError(null);
+              return;
+            }
+            setError("Transcript not available. Please upload the video/audio file to generate a transcript.");
+          } catch (err) {
+            setError(err instanceof Error ? err.message : "Failed to fetch transcript");
+          }
+        };
+
+        await poll(0);
+        return;
+      }
+
+      if (!payload.editableTranscript.transcript.available) {
+        setError("Transcript not available. Please upload the video/audio file to generate a transcript.");
+        return;
+      }
+
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to fetch transcript");
+    } finally {
+      setLoadingTranscript(false);
+    }
   }
 
-  async function handleAuditTranscriptMedia(files: FileList | null) {
-    const file = files?.[0];
-    if (!file || !videoUrl.trim()) return;
-    setTranscriptWorking(true);
+  async function handleUploadTranscript(file: File) {
     setError(null);
+    setStatus(null);
+    setUploadingTranscript(true);
+    setTranslation(null);
+    setTranslatedSegments([]);
+    setTranslationAudio(null);
     try {
       const token = localStorage.getItem("daytabs_token");
       const locale = localStorage.getItem(DAYTABS_LOCALE_STORAGE_KEY);
-      const formData = new FormData();
-      formData.append("videoUrl", videoUrl.trim());
-      formData.append("media", file);
-      const response = await fetch("/api/youtube/audit-transcribe", {
+      const body = new FormData();
+      body.append("media", file);
+      const response = await fetch("/api/youtube/transcript-transcribe", {
         method: "POST",
         headers: {
           ...(locale ? { "Accept-Language": locale } : {}),
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: formData,
+        body,
       });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.error || "Could not generate transcript from upload");
-      const nextReport = normalizeSavedAuditCard({
-        id: activeAuditId || "",
-        videoUrl: videoUrl.trim(),
-        savedAt: new Date().toISOString(),
-        preview: preview!,
-        report: data.report as AuditReport,
-        generatedThumbnail,
-      }).report;
-      setReport(nextReport);
-      updateSavedAuditReport(nextReport);
-      setTranslationAudio(null);
-      setTranslationVideo(null);
+      if (!response.ok) throw new Error((data as { error?: string }).error || "Upload failed");
+      const payload = data as TranscriptTranscribeResponse;
+      setSegments(payload.transcript.segments || []);
+      setEditableTranscript((prev) => prev ? ({
+        ...prev,
+        transcript: {
+          ...prev.transcript,
+          available: true,
+          source: "transcribed_audio",
+          language: null,
+          text: payload.transcript.text,
+          segments: payload.transcript.segments,
+        },
+        needsUploadFallback: false,
+      }) : null);
+      setStatus({ state: "complete", message: "Transcript ready." });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not generate transcript from upload");
+      setError(err instanceof Error ? err.message : "Failed to transcribe upload");
     } finally {
-      setTranscriptWorking(false);
+      setUploadingTranscript(false);
     }
   }
 
-  async function translateAuditTranscript() {
-    if (!report?.transcript.segments.length) return;
-    setTranslationWorking(true);
+  async function handleTranslate() {
     setError(null);
+    setTranslationWorking(true);
+    setTranslation(null);
+    setTranslatedSegments([]);
     setTranslationAudio(null);
-    setTranslationVideo(null);
     try {
-      const data = await jsonFetch<{
-        translation: AuditReport["transcript"]["translations"][number];
-      }>("/api/youtube/audit-translate", {
+      const payload = await jsonFetch<TranslateResponse>("/api/youtube/transcript-translate", {
         method: "POST",
         body: JSON.stringify({
           targetLanguage: translationLanguage,
-          sourceLanguage: report.transcript.language,
-          segments: report.transcript.segments,
+          sourceLanguage,
+          segments: normalizedSegments,
         }),
       });
-      const nextReport: AuditReport = {
-        ...report,
-        transcript: {
-          ...report.transcript,
-          translations: [
-            ...report.transcript.translations.filter((item) => item.targetLanguage !== data.translation.targetLanguage),
-            data.translation,
-          ].sort((a, b) => a.targetLanguage.localeCompare(b.targetLanguage)),
-        },
-      };
-      setReport(nextReport);
-      updateSavedAuditReport(nextReport);
+      setTranslation(payload.translation);
+      setTranslatedSegments(payload.translation.segments || []);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not translate transcript");
+      setError(err instanceof Error ? err.message : "Failed to translate transcript");
     } finally {
       setTranslationWorking(false);
     }
   }
 
-  async function generateTranslationAudio() {
-    if (!preview || !selectedTranslation?.segments.length) return;
-    setTranslationAudioWorking(true);
+  async function handleGenerateAudio() {
     setError(null);
+    setTranslationAudioWorking(true);
+    setTranslationAudio(null);
     try {
-      const data = await jsonFetch<TranslationAudioResult>("/api/youtube/audit-translation-audio", {
+      const payload = await jsonFetch<TranslationAudioResponse>("/api/youtube/transcript-translation-audio", {
         method: "POST",
         body: JSON.stringify({
-          title: preview.video.title,
-          targetLanguage: selectedTranslation.targetLanguage,
           voice: translationVoice,
-          segments: selectedTranslation.segments,
+          title: transcriptExportBaseName,
+          targetLanguage: translationLanguage,
+          segments: normalizedTranslatedSegments,
         }),
       });
-      setTranslationAudio(data);
-      setTranslationVideo(null);
+      setTranslationAudio(payload);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not generate translated audio");
+      setError(err instanceof Error ? err.message : "Failed to generate audio");
     } finally {
       setTranslationAudioWorking(false);
-    }
-  }
-
-  async function generateTranslationVideo() {
-    if (!preview || !selectedTranslation || !translationAudio?.filename) return;
-    setTranslationVideoWorking(true);
-    setError(null);
-    try {
-      const data = await jsonFetch<TranslationVideoResult>("/api/youtube/audit-translation-video", {
-        method: "POST",
-        body: JSON.stringify({
-          title: preview.video.title,
-          targetLanguage: selectedTranslation.targetLanguage,
-          voice: translationVoice,
-          audioFilename: translationAudio.filename,
-          gender: OPENAI_VOICE_GENDER[translationVoice],
-        }),
-      });
-      setTranslationVideo(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not generate translated video");
-    } finally {
-      setTranslationVideoWorking(false);
     }
   }
 
@@ -1050,22 +1107,10 @@ export default function YouTubeAuditTab() {
                   </div>
                 ) : (
                   <div className="rounded-2xl border border-amber-400/15 bg-amber-500/10 p-4">
-                    <p className="text-[11px] uppercase tracking-[0.14em] text-amber-100/55">Transcript fallback</p>
-                    <p className="mt-3 text-sm leading-6 text-amber-50/75">Upload the matching video or audio file to generate a transcript and rebuild this audit with script-level findings.</p>
-                    <label className="mt-4 inline-flex cursor-pointer items-center rounded-lg border border-amber-300/20 px-3 py-2 text-sm font-semibold text-amber-50 transition-colors hover:bg-amber-300/10">
-                      {transcriptWorking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
-                      {transcriptWorking ? "Transcribing" : "Upload media"}
-                      <input
-                        type="file"
-                        accept="audio/*,video/*,.mp3,.m4a,.wav,.webm,.mp4,.mov,.avi,.mkv"
-                        className="hidden"
-                        disabled={transcriptWorking}
-                        onChange={(event) => {
-                          void handleAuditTranscriptMedia(event.target.files);
-                          event.currentTarget.value = "";
-                        }}
-                      />
-                    </label>
+                    <p className="text-[11px] uppercase tracking-[0.14em] text-amber-100/55">Transcript unavailable</p>
+                    <p className="mt-3 text-sm leading-6 text-amber-50/75">
+                      This audit was generated without full script analysis. Use the Transcript tools below to fetch or upload a transcript, then translate and generate aligned audio.
+                    </p>
                   </div>
                 )}
                 <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
@@ -1215,21 +1260,114 @@ export default function YouTubeAuditTab() {
             </PanelCardSoft>
           </div>
 
-          {report.transcript.available && report.transcript.segments.length ? (
+          {isStudio ? (
             <PanelCard className="p-5">
               <details>
                 <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
                   <div>
-                    <p className="text-sm font-semibold text-white">Full script and translation</p>
+                    <p className="text-sm font-semibold text-white">Transcript tools</p>
                     <p className="mt-2 text-sm text-white/55">
-                      Expand to review the full timestamped script, translate it naturally, and generate aligned AI voice audio.
+                      Fetch a YouTube transcript, translate it, and generate aligned AI voice audio (audio only).
                     </p>
                   </div>
                   <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-semibold text-white/60">
-                    {report.transcript.segments.length} timestamped segments
+                    {segments.length ? `${segments.length} segments` : "No transcript"}
                   </span>
                 </summary>
+
                 <div className="mt-5 space-y-4">
+                  <PanelCardSoft className="p-4">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button type="button" className="rounded-lg" onClick={() => void handleFetchTranscript()} disabled={loadingTranscript || !videoUrl.trim()}>
+                          {loadingTranscript ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                          {loadingTranscript ? "Fetching" : "Fetch transcript"}
+                        </Button>
+                        <label className="inline-flex cursor-pointer items-center rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm font-semibold text-white/80 transition-colors hover:bg-white/[0.05]">
+                          {uploadingTranscript ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
+                          {uploadingTranscript ? "Uploading" : "Upload audio/video"}
+                          <input
+                            type="file"
+                            className="hidden"
+                            disabled={uploadingTranscript}
+                            accept=".mp3,.m4a,.wav,.webm,.mp4,.mov,.avi,.mkv"
+                            onChange={(event) => {
+                              const file = event.target.files?.[0];
+                              if (!file) return;
+                              void handleUploadTranscript(file);
+                              event.target.value = "";
+                            }}
+                          />
+                        </label>
+                      </div>
+
+                      {editableTranscript?.canonicalUrl ? (
+                        <a
+                          href={editableTranscript.canonicalUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 rounded-lg border border-white/10 bg-white/[0.03] px-2 py-1 text-xs text-white/70 hover:text-white"
+                        >
+                          Open on YouTube <ExternalLink className="h-3 w-3" />
+                        </a>
+                      ) : null}
+                    </div>
+
+                    {editableTranscript ? (
+                      <div className="mt-3 text-xs text-white/45">
+                        Captions: {editableTranscript.captions.available ? "available" : "none"}
+                        {editableTranscript.captions.language ? ` · ${editableTranscript.captions.language}` : ""}
+                        {editableTranscript.captions.source ? ` · ${editableTranscript.captions.source}` : ""}
+                        {status?.state === "processing" ? " · generating transcript from audio" : ""}
+                        {editableTranscript.needsUploadFallback && status?.state !== "processing" ? " · captions restricted" : ""}
+                      </div>
+                    ) : null}
+
+                    {status?.message && status.state !== "error" ? (
+                      <div className="mt-4 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white/70">
+                        {status.message}
+                      </div>
+                    ) : null}
+                  </PanelCardSoft>
+
+                  <PanelCardSoft className="p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">Transcript segments</p>
+                        <p className="mt-2 text-sm text-white/55">Edit text per timestamp. Start/end times are preserved for translation audio alignment.</p>
+                      </div>
+                      <span className="text-xs text-white/40">{normalizedSegments.length ? `${normalizedSegments.length} segments` : "No transcript yet"}</span>
+                    </div>
+
+                    {!normalizedSegments.length ? (
+                      <div className="mt-4 rounded-xl border border-white/10 bg-white/[0.02] p-4 text-sm text-white/55">
+                        Fetch a transcript (or upload audio/video) to start.
+                      </div>
+                    ) : (
+                      <div className="mt-4 max-h-[28rem] space-y-3 overflow-y-auto pr-1">
+                        {segments.map((segment, index) => (
+                          <div key={`${segment.start}-${segment.end}-${index}`} className="rounded-xl border border-white/8 bg-black/15 p-3">
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="text-xs font-semibold text-white/70">
+                                {formatTimestamp(segment.start)} → {formatTimestamp(segment.end)}
+                              </div>
+                              <div className="text-[11px] text-white/35">#{index + 1}</div>
+                            </div>
+                            <Textarea
+                              value={segment.text}
+                              onChange={(event) => {
+                                const next = [...segments];
+                                next[index] = { ...segment, text: event.target.value };
+                                setSegments(next);
+                              }}
+                              className="mt-3 min-h-[88px] text-sm leading-6"
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </PanelCardSoft>
+
                   <PanelCardSoft className="p-4">
                     <div className="flex flex-wrap items-end gap-3">
                       <div className="min-w-[180px] flex-1">
@@ -1238,8 +1376,9 @@ export default function YouTubeAuditTab() {
                           value={translationLanguage}
                           onChange={(event) => {
                             setTranslationLanguage(event.target.value);
+                            setTranslation(null);
+                            setTranslatedSegments([]);
                             setTranslationAudio(null);
-                            setTranslationVideo(null);
                           }}
                           className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 text-sm text-white outline-none focus:border-primary/35"
                         >
@@ -1250,53 +1389,66 @@ export default function YouTubeAuditTab() {
                           ))}
                         </select>
                       </div>
-                      <Button type="button" className="rounded-lg" onClick={() => void translateAuditTranscript()} disabled={translationWorking}>
+                      <Button type="button" className="rounded-lg" onClick={() => void handleTranslate()} disabled={translationWorking || !normalizedSegments.length}>
                         {translationWorking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                        {translationWorking ? "Translating" : selectedTranslation?.targetLanguage === translationLanguage ? "Refresh translation" : "Translate script"}
+                        {translationWorking ? "Translating" : "Translate"}
                       </Button>
                     </div>
-                    <p className="mt-3 text-xs leading-5 text-white/45">
-                      Translation is meaning-first rather than word-for-word, while being compressed when needed to fit the original segment timestamps.
-                    </p>
-                    <p className="mt-2 text-xs leading-5 text-white/35">
-                      If you edit the transcript or timestamps below, existing translations are cleared and the next translation/audio generation will use your updated script.
-                    </p>
+
+                    {translation ? (
+                      <div className="mt-4 rounded-xl border border-white/10 bg-black/15 p-3">
+                        <div className="text-xs text-white/55">
+                          {translation.targetLanguage} translation · {new Date(translation.createdAt).toLocaleString()}
+                        </div>
+                        <div className="mt-3 max-h-[22rem] space-y-3 overflow-y-auto pr-1">
+                          {translatedSegments.map((segment, index) => (
+                            <div key={`${segment.start}-${segment.end}-${index}`} className="rounded-xl border border-white/8 bg-background/20 p-3">
+                              <div className="text-xs font-semibold text-white/70">
+                                {formatTimestamp(segment.start)} → {formatTimestamp(segment.end)}
+                              </div>
+                              <Textarea
+                                value={segment.text}
+                                onChange={(event) => {
+                                  const next = [...translatedSegments];
+                                  next[index] = { ...segment, text: event.target.value };
+                                  setTranslatedSegments(next);
+                                }}
+                                className="mt-3 min-h-[88px] text-sm leading-6"
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-4 rounded-xl border border-white/10 bg-white/[0.02] p-4 text-sm text-white/55">
+                        No translation yet.
+                      </div>
+                    )}
                   </PanelCardSoft>
 
-                  {selectedTranslation ? (
-                    <PanelCardSoft className="p-4">
-                      <div className="flex flex-wrap items-end gap-3">
-                        <div className="min-w-[180px] flex-1">
-                          <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">AI voice</p>
-                          <select
-                            value={translationVoice}
-                            onChange={(event) => {
-                              setTranslationVoice(event.target.value as (typeof OPENAI_VOICES)[number]);
-                              setTranslationAudio(null);
-                              setTranslationVideo(null);
-                            }}
-                            className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 text-sm text-white outline-none focus:border-primary/35"
-                          >
-                            {OPENAI_VOICES.map((voice) => (
-                              <option key={voice} value={voice} className="bg-slate-950">
-                                {voice}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                        <Button type="button" className="rounded-lg" onClick={() => void generateTranslationAudio()} disabled={translationAudioWorking}>
-                          {translationAudioWorking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                          {translationAudioWorking ? "Generating audio" : "Generate translation audio"}
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          className="rounded-lg"
-                          onClick={() => void generateTranslationVideo()}
-                          disabled={!translationAudio?.filename || translationVideoWorking}
+                  <PanelCardSoft className="p-4">
+                    <div className="flex flex-wrap items-end gap-3">
+                      <div className="min-w-[180px] flex-1">
+                        <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">AI voice</p>
+                        <select
+                          value={translationVoice}
+                          onChange={(event) => {
+                            setTranslationVoice(event.target.value as (typeof OPENAI_VOICES)[number]);
+                            setTranslationAudio(null);
+                          }}
+                          className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 text-sm text-white outline-none focus:border-primary/35"
                         >
-                          {translationVideoWorking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                          {translationVideoWorking ? "Generating video" : "Generate speaking video"}
+                          {OPENAI_VOICES.map((voice) => (
+                            <option key={voice} value={voice} className="bg-slate-950">
+                              {voice}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Button type="button" className="rounded-lg" onClick={() => void handleGenerateAudio()} disabled={translationAudioWorking || !normalizedTranslatedSegments.length}>
+                          {translationAudioWorking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                          {translationAudioWorking ? "Generating audio" : "Generate audio"}
                         </Button>
                         {translationAudio ? (
                           <Button
@@ -1310,98 +1462,23 @@ export default function YouTubeAuditTab() {
                             }}
                           >
                             <Download className="mr-2 h-4 w-4" />
-                            Download audio
-                          </Button>
-                        ) : null}
-                        {translationVideo ? (
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            className="rounded-lg"
-                            onClick={() => {
-                              void downloadAuthenticatedFile(translationVideo.downloadUrl, translationVideo.filename).catch((err) => {
-                                setError(err instanceof Error ? err.message : "Could not download translated video");
-                              });
-                            }}
-                          >
-                            <Download className="mr-2 h-4 w-4" />
-                            Download video
+                            Download MP3
                           </Button>
                         ) : null}
                       </div>
-                      <div className="mt-3 flex flex-wrap items-center gap-3">
-                        <p className="text-xs text-white/45">Preview selected voice:</p>
-                        <audio controls preload="none" src={`/api/analysis/voice-preview/${translationVoice}`} className="h-10 max-w-full" />
-                      </div>
-                      <p className="mt-3 text-xs leading-5 text-white/45">
-                        The generated audio is forced to the original timeline. If a translated line runs long, the wording is shortened at translation time and the speech is tightened to stay inside the original segment length.
-                      </p>
-                    </PanelCardSoft>
-                  ) : null}
+                    </div>
 
-                  <div className={`grid gap-4 ${selectedTranslation ? "xl:grid-cols-[1fr,1fr]" : ""}`}>
-                    <PanelCardSoft className="p-4">
-                      <div className="flex items-center justify-between gap-3">
-                        <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">Original script</p>
-                        <span className="text-xs text-white/40">Grouped into sentence-style or roughly 10-second sections</span>
-                      </div>
-                      <div className="mt-4 max-h-[28rem] space-y-3 overflow-y-auto pr-1">
-                        {report.transcript.segments.map((segment, index) => (
-                          <div key={`script-${index}-${segment.start}`} className="rounded-xl border border-white/8 bg-black/15 p-3">
-                            <div className="grid gap-3 sm:grid-cols-[88px,88px,1fr]">
-                              <div>
-                                <p className="text-[10px] uppercase tracking-[0.14em] text-white/35">Start</p>
-                                <input
-                                  value={formatTranscriptTime(segment.start)}
-                                  onChange={(event) => updateTranscriptSegment(index, "start", event.target.value)}
-                                  className="mt-2 h-10 w-full rounded-lg border border-white/10 bg-white/[0.03] px-2 text-xs font-mono text-white outline-none focus:border-primary/35"
-                                />
-                              </div>
-                              <div>
-                                <p className="text-[10px] uppercase tracking-[0.14em] text-white/35">End</p>
-                                <input
-                                  value={formatTranscriptTime(segment.end)}
-                                  onChange={(event) => updateTranscriptSegment(index, "end", event.target.value)}
-                                  className="mt-2 h-10 w-full rounded-lg border border-white/10 bg-white/[0.03] px-2 text-xs font-mono text-white outline-none focus:border-primary/35"
-                                />
-                              </div>
-                              <div>
-                                <p className="text-[10px] uppercase tracking-[0.14em] text-white/35">Transcript</p>
-                                <Textarea
-                                  value={segment.text}
-                                  onChange={(event) => updateTranscriptSegment(index, "text", event.target.value)}
-                                  className="mt-2 min-h-[88px] text-sm leading-6"
-                                />
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </PanelCardSoft>
-
-                    {selectedTranslation ? (
-                      <PanelCardSoft className="p-4">
-                        <div className="flex items-center justify-between gap-3">
-                          <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">
-                            {selectedTranslation.targetLanguage} translation
-                          </p>
-                          <span className="text-xs text-white/40">
-                            {new Date(selectedTranslation.createdAt).toLocaleString()}
-                          </span>
-                        </div>
-                        <div className="mt-4 max-h-[28rem] space-y-3 overflow-y-auto pr-1">
-                          {selectedTranslation.segments.map((segment, index) => (
-                            <div key={`translation-${index}-${segment.start}`} className="flex gap-3 rounded-xl border border-white/8 bg-black/15 p-3">
-                              <div className="w-20 shrink-0 font-mono text-xs font-semibold text-white/45">
-                                {formatTranscriptTime(segment.start)}
-                              </div>
-                              <p className="text-sm leading-6 text-white/82">{segment.text}</p>
-                            </div>
-                          ))}
-                        </div>
-                      </PanelCardSoft>
-                    ) : null}
-                  </div>
+                    <div className="mt-3 flex flex-wrap items-center gap-3">
+                      <p className="text-xs text-white/45">Preview selected voice:</p>
+                      <audio controls preload="none" src={`/api/analysis/voice-preview/${translationVoice}`} className="h-10 max-w-full" />
+                    </div>
+                    <p className="mt-3 text-xs leading-5 text-white/45">
+                      The generated audio is forced to the original timeline. If a translated line runs long, the wording is shortened at translation time and the speech is tightened to stay inside the original segment length.
+                    </p>
+                    <p className="mt-2 text-xs leading-5 text-white/35">
+                      Output base name: {transcriptExportBaseName}
+                    </p>
+                  </PanelCardSoft>
                 </div>
               </details>
             </PanelCard>

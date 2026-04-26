@@ -18,7 +18,6 @@ import VideoAnalyzerTab from "./tabs/VideoAnalyzerTab";
 import TeleprompterTab from "./tabs/TeleprompterTab";
 import ScriptPlannerTab from "./tabs/ScriptPlannerTab";
 import YouTubeAuditTab from "./tabs/YouTubeAuditTab";
-import YouTubeTranscriptTab from "./tabs/YouTubeTranscriptTab";
 import YouTubeGrowthPlannerV2Tab, {
   getGrowthPlannerNotificationCounts,
   getGrowthPlannerNotifications,
@@ -48,7 +47,6 @@ const TABS = [
   { id: "script-planner", icon: Clapperboard },
   { id: "growth-planner", icon: CalendarDays },
   { id: "youtube-audit", icon: Youtube },
-  { id: "youtube-transcript", icon: FileText },
   { id: "teleprompter", icon: MonitorPlay },
 ] as const;
 
@@ -56,6 +54,7 @@ type TabId = (typeof TABS)[number]["id"];
 
 function getTabFromUrl(): TabId {
   const tab = new URLSearchParams(window.location.search).get("tab");
+  if (tab === "youtube-transcript") return "youtube-audit";
   const match = TABS.find((item) => item.id === tab);
   return match?.id ?? "dashboard";
 }
@@ -652,7 +651,6 @@ export default function Home() {
         {activeTab === "script-planner" && <ScriptPlannerTab />}
         {activeTab === "growth-planner" && <YouTubeGrowthPlannerV2Tab />}
         {activeTab === "youtube-audit" && <YouTubeAuditTab />}
-        {activeTab === "youtube-transcript" && <YouTubeTranscriptTab />}
         {activeTab === "teleprompter" && <TeleprompterTab />}
       </main>
     </div>

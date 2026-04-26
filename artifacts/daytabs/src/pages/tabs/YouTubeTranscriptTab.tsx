@@ -1,7 +1,6 @@
 import { FormEvent, useMemo, useRef, useState } from "react";
 import { Download, ExternalLink, Loader2, Upload, Youtube } from "lucide-react";
 import { PanelCard, PanelHeader, PanelPage, PanelSubtitle, PanelTitle } from "@/components/panel-system";
-import { Button } from "@/components/ui/button";
 import { usePlan } from "@/hooks/use-plan";
 import { DAYTABS_LOCALE_STORAGE_KEY } from "@/lib/i18n";
 
@@ -62,7 +61,6 @@ type TranscriptTranslation = {
 type TranslateResponse = { translation: TranscriptTranslation };
 
 type TranslationAudioResponse = { downloadUrl: string; filename: string; voice: string };
-type TranslationVideoResponse = { downloadUrl: string; filename: string; voice: string; gender: "male" | "female" };
 
 const TRANSLATION_LANGUAGES = [
   "Turkish",
@@ -80,14 +78,6 @@ const TRANSLATION_LANGUAGES = [
 ];
 
 const OPENAI_VOICES = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"] as const;
-const OPENAI_VOICE_GENDER: Record<(typeof OPENAI_VOICES)[number], "male" | "female"> = {
-  alloy: "male",
-  echo: "male",
-  onyx: "male",
-  fable: "female",
-  nova: "female",
-  shimmer: "female",
-};
 
 async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
   const token = localStorage.getItem("daytabs_token");
@@ -181,8 +171,6 @@ export default function YouTubeTranscriptTab() {
   const [voice, setVoice] = useState<(typeof OPENAI_VOICES)[number]>("alloy");
   const [audioWorking, setAudioWorking] = useState(false);
   const [audioResult, setAudioResult] = useState<TranslationAudioResponse | null>(null);
-  const [videoWorking, setVideoWorking] = useState(false);
-  const [videoResult, setVideoResult] = useState<TranslationVideoResponse | null>(null);
 
   const isStudio = plan.isStudio;
   const sourceLanguage = editable?.transcript.language ?? editable?.captions.language ?? null;
@@ -202,7 +190,6 @@ export default function YouTubeTranscriptTab() {
     setTranslation(null);
     setTranslatedSegments([]);
     setAudioResult(null);
-    setVideoResult(null);
     setEditable(null);
     setSegments([]);
     setLoadingTranscript(true);
@@ -295,7 +282,6 @@ export default function YouTubeTranscriptTab() {
     setTranslation(null);
     setTranslatedSegments([]);
     setAudioResult(null);
-    setVideoResult(null);
     try {
       const token = localStorage.getItem("daytabs_token");
       const locale = localStorage.getItem(DAYTABS_LOCALE_STORAGE_KEY);
@@ -339,7 +325,6 @@ export default function YouTubeTranscriptTab() {
     setTranslation(null);
     setTranslatedSegments([]);
     setAudioResult(null);
-    setVideoResult(null);
     try {
       const payload = await jsonFetch<TranslateResponse>("/api/youtube/transcript-translate", {
         method: "POST",
@@ -380,32 +365,6 @@ export default function YouTubeTranscriptTab() {
     }
   }
 
-  async function handleGenerateVideo() {
-    setError(null);
-    setVideoWorking(true);
-    setVideoResult(null);
-    try {
-      if (!audioResult?.filename) {
-        throw new Error("Generate translation audio first.");
-      }
-      const payload = await jsonFetch<TranslationVideoResponse>("/api/youtube/transcript-translation-video", {
-        method: "POST",
-        body: JSON.stringify({
-          voice,
-          gender: OPENAI_VOICE_GENDER[voice],
-          title: exportBaseName,
-          targetLanguage: translationLanguage,
-          audioFilename: audioResult.filename,
-        }),
-      });
-      setVideoResult(payload);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to generate video");
-    } finally {
-      setVideoWorking(false);
-    }
-  }
-
   if (planLoading) {
     return (
       <PanelPage className="max-w-6xl">
@@ -420,7 +379,7 @@ export default function YouTubeTranscriptTab() {
         <PanelHeader>
           <div>
             <PanelTitle>YouTube Transcript</PanelTitle>
-            <PanelSubtitle>Fetch a YouTube transcript, edit timestamps, translate, and generate audio/video.</PanelSubtitle>
+            <PanelSubtitle>Fetch a YouTube transcript, edit timestamps, translate, and generate audio.</PanelSubtitle>
           </div>
         </PanelHeader>
         <PanelCard className="border-pink-500/20 bg-pink-500/8 p-8 text-center">
@@ -429,7 +388,7 @@ export default function YouTubeTranscriptTab() {
           </div>
           <h3 className="mt-4 text-xl font-semibold text-white">Studio-only feature</h3>
           <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-white/65">
-            Transcript fetching/editing + translation audio/video generation is enabled on the Studio plan.
+            Transcript fetching/editing + translation audio generation is enabled on the Studio plan.
           </p>
           <a
             href="/pricing?highlight=studio"
@@ -447,7 +406,7 @@ export default function YouTubeTranscriptTab() {
       <PanelHeader>
         <div>
           <PanelTitle>YouTube Transcript</PanelTitle>
-          <PanelSubtitle>Paste a YouTube URL to get an editable timestamped transcript, then translate + generate audio/video.</PanelSubtitle>
+          <PanelSubtitle>Paste a YouTube URL to get an editable timestamped transcript, then translate + generate audio.</PanelSubtitle>
         </div>
       </PanelHeader>
 
@@ -618,8 +577,8 @@ export default function YouTubeTranscriptTab() {
       <PanelCard className="p-5">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h3 className="text-sm font-semibold text-white">Audio + AI character video</h3>
-            <p className="mt-1 text-xs text-white/45">Generates spoken audio (OpenAI voice) and an AI character video reading it.</p>
+            <h3 className="text-sm font-semibold text-white">Translation audio</h3>
+            <p className="mt-1 text-xs text-white/45">Generates spoken audio (OpenAI voice) aligned to your translated timestamps.</p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <select
@@ -641,18 +600,10 @@ export default function YouTubeTranscriptTab() {
             >
               {audioWorking ? <Loader2 className="h-4 w-4 animate-spin" /> : "Generate audio"}
             </button>
-            <Button
-              type="button"
-              onClick={() => void handleGenerateVideo()}
-              disabled={videoWorking || !normalizedTranslatedSegments.length || !audioResult?.filename}
-              className="h-10"
-            >
-              {videoWorking ? <Loader2 className="h-4 w-4 animate-spin" /> : "Generate video"}
-            </Button>
           </div>
         </div>
 
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <div className="mt-4">
           <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
             <div className="text-xs font-semibold text-white/70">Audio</div>
             {audioResult ? (
@@ -669,26 +620,6 @@ export default function YouTubeTranscriptTab() {
               </div>
             ) : (
               <div className="mt-2 text-sm text-white/55">Generate audio after translating.</div>
-            )}
-          </div>
-          <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-            <div className="text-xs font-semibold text-white/70">Video</div>
-            {videoResult ? (
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => void downloadAuthenticatedFile(videoResult.downloadUrl, videoResult.filename).catch((err) => setError(err instanceof Error ? err.message : "Download failed"))}
-                  className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-xs font-semibold text-white/80 hover:bg-white/[0.05]"
-                >
-                  <Download className="h-4 w-4" />
-                  Download MP4
-                </button>
-                <div className="text-xs text-white/45">
-                  {videoResult.voice} · {videoResult.gender}
-                </div>
-              </div>
-            ) : (
-              <div className="mt-2 text-sm text-white/55">Generate audio first, then generate video.</div>
             )}
           </div>
         </div>
