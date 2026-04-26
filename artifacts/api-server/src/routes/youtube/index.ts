@@ -81,10 +81,19 @@ const TTS_VOICE_GENDER: Record<(typeof VALID_TTS_VOICES)[number], "male" | "fema
 const AVATAR_IMAGE_MODEL = process.env.YOUTUBE_THUMBNAIL_IMAGE_MODEL || "gpt-image-2";
 const AVATAR_IMAGE_FALLBACK_MODEL = "gpt-image-1";
 const MAX_TRANSLATION_VIDEO_DURATION_SEC = 15 * 60;
+const AUDIT_EXPORT_FILE_TTL_MS = Number(process.env.AUDIT_EXPORT_FILE_TTL_MS || 60 * 60_000);
 
 fs.mkdir(auditUploadDir, { recursive: true }).catch(() => {});
 fs.mkdir(auditExportDir, { recursive: true }).catch(() => {});
 fs.mkdir(avatarCacheDir, { recursive: true }).catch(() => {});
+
+function scheduleAuditExportCleanup(filePath: string) {
+  if (!AUDIT_EXPORT_FILE_TTL_MS || AUDIT_EXPORT_FILE_TTL_MS <= 0) return;
+  const timer = setTimeout(() => {
+    fs.unlink(filePath).catch(() => {});
+  }, AUDIT_EXPORT_FILE_TTL_MS);
+  timer.unref?.();
+}
 
 type TranscriptPipelineSource = "youtube_caption" | "audio_transcription";
 type TranscriptCaptionType = "manual" | "auto" | "generated";
@@ -95,6 +104,7 @@ type CachedYoutubeTranscriptPayload =
       status: "processing";
       preferredLanguage: string | null;
       step: string;
+      code?: string;
       startedAt: string;
       updatedAt: string;
     }
@@ -596,6 +606,7 @@ async function createAlignedTranslationAudio(
     const outputFilename = `${sanitizeAuditFilenamePart(baseName)}-${voice}-${exportId}.mp3`;
     const outputPath = path.join(auditExportDir, outputFilename);
     await execAsync(`ffmpeg -f concat -safe 0 -i "${concatList}" -af "apad=pad_dur=${totalDuration.toFixed(3)},atrim=0:${totalDuration.toFixed(3)}" -ar 24000 -ac 1 -c:a libmp3lame -q:a 2 "${outputPath}" -y`);
+    scheduleAuditExportCleanup(outputPath);
     return { outputFilename, outputPath };
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
@@ -757,6 +768,7 @@ async function createTalkingAvatarVideoFromAudio(options: {
       `ffmpeg -hide_banner -loglevel error -stream_loop -1 -i "${cyclePath}" -i "${options.audioPath}" ` +
       `-c:v libx264 -preset veryfast -crf 22 -pix_fmt yuv420p -c:a aac -b:a 128k -shortest -movflags +faststart "${outputPath}" -y`,
     );
+    scheduleAuditExportCleanup(outputPath);
     return { outputFilename, outputPath };
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
@@ -1739,6 +1751,8 @@ router.get("/audit-download/:filename", requireAuth, async (req, res) => {
       res.status(404).json({ error: "File not found or has expired" });
       return;
     }
+    res.setHeader("Cache-Control", "no-store, max-age=0");
+    res.setHeader("Pragma", "no-cache");
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
     res.setHeader("Content-Type", filename.endsWith(".mp3")
       ? "audio/mpeg"
@@ -1748,7 +1762,6 @@ router.get("/audit-download/:filename", requireAuth, async (req, res) => {
     const { createReadStream } = await import("fs");
     const stream = createReadStream(filePath);
     stream.pipe(res as unknown as NodeJS.WritableStream);
-    stream.on("end", () => { fs.unlink(filePath).catch(() => {}); });
   } catch (err) {
     req.log.error({ err }, "YouTube audit download error");
     res.status(500).json({ error: "Download failed" });

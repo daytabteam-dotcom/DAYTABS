@@ -48,6 +48,12 @@ type AuditReport = {
     confidence: "high" | "medium" | "low";
     basis: string;
   };
+  captions: {
+    available: boolean;
+    source: "manual" | "auto" | "uploaded" | "transcribed_audio" | null;
+    language: string | null;
+    languages: string[];
+  };
   transcript: {
     available: boolean;
     source: "manual" | "auto" | "uploaded" | null;
@@ -134,6 +140,13 @@ type AuditPreview = {
     basis: string;
   };
   recommendedThumbnailStyle: string;
+  captions: {
+    available: boolean;
+    source: "manual" | "auto" | null;
+    language: string | null;
+    languages: string[];
+    downloadable?: boolean;
+  };
   transcript: {
     available: boolean;
     source: "manual" | "auto" | "uploaded" | null;
@@ -229,10 +242,13 @@ async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
 async function downloadAuthenticatedFile(url: string, filename: string) {
   const token = localStorage.getItem("daytabs_token");
   const locale = localStorage.getItem(DAYTABS_LOCALE_STORAGE_KEY);
-  const response = await fetch(url, {
+  const cacheBustUrl = `${url}${url.includes("?") ? "&" : "?"}t=${Date.now()}`;
+  const response = await fetch(cacheBustUrl, {
+    cache: "no-store",
     headers: {
       ...(locale ? { "Accept-Language": locale } : {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      "Cache-Control": "no-cache",
     },
   });
   if (!response.ok) {
