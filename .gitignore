@@ -53,3 +53,4 @@ attached_assets/*.mp4
 
 # Local secrets (do not commit)
 secrets/
+cookies.base64
