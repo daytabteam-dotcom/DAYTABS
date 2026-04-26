@@ -1,7 +1,7 @@
 import { Router, type Request } from "express";
 import crypto from "crypto";
 import { and, desc, eq, gt, isNull, sql } from "drizzle-orm";
-import { db, blogsTable, blogCommentsTable, blogLikesTable, blogViewsTable } from "@workspace/db";
+import { db, blogsTable, blogCommentsTable, blogLikesTable, blogSharesTable, blogViewsTable } from "@workspace/db";
 import { optionalAuth, requireAuth } from "../../middlewares/auth";
 
 const router = Router();
@@ -230,6 +230,7 @@ router.get("/slug/:slug/comments", async (req, res) => {
         id: blogCommentsTable.id,
         blogId: blogCommentsTable.blogId,
         userId: blogCommentsTable.userId,
+        authorName: blogCommentsTable.authorName,
         parentCommentId: blogCommentsTable.parentCommentId,
         content: blogCommentsTable.content,
         createdAt: blogCommentsTable.createdAt,
@@ -255,6 +256,16 @@ router.post("/slug/:slug/comments", requireAuth, async (req, res) => {
       coverImage: typeof req.body?.blog?.coverImage === "string" ? req.body.blog.coverImage : null,
     });
 
+    const authorName = asString(req.body?.authorName || req.body?.name).trim();
+    if (authorName.length < 1) {
+      res.status(400).json({ error: "Name is required" });
+      return;
+    }
+    if (authorName.length > 60) {
+      res.status(400).json({ error: "Name is too long" });
+      return;
+    }
+
     const commentContent = asString(req.body?.content).trim();
     if (commentContent.length < 1) {
       res.status(400).json({ error: "Comment content is required" });
@@ -278,6 +289,7 @@ router.post("/slug/:slug/comments", requireAuth, async (req, res) => {
       .values({
         blogId: blog.id,
         userId: req.auth!.user_id,
+        authorName,
         parentCommentId,
         content: commentContent,
         status: "pending",
@@ -289,6 +301,48 @@ router.post("/slug/:slug/comments", requireAuth, async (req, res) => {
     res.json({ comment, status: "pending", visitorId });
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : "Failed to add comment" });
+  }
+});
+
+router.post("/slug/:slug/share", optionalAuth, async (req, res) => {
+  try {
+    const slug = slugParam(req);
+
+    const shareType = asString(req.body?.shareType).trim();
+    const platform = asString(req.body?.platform).trim();
+    const blogUrl = asString(req.body?.blogUrl).trim();
+
+    const allowedTypes = new Set(["full", "section", "visual", "table", "quote"]);
+    if (!allowedTypes.has(shareType)) {
+      res.status(400).json({ error: "Invalid shareType" });
+      return;
+    }
+    if (!platform || platform.length > 64) {
+      res.status(400).json({ error: "Invalid platform" });
+      return;
+    }
+    if (!blogUrl || blogUrl.length > 800) {
+      res.status(400).json({ error: "Invalid blogUrl" });
+      return;
+    }
+
+    const blog = await getOrCreateBlog(slug, {
+      title: req.body?.blog?.title,
+      description: req.body?.blog?.description,
+      content: req.body?.blog?.content,
+      coverImage: typeof req.body?.blog?.coverImage === "string" ? req.body.blog.coverImage : null,
+    });
+
+    await db.insert(blogSharesTable).values({
+      blogId: blog.id,
+      shareType,
+      platform,
+      blogUrl,
+    });
+
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to track share" });
   }
 });
 

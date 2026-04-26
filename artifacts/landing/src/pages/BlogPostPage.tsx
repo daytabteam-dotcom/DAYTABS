@@ -21,20 +21,34 @@ function formatDate(dateStr: string) {
   });
 }
 
-function extractHeadings(html: string): { id: string; text: string }[] {
-  const matches = [...html.matchAll(/<h2[^>]*>(.*?)<\/h2>/gi)];
+function slugifyHeading(text: string) {
+  return text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+function extractHeadings(html: string): Array<{ id: string; text: string; level: 2 | 3 }> {
+  const matches = [...html.matchAll(/<h([23])[^>]*>(.*?)<\/h\1>/gi)];
+  const used = new Map<string, number>();
   return matches.map((m) => {
-    const text = m[1].replace(/<[^>]+>/g, "");
-    const id = text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-    return { id, text };
+    const level = Number(m[1]) === 3 ? 3 : 2;
+    const text = m[2].replace(/<[^>]+>/g, "");
+    const base = slugifyHeading(text) || "section";
+    const count = used.get(base) ?? 0;
+    used.set(base, count + 1);
+    const id = count === 0 ? base : `${base}-${count + 1}`;
+    return { id, text, level: level as 2 | 3 };
   });
 }
 
-function injectIds(html: string): string {
-  return html.replace(/<h2([^>]*)>(.*?)<\/h2>/gi, (_match, attrs, inner) => {
-    const text = inner.replace(/<[^>]+>/g, "");
-    const id = text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-    return `<h2${attrs} id="${id}">${inner}</h2>`;
+function injectHeadingIds(html: string): string {
+  const used = new Map<string, number>();
+  return html.replace(/<h([23])([^>]*)>(.*?)<\/h\1>/gi, (_match, level, attrs, inner) => {
+    if (/\sid\s*=/.test(String(attrs))) return `<h${level}${attrs}>${inner}</h${level}>`;
+    const text = String(inner).replace(/<[^>]+>/g, "");
+    const base = slugifyHeading(text) || "section";
+    const count = used.get(base) ?? 0;
+    used.set(base, count + 1);
+    const id = count === 0 ? base : `${base}-${count + 1}`;
+    return `<h${level}${attrs} id="${id}">${inner}</h${level}>`;
   });
 }
 
@@ -79,21 +93,20 @@ async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
   return data as T;
 }
 
-function buildShareLinks(postUrl: string, title: string, description: string) {
-  const shareLead = "I found this interesting article here:";
-  const shareText = `${shareLead}\n\n${title}\n\n${postUrl}`;
-  const encodedTitle = encodeURIComponent(`${shareLead} ${title}`);
-  const encodedDescription = encodeURIComponent(description);
-  const encodedUrl = encodeURIComponent(postUrl);
+function truncate(text: string, max: number) {
+  const clean = text.trim().replace(/\s+/g, " ");
+  if (clean.length <= max) return clean;
+  return `${clean.slice(0, max)}...`;
+}
+
+function buildPlatformLinks(input: { url: string; xText: string; redditTitle: string }) {
+  const encodedUrl = encodeURIComponent(input.url);
+  const encodedText = encodeURIComponent(input.xText);
+  const encodedTitle = encodeURIComponent(input.redditTitle);
   return {
-    x: `https://twitter.com/intent/tweet?text=${encodedTitle}&url=${encodedUrl}`,
+    x: `https://twitter.com/intent/tweet?text=${encodedText}&url=${encodedUrl}`,
     linkedin: `https://www.linkedin.com/sharing/share-offsite/?url=${encodedUrl}`,
     reddit: `https://www.reddit.com/submit?url=${encodedUrl}&title=${encodedTitle}`,
-    whatsapp: `https://wa.me/?text=${encodeURIComponent(shareText)}`,
-    telegram: `https://t.me/share/url?url=${encodedUrl}&text=${encodeURIComponent(`${shareLead} ${title}`)}`,
-    copyText: `${shareLead}\n\n${title}\n\n${description}\n\n${postUrl}`,
-    nativeText: `${shareLead}\n\n${title}\n\n${description}\n\n${postUrl}`,
-    description: encodedDescription,
   };
 }
 
@@ -129,13 +142,16 @@ function elementText(el: Element) {
   return (el.textContent ?? "").replace(/\s+/g, " ").trim();
 }
 
-type ShareTarget =
-  | { kind: "table"; title: string; slug: string; postUrl: string; headers: string[]; rows: string[][] }
-  | { kind: "image"; title: string; slug: string; postUrl: string; src: string; alt: string };
+type ShareCardFormat = "landscape" | "portrait";
 
-async function createShareCard(target: ShareTarget): Promise<{ file: File; dataUrl: string; caption: string }> {
-  const width = 1200;
-  const height = 630;
+type ShareCardTarget =
+  | { kind: "table"; title: string; slug: string; postUrl: string; headers: string[]; rows: string[][] }
+  | { kind: "image"; title: string; slug: string; postUrl: string; src: string; alt: string }
+  | { kind: "quote"; title: string; slug: string; postUrl: string; quote: string };
+
+async function createShareCard(target: ShareCardTarget, format: ShareCardFormat): Promise<{ file: File; dataUrl: string }> {
+  const width = format === "portrait" ? 1080 : 1200;
+  const height = format === "portrait" ? 1350 : 630;
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
@@ -152,7 +168,7 @@ async function createShareCard(target: ShareTarget): Promise<{ file: File; dataU
   // Accent blob
   ctx.fillStyle = "rgba(124,58,237,0.22)";
   ctx.beginPath();
-  ctx.ellipse(width * 0.76, height * 0.18, 340, 220, 0.3, 0, Math.PI * 2);
+  ctx.ellipse(width * 0.76, height * (format === "portrait" ? 0.14 : 0.18), format === "portrait" ? 300 : 340, format === "portrait" ? 240 : 220, 0.3, 0, Math.PI * 2);
   ctx.fill();
 
   // Header
@@ -167,17 +183,17 @@ async function createShareCard(target: ShareTarget): Promise<{ file: File; dataU
   ctx.fillStyle = "rgba(255,255,255,0.92)";
   ctx.font = "800 34px system-ui, -apple-system, Segoe UI, Roboto, Arial";
   const titleLines = wrapText(ctx, target.title, width - 88);
-  const titleMaxLines = 2;
+  const titleMaxLines = format === "portrait" ? 3 : 2;
   const shownTitle = titleLines.slice(0, titleMaxLines);
-  const titleY = 132;
+  const titleY = format === "portrait" ? 142 : 132;
   shownTitle.forEach((line, index) => {
     ctx.fillText(line, 44, titleY + index * 40);
   });
 
-  const contentTop = 228;
+  const contentTop = format === "portrait" ? 280 : 228;
   const contentLeft = 44;
   const contentWidth = width - 88;
-  const contentHeight = 320;
+  const contentHeight = format === "portrait" ? 820 : 320;
 
   // Content card
   ctx.fillStyle = "rgba(0,0,0,0.32)";
@@ -213,7 +229,7 @@ async function createShareCard(target: ShareTarget): Promise<{ file: File; dataU
     ctx.clip();
     ctx.drawImage(image, drawX, drawY, drawW, drawH);
     ctx.restore();
-  } else {
+  } else if (target.kind === "table") {
     const padding = 22;
     const tableX = contentLeft + padding;
     const tableY = contentTop + padding;
@@ -266,15 +282,43 @@ async function createShareCard(target: ShareTarget): Promise<{ file: File; dataU
       ctx.font = "600 14px system-ui, -apple-system, Segoe UI, Roboto, Arial";
       ctx.fillText(`+${target.rows.length - shownRows.length} more rows`, tableX + 14, tableY + tableH - 14);
     }
+  } else {
+    const quote = target.quote.trim().replace(/\s+/g, " ");
+    const padding = 34;
+    const boxX = contentLeft + padding;
+    const boxY = contentTop + padding;
+    const boxW = contentWidth - padding * 2;
+    const boxH = contentHeight - padding * 2;
+
+    ctx.fillStyle = "rgba(255,255,255,0.04)";
+    drawRoundedRect(ctx, boxX, boxY, boxW, boxH, 22);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(167,139,250,0.40)";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.fillStyle = "rgba(255,255,255,0.88)";
+    ctx.font = format === "portrait"
+      ? "700 34px system-ui, -apple-system, Segoe UI, Roboto, Arial"
+      : "700 28px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+    const lines = wrapText(ctx, `“${quote}”`, boxW - 56);
+    const maxLines = format === "portrait" ? 9 : 6;
+    const shown = lines.slice(0, maxLines);
+    const lineH = format === "portrait" ? 46 : 40;
+    const startY = boxY + 78;
+    shown.forEach((line, idx) => {
+      ctx.fillText(line, boxX + 28, startY + idx * lineH);
+    });
   }
 
   // Footer CTA
   ctx.fillStyle = "rgba(255,255,255,0.70)";
   ctx.font = "600 18px system-ui, -apple-system, Segoe UI, Roboto, Arial";
-  ctx.fillText("Read the full guide on DayTabs", 44, 584);
+  const footerY = format === "portrait" ? height - 92 : 584;
+  ctx.fillText("Read the full article on DayTabs", 44, footerY);
   ctx.fillStyle = "rgba(167,139,250,0.95)";
   ctx.font = "700 18px system-ui, -apple-system, Segoe UI, Roboto, Arial";
-  ctx.fillText(target.postUrl, 44, 610);
+  ctx.fillText(target.postUrl, 44, footerY + 26);
 
   const blob: Blob = await new Promise((resolve, reject) => {
     canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Could not export image"))), "image/jpeg", 0.92);
@@ -282,12 +326,11 @@ async function createShareCard(target: ShareTarget): Promise<{ file: File; dataU
   const filename = `daytabs-${target.slug}-${target.kind}.jpg`;
   const file = new File([blob], filename, { type: "image/jpeg" });
   const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
-  const caption = `I found this interesting section here:\n\n${target.title}\n\n${target.postUrl}`;
 
-  return { file, dataUrl, caption };
+  return { file, dataUrl };
 }
 
-function TableOfContentsMobile({ headings }: { headings: { id: string; text: string }[] }) {
+function TableOfContentsMobile({ headings }: { headings: Array<{ id: string; text: string; level: 2 | 3 }> }) {
   const [open, setOpen] = useState(false);
 
   if (headings.length === 0) return null;
@@ -309,7 +352,9 @@ function TableOfContentsMobile({ headings }: { headings: { id: string; text: str
                 key={h.id}
                 href={`#${h.id}`}
                 onClick={() => setOpen(false)}
-                className="text-sm text-white/50 hover:text-violet-300 transition-colors py-1"
+                className={`text-sm text-white/50 hover:text-violet-300 transition-colors py-1 ${
+                  h.level === 3 ? "pl-3 text-white/45" : ""
+                }`}
               >
                 {h.text}
               </a>
@@ -330,17 +375,27 @@ export default function BlogPostPage() {
   const [stats, setStats] = useState<{ viewCount: number; likeCount: number; commentCount: number; likedByMe: boolean } | null>(null);
   const [engagementError, setEngagementError] = useState<string | null>(null);
   const [likeWorking, setLikeWorking] = useState(false);
-  const [shareOpen, setShareOpen] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [comments, setComments] = useState<Array<{ id: number; userId: number; parentCommentId: number | null; content: string; createdAt: string }>>([]);
+  const [shareModal, setShareModal] = useState<{
+    shareType: "full" | "section" | "visual" | "table" | "quote";
+    title: string;
+    url: string;
+    text: string;
+    xText: string;
+    redditTitle: string;
+    cardTarget?: ShareCardTarget;
+  } | null>(null);
+  const [shareCopiedLink, setShareCopiedLink] = useState(false);
+  const [shareCopiedText, setShareCopiedText] = useState(false);
+  const [shareCardFormat, setShareCardFormat] = useState<ShareCardFormat>("landscape");
+  const [shareCardLoading, setShareCardLoading] = useState(false);
+  const [shareCardImage, setShareCardImage] = useState<string | null>(null);
+  const [shareCardFile, setShareCardFile] = useState<File | null>(null);
+  const [quoteShare, setQuoteShare] = useState<{ open: boolean; x: number; y: number; text: string } | null>(null);
+  const [comments, setComments] = useState<Array<{ id: number; userId: number; authorName: string; parentCommentId: number | null; content: string; createdAt: string }>>([]);
+  const [commentName, setCommentName] = useState("");
   const [commentText, setCommentText] = useState("");
   const [commentWorking, setCommentWorking] = useState(false);
   const [commentNotice, setCommentNotice] = useState<string | null>(null);
-  const [sectionShareOpen, setSectionShareOpen] = useState(false);
-  const [sectionShareLoading, setSectionShareLoading] = useState(false);
-  const [sectionShareImage, setSectionShareImage] = useState<string | null>(null);
-  const [sectionShareFile, setSectionShareFile] = useState<File | null>(null);
-  const [sectionShareCaption, setSectionShareCaption] = useState<string>("");
 
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -351,14 +406,10 @@ export default function BlogPostPage() {
     [post?.content],
   );
   const contentWithIds = useMemo(
-    () => (post ? enhanceTables(injectIds(post.content)) : ""),
+    () => (post ? enhanceTables(injectHeadingIds(post.content)) : ""),
     [post?.content],
   );
   const postUrl = post ? `${SITE_URL}/blog/${post.slug}` : "";
-  const share = useMemo(
-    () => (post ? buildShareLinks(postUrl, post.title, post.metaDescription) : null),
-    [post, postUrl],
-  );
   const hasAuthToken = typeof window !== "undefined" && Boolean(localStorage.getItem("daytabs_token"));
 
   const articleSchema = {
@@ -403,7 +454,7 @@ export default function BlogPostPage() {
 
     void (async () => {
       try {
-        const data = await jsonFetch<{ comments: Array<{ id: number; userId: number; parentCommentId: number | null; content: string; createdAt: string }> }>(
+        const data = await jsonFetch<{ comments: Array<{ id: number; userId: number; authorName: string; parentCommentId: number | null; content: string; createdAt: string }> }>(
           `/api/blogs/slug/${post.slug}/comments`,
         );
         setComments(data.comments ?? []);
@@ -442,29 +493,87 @@ export default function BlogPostPage() {
     }
   }
 
-  async function copyLink() {
+  function trackShare(shareType: "full" | "section" | "visual" | "table" | "quote", platform: string, blogUrl: string) {
     if (!post) return;
-    setCopied(false);
+    const visitorId = getOrCreateVisitorId();
+    const payload = JSON.stringify({
+      visitorId,
+      shareType,
+      platform,
+      blogUrl,
+      blog: {
+        title: post.title,
+        description: post.metaDescription,
+        content: post.content,
+        coverImage: null,
+      },
+    });
+
+    const endpoint = `/api/blogs/slug/${post.slug}/share`;
     try {
-      await navigator.clipboard.writeText(shareLinks.copyText);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
+      if (typeof navigator !== "undefined" && "sendBeacon" in navigator) {
+        const blob = new Blob([payload], { type: "application/json" });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (navigator as any).sendBeacon(endpoint, blob);
+        return;
+      }
     } catch {
-      setEngagementError("Could not copy link");
+      // fall back
     }
+    void fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: payload,
+      keepalive: true,
+    }).catch(() => null);
   }
 
-  async function shareNative() {
-    if (!post) return;
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const nav = navigator as any;
-      if (!nav?.share) return;
-      const payload = share ?? buildShareLinks(postUrl, post.title, post.metaDescription);
-      await nav.share({ title: post.title, text: payload.nativeText, url: postUrl });
-    } catch {
-      // user cancelled
-    }
+  function buildFullShare(postTitle: string, description: string, url: string) {
+    const shortDesc = truncate(description, 100);
+    const text = `“I found this interesting article on DayTabs:\n\n${postTitle}\n\n${shortDesc}\n\nRead it here:\n${url}”`;
+    const xText = truncate(`I found this interesting article on DayTabs: ${postTitle} — ${truncate(description, 140)}`, 240);
+    const redditTitle = `${postTitle} (DayTabs)`;
+    return { text, xText, redditTitle, url };
+  }
+
+  function buildSectionShare(input: { sectionTitle: string; blogTitle: string; sectionUrl: string }) {
+    const text = `“I found this useful section on DayTabs:\n\n${input.sectionTitle}\n\nFrom: ${input.blogTitle}\n\nRead it here:\n${input.sectionUrl}”`;
+    const xText = truncate(`Useful section on DayTabs: ${input.sectionTitle} (from ${input.blogTitle})`, 240);
+    const redditTitle = `${input.sectionTitle} — ${input.blogTitle}`;
+    return { text, xText, redditTitle, url: input.sectionUrl };
+  }
+
+  function buildQuoteShare(input: { quoteText: string; blogTitle: string; url: string }) {
+    const clean = input.quoteText.trim().replace(/\s+/g, " ");
+    const text = `“I found this interesting insight on DayTabs:\n\n“${clean}”\n\nFrom: ${input.blogTitle}\n\nRead the full article:\n${input.url}”`;
+    const xText = truncate(`Insight from DayTabs: "${truncate(clean, 160)}" — ${input.blogTitle}`, 240);
+    const redditTitle = `Insight — ${input.blogTitle}`;
+    return { text, xText, redditTitle, url: input.url, clean };
+  }
+
+  function buildVisualShare(input: { blogTitle: string; url: string }) {
+    const text = `“I found this helpful visual on DayTabs:\n\nFrom: ${input.blogTitle}\n\nRead the full article:\n${input.url}”`;
+    const xText = truncate(`Visual from DayTabs: ${input.blogTitle}`, 240);
+    const redditTitle = `Visual — ${input.blogTitle}`;
+    return { text, xText, redditTitle, url: input.url };
+  }
+
+  function buildTableShare(input: { blogTitle: string; url: string }) {
+    const text = `“I found this useful table on DayTabs:\n\nFrom: ${input.blogTitle}\n\nRead the full article:\n${input.url}”`;
+    const xText = truncate(`Table from DayTabs: ${input.blogTitle}`, 240);
+    const redditTitle = `Table — ${input.blogTitle}`;
+    return { text, xText, redditTitle, url: input.url };
+  }
+
+  function openShare(next: NonNullable<typeof shareModal>) {
+    setEngagementError(null);
+    setShareCopiedLink(false);
+    setShareCopiedText(false);
+    setShareCardFormat("landscape");
+    setShareCardLoading(false);
+    setShareCardImage(null);
+    setShareCardFile(null);
+    setShareModal(next);
   }
 
   async function submitComment() {
@@ -485,9 +594,11 @@ export default function BlogPostPage() {
             content: post.content,
             coverImage: null,
           },
+          authorName: commentName,
           content: commentText,
         }),
       });
+      setCommentName("");
       setCommentText("");
       setCommentNotice("Comment submitted for review.");
     } catch (err) {
@@ -497,25 +608,31 @@ export default function BlogPostPage() {
     }
   }
 
-  async function openSectionShare(target: ShareTarget) {
-    setSectionShareOpen(true);
-    setSectionShareLoading(true);
-    setSectionShareImage(null);
-    setSectionShareFile(null);
-    setSectionShareCaption("");
-    setEngagementError(null);
-    try {
-      const result = await createShareCard(target);
-      setSectionShareImage(result.dataUrl);
-      setSectionShareFile(result.file);
-      setSectionShareCaption(result.caption);
-    } catch (err) {
-      setEngagementError(err instanceof Error ? err.message : "Could not create share image");
-      setSectionShareOpen(false);
-    } finally {
-      setSectionShareLoading(false);
-    }
-  }
+  useEffect(() => {
+    if (!shareModal?.cardTarget) return;
+    let cancelled = false;
+    setShareCardLoading(true);
+    setShareCardImage(null);
+    setShareCardFile(null);
+    void (async () => {
+      try {
+        const result = await createShareCard(shareModal.cardTarget!, shareCardFormat);
+        if (cancelled) return;
+        setShareCardImage(result.dataUrl);
+        setShareCardFile(result.file);
+      } catch (err) {
+        if (cancelled) return;
+        setEngagementError(err instanceof Error ? err.message : "Could not create share image");
+        setShareCardImage(null);
+        setShareCardFile(null);
+      } finally {
+        if (!cancelled) setShareCardLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [shareModal?.cardTarget, shareCardFormat]);
 
   useEffect(() => {
     if (!post) return;
@@ -523,19 +640,63 @@ export default function BlogPostPage() {
     if (!root) return;
 
     root.querySelectorAll(".blog-share-button").forEach((node) => node.remove());
+    root.querySelectorAll(".blog-heading-share-button").forEach((node) => node.remove());
 
-    const addButton = (wrapper: HTMLElement, target: ShareTarget) => {
+    const addOverlayButton = (wrapper: HTMLElement, opts: { label: string; shareType: "visual" | "table"; cardTarget: ShareCardTarget }) => {
       wrapper.classList.add("blog-shareable");
       const button = document.createElement("button");
       button.type = "button";
       button.className = "blog-share-button";
-      button.innerText = "Share";
+      button.innerText = opts.label;
       button.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        void openSectionShare(target);
+        const preset = opts.shareType === "table"
+          ? buildTableShare({ blogTitle: post.title, url: postUrl })
+          : buildVisualShare({ blogTitle: post.title, url: postUrl });
+        openShare({
+          shareType: opts.shareType,
+          title: post.title,
+          url: preset.url,
+          text: preset.text,
+          xText: preset.xText,
+          redditTitle: preset.redditTitle,
+          cardTarget: opts.cardTarget,
+        });
       });
       wrapper.appendChild(button);
+    };
+
+    const addHeadingButton = (heading: HTMLElement) => {
+      const id = heading.getAttribute("id");
+      if (!id) return;
+      const text = elementText(heading);
+      if (!text) return;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "blog-heading-share-button";
+      button.setAttribute("aria-label", "Share section");
+      button.innerHTML = `
+        <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">
+          <path fill="currentColor" d="M18 8a3 3 0 1 0-2.83-4H15a3 3 0 0 0 .17 1l-7.26 4.14A3 3 0 0 0 6 8a3 3 0 1 0 1.91 5.36l7.26 4.14a3 3 0 0 0-.17 1 3 3 0 1 0 3-3 2.98 2.98 0 0 0-1.91.69l-7.26-4.14A3 3 0 0 0 9 11.5c0-.19-.02-.38-.05-.56l7.26-4.14A2.98 2.98 0 0 0 18 8Z"/>
+        </svg>
+      `;
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const sectionUrl = `${postUrl}#${id}`;
+        const preset = buildSectionShare({ sectionTitle: text, blogTitle: post.title, sectionUrl });
+        openShare({
+          shareType: "section",
+          title: text,
+          url: preset.url,
+          text: preset.text,
+          xText: preset.xText,
+          redditTitle: preset.redditTitle,
+        });
+      });
+      heading.classList.add("blog-share-heading");
+      heading.appendChild(button);
     };
 
     // Tables
@@ -545,7 +706,11 @@ export default function BlogPostPage() {
       if (!table) return;
       const headers = Array.from(table.querySelectorAll("thead th")).map((th) => elementText(th)).filter(Boolean);
       const rows = Array.from(table.querySelectorAll("tbody tr")).map((tr) => Array.from(tr.querySelectorAll("td")).map((td) => elementText(td)));
-      addButton(wrapper, { kind: "table", title: post.title, slug: post.slug, postUrl, headers, rows });
+      addOverlayButton(wrapper, {
+        label: "Share table",
+        shareType: "table",
+        cardTarget: { kind: "table", title: post.title, slug: post.slug, postUrl, headers, rows },
+      });
     });
 
     // Images (wrap)
@@ -563,8 +728,68 @@ export default function BlogPostPage() {
             next.appendChild(image);
             return next;
           })();
-      addButton(wrapper, { kind: "image", title: post.title, slug: post.slug, postUrl, src, alt: image.alt || "" });
+      addOverlayButton(wrapper, {
+        label: "Share",
+        shareType: "visual",
+        cardTarget: { kind: "image", title: post.title, slug: post.slug, postUrl, src, alt: image.alt || "" },
+      });
     });
+
+    // H2/H3 share
+    root.querySelectorAll("h2, h3").forEach((node) => addHeadingButton(node as HTMLElement));
+  }, [post, postUrl]);
+
+  useEffect(() => {
+    if (!post) return;
+    const root = document.querySelector(".prose-content");
+    if (!root) return;
+
+    const handleSelection = () => {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed) {
+        setQuoteShare(null);
+        return;
+      }
+      const text = sel.toString().trim();
+      if (!text || text.length < 3) {
+        setQuoteShare(null);
+        return;
+      }
+      if (text.length > 800) {
+        setQuoteShare(null);
+        return;
+      }
+      const range = sel.rangeCount ? sel.getRangeAt(0) : null;
+      if (!range) {
+        setQuoteShare(null);
+        return;
+      }
+      const container = range.commonAncestorContainer;
+      const inside = container instanceof Element ? root.contains(container) : root.contains(container.parentElement);
+      if (!inside) {
+        setQuoteShare(null);
+        return;
+      }
+      const rect = range.getBoundingClientRect();
+      if (!rect || rect.width === 0 || rect.height === 0) {
+        setQuoteShare(null);
+        return;
+      }
+      const x = Math.min(window.innerWidth - 140, Math.max(12, rect.right + 10));
+      const y = Math.max(12, rect.top - 44);
+      setQuoteShare({ open: true, x, y, text });
+    };
+
+    const dismiss = () => setQuoteShare(null);
+
+    document.addEventListener("mouseup", handleSelection);
+    document.addEventListener("keyup", handleSelection);
+    window.addEventListener("scroll", dismiss, true);
+    return () => {
+      document.removeEventListener("mouseup", handleSelection);
+      document.removeEventListener("keyup", handleSelection);
+      window.removeEventListener("scroll", dismiss, true);
+    };
   }, [post, postUrl]);
 
   if (!post) {
@@ -582,7 +807,19 @@ export default function BlogPostPage() {
     );
   }
 
-  const shareLinks = share ?? buildShareLinks(postUrl, post.title, post.metaDescription);
+  const openFullShare = () => {
+    const preset = buildFullShare(post.title, post.metaDescription, postUrl);
+    openShare({
+      shareType: "full",
+      title: post.title,
+      url: preset.url,
+      text: preset.text,
+      xText: preset.xText,
+      redditTitle: preset.redditTitle,
+    });
+  };
+
+  const modalLinks = shareModal ? buildPlatformLinks({ url: shareModal.url, xText: shareModal.xText, redditTitle: shareModal.redditTitle }) : null;
 
   return (
     <div className="min-h-screen bg-background text-foreground overflow-x-hidden">
@@ -645,7 +882,7 @@ export default function BlogPostPage() {
                   <h1 className="text-3xl md:text-4xl font-bold leading-tight">{post.title}</h1>
                   <button
                     type="button"
-                    onClick={() => setShareOpen(true)}
+                    onClick={openFullShare}
                     className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2 text-sm text-white/70 hover:bg-white/[0.06] hover:text-white transition-colors cursor-pointer"
                   >
                     <Share2 className="w-4 h-4" />
@@ -725,7 +962,7 @@ export default function BlogPostPage() {
                     </div>
                     <button
                       type="button"
-                      onClick={() => setShareOpen(true)}
+                      onClick={openFullShare}
                       className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2 text-sm text-white/70 hover:bg-white/[0.06] hover:text-white transition-colors cursor-pointer"
                     >
                       <Share2 className="w-4 h-4" />
@@ -746,6 +983,13 @@ export default function BlogPostPage() {
 
                   {hasAuthToken ? (
                     <div className="space-y-3">
+                      <input
+                        value={commentName}
+                        onChange={(event) => setCommentName(event.target.value)}
+                        placeholder="Your name"
+                        className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-violet-500/30"
+                        maxLength={60}
+                      />
                       <textarea
                         value={commentText}
                         onChange={(event) => setCommentText(event.target.value)}
@@ -756,7 +1000,7 @@ export default function BlogPostPage() {
                         <button
                           type="button"
                           onClick={() => void submitComment()}
-                          disabled={commentWorking || !commentText.trim()}
+                          disabled={commentWorking || !commentText.trim() || !commentName.trim()}
                           className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-violet-600 to-purple-500 text-white text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                         >
                           {commentWorking ? "Submitting..." : "Submit comment"}
@@ -772,7 +1016,7 @@ export default function BlogPostPage() {
                   <div className="mt-6 space-y-4">
                     {comments.length ? comments.map((comment) => (
                       <div key={comment.id} className="rounded-xl border border-white/10 bg-white/[0.02] px-4 py-3">
-                        <p className="text-xs text-white/35">User #{comment.userId} · {new Date(comment.createdAt).toLocaleString("en-US")}</p>
+                        <p className="text-xs text-white/35">{comment.authorName?.trim() ? comment.authorName : `User #${comment.userId}`} · {new Date(comment.createdAt).toLocaleString("en-US")}</p>
                         <p className="mt-2 text-sm text-white/75 whitespace-pre-wrap">{comment.content}</p>
                       </div>
                     )) : (
@@ -796,210 +1040,222 @@ export default function BlogPostPage() {
               </div>
             </motion.article>
 
-            {shareOpen ? (
-              <div className="fixed inset-0 z-[100] flex items-center justify-center px-6">
-                <button
-                  type="button"
-                  className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-                  onClick={() => setShareOpen(false)}
-                  aria-label="Close share modal"
-                />
-                <div className="relative w-full max-w-lg glass rounded-2xl border border-white/10 p-6">
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <p className="text-sm font-semibold text-white">Share this post</p>
-                      <p className="mt-1 text-xs text-white/45 break-words">{postUrl}</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setShareOpen(false)}
-                      className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-white/70 hover:bg-white/[0.06] hover:text-white"
-                    >
-                      Close
-                    </button>
-                  </div>
-
-                  <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <button
-                      type="button"
-                      onClick={() => void copyLink()}
-                      className="flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white/75 hover:bg-white/[0.06] hover:text-white"
-                    >
-                      {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                      {copied ? "Copied" : "Copy share text"}
-                    </button>
-                    <a
-                      href={shareLinks.x}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white/75 hover:bg-white/[0.06] hover:text-white"
-                    >
-                      <Share2 className="w-4 h-4" />
-                      Share on X
-                    </a>
-                    <a
-                      href={shareLinks.linkedin}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white/75 hover:bg-white/[0.06] hover:text-white"
-                    >
-                      <Share2 className="w-4 h-4" />
-                      Share on LinkedIn
-                    </a>
-                    <a
-                      href={shareLinks.reddit}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white/75 hover:bg-white/[0.06] hover:text-white"
-                    >
-                      <Share2 className="w-4 h-4" />
-                      Share on Reddit
-                    </a>
-                    <a
-                      href={shareLinks.whatsapp}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white/75 hover:bg-white/[0.06] hover:text-white"
-                    >
-                      <Share2 className="w-4 h-4" />
-                      WhatsApp
-                    </a>
-                    <a
-                      href={shareLinks.telegram}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white/75 hover:bg-white/[0.06] hover:text-white"
-                    >
-                      <Share2 className="w-4 h-4" />
-                      Telegram
-                    </a>
-                    {typeof navigator !== "undefined" && "share" in navigator ? (
-                      <button
-                        type="button"
-                        onClick={() => void shareNative()}
-                        className="sm:col-span-2 flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-purple-500 px-4 py-3 text-sm font-medium text-white hover:from-violet-500 hover:to-purple-400"
-                      >
-                        <Share2 className="w-4 h-4" />
-                        Native share
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
-              </div>
+            {quoteShare?.open ? (
+              <button
+                type="button"
+                className="blog-quote-share-fab"
+                style={{ left: quoteShare.x, top: quoteShare.y }}
+                onClick={() => {
+                  const preset = buildQuoteShare({ quoteText: quoteShare.text, blogTitle: post.title, url: postUrl });
+                  openShare({
+                    shareType: "quote",
+                    title: "Quote",
+                    url: preset.url,
+                    text: preset.text,
+                    xText: preset.xText,
+                    redditTitle: preset.redditTitle,
+                    cardTarget: { kind: "quote", title: post.title, slug: post.slug, postUrl, quote: preset.clean },
+                  });
+                  setQuoteShare(null);
+                }}
+              >
+                <Share2 className="w-4 h-4" />
+                Share quote
+              </button>
             ) : null}
 
-            {sectionShareOpen ? (
-              <div className="fixed inset-0 z-[120] flex items-center justify-center px-6">
+            {shareModal ? (
+              <div className="fixed inset-0 z-[130] flex items-center justify-center px-6">
                 <button
                   type="button"
                   className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-                  onClick={() => setSectionShareOpen(false)}
-                  aria-label="Close share image modal"
+                  onClick={() => setShareModal(null)}
+                  aria-label="Close share modal"
                 />
                 <div className="relative w-full max-w-2xl glass rounded-2xl border border-white/10 p-6">
                   <div className="flex items-start justify-between gap-4">
                     <div>
-                      <p className="text-sm font-semibold text-white">Share as image</p>
-                      <p className="mt-1 text-xs text-white/45">Dark background, optimized for social (1200×630).</p>
+                      <p className="text-sm font-semibold text-white">
+                        {shareModal.shareType === "full" ? "Share this blog" : "Share"}
+                      </p>
+                      <p className="mt-1 text-xs text-white/45 break-words">{shareModal.url}</p>
                     </div>
                     <button
                       type="button"
-                      onClick={() => setSectionShareOpen(false)}
+                      onClick={() => setShareModal(null)}
                       className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-white/70 hover:bg-white/[0.06] hover:text-white"
                     >
                       Close
                     </button>
                   </div>
 
-                  <div className="mt-5">
-                    {sectionShareLoading ? (
-                      <div className="flex items-center justify-center h-[320px] rounded-xl border border-dashed border-white/10 text-sm text-white/55">
-                        Creating image...
+                  {shareModal.cardTarget ? (
+                    <>
+                      <div className="mt-5 flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setShareCardFormat("landscape")}
+                          className={`rounded-xl border px-3 py-2 text-xs font-semibold transition-colors ${
+                            shareCardFormat === "landscape"
+                              ? "border-violet-400/40 bg-violet-500/20 text-violet-100"
+                              : "border-white/10 bg-white/[0.03] text-white/70 hover:bg-white/[0.06] hover:text-white"
+                          }`}
+                        >
+                          1200×630
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setShareCardFormat("portrait")}
+                          className={`rounded-xl border px-3 py-2 text-xs font-semibold transition-colors ${
+                            shareCardFormat === "portrait"
+                              ? "border-violet-400/40 bg-violet-500/20 text-violet-100"
+                              : "border-white/10 bg-white/[0.03] text-white/70 hover:bg-white/[0.06] hover:text-white"
+                          }`}
+                        >
+                          1080×1350
+                        </button>
+                        <span className="text-xs text-white/40">Download image for social sharing.</span>
                       </div>
-                    ) : sectionShareImage ? (
-                      <div className="overflow-hidden rounded-xl border border-white/10 bg-black/20">
-                        <img src={sectionShareImage} alt="Share card preview" className="w-full object-cover" />
+
+                      <div className="mt-4">
+                        {shareCardLoading ? (
+                          <div className="flex items-center justify-center h-[320px] rounded-xl border border-dashed border-white/10 text-sm text-white/55">
+                            Creating image...
+                          </div>
+                        ) : shareCardImage ? (
+                          <div className="overflow-hidden rounded-xl border border-white/10 bg-black/20">
+                            <img src={shareCardImage} alt="Share card preview" className="w-full object-cover" />
+                          </div>
+                        ) : null}
                       </div>
-                    ) : null}
-                  </div>
+                    </>
+                  ) : null}
 
                   <div className="mt-5 grid gap-3 sm:grid-cols-2">
                     <button
                       type="button"
                       onClick={async () => {
-                        if (!sectionShareCaption) return;
                         try {
-                          await navigator.clipboard.writeText(sectionShareCaption);
+                          await navigator.clipboard.writeText(shareModal.url);
+                          setShareCopiedLink(true);
+                          window.setTimeout(() => setShareCopiedLink(false), 1500);
+                          trackShare(shareModal.shareType, "copy_link", shareModal.url);
                         } catch {
-                          setEngagementError("Could not copy caption");
+                          setEngagementError("Could not copy link");
                         }
                       }}
                       className="flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white/75 hover:bg-white/[0.06] hover:text-white"
-                      disabled={!sectionShareCaption}
                     >
-                      <Copy className="w-4 h-4" />
-                      Copy caption
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (!sectionShareFile || !sectionShareImage) return;
-                        const a = document.createElement("a");
-                        a.href = sectionShareImage;
-                        a.download = sectionShareFile.name;
-                        a.click();
-                      }}
-                      className="flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-purple-500 px-4 py-3 text-sm font-medium text-white hover:from-violet-500 hover:to-purple-400 disabled:opacity-50"
-                      disabled={!sectionShareImage || !sectionShareFile}
-                    >
-                      <ImageIcon className="w-4 h-4" />
-                      Download image
+                      {shareCopiedLink ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                      {shareCopiedLink ? "Copied link" : "Copy link"}
                     </button>
 
-                    {sectionShareFile && typeof navigator !== "undefined" && "canShare" in navigator && "share" in navigator ? (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          await navigator.clipboard.writeText(shareModal.text);
+                          setShareCopiedText(true);
+                          window.setTimeout(() => setShareCopiedText(false), 1500);
+                          trackShare(shareModal.shareType, "copy_text", shareModal.url);
+                        } catch {
+                          setEngagementError("Could not copy text");
+                        }
+                      }}
+                      className="flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white/75 hover:bg-white/[0.06] hover:text-white"
+                    >
+                      {shareCopiedText ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                      {shareCopiedText ? "Copied text" : "Copy text"}
+                    </button>
+
+                    {shareModal.cardTarget ? (
                       <button
                         type="button"
-                        onClick={async () => {
-                          try {
-                            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                            const nav = navigator as any;
-                            if (!nav?.canShare?.({ files: [sectionShareFile] })) return;
-                            await nav.share({ files: [sectionShareFile], text: sectionShareCaption, title: post.title });
-                          } catch {
-                            // cancelled
-                          }
+                        onClick={() => {
+                          if (!shareCardFile || !shareCardImage) return;
+                          const a = document.createElement("a");
+                          a.href = shareCardImage;
+                          a.download = shareCardFile.name;
+                          a.click();
+                          trackShare(shareModal.shareType, "download_image", shareModal.url);
                         }}
-                        className="sm:col-span-2 flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white/75 hover:bg-white/[0.06] hover:text-white"
+                        className="sm:col-span-2 flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-purple-500 px-4 py-3 text-sm font-medium text-white hover:from-violet-500 hover:to-purple-400 disabled:opacity-50"
+                        disabled={!shareCardImage || !shareCardFile}
                       >
-                        <Share2 className="w-4 h-4" />
-                        Native share (with image)
+                        <ImageIcon className="w-4 h-4" />
+                        Download image
                       </button>
+                    ) : null}
+
+                    {typeof navigator !== "undefined" && "share" in navigator ? (
+                      shareModal.cardTarget && shareCardFile && typeof navigator !== "undefined" && "canShare" in navigator ? (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                              const nav = navigator as any;
+                              if (!nav?.canShare?.({ files: [shareCardFile] })) return;
+                              await nav.share({ files: [shareCardFile], text: shareModal.text, title: post.title, url: shareModal.url });
+                              trackShare(shareModal.shareType, "native", shareModal.url);
+                            } catch {
+                              // cancelled
+                            }
+                          }}
+                          className="sm:col-span-2 flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white/75 hover:bg-white/[0.06] hover:text-white"
+                        >
+                          <Share2 className="w-4 h-4" />
+                          Native share (with image)
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                              const nav = navigator as any;
+                              if (!nav?.share) return;
+                              await nav.share({ title: shareModal.title, text: shareModal.text, url: shareModal.url });
+                              trackShare(shareModal.shareType, "native", shareModal.url);
+                            } catch {
+                              // cancelled
+                            }
+                          }}
+                          className="sm:col-span-2 flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-purple-500 px-4 py-3 text-sm font-medium text-white hover:from-violet-500 hover:to-purple-400"
+                        >
+                          <Share2 className="w-4 h-4" />
+                          Native share
+                        </button>
+                      )
                     ) : null}
                   </div>
 
                   <div className="mt-4 grid gap-3 sm:grid-cols-3">
                     <a
-                      href={shareLinks.x}
+                      href={modalLinks?.x ?? "#"}
                       target="_blank"
                       rel="noreferrer"
+                      onClick={() => trackShare(shareModal.shareType, "x", shareModal.url)}
                       className="flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white/75 hover:bg-white/[0.06] hover:text-white"
                     >
                       <Share2 className="w-4 h-4" />
                       X
                     </a>
                     <a
-                      href={shareLinks.linkedin}
+                      href={modalLinks?.linkedin ?? "#"}
                       target="_blank"
                       rel="noreferrer"
+                      onClick={() => trackShare(shareModal.shareType, "linkedin", shareModal.url)}
                       className="flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white/75 hover:bg-white/[0.06] hover:text-white"
                     >
                       <Share2 className="w-4 h-4" />
                       LinkedIn
                     </a>
                     <a
-                      href={shareLinks.reddit}
+                      href={modalLinks?.reddit ?? "#"}
                       target="_blank"
                       rel="noreferrer"
+                      onClick={() => trackShare(shareModal.shareType, "reddit", shareModal.url)}
                       className="flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white/75 hover:bg-white/[0.06] hover:text-white"
                     >
                       <Share2 className="w-4 h-4" />
@@ -1019,7 +1275,9 @@ export default function BlogPostPage() {
                       <a
                         key={h.id}
                         href={`#${h.id}`}
-                        className="text-sm text-white/50 hover:text-violet-300 transition-colors py-1 leading-tight"
+                        className={`text-sm hover:text-violet-300 transition-colors py-1 leading-tight ${
+                          h.level === 3 ? "text-white/45 pl-3" : "text-white/50"
+                        }`}
                       >
                         {h.text}
                       </a>

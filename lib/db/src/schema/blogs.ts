@@ -37,6 +37,7 @@ export const blogCommentsTable = pgTable("blog_comments", {
   id: serial("id").primaryKey(),
   blogId: integer("blog_id").notNull().references(() => blogsTable.id, { onDelete: "cascade" }),
   userId: integer("user_id").notNull().references(() => usersTable.id, { onDelete: "cascade" }),
+  authorName: text("author_name").notNull().default(""),
   parentCommentId: integer("parent_comment_id"),
   content: text("content").notNull(),
   status: text("status").notNull().default("pending"),
@@ -44,8 +45,17 @@ export const blogCommentsTable = pgTable("blog_comments", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+export const blogSharesTable = pgTable("blog_shares", {
+  id: serial("id").primaryKey(),
+  blogId: integer("blog_id").notNull().references(() => blogsTable.id, { onDelete: "cascade" }),
+  shareType: text("share_type").notNull(),
+  platform: text("platform").notNull(),
+  blogUrl: text("blog_url").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 export type Blog = typeof blogsTable.$inferSelect;
 export type BlogView = typeof blogViewsTable.$inferSelect;
 export type BlogLike = typeof blogLikesTable.$inferSelect;
 export type BlogComment = typeof blogCommentsTable.$inferSelect;
-
+export type BlogShare = typeof blogSharesTable.$inferSelect;

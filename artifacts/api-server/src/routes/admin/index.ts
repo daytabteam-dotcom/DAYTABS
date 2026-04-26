@@ -332,6 +332,7 @@ router.get("/blog-comments", async (req, res) => {
       user_id: number;
       user_email: string;
       user_name: string | null;
+      author_name: string;
       content: string;
       status: string;
       created_at: Date;
@@ -345,6 +346,7 @@ router.get("/blog-comments", async (req, res) => {
         bc.user_id,
         u.email AS user_email,
         u.name AS user_name,
+        bc.author_name,
         bc.content,
         bc.status,
         bc.created_at,
@@ -363,6 +365,7 @@ router.get("/blog-comments", async (req, res) => {
         id: row.id,
         blog: { id: row.blog_id, slug: row.blog_slug, title: row.blog_title },
         user: { id: row.user_id, email: row.user_email, name: row.user_name },
+        authorName: row.author_name ?? "",
         content: row.content,
         status: row.status,
         createdAt: row.created_at.toISOString(),

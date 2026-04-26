@@ -324,6 +324,60 @@
     transform: translateY(0);
   }
 
+  .prose-content .blog-share-heading {
+    position: relative;
+  }
+
+  .prose-content .blog-heading-share-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    margin-left: 0.45rem;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(10, 10, 20, 0.6);
+    color: rgba(255, 255, 255, 0.78);
+    vertical-align: middle;
+    opacity: 0;
+    transform: translateY(-2px);
+    transition: opacity 0.16s ease, transform 0.16s ease, background 0.16s ease;
+    cursor: pointer;
+  }
+
+  .prose-content .blog-heading-share-button:hover {
+    background: rgba(124, 58, 237, 0.38);
+    color: rgba(255, 255, 255, 0.92);
+  }
+
+  .prose-content .blog-share-heading:hover .blog-heading-share-button {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  .blog-quote-share-fab {
+    position: fixed;
+    z-index: 140;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.55rem 0.75rem;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(10, 10, 20, 0.8);
+    color: rgba(255, 255, 255, 0.92);
+    font-size: 0.78rem;
+    font-weight: 650;
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+    backdrop-filter: blur(10px);
+    cursor: pointer;
+  }
+
+  .blog-quote-share-fab:hover {
+    background: rgba(124, 58, 237, 0.45);
+  }
+
   .prose-content .blog-table {
     width: 100%;
     min-width: 640px;

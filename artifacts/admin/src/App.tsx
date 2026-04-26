@@ -88,6 +88,7 @@ interface ModerationComment {
   id: number;
   blog: { id: number; slug: string; title: string };
   user: { id: number; email: string; name: string | null };
+  authorName: string;
   content: string;
   status: CommentStatus;
   createdAt: string;
@@ -695,6 +696,12 @@ function BlogCommentsModerationView() {
                         <span>/{comment.blog.slug}</span>
                         <span>·</span>
                         <span>{comment.user.email}</span>
+                        {comment.authorName ? (
+                          <>
+                            <span>·</span>
+                            <span>{comment.authorName}</span>
+                          </>
+                        ) : null}
                       </p>
                     </div>
                     <div className="comment-actions">
