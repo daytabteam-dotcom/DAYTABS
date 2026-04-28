@@ -15,6 +15,9 @@ import PrivacyPage from "@/pages/PrivacyPage";
 import RefundPolicyPage from "@/pages/RefundPolicyPage";
 import BlogIndexPage from "@/pages/BlogIndexPage";
 import BlogPostPage from "@/pages/BlogPostPage";
+import FeaturesIndexPage from "@/pages/FeaturesIndexPage";
+import TeleprompterFeaturePage from "@/pages/TeleprompterFeaturePage";
+import FeaturesSlugPage from "@/pages/FeaturesSlugPage";
 import { LandingI18nProvider } from "@/lib/i18n";
 
 const queryClient = new QueryClient();
@@ -32,6 +35,9 @@ function Router() {
       <Route path="/terms" component={TermsPage} />
       <Route path="/privacy" component={PrivacyPage} />
       <Route path="/refund-policy" component={RefundPolicyPage} />
+      <Route path="/features" component={FeaturesIndexPage} />
+      <Route path="/features/teleprompter" component={TeleprompterFeaturePage} />
+      <Route path="/features/:slug" component={FeaturesSlugPage} />
       <Route path="/blog" component={BlogIndexPage} />
       <Route path="/blog/:slug" component={BlogPostPage} />
       <Route component={NotFound} />

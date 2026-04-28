@@ -10,7 +10,7 @@ export default function Navbar() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [currentPath, navigate] = useLocation();
   const navLinks = [
-    { label: copy.nav.features, href: "#features" },
+    { label: copy.nav.features, href: "/features" },
     { label: copy.nav.howItWorks, href: "#how-it-works" },
     { label: copy.nav.blog, href: "/blog" },
     { label: copy.nav.pricing, href: "/pricing" },
