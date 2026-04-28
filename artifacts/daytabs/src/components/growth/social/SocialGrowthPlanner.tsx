@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { PanelCardSoft } from "@/components/panel-system";
-import type { SocialPlatform, SocialPlanDay, SocialPostPerformanceFeedback, SocialWeeklyPlan } from "./types";
+import type { SocialPlatform, SocialPlanDay, SocialPostPerformanceFeedback, SocialPostingMode, SocialWeekday, SocialWeeklyPlan } from "./types";
 import { fetchLatestSocialPlan, generateNextWeekSocialPlan, generateSocialPlan, patchSocialDay, deleteSocialDay, regenerateSocialDay } from "./socialApi";
 import { SocialPlanSetup } from "./SocialPlanSetup";
 import { SocialPlanBoard } from "./SocialPlanBoard";
@@ -52,7 +52,7 @@ export default function SocialGrowthPlanner({ platform }: { platform: SocialPlat
     void loadLatest();
   }, [loadLatest]);
 
-  const handleGenerate = useCallback(async (input: { topic: string; postsPerWeek: number; audience?: string; goal?: string; tone?: string; formatPreference?: string }) => {
+  const handleGenerate = useCallback(async (input: { topic: string; postsPerWeek: number; postingMode: SocialPostingMode; preferredWeekdays?: SocialWeekday[]; audience?: string; goal?: string; tone?: string; formatPreference?: string }) => {
     setWorking("generate");
     setError(null);
     setLimitError(null);
@@ -98,12 +98,12 @@ export default function SocialGrowthPlanner({ platform }: { platform: SocialPlat
     }
   }, [plan]);
 
-  const handleRegenerateDay = useCallback(async (day: SocialPlanDay) => {
+  const handleRegenerateDay = useCallback(async (day: SocialPlanDay, intent?: string) => {
     if (!plan) return;
     setWorking(`regen:${day.id}`);
     setError(null);
     try {
-      const data = await regenerateSocialDay({ planId: plan.id, dayId: day.id, platform });
+      const data = await regenerateSocialDay({ planId: plan.id, dayId: day.id, platform, intent });
       setPlan(data.plan);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not regenerate idea");
@@ -135,6 +135,8 @@ export default function SocialGrowthPlanner({ platform }: { platform: SocialPlat
         platform,
         topic: pendingNextWeekTopic.trim() || plan.topic,
         postsPerWeek: plan.postsPerWeek,
+        postingMode: plan.postingMode,
+        preferredWeekdays: plan.preferredWeekdays,
         audience: plan.audience ?? undefined,
         goal: plan.goal ?? undefined,
         tone: plan.tone ?? undefined,
@@ -203,4 +205,3 @@ export default function SocialGrowthPlanner({ platform }: { platform: SocialPlat
     </div>
   );
 }
-

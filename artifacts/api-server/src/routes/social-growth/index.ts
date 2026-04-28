@@ -1,8 +1,14 @@
 import { Router } from "express";
 import { requireAuth } from "../../middlewares/auth";
 import { normalizePlan, PLAN_LIMITS } from "../../lib/planLimits";
-import { checkAndIncrementSocialGrowthPlan } from "../../lib/usageService";
-import type { SocialPlatform, SocialPostPerformanceFeedback, SocialPlanDay } from "../../models/socialGrowthPlan";
+import { checkAndIncrementSocialGrowthPlan, checkSocialGrowthPlanLimit } from "../../lib/usageService";
+import type {
+  SocialPlatform,
+  SocialPostPerformanceFeedback,
+  SocialPlanDay,
+  SocialPostingMode,
+  SocialWeekday,
+} from "../../models/socialGrowthPlan";
 import { generateSocialWeeklyPlanAi, regenerateSocialPlanDayAi } from "../../services/socialGrowthAiService";
 import {
   createSocialWeeklyPlan,
@@ -19,6 +25,14 @@ router.use(requireAuth);
 
 function isPlatform(value: unknown): value is SocialPlatform {
   return value === "linkedin" || value === "tiktok" || value === "instagram";
+}
+
+function isPostingMode(value: unknown): value is SocialPostingMode {
+  return value === "manual" || value === "ai_optimized";
+}
+
+function isWeekday(value: unknown): value is SocialWeekday {
+  return value === "Mon" || value === "Tue" || value === "Wed" || value === "Thu" || value === "Fri" || value === "Sat" || value === "Sun";
 }
 
 function isIsoDate(value: unknown): value is string {
@@ -68,6 +82,8 @@ router.post("/plans/generate", async (req, res) => {
     platform,
     topic,
     postsPerWeek,
+    postingMode,
+    preferredWeekdays,
     audience,
     goal,
     tone,
@@ -86,8 +102,13 @@ router.post("/plans/generate", async (req, res) => {
     return;
   }
 
-  const posts = Math.max(1, Math.min(7, Number(postsPerWeek ?? 0) || 0));
-  if (!posts) {
+  const mode: SocialPostingMode = isPostingMode(postingMode) ? postingMode : "manual";
+  const weekdays = Array.isArray(preferredWeekdays) ? preferredWeekdays.filter(isWeekday) : [];
+
+  const posts = mode === "ai_optimized"
+    ? Math.max(1, Math.min(7, Number(postsPerWeek ?? 5) || 5))
+    : Math.max(1, Math.min(7, Number(postsPerWeek ?? 0) || 0));
+  if (mode === "manual" && !posts) {
     res.status(400).json({ error: "postsPerWeek must be between 1 and 7." });
     return;
   }
@@ -106,7 +127,7 @@ router.post("/plans/generate", async (req, res) => {
 
   const model = PLAN_LIMITS[normalizePlan(rawPlan)].script_planner_model;
 
-  const planPayload = await generateSocialWeeklyPlanAi({
+  const aiResult = await generateSocialWeeklyPlanAi({
     userId: req.auth!.user_id,
     model,
     platform,
@@ -114,6 +135,8 @@ router.post("/plans/generate", async (req, res) => {
     endDate,
     topic: trimmedTopic,
     postsPerWeek: posts,
+    postingMode: mode,
+    preferredWeekdays: weekdays.length ? weekdays : undefined,
     audience: typeof audience === "string" ? audience : undefined,
     goal: typeof goal === "string" ? goal : undefined,
     tone: typeof tone === "string" ? tone : undefined,
@@ -128,12 +151,14 @@ router.post("/plans/generate", async (req, res) => {
     startDate: computedStart,
     endDate,
     topic: trimmedTopic,
-    postsPerWeek: posts,
+    postsPerWeek: aiResult.postsPerWeek,
+    postingMode: mode,
+    preferredWeekdays: weekdays.length ? weekdays : undefined,
     audience: typeof audience === "string" ? audience : undefined,
     goal: typeof goal === "string" ? goal : undefined,
     tone: typeof tone === "string" ? tone : undefined,
     formatPreference: typeof formatPreference === "string" ? formatPreference : undefined,
-    plan: planPayload,
+    plan: aiResult.plan,
   });
 
   res.json({ plan: row });
@@ -170,6 +195,8 @@ router.post("/plans/:id/generate-next-week", async (req, res) => {
     platform,
     topic,
     postsPerWeek,
+    postingMode,
+    preferredWeekdays,
     audience,
     goal,
     tone,
@@ -182,6 +209,9 @@ router.post("/plans/:id/generate-next-week", async (req, res) => {
     res.status(400).json({ error: "Invalid platform" });
     return;
   }
+
+  const mode: SocialPostingMode = isPostingMode(postingMode) ? postingMode : "manual";
+  const weekdays = Array.isArray(preferredWeekdays) ? preferredWeekdays.filter(isWeekday) : [];
 
   const currentPlan = await getLatestSocialWeeklyPlan(req.auth!.user_id, platform);
   if (!currentPlan || currentPlan.id !== planId) {
@@ -201,7 +231,9 @@ router.post("/plans/:id/generate-next-week", async (req, res) => {
     return;
   }
 
-  const posts = Math.max(1, Math.min(7, Number(postsPerWeek ?? currentPlan.postsPerWeek ?? 0) || 0));
+  const posts = mode === "ai_optimized"
+    ? Math.max(1, Math.min(7, Number(postsPerWeek ?? currentPlan.postsPerWeek ?? 5) || 5))
+    : Math.max(1, Math.min(7, Number(postsPerWeek ?? currentPlan.postsPerWeek ?? 0) || 0));
   const nextStart = addDaysIso(currentPlan.endDate, 1);
   const { endDate } = weekRangeForStart(nextStart);
 
@@ -212,9 +244,16 @@ router.post("/plans/:id/generate-next-week", async (req, res) => {
     await saveSocialWeeklyPlanFeedback(req.auth!.user_id, planId, platform, normalizedFeedback);
   }
 
+  const rawPlan = req.auth!.plan ?? "free";
+  const usageCheck = await checkAndIncrementSocialGrowthPlan(req.auth!.user_id, rawPlan);
+  if (!usageCheck.allowed) {
+    res.status(429).json({ ...usageCheck.error, limitReached: true, type: "growth_planner_limit" });
+    return;
+  }
+
   const model = PLAN_LIMITS[normalizePlan(req.auth!.plan ?? "free")].script_planner_model;
 
-  const planPayload = await generateSocialWeeklyPlanAi({
+  const aiResult = await generateSocialWeeklyPlanAi({
     userId: req.auth!.user_id,
     model,
     platform,
@@ -222,6 +261,8 @@ router.post("/plans/:id/generate-next-week", async (req, res) => {
     endDate,
     topic: trimmedTopic,
     postsPerWeek: posts,
+    postingMode: mode,
+    preferredWeekdays: weekdays.length ? weekdays : undefined,
     audience: typeof audience === "string" ? audience : (currentPlan.audience ?? undefined),
     goal: typeof goal === "string" ? goal : (currentPlan.goal ?? undefined),
     tone: typeof tone === "string" ? tone : (currentPlan.tone ?? undefined),
@@ -236,12 +277,14 @@ router.post("/plans/:id/generate-next-week", async (req, res) => {
     startDate: nextStart,
     endDate,
     topic: trimmedTopic,
-    postsPerWeek: posts,
+    postsPerWeek: aiResult.postsPerWeek,
+    postingMode: mode,
+    preferredWeekdays: weekdays.length ? weekdays : undefined,
     audience: typeof audience === "string" ? audience : (currentPlan.audience ?? undefined),
     goal: typeof goal === "string" ? goal : (currentPlan.goal ?? undefined),
     tone: typeof tone === "string" ? tone : (currentPlan.tone ?? undefined),
     formatPreference: typeof formatPreference === "string" ? formatPreference : (currentPlan.formatPreference ?? undefined),
-    plan: planPayload,
+    plan: aiResult.plan,
   });
 
   res.json({ plan: row, message: "Your feedback was saved. Creating next week's plan now." });
@@ -295,6 +338,7 @@ router.post("/plans/:id/days/:dayId/regenerate", async (req, res) => {
   }
 
   const platform = req.body?.platform;
+  const intent = typeof req.body?.intent === "string" ? req.body.intent : undefined;
   if (!isPlatform(platform)) {
     res.status(400).json({ error: "Invalid platform" });
     return;
@@ -303,6 +347,12 @@ router.post("/plans/:id/days/:dayId/regenerate", async (req, res) => {
   const currentPlan = await getLatestSocialWeeklyPlan(req.auth!.user_id, platform);
   if (!currentPlan || currentPlan.id !== planId) {
     res.status(404).json({ error: "Plan not found" });
+    return;
+  }
+
+  const limitCheck = await checkSocialGrowthPlanLimit(req.auth!.user_id, req.auth!.plan ?? "free");
+  if (!limitCheck.allowed) {
+    res.status(429).json({ ...limitCheck.error, limitReached: true, type: "growth_planner_limit" });
     return;
   }
 
@@ -320,6 +370,7 @@ router.post("/plans/:id/days/:dayId/regenerate", async (req, res) => {
     platform,
     topic: currentPlan.topic,
     day,
+    intent,
   });
 
   const updated = await updateSocialPlanDay(req.auth!.user_id, planId, dayId, regenerated as Record<string, unknown>);
@@ -331,4 +382,3 @@ router.post("/plans/:id/days/:dayId/regenerate", async (req, res) => {
 });
 
 export default router;
-

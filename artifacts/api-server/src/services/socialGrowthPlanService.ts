@@ -32,6 +32,8 @@ export async function createSocialWeeklyPlan(userId: number, input: SocialWeekly
       endDate: input.endDate,
       topic: input.topic,
       postsPerWeek: input.postsPerWeek,
+      postingMode: input.postingMode ?? "manual",
+      preferredWeekdays: (input.preferredWeekdays ?? []) as unknown as object,
       audience: input.audience ?? null,
       goal: input.goal ?? null,
       tone: input.tone ?? null,
@@ -123,4 +125,3 @@ function isoWeekNumber(isoDate: string) {
   const yearStart = new Date(Date.UTC(utcDate.getUTCFullYear(), 0, 1));
   return Math.ceil((((utcDate.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
 }
-

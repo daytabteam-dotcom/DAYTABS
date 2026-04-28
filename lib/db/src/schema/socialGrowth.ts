@@ -10,6 +10,8 @@ export const socialGrowthWeeklyPlansTable = pgTable("social_growth_weekly_plans"
   endDate: text("end_date").notNull(),
   topic: text("topic").notNull(),
   postsPerWeek: integer("posts_per_week").notNull(),
+  postingMode: text("posting_mode").notNull().default("manual"),
+  preferredWeekdays: jsonb("preferred_weekdays").notNull().default([]),
   audience: text("audience"),
   goal: text("goal"),
   tone: text("tone"),
@@ -30,4 +32,3 @@ export const socialGrowthPlanFeedbackTable = pgTable("social_growth_plan_feedbac
 
 export type SocialGrowthWeeklyPlan = typeof socialGrowthWeeklyPlansTable.$inferSelect;
 export type SocialGrowthPlanFeedback = typeof socialGrowthPlanFeedbackTable.$inferSelect;
-

@@ -1,5 +1,5 @@
 import { DAYTABS_LOCALE_STORAGE_KEY } from "@/lib/i18n";
-import type { SocialPlatform, SocialPostPerformanceFeedback, SocialWeeklyPlan } from "./types";
+import type { SocialPlatform, SocialPostPerformanceFeedback, SocialPostingMode, SocialWeekday, SocialWeeklyPlan } from "./types";
 
 function authHeaders(): HeadersInit {
   const token = localStorage.getItem("daytabs_token");
@@ -32,6 +32,8 @@ export async function generateSocialPlan(input: {
   platform: SocialPlatform;
   topic: string;
   postsPerWeek: number;
+  postingMode?: SocialPostingMode;
+  preferredWeekdays?: SocialWeekday[];
   audience?: string;
   goal?: string;
   tone?: string;
@@ -60,10 +62,10 @@ export async function deleteSocialDay(input: { planId: number; dayId: string }) 
   });
 }
 
-export async function regenerateSocialDay(input: { planId: number; dayId: string; platform: SocialPlatform }) {
+export async function regenerateSocialDay(input: { planId: number; dayId: string; platform: SocialPlatform; intent?: string }) {
   return await jsonFetch<{ plan: SocialWeeklyPlan }>(`/api/social-growth/plans/${input.planId}/days/${input.dayId}/regenerate`, {
     method: "POST",
-    body: JSON.stringify({ platform: input.platform }),
+    body: JSON.stringify({ platform: input.platform, intent: input.intent }),
   });
 }
 
@@ -72,6 +74,8 @@ export async function generateNextWeekSocialPlan(input: {
   platform: SocialPlatform;
   topic?: string;
   postsPerWeek?: number;
+  postingMode?: SocialPostingMode;
+  preferredWeekdays?: SocialWeekday[];
   audience?: string;
   goal?: string;
   tone?: string;
@@ -84,4 +88,3 @@ export async function generateNextWeekSocialPlan(input: {
     body: JSON.stringify(input),
   });
 }
-

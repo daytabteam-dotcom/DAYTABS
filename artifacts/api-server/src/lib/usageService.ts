@@ -380,3 +380,29 @@ export async function checkAndIncrementSocialGrowthPlan(userId: number, rawPlan:
 
   return { allowed: true, used: used + 1, limit };
 }
+
+export async function checkSocialGrowthPlanLimit(userId: number, rawPlan: string): Promise<{
+  allowed: boolean;
+  used: number;
+  limit: number;
+  error?: { error: string };
+}> {
+  const plan = normalizePlan(rawPlan);
+  const limit = socialGrowthPlanLimit(plan);
+
+  const usage = await getOrCreateUsage(userId);
+  const used = usage.socialGrowthPlansUsed ?? 0;
+
+  if (used >= limit) {
+    return {
+      allowed: false,
+      used,
+      limit,
+      error: {
+        error: "You have reached your Growth Planner limit on your current plan. Upgrade your plan to create more weekly plans.",
+      },
+    };
+  }
+
+  return { allowed: true, used, limit };
+}
