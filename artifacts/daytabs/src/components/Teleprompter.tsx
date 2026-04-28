@@ -193,12 +193,21 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
 
     try {
       stopMediaTracks();
+      const supported = navigator.mediaDevices.getSupportedConstraints?.() ?? {};
+      const isPortrait = typeof window !== "undefined" && window.innerHeight > window.innerWidth;
+      const idealWidth = isPortrait ? 720 : 1280;
+      const idealHeight = isPortrait ? 1280 : 720;
+
+      const videoConstraints: MediaTrackConstraints = {
+        facingMode: "user",
+      };
+      if (supported.width) videoConstraints.width = { ideal: idealWidth };
+      if (supported.height) videoConstraints.height = { ideal: idealHeight };
+      if (supported.aspectRatio) videoConstraints.aspectRatio = idealWidth / idealHeight;
+      if ((supported as any).resizeMode) (videoConstraints as any).resizeMode = "crop-and-scale";
+
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: "user",
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-        },
+        video: videoConstraints,
         audio: true,
       });
       streamRef.current = stream;
@@ -271,9 +280,13 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
     if (countdownValue !== null) return;
 
     clearCountdown();
+    setPlaying(false);
     resetScrollPosition();
     setPreviewing(false);
     setSavedMessage(null);
+
+    const ready = cameraReady || await startCamera();
+    if (!ready) return;
 
     const runCountdown = (value: number) => {
       setCountdownValue(value);
@@ -286,9 +299,6 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
         countdownTimerRef.current = null;
         setCountdownValue(null);
         resetScrollPosition();
-
-        const ready = cameraReady || await startCamera();
-        if (!ready) return;
         const didStartRecording = startRecording();
         if (!didStartRecording) return;
         setPlaying(true);
