@@ -56,6 +56,69 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
   const recordingRef = useRef(false);
   const cameraOrientationRef = useRef<"portrait" | "landscape" | null>(null);
 
+  const getDesiredPortrait = useCallback(() => {
+    if (typeof window === "undefined") return false;
+    if (typeof window.matchMedia === "function" && window.matchMedia("(orientation: portrait)").matches) return true;
+    return window.innerHeight > window.innerWidth;
+  }, []);
+
+  const drawVideoToCanvas = useCallback(
+    (
+      video: HTMLVideoElement,
+      canvas: HTMLCanvasElement,
+      ctx: CanvasRenderingContext2D,
+      desiredPortrait: boolean,
+    ) => {
+      const outputWidth = desiredPortrait ? 1080 : 1920;
+      const outputHeight = desiredPortrait ? 1920 : 1080;
+
+      if (canvas.width !== outputWidth) canvas.width = outputWidth;
+      if (canvas.height !== outputHeight) canvas.height = outputHeight;
+
+      const vw = video.videoWidth;
+      const vh = video.videoHeight;
+
+      if (!vw || !vh) {
+        drawRafRef.current = requestAnimationFrame(() => drawVideoToCanvas(video, canvas, ctx, desiredPortrait));
+        return;
+      }
+
+      ctx.clearRect(0, 0, outputWidth, outputHeight);
+
+      const cameraPortrait = vh > vw;
+      const needsRotation = desiredPortrait !== cameraPortrait;
+
+      ctx.save();
+
+      try {
+        if (needsRotation) {
+          ctx.translate(outputWidth / 2, outputHeight / 2);
+          ctx.rotate(desiredPortrait ? Math.PI / 2 : -Math.PI / 2);
+
+          const scale = Math.min(outputHeight / vw, outputWidth / vh);
+          const drawWidth = vw * scale;
+          const drawHeight = vh * scale;
+
+          ctx.drawImage(video, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
+        } else {
+          const scale = Math.min(outputWidth / vw, outputHeight / vh);
+          const drawWidth = vw * scale;
+          const drawHeight = vh * scale;
+          const dx = (outputWidth - drawWidth) / 2;
+          const dy = (outputHeight - drawHeight) / 2;
+          ctx.drawImage(video, dx, dy, drawWidth, drawHeight);
+        }
+      } catch {
+        // ignore transient draw errors
+      }
+
+      ctx.restore();
+
+      drawRafRef.current = requestAnimationFrame(() => drawVideoToCanvas(video, canvas, ctx, desiredPortrait));
+    },
+    [],
+  );
+
   useEffect(() => {
     recordingRef.current = recording;
   }, [recording]);
@@ -171,49 +234,17 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
         return false;
       }
 
-      const desiredOrientation: "portrait" | "landscape" =
-        typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(orientation: portrait)").matches
-          ? "portrait"
-          : "landscape";
-
-      const outputWidth = desiredOrientation === "portrait" ? 1080 : 1920;
-      const outputHeight = desiredOrientation === "portrait" ? 1920 : 1080;
+      const desiredPortrait = getDesiredPortrait();
 
       const canvas = document.createElement("canvas");
-      canvas.width = outputWidth;
-      canvas.height = outputHeight;
       const ctx = canvas.getContext("2d");
       if (!ctx) {
         setCameraError("Canvas unavailable.");
         return false;
       }
 
-      const draw = () => {
-        const vw = sourceVideo.videoWidth || outputWidth;
-        const vh = sourceVideo.videoHeight || outputHeight;
-
-        ctx.clearRect(0, 0, outputWidth, outputHeight);
-
-        if (!vw || !vh) {
-          drawRafRef.current = requestAnimationFrame(draw);
-          return;
-        }
-
-        const scale = Math.min(outputWidth / vw, outputHeight / vh);
-        const drawWidth = vw * scale;
-        const drawHeight = vh * scale;
-        const dx = (outputWidth - drawWidth) / 2;
-        const dy = (outputHeight - drawHeight) / 2;
-        try {
-          ctx.drawImage(sourceVideo, dx, dy, drawWidth, drawHeight);
-        } catch {
-          // ignore transient draw errors
-        }
-        drawRafRef.current = requestAnimationFrame(draw);
-      };
-
       if (drawRafRef.current) cancelAnimationFrame(drawRafRef.current);
-      draw();
+      drawVideoToCanvas(sourceVideo, canvas, ctx, desiredPortrait);
 
       const canvasStream = canvas.captureStream(30);
       const audioTrack = streamRef.current.getAudioTracks()[0];
@@ -253,9 +284,10 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
       setCameraError(error instanceof Error ? error.message : "Could not start recording.");
       return false;
     }
-  }, [getSupportedMimeType, saveBlobToDevice, stopMediaTracks]);
+  }, [drawVideoToCanvas, getDesiredPortrait, getSupportedMimeType, saveBlobToDevice, stopMediaTracks]);
 
   const startCamera = useCallback(async () => {
+    stopMediaTracks();
     setCameraRequested(true);
     setCameraError(null);
     setCameraReady(false);
@@ -266,90 +298,24 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
     }
 
     try {
-      const desiredOrientation: "portrait" | "landscape" = (() => {
-        if (typeof window === "undefined") return "landscape";
-        if (typeof window.matchMedia === "function" && window.matchMedia("(orientation: portrait)").matches) return "portrait";
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const screenOrientation = (window.screen as any)?.orientation?.type as string | undefined;
-        if (screenOrientation?.includes("portrait")) return "portrait";
-        return window.innerHeight > window.innerWidth ? "portrait" : "landscape";
-      })();
+      const desiredPortrait = getDesiredPortrait();
+      const desiredOrientation: "portrait" | "landscape" = desiredPortrait ? "portrait" : "landscape";
 
-      stopMediaTracks();
       const supported = navigator.mediaDevices.getSupportedConstraints?.() ?? {};
 
-      const buildConstraints = (orientation: "portrait" | "landscape", strict: boolean): MediaTrackConstraints => {
-        const idealWidth = orientation === "portrait" ? 1080 : 1920;
-        const idealHeight = orientation === "portrait" ? 1920 : 1080;
-        const aspect = orientation === "portrait" ? 9 / 16 : 16 / 9;
-        const videoConstraints: MediaTrackConstraints = { facingMode: "user" };
-        if (supported.width) videoConstraints.width = strict ? { ideal: idealWidth, min: 720 } : { ideal: idealWidth };
-        if (supported.height) videoConstraints.height = strict ? { ideal: idealHeight, min: 720 } : { ideal: idealHeight };
-        if (supported.aspectRatio) videoConstraints.aspectRatio = strict ? { exact: aspect } : aspect;
-        if (supported.frameRate) videoConstraints.frameRate = { ideal: 30, max: 60 };
-        if ((supported as any).resizeMode) (videoConstraints as any).resizeMode = "crop-and-scale";
-        // Encourage higher-quality modes when available.
-        if (!strict) {
-          (videoConstraints as any).advanced = [
-            supported.width && supported.height ? { width: idealWidth, height: idealHeight } : {},
-          ].filter((x: any) => Object.keys(x).length);
-        }
-        return videoConstraints;
-      };
+      const idealWidth = desiredPortrait ? 1080 : 1920;
+      const idealHeight = desiredPortrait ? 1920 : 1080;
+      const aspect = desiredPortrait ? 9 / 16 : 16 / 9;
+      const videoConstraints: MediaTrackConstraints = { facingMode: "user" };
+      if (supported.width) videoConstraints.width = { ideal: idealWidth };
+      if (supported.height) videoConstraints.height = { ideal: idealHeight };
+      if (supported.aspectRatio) videoConstraints.aspectRatio = aspect;
+      if (supported.frameRate) videoConstraints.frameRate = { ideal: 30, max: 60 };
 
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: buildConstraints(desiredOrientation, false),
+        video: videoConstraints,
         audio: true,
       });
-
-      const track = stream.getVideoTracks()[0];
-      const settings = track?.getSettings?.() ?? {};
-      const width = typeof settings.width === "number" ? settings.width : null;
-      const height = typeof settings.height === "number" ? settings.height : null;
-      const actualOrientation: "portrait" | "landscape" | null =
-        width && height ? (height >= width ? "portrait" : "landscape") : null;
-
-      if (track && actualOrientation && actualOrientation !== desiredOrientation) {
-        // Attempt to correct without re-prompting by tightening constraints.
-        try {
-          await track.applyConstraints(buildConstraints(desiredOrientation, true));
-        } catch {
-          // ignore
-        }
-        const next = track.getSettings?.() ?? {};
-        const nextW = typeof next.width === "number" ? next.width : null;
-        const nextH = typeof next.height === "number" ? next.height : null;
-        const nextOrientation: "portrait" | "landscape" | null =
-          nextW && nextH ? (nextH >= nextW ? "portrait" : "landscape") : null;
-
-        if (nextOrientation && nextOrientation !== desiredOrientation) {
-          // Hard fallback: restart the stream with strict constraints.
-          for (const t of stream.getTracks()) t.stop();
-          const retry = await navigator.mediaDevices.getUserMedia({
-            video: buildConstraints(desiredOrientation, true),
-            audio: true,
-          });
-          streamRef.current = retry;
-          cameraOrientationRef.current = desiredOrientation;
-          if (videoRef.current) {
-            const video = videoRef.current;
-            video.muted = true;
-            video.playsInline = true;
-            video.srcObject = retry;
-            video.onloadedmetadata = () => {
-              setCameraReady(true);
-              void video.play().catch(() => undefined);
-            };
-            if (video.readyState >= 1) {
-              setCameraReady(true);
-              await video.play().catch(() => undefined);
-            }
-          } else {
-            setCameraReady(true);
-          }
-          return true;
-        }
-      }
 
       streamRef.current = stream;
       cameraOrientationRef.current = desiredOrientation;
@@ -374,7 +340,7 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
       setCameraError(error instanceof Error ? error.message : "Could not access the front camera.");
       return false;
     }
-  }, [stopMediaTracks]);
+  }, [getDesiredPortrait, stopMediaTracks]);
 
   const stopRecordingSession = useCallback(() => {
     clearCountdown();
@@ -427,10 +393,7 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
     setPreviewing(false);
     setSavedMessage(null);
 
-    const desiredOrientation: "portrait" | "landscape" =
-      typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(orientation: portrait)").matches
-        ? "portrait"
-        : "landscape";
+    const desiredOrientation: "portrait" | "landscape" = getDesiredPortrait() ? "portrait" : "landscape";
 
     const mustRestartCamera = !cameraReady || cameraOrientationRef.current !== desiredOrientation;
     const ready = mustRestartCamera ? await startCamera() : true;
@@ -455,7 +418,7 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
     };
 
     runCountdown(3);
-  }, [cameraReady, clearCountdown, countdownValue, resetScrollPosition, revealControls, startCamera, startRecording]);
+  }, [cameraReady, clearCountdown, countdownValue, getDesiredPortrait, resetScrollPosition, revealControls, startCamera, startRecording]);
 
   const reset = useCallback(() => {
     clearCountdown();

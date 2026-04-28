@@ -4,7 +4,6 @@ import {
   LayoutDashboard,
   Wand2,
   MonitorPlay,
-  Clapperboard,
   Zap,
   Video,
   FileText,
@@ -16,7 +15,6 @@ import {
 } from "lucide-react";
 import VideoAnalyzerTab from "./tabs/VideoAnalyzerTab";
 import TeleprompterTab from "./tabs/TeleprompterTab";
-import ScriptPlannerTab from "./tabs/ScriptPlannerTab";
 import YouTubeAuditTab from "./tabs/YouTubeAuditTab";
 import YouTubeGrowthPlannerV2Tab, {
   getGrowthPlannerNotificationCounts,
@@ -29,7 +27,6 @@ import {
   getPlanBadgeColor,
   PLAN_DISPLAY_NAMES,
   getDurationLimitLabel,
-  getScriptPlannerChatLimit,
 } from "@/hooks/use-plan";
 import { useUser } from "@/hooks/use-user";
 import {
@@ -45,20 +42,19 @@ import { useDayTabsI18n } from "@/lib/i18n";
 const TABS = [
   { id: "dashboard", icon: LayoutDashboard },
   { id: "video-analyzer", icon: Wand2 },
-  { id: "script-planner", icon: Clapperboard },
   { id: "growth-planner", icon: CalendarDays },
   { id: "youtube-audit", icon: Youtube },
   { id: "teleprompter", icon: MonitorPlay },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
-
-const NAV_TABS = TABS.filter((tab) => tab.id !== "script-planner");
+const NAV_TABS = TABS;
 
 function getTabFromUrl(): TabId {
   const tab = new URLSearchParams(window.location.search).get("tab");
   if (tab === "content-planner") return "growth-planner";
   if (tab === "youtube-transcript") return "youtube-audit";
+  if (tab === "script-planner") return "dashboard";
   const match = TABS.find((item) => item.id === tab);
   return match?.id ?? "dashboard";
 }
@@ -324,14 +320,12 @@ function Dashboard({
 }) {
   const { copy } = useDayTabsI18n();
   const { user } = useUser();
-  const { plan, getModeLimits, getScriptPlannerLimits } = usePlan();
+  const { plan, getModeLimits } = usePlan();
   const norm = plan.normalizedPlan;
   const limits = getModeLimits("video-analyzer");
   const used = limits.usageUsed;
   const remaining = limits.usageRemaining;
   const total = limits.usageLimit;
-  const spLimits = getScriptPlannerLimits();
-  const spChatLimit = getScriptPlannerChatLimit(norm);
   const badgeClass = getPlanBadgeColor(norm);
   const displayName = PLAN_DISPLAY_NAMES[norm] ?? "Free";
   const firstName =
@@ -407,11 +401,6 @@ function Dashboard({
           color={remaining === 0 ? "text-red-400" : "text-primary"}
         />
         <StatCard
-          label={copy.dashboard.statScriptGenerations}
-          value={spLimits.generationsUsed}
-          sublabel={`of ${spChatLimit} ${copy.dashboard.thisMonth}`}
-        />
-        <StatCard
           label={copy.dashboard.statMaxDuration}
           value={getDurationLimitLabel(norm)}
           sublabel={copy.dashboard.perVideo}
@@ -428,13 +417,6 @@ function Dashboard({
             desc={copy.dashboard.actions.analyze.desc}
             color="bg-primary/15 border border-primary/20 text-primary"
             onClick={() => onNavigate("video-analyzer")}
-          />
-          <QuickActionCard
-            icon={Clapperboard}
-            title={copy.dashboard.actions.script.title}
-            desc={copy.dashboard.actions.script.desc}
-            color="bg-blue-500/15 border border-blue-500/20 text-blue-400"
-            onClick={() => onNavigate("script-planner")}
           />
           <QuickActionCard
             icon={MonitorPlay}
@@ -638,7 +620,6 @@ export default function Home() {
         {activeTab === "video-analyzer" && (
           <VideoAnalyzerTab {...tabCallbacks} />
         )}
-        {activeTab === "script-planner" && <ScriptPlannerTab />}
         {activeTab === "growth-planner" && <GrowthPlannerPage />}
         {activeTab === "youtube-audit" && <YouTubeAuditTab />}
         {activeTab === "teleprompter" && <TeleprompterTab />}
