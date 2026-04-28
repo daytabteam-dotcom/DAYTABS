@@ -53,9 +53,11 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]["id"];
 
+const NAV_TABS = TABS.filter((tab) => tab.id !== "script-planner");
+
 function getTabFromUrl(): TabId {
   const tab = new URLSearchParams(window.location.search).get("tab");
-  if (tab === "content-planner") return "script-planner";
+  if (tab === "content-planner") return "growth-planner";
   if (tab === "youtube-transcript") return "youtube-audit";
   const match = TABS.find((item) => item.id === tab);
   return match?.id ?? "dashboard";
@@ -599,7 +601,7 @@ export default function Home() {
       <div className="w-full border-b border-white/5 bg-background/25 backdrop-blur-md sticky top-16 z-40 sm:top-20">
         <div className="panel-shell">
           <div className="flex items-center gap-2 overflow-x-auto scrollbar-none py-2.5 sm:py-3">
-            {TABS.map((tab) => {
+            {NAV_TABS.map((tab) => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
               const tabCopy = copy.tabs[tab.id];

@@ -40,6 +40,13 @@ function dayHeader(isoDate: string) {
   };
 }
 
+function addDaysIso(isoDate: string, days: number) {
+  const date = new Date(`${isoDate}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return isoDate;
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
 function statusTone(status: SocialPostStatus) {
   if (status === "posted") return "border-emerald-300/25 bg-emerald-400/10 text-emerald-100";
   if (status === "skipped") return "border-red-300/25 bg-red-400/10 text-red-100";
@@ -74,10 +81,10 @@ function platformAccent(platform: SocialPlatform) {
   }
   if (platform === "tiktok") {
     return {
-      iconBg: "bg-fuchsia-500/12 border-fuchsia-400/30",
-      gradient: "bg-linear-to-r from-cyan-400 via-fuchsia-500 to-rose-500",
-      soft: "bg-fuchsia-500/10 border-fuchsia-400/30",
-      tabActive: "border-fuchsia-300/35 bg-fuchsia-500/15 text-white",
+      iconBg: "bg-violet-500/12 border-violet-400/30",
+      gradient: "bg-linear-to-r from-violet-500 via-purple-500 to-fuchsia-500",
+      soft: "bg-violet-500/10 border-violet-400/30",
+      tabActive: "border-violet-300/35 bg-violet-500/15 text-white",
     };
   }
   return {
@@ -122,6 +129,7 @@ export function SocialPlanBoard({
   const [activeDayId, setActiveDayId] = useState<string | null>(null);
   const [activePanelTab, setActivePanelTab] = useState<"create" | "visuals" | "strategy">("create");
   const [manualOpen, setManualOpen] = useState(false);
+  const [tomorrowOpen, setTomorrowOpen] = useState(false);
   const [manualDraft, setManualDraft] = useState(() => ({
     date: new Date().toISOString().slice(0, 10),
     contentIdea: "",
@@ -132,15 +140,21 @@ export function SocialPlanBoard({
     bestPostingTime: "",
   }));
   const [taskFilter, setTaskFilter] = useState<"all" | "pending" | "completed" | "today">("all");
+  const [dateOverrides, setDateOverrides] = useState<Record<string, string>>({});
+  const [draggingDayId, setDraggingDayId] = useState<string | null>(null);
+  const [draggingOverDate, setDraggingOverDate] = useState<string | null>(null);
   const label = platformLabel(plan.platform);
   const days = useMemo(() => (plan.plan.days ?? []).slice().sort((a, b) => a.date.localeCompare(b.date) || a.day - b.day), [plan.plan.days]);
   const Icon = platformIcon(plan.platform);
 
   const byDate = useMemo(() => {
     const map = new Map<string, SocialPlanDay[]>();
-    for (const day of days) map.set(day.date, [...(map.get(day.date) ?? []), day]);
+    for (const day of days) {
+      const effectiveDate = dateOverrides[day.id] ?? day.date;
+      map.set(effectiveDate, [...(map.get(effectiveDate) ?? []), day]);
+    }
     return map;
-  }, [days]);
+  }, [days, dateOverrides]);
 
   const dates = useMemo(() => {
     const start = new Date(`${plan.startDate}T00:00:00Z`);
@@ -159,7 +173,9 @@ export function SocialPlanBoard({
   }
 
   const today = new Date().toISOString().slice(0, 10);
-  const todayDays = useMemo(() => days.filter((day) => day.date === today), [days, today]);
+  const tomorrow = addDaysIso(today, 1);
+  const todayDays = useMemo(() => days.filter((day) => (dateOverrides[day.id] ?? day.date) === today), [days, dateOverrides, today]);
+  const tomorrowDays = useMemo(() => days.filter((day) => (dateOverrides[day.id] ?? day.date) === tomorrow), [days, dateOverrides, tomorrow]);
   const accent = platformAccent(plan.platform);
 
   const allTasks = useMemo(() => getAllGrowthTasks(plan.platform, days), [days, plan.platform]);
@@ -244,7 +260,11 @@ export function SocialPlanBoard({
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/40">What should I do next?</p>
             <p className="mt-2 text-sm text-white/70">
-              {todayDays.length ? "Start with today’s post." : "Review tomorrow’s idea or generate one for today."}
+              {todayDays.length
+                ? "Start with today’s post."
+                : tomorrowDays.length
+                  ? "Review tomorrow’s plan or add an idea for today."
+                  : "Add a new idea or generate one to keep momentum."}
             </p>
           </div>
           {taskProgress.total ? (
@@ -252,6 +272,28 @@ export function SocialPlanBoard({
               Growth tasks: <span className="text-white/80">{taskProgress.done}/{taskProgress.total}</span> completed
             </span>
           ) : null}
+        </div>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Button
+            type="button"
+            variant="secondary"
+            className="rounded-xl"
+            onClick={() => setTomorrowOpen(true)}
+          >
+            View tomorrow’s plan
+          </Button>
+          <Button
+            type="button"
+            className={cn("rounded-xl text-white", accent.gradient)}
+            onClick={() => {
+              setManualDraft((current) => ({ ...current, date: today }));
+              setManualOpen(true);
+            }}
+            disabled={working}
+          >
+            <Plus className="mr-2 h-4 w-4" />
+            Add idea for today
+          </Button>
         </div>
       </PanelCardSoft>
 
@@ -264,10 +306,23 @@ export function SocialPlanBoard({
             </p>
           </div>
           {!todayDays.length ? (
-            <div className="flex flex-wrap gap-2">
+            <div className="grid w-full gap-2 sm:grid-cols-2">
               <Button
                 type="button"
-                className={cn("rounded-xl text-white", accent.gradient)}
+                className={cn("w-full justify-center rounded-xl text-white", accent.gradient)}
+                onClick={() => {
+                  setManualDraft((current) => ({ ...current, date: today }));
+                  setManualOpen(true);
+                }}
+                disabled={working}
+              >
+                <Sparkles className="mr-2 h-4 w-4" />
+                Generate idea for today
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                className="w-full justify-center rounded-xl"
                 onClick={() => {
                   setManualDraft((current) => ({ ...current, date: today }));
                   setManualOpen(true);
@@ -275,10 +330,7 @@ export function SocialPlanBoard({
                 disabled={working}
               >
                 <Plus className="mr-2 h-4 w-4" />
-                Add idea for today
-              </Button>
-              <Button type="button" variant="secondary" className="rounded-xl" onClick={() => setViewMode("planner")}>
-                Open planner
+                Add manual idea for today
               </Button>
             </div>
           ) : null}
@@ -342,8 +394,12 @@ export function SocialPlanBoard({
                         variant="secondary"
                         className="rounded-xl"
                         onClick={async () => {
-                          await onPatchDay(day, { status: "posted" });
-                          toast({ title: "Marked as posted", description: "Updated this post to Posted." });
+                          try {
+                            await onPatchDay(day, { status: "posted" });
+                            toast({ title: "Marked as posted", description: "Updated this post to Posted." });
+                          } catch (err) {
+                            toast({ variant: "destructive", title: "Could not update status", description: err instanceof Error ? err.message : "Please try again." });
+                          }
                         }}
                         disabled={working}
                       >
@@ -376,7 +432,43 @@ export function SocialPlanBoard({
         <div className="overflow-x-auto pb-2">
           <div className="flex min-w-max gap-3">
             {dates.map((date) => (
-              <div key={date} className="min-h-65 w-[340px] shrink-0 rounded-2xl border border-white/10 bg-white/2.5 p-3 transition-all hover:bg-white/4">
+              <div
+                key={date}
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  setDraggingOverDate(date);
+                }}
+                onDragLeave={() => {
+                  setDraggingOverDate((current) => (current === date ? null : current));
+                }}
+                onDrop={async (event) => {
+                  event.preventDefault();
+                  setDraggingOverDate(null);
+                  const dayId = event.dataTransfer.getData("text/dayId");
+                  const fromDate = event.dataTransfer.getData("text/fromDate");
+                  if (!dayId) return;
+                  const day = days.find((item) => item.id === dayId);
+                  if (!day) return;
+                  const previousDate = fromDate || (dateOverrides[day.id] ?? day.date);
+                  if (previousDate === date) return;
+                  setDateOverrides((current) => ({ ...current, [day.id]: date }));
+                  try {
+                    await onPatchDay(day, { date });
+                    toast({ title: "Moved", description: "Updated the post date." });
+                  } catch (err) {
+                    setDateOverrides((current) => {
+                      const next = { ...current };
+                      delete next[day.id];
+                      return next;
+                    });
+                    toast({ variant: "destructive", title: "Could not move post", description: err instanceof Error ? err.message : "Please try again." });
+                  }
+                }}
+                className={cn(
+                  "min-h-65 w-[340px] shrink-0 rounded-2xl border bg-white/2.5 p-3 transition-all",
+                  draggingOverDate === date ? "border-white/25 bg-white/4 shadow-lg shadow-black/10" : "border-white/10 hover:bg-white/4",
+                )}
+              >
                 <div className="mb-3 flex items-start justify-between gap-2 rounded-xl border border-white/10 bg-black/10 px-3 py-2">
                   <div>
                     <p className="text-sm font-semibold text-white">{dayHeader(date).weekday}</p>
@@ -389,12 +481,28 @@ export function SocialPlanBoard({
                 <div className="space-y-3">
                   {(byDate.get(date) ?? []).map((day) => {
                     const status = (day.status ?? "not_finished") as SocialPostStatus;
+                    const effectiveDate = dateOverrides[day.id] ?? day.date;
                     return (
-                      <button
+                      <div
                         key={day.id}
-                        type="button"
+                        role="button"
+                        tabIndex={0}
+                        draggable
+                        onDragStart={(event) => {
+                          setDraggingDayId(day.id);
+                          event.dataTransfer.setData("text/dayId", day.id);
+                          event.dataTransfer.setData("text/fromDate", effectiveDate);
+                          event.dataTransfer.effectAllowed = "move";
+                        }}
+                        onDragEnd={() => {
+                          setDraggingDayId(null);
+                          setDraggingOverDate(null);
+                        }}
                         onClick={() => openDay(day.id)}
-                        className="w-full text-left"
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") openDay(day.id);
+                        }}
+                        className={cn("w-full cursor-grab text-left active:cursor-grabbing", draggingDayId === day.id && "opacity-60")}
                       >
                         <PanelCardSoft className="cursor-pointer border border-white/10 p-3 transition-all hover:-translate-y-0.5 hover:border-white/20 hover:bg-white/4">
                           <div className="flex items-start justify-between gap-3">
@@ -434,7 +542,7 @@ export function SocialPlanBoard({
                             <ArrowRight className="mt-1 h-4 w-4 text-white/35" />
                           </div>
                         </PanelCardSoft>
-                      </button>
+                      </div>
                     );
                   })}
                   {!byDate.get(date)?.length ? (
@@ -449,7 +557,7 @@ export function SocialPlanBoard({
                       <div className="mt-3 flex flex-wrap gap-2">
                         <Button
                           type="button"
-                          className={cn("rounded-xl text-white", accent.gradient)}
+                          className={cn("w-full justify-center rounded-xl text-white", accent.gradient)}
                           onClick={() => {
                             setManualDraft((current) => ({ ...current, date }));
                             setManualOpen(true);
@@ -462,7 +570,7 @@ export function SocialPlanBoard({
                         <Button
                           type="button"
                           variant="secondary"
-                          className="rounded-xl"
+                          className="w-full justify-center rounded-xl"
                           onClick={() => {
                             setManualDraft((current) => ({ ...current, date }));
                             setManualOpen(true);
@@ -475,6 +583,19 @@ export function SocialPlanBoard({
                       </div>
                     </PanelCardSoft>
                   ) : null}
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="w-full justify-center rounded-xl border-dashed text-white/70 hover:text-white"
+                    onClick={() => {
+                      setManualDraft((current) => ({ ...current, date }));
+                      setManualOpen(true);
+                    }}
+                    disabled={working}
+                  >
+                    <Plus className="mr-2 h-4 w-4" />
+                    Add manual idea
+                  </Button>
                 </div>
               </div>
             ))}
@@ -565,25 +686,50 @@ export function SocialPlanBoard({
                                     variant="secondary"
                                     className="rounded-xl"
                                     onClick={async () => {
-                                      const intent = day.ideaOrigin === "manual"
-                                        ? `Improve this user-created idea for ${label}. Keep the original idea, but make it platform-native and execution-ready. Return valid JSON only.`
-                                        : "Improve this idea while keeping the same core topic and angle. Return valid JSON only.";
-                                      await onRegenerateDay(day, intent);
-                                      if (day.ideaOrigin === "manual") await onPatchDay(day, { aiImproved: true });
-                                      toast({ title: "Improved", description: "Updated this idea with AI." });
+                                      try {
+                                        await onRegenerateDay(day);
+                                        toast({ title: "Regenerated", description: "Generated a new version of this idea." });
+                                      } catch (err) {
+                                        toast({ variant: "destructive", title: "Could not regenerate", description: err instanceof Error ? err.message : "Please try again." });
+                                      }
                                     }}
                                     disabled={working}
                                   >
-                                    <Sparkles className="mr-2 h-4 w-4" />
-                                    Improve
+                                    <RefreshCcw className="mr-2 h-4 w-4" />
+                                    Regenerate
                                   </Button>
+                                  {day.ideaOrigin === "manual" ? (
+                                    <Button
+                                      type="button"
+                                      variant="secondary"
+                                      className="rounded-xl"
+                                      onClick={async () => {
+                                        const intent = `Improve this user-created idea for ${label}. Keep the original idea, but make it platform-native and execution-ready. Return valid JSON only.`;
+                                        try {
+                                          await onRegenerateDay(day, intent);
+                                          await onPatchDay(day, { aiImproved: true });
+                                          toast({ title: "Improved", description: "Updated this idea with AI." });
+                                        } catch (err) {
+                                          toast({ variant: "destructive", title: "Could not improve idea", description: err instanceof Error ? err.message : "Please try again." });
+                                        }
+                                      }}
+                                      disabled={working}
+                                    >
+                                      <Sparkles className="mr-2 h-4 w-4" />
+                                      Improve with AI
+                                    </Button>
+                                  ) : null}
                                   <Button
                                     type="button"
                                     variant="secondary"
                                     className="rounded-xl"
                                     onClick={async () => {
-                                      await onPatchDay(day, { status: "posted" });
-                                      toast({ title: "Marked as posted", description: "Updated this post to Posted." });
+                                      try {
+                                        await onPatchDay(day, { status: "posted" });
+                                        toast({ title: "Marked as posted", description: "Updated this post to Posted." });
+                                      } catch (err) {
+                                        toast({ variant: "destructive", title: "Could not update status", description: err instanceof Error ? err.message : "Please try again." });
+                                      }
                                     }}
                                     disabled={working || status === "posted"}
                                   >
@@ -659,7 +805,11 @@ export function SocialPlanBoard({
                               const key = item.id ? String(item.id) : `${day.id}:${index}`;
                               return key === task.key ? { ...item, completed: !completed } : item;
                             });
-                            await onPatchDay(day, { growthTasks: next });
+                            try {
+                              await onPatchDay(day, { growthTasks: next });
+                            } catch (err) {
+                              toast({ variant: "destructive", title: "Could not update task", description: err instanceof Error ? err.message : "Please try again." });
+                            }
                           }}
                           className={cn(
                             "mt-0.5 inline-flex h-6 w-6 items-center justify-center rounded-md border transition-colors",
@@ -704,6 +854,174 @@ export function SocialPlanBoard({
           )}
         </div>
       )}
+
+      <Dialog open={tomorrowOpen} onOpenChange={(open) => setTomorrowOpen(open)}>
+        <DialogPrimitive.Portal>
+          <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/75 backdrop-blur-md" />
+          <DialogPrimitive.Content className="fixed left-1/2 top-1/2 z-50 w-[min(94vw,760px)] max-h-[86vh] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-3xl border border-white/10 bg-[#11111a] shadow-2xl">
+            <div className="flex max-h-[86vh] flex-col text-white">
+              <div className="sticky top-0 z-10 border-b border-white/10 bg-[#11111a]/95 p-6 backdrop-blur">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/40">Tomorrow’s plan</p>
+                    <p className="mt-2 text-lg font-semibold text-white">{dayHeader(tomorrow).weekday}, {dayHeader(tomorrow).date}</p>
+                    <p className="mt-1 text-sm text-white/55">Planned content and tasks for tomorrow.</p>
+                  </div>
+                  <DialogPrimitive.Close className="rounded-xl border border-white/10 bg-white/3 p-2 text-white/70 hover:bg-white/6 hover:text-white">
+                    <X className="h-4 w-4" />
+                    <span className="sr-only">Close</span>
+                  </DialogPrimitive.Close>
+                </div>
+              </div>
+
+              <div className="max-h-[calc(86vh-150px)] overflow-y-auto p-6">
+                <div className="space-y-6">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/40">Planned posts</p>
+                    <div className="mt-3 space-y-3">
+                      {tomorrowDays.length ? (
+                        tomorrowDays.map((day) => {
+                          const status = (day.status ?? "not_finished") as SocialPostStatus;
+                          const preview = plan.platform === "linkedin"
+                            ? (day.postDraft || day.caption || day.hook)
+                            : plan.platform === "tiktok"
+                              ? (day.script || day.caption || day.hook)
+                              : (day.caption || day.script || day.hook);
+                          return (
+                            <div key={`tomorrow-${day.id}`} className="rounded-2xl border border-white/10 bg-white/3 p-4">
+                              <div className="flex flex-wrap items-start justify-between gap-3">
+                                <div className="flex min-w-0 items-start gap-3">
+                                  <span className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border", accent.iconBg)}>
+                                    <Icon className="h-5 w-5 text-white/85" />
+                                  </span>
+                                  <div className="min-w-0">
+                                    <p className="truncate text-sm font-semibold text-white">{day.contentIdea}</p>
+                                    {preview ? <p className="mt-1 line-clamp-2 text-xs text-white/60">{preview}</p> : null}
+                                    <div className="mt-3 flex flex-wrap gap-2">
+                                      <span className={cn("rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]", contentTypeTone(day.contentType))}>
+                                        {day.contentType ? day.contentType.replace(/_/g, " ") : "post"}
+                                      </span>
+                                      <span className={cn("rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]", statusTone(status))}>
+                                        {status === "not_finished" ? "Planned" : status}
+                                      </span>
+                                      <span className="rounded-full border border-white/10 bg-white/4 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/60">
+                                        {day.bestPostingTime || "Time TBD"}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+                                <Button type="button" variant="secondary" className="rounded-xl" onClick={() => openDay(day.id)}>
+                                  Open details
+                                </Button>
+                              </div>
+                            </div>
+                          );
+                        })
+                      ) : (
+                        <PanelCardSoft className="border border-dashed border-white/10 bg-white/3 p-4 text-sm text-white/60">
+                          Nothing planned for tomorrow yet.
+                        </PanelCardSoft>
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/40">Tomorrow’s tasks</p>
+                      <span className="text-xs text-white/45">
+                        {allTasks.filter((task) => task.date === tomorrow && Boolean(task.completed)).length}/{allTasks.filter((task) => task.date === tomorrow).length} completed
+                      </span>
+                    </div>
+                    <div className="mt-3 space-y-3">
+                      {allTasks.filter((task) => task.date === tomorrow).length ? (
+                        allTasks.filter((task) => task.date === tomorrow).map((task) => {
+                          const day = days.find((item) => item.id === task.planDayId) ?? null;
+                          const completed = Boolean(task.completed);
+                          return (
+                            <div key={`tomorrow-task-${task.key}`} className={cn("rounded-2xl border border-white/10 bg-white/3 p-4", completed && "opacity-70")}>
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="flex min-w-0 items-start gap-3">
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      if (!day) return;
+                                      const tasks = day.growthTasks ?? [];
+                                      const next = tasks.map((item, index) => {
+                                        const key = item.id ? String(item.id) : `${day.id}:${index}`;
+                                        return key === task.key ? { ...item, completed: !completed } : item;
+                                      });
+                                      try {
+                                        await onPatchDay(day, { growthTasks: next });
+                                      } catch (err) {
+                                        toast({ variant: "destructive", title: "Could not update task", description: err instanceof Error ? err.message : "Please try again." });
+                                      }
+                                    }}
+                                    className={cn(
+                                      "mt-0.5 inline-flex h-6 w-6 items-center justify-center rounded-md border transition-colors",
+                                      completed ? "border-emerald-300/35 bg-emerald-500/15 text-emerald-100" : "border-white/15 bg-black/20 text-white/60 hover:bg-white/4 hover:text-white",
+                                    )}
+                                    aria-label={completed ? "Mark task as pending" : "Mark task as done"}
+                                  >
+                                    {completed ? <Check className="h-4 w-4" /> : null}
+                                  </button>
+                                  <div className="min-w-0">
+                                    <p className="text-sm font-semibold text-white">{task.title}</p>
+                                    <p className="mt-1 text-xs text-white/55">{task.suggestedTiming}</p>
+                                    {day ? (
+                                      <p className="mt-2 text-xs text-white/55">
+                                        Related post: <button type="button" className="text-white/80 underline-offset-4 hover:underline" onClick={() => openDay(day.id)}>{task.ideaTitle}</button>
+                                      </p>
+                                    ) : null}
+                                  </div>
+                                </div>
+                                <span className={cn("rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]", completed ? "border-emerald-300/25 bg-emerald-400/10 text-emerald-100" : "border-white/10 bg-white/4 text-white/55")}>
+                                  {completed ? "Completed" : "Pending"}
+                                </span>
+                              </div>
+                              <p className="mt-3 text-sm leading-6 text-white/70">{task.description}</p>
+                              <p className="mt-2 text-xs text-white/45">Why: {task.reason}</p>
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                <span className="rounded-full border border-white/10 bg-white/4 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/55">
+                                  {task.taskType.replace(/_/g, " ")}
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })
+                      ) : (
+                        <PanelCardSoft className="border border-dashed border-white/10 bg-white/3 p-4 text-sm text-white/60">
+                          No tasks scheduled for tomorrow.
+                        </PanelCardSoft>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="sticky bottom-0 z-10 border-t border-white/10 bg-[#11111a]/95 p-6 backdrop-blur">
+                <div className="flex flex-wrap justify-end gap-2">
+                  <Button type="button" variant="secondary" className="rounded-xl" onClick={() => setTomorrowOpen(false)}>
+                    Close
+                  </Button>
+                  <Button
+                    type="button"
+                    className={cn("rounded-xl text-white", accent.gradient)}
+                    onClick={() => {
+                      setTomorrowOpen(false);
+                      setManualDraft((current) => ({ ...current, date: today }));
+                      setManualOpen(true);
+                    }}
+                    disabled={working}
+                  >
+                    <Plus className="mr-2 h-4 w-4" />
+                    Add idea for today
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </DialogPrimitive.Content>
+        </DialogPrimitive.Portal>
+      </Dialog>
 
       <Dialog open={manualOpen} onOpenChange={(open) => setManualOpen(open)}>
         <DialogPrimitive.Portal>
@@ -860,8 +1178,12 @@ export function SocialPlanBoard({
                           aiImproved: false,
                         } satisfies SocialPlanDay;
                         const intent = `Improve this user-created idea for ${label}. Keep the original idea. Inputs: Platform: ${label}. Idea title: ${title}. User notes: ${manualDraft.notes}. Content type: ${manualDraft.contentType}. Audience: ${plan.audience ?? ""}. Goal: ${plan.goal ?? ""}. Tone: ${plan.tone ?? ""}. Date: ${manualDraft.date}. Return valid JSON only.`;
-                        await onRegenerateDay(placeholderDay, intent);
-                        await onPatchDay(placeholderDay, { ideaOrigin: "manual", aiImproved: true });
+                        try {
+                          await onRegenerateDay(placeholderDay, intent);
+                          await onPatchDay(placeholderDay, { ideaOrigin: "manual", aiImproved: true });
+                        } catch (err) {
+                          toast({ variant: "destructive", title: "Could not improve idea", description: err instanceof Error ? err.message : "Please try again." });
+                        }
                       }
                       setManualOpen(false);
                     }}
@@ -1132,25 +1454,50 @@ export function SocialPlanBoard({
                         variant="secondary"
                         className="rounded-xl"
                         onClick={async () => {
-                          const intent = activeDay.ideaOrigin === "manual"
-                            ? `Improve this user-created idea for ${label}. Keep the original idea. Inputs: Platform: ${label}. Idea title: ${activeDay.contentIdea}. User notes: ${activeDay.postContext ?? ""}. Content type: ${activeDay.contentType ?? ""}. Audience: ${plan.audience ?? ""}. Goal: ${plan.goal ?? ""}. Tone: ${plan.tone ?? ""}. Date: ${activeDay.date}. Return valid JSON only.`
-                            : "Improve this idea while keeping the same core topic and angle. Return valid JSON only.";
-                          await onRegenerateDay(activeDay, intent);
-                          if (activeDay.ideaOrigin === "manual") await onPatchDay(activeDay, { aiImproved: true });
-                          toast({ title: "Improved", description: "Updated this idea with AI." });
+                          try {
+                            await onRegenerateDay(activeDay);
+                            toast({ title: "Regenerated", description: "Generated a new version of this idea." });
+                          } catch (err) {
+                            toast({ variant: "destructive", title: "Could not regenerate", description: err instanceof Error ? err.message : "Please try again." });
+                          }
                         }}
                         disabled={working}
                       >
-                        <Sparkles className="mr-2 h-4 w-4" />
-                        Improve with AI
+                        <RefreshCcw className="mr-2 h-4 w-4" />
+                        Regenerate
                       </Button>
+                      {activeDay.ideaOrigin === "manual" ? (
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          className="rounded-xl"
+                          onClick={async () => {
+                            const intent = `Improve this user-created idea for ${label}. Keep the original idea. Inputs: Platform: ${label}. Idea title: ${activeDay.contentIdea}. User notes: ${activeDay.postContext ?? ""}. Content type: ${activeDay.contentType ?? ""}. Audience: ${plan.audience ?? ""}. Goal: ${plan.goal ?? ""}. Tone: ${plan.tone ?? ""}. Date: ${activeDay.date}. Return valid JSON only.`;
+                            try {
+                              await onRegenerateDay(activeDay, intent);
+                              await onPatchDay(activeDay, { aiImproved: true });
+                              toast({ title: "Improved", description: "Updated this idea with AI." });
+                            } catch (err) {
+                              toast({ variant: "destructive", title: "Could not improve idea", description: err instanceof Error ? err.message : "Please try again." });
+                            }
+                          }}
+                          disabled={working}
+                        >
+                          <Sparkles className="mr-2 h-4 w-4" />
+                          Improve with AI
+                        </Button>
+                      ) : null}
                       <Button
                         type="button"
                         variant="secondary"
                         className="rounded-xl"
                         onClick={async () => {
-                          await onPatchDay(activeDay, { status: "posted" });
-                          toast({ title: "Marked as posted", description: "Updated this post to Posted." });
+                          try {
+                            await onPatchDay(activeDay, { status: "posted" });
+                            toast({ title: "Marked as posted", description: "Updated this post to Posted." });
+                          } catch (err) {
+                            toast({ variant: "destructive", title: "Could not update status", description: err instanceof Error ? err.message : "Please try again." });
+                          }
                         }}
                         disabled={working || status === "posted"}
                       >
@@ -1160,23 +1507,14 @@ export function SocialPlanBoard({
                       <Button
                         type="button"
                         variant="secondary"
-                        className="rounded-xl"
-                        onClick={async () => {
-                          await onRegenerateDay(activeDay);
-                          toast({ title: "Regenerated", description: "Generated a new version of this idea." });
-                        }}
-                        disabled={working}
-                      >
-                        <RefreshCcw className="mr-2 h-4 w-4" />
-                        Regenerate
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="secondary"
                         className="rounded-xl text-red-200 hover:text-red-100"
                         onClick={async () => {
-                          await onDeleteDay(activeDay);
-                          setActiveDayId(null);
+                          try {
+                            await onDeleteDay(activeDay);
+                            setActiveDayId(null);
+                          } catch (err) {
+                            toast({ variant: "destructive", title: "Could not delete idea", description: err instanceof Error ? err.message : "Please try again." });
+                          }
                         }}
                         disabled={working}
                       >

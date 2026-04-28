@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { PanelCardSoft } from "@/components/panel-system";
+import { useToast } from "@/hooks/use-toast";
 import type { SocialPlatform, SocialPlanDay, SocialPostPerformanceFeedback, SocialPostingMode, SocialWeekday, SocialWeeklyPlan } from "./types";
 import { createSocialDay, fetchLatestSocialPlan, generateNextWeekSocialPlan, generateSocialPlan, patchSocialDay, deleteSocialDay, regenerateSocialDay } from "./socialApi";
 import { SocialPlanSetup } from "./SocialPlanSetup";
@@ -23,6 +24,7 @@ function platformLabel(platform: SocialPlatform) {
 
 export default function SocialGrowthPlanner({ platform }: { platform: SocialPlatform }) {
   const label = platformLabel(platform);
+  const { toast } = useToast();
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -76,7 +78,9 @@ export default function SocialGrowthPlanner({ platform }: { platform: SocialPlat
       const data = await patchSocialDay({ planId: plan.id, dayId: day.id, patch });
       setPlan(data.plan);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save changes");
+      const message = err instanceof Error ? err.message : "Could not save changes";
+      setError(message);
+      throw new Error(message);
     } finally {
       setWorking(null);
     }
@@ -92,7 +96,9 @@ export default function SocialGrowthPlanner({ platform }: { platform: SocialPlat
       const data = await deleteSocialDay({ planId: plan.id, dayId: day.id });
       setPlan(data.plan);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not delete idea");
+      const message = err instanceof Error ? err.message : "Could not delete idea";
+      setError(message);
+      throw new Error(message);
     } finally {
       setWorking(null);
     }
@@ -106,7 +112,9 @@ export default function SocialGrowthPlanner({ platform }: { platform: SocialPlat
       const data = await regenerateSocialDay({ planId: plan.id, dayId: day.id, platform, intent });
       setPlan(data.plan);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not regenerate idea");
+      const message = err instanceof Error ? err.message : "Could not regenerate idea";
+      setError(message);
+      throw new Error(message);
     } finally {
       setWorking(null);
     }
@@ -133,12 +141,15 @@ export default function SocialGrowthPlanner({ platform }: { platform: SocialPlat
     setError(null);
     setLimitError(null);
     if (!weekEnded(plan)) {
-      setError("This week is still active. You can generate next week after this plan ends.");
+      toast({
+        title: "This week is still active",
+        description: "You can generate next week after this plan ends.",
+      });
       return;
     }
     setPendingNextWeekTopic(plan.topic);
     setFeedbackOpen(true);
-  }, [plan]);
+  }, [plan, toast]);
 
   const runGenerateNextWeek = useCallback(async (options: { skippedFeedback: boolean; feedback?: SocialPostPerformanceFeedback[] }) => {
     if (!plan) return;

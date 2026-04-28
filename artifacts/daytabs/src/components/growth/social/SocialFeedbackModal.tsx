@@ -1,5 +1,7 @@
 import { useMemo, useState } from "react";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import * as DialogPrimitive from "@radix-ui/react-dialog";
+import { X } from "lucide-react";
+import { Dialog, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PanelCardSoft } from "@/components/panel-system";
@@ -70,15 +72,25 @@ export function SocialFeedbackModal({
 
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
-      <DialogContent className="max-h-[80vh] max-w-4xl overflow-y-auto pt-10">
-        <DialogHeader>
-          <DialogTitle>How did last week&apos;s {label} posts perform?</DialogTitle>
-          <DialogDescription>
-            Add quick feedback so DayTabs can create a smarter plan for next week.
-          </DialogDescription>
-        </DialogHeader>
+      <DialogPrimitive.Portal>
+        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/75 backdrop-blur-md" />
+        <DialogPrimitive.Content className="fixed left-1/2 top-1/2 z-50 w-[min(94vw,760px)] max-h-[86vh] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-3xl border border-white/10 bg-[#11111a] shadow-2xl">
+          <div className="flex max-h-[86vh] flex-col text-white">
+            <div className="sticky top-0 z-10 border-b border-white/10 bg-[#11111a]/95 p-6 backdrop-blur">
+              <div className="flex items-start justify-between gap-4">
+                <DialogHeader className="space-y-1 pr-10">
+                  <DialogTitle className="text-xl text-white">How did last week&apos;s {label} posts perform?</DialogTitle>
+                  <DialogDescription className="text-white/55">Add quick feedback so DayTabs can create a smarter plan for next week.</DialogDescription>
+                </DialogHeader>
+                <DialogPrimitive.Close className="rounded-xl border border-white/10 bg-white/3 p-2 text-white/70 hover:bg-white/6 hover:text-white">
+                  <X className="h-4 w-4" />
+                  <span className="sr-only">Close</span>
+                </DialogPrimitive.Close>
+              </div>
+            </div>
 
-        <div className="space-y-4">
+            <div className="max-h-[calc(86vh-150px)] overflow-y-auto p-6">
+              <div className="space-y-4">
           {days.map((day) => {
             const value = draft[day.id] ?? {};
             return (
@@ -179,45 +191,49 @@ export function SocialFeedbackModal({
               </PanelCardSoft>
             );
           })}
-        </div>
+              </div>
+            </div>
 
-        <div className="mt-6 flex flex-wrap justify-end gap-2">
-          <Button type="button" variant="secondary" onClick={onSkip} disabled={working}>
-            Skip Feedback
-          </Button>
-          <Button
-            type="button"
-            onClick={() => {
-              const feedback: SocialPostPerformanceFeedback[] = days.map((day) => {
-                const value = draft[day.id] ?? {};
-                const num = (v: string) => (v && Number.isFinite(Number(v)) ? Number(v) : undefined);
-                return {
-                  planDayId: day.id,
-                  date: day.date,
-                  contentIdea: day.contentIdea,
-                  platform,
-                  status: (value.status ?? "not_finished") as SocialPostStatus,
-                  performance: (value.performance ?? "unknown") as SocialPostPerformance,
-                  viewsOrImpressions: num(value.viewsOrImpressions),
-                  likes: num(value.likes),
-                  comments: num(value.comments),
-                  shares: num(value.shares),
-                  saves: num(value.saves),
-                  newFollowers: num(value.newFollowers),
-                  whatWorked: value.whatWorked?.trim() || undefined,
-                  whatDidNotWork: value.whatDidNotWork?.trim() || undefined,
-                  userNotes: value.userNotes?.trim() || undefined,
-                };
-              });
-              onSubmit(feedback);
-            }}
-            disabled={working}
-          >
-            {working ? "Saving..." : "Save Feedback and Generate Next Week"}
-          </Button>
-        </div>
-      </DialogContent>
+            <div className="sticky bottom-0 z-10 border-t border-white/10 bg-[#11111a]/95 p-6 backdrop-blur">
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button type="button" variant="secondary" onClick={onSkip} disabled={working}>
+                  Skip Feedback
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => {
+                    const feedback: SocialPostPerformanceFeedback[] = days.map((day) => {
+                      const value = draft[day.id] ?? {};
+                      const num = (v: string) => (v && Number.isFinite(Number(v)) ? Number(v) : undefined);
+                      return {
+                        planDayId: day.id,
+                        date: day.date,
+                        contentIdea: day.contentIdea,
+                        platform,
+                        status: (value.status ?? "not_finished") as SocialPostStatus,
+                        performance: (value.performance ?? "unknown") as SocialPostPerformance,
+                        viewsOrImpressions: num(value.viewsOrImpressions),
+                        likes: num(value.likes),
+                        comments: num(value.comments),
+                        shares: num(value.shares),
+                        saves: num(value.saves),
+                        newFollowers: num(value.newFollowers),
+                        whatWorked: value.whatWorked?.trim() || undefined,
+                        whatDidNotWork: value.whatDidNotWork?.trim() || undefined,
+                        userNotes: value.userNotes?.trim() || undefined,
+                      };
+                    });
+                    onSubmit(feedback);
+                  }}
+                  disabled={working}
+                >
+                  {working ? "Saving..." : "Save Feedback and Generate Next Week"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </DialogPrimitive.Content>
+      </DialogPrimitive.Portal>
     </Dialog>
   );
 }
-

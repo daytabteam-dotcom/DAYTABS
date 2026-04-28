@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { CalendarDays, Instagram, Linkedin, Youtube } from "lucide-react";
+import { Instagram, Linkedin, Music2, Youtube } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export type GrowthPlatformTab = "youtube" | "linkedin" | "tiktok" | "instagram";
@@ -26,7 +26,7 @@ const TABS: Array<{
     id: "tiktok",
     label: "TikTok",
     description: "Generate short-form video ideas built around fast hooks and visuals.",
-    Icon: CalendarDays,
+    Icon: Music2,
   },
   {
     id: "instagram",
@@ -78,4 +78,3 @@ export function PlatformTabs({
     </div>
   );
 }
-
