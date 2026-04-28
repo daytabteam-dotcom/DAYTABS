@@ -17,8 +17,8 @@ function platformLabel(platform: SocialPlatform) {
 }
 
 function formatRange(startDate: string, endDate: string) {
-  const start = new Date(`${startDate}T00:00:00Z`);
-  const end = new Date(`${endDate}T00:00:00Z`);
+  const start = new Date(`${startDate}T00:00:00`);
+  const end = new Date(`${endDate}T00:00:00`);
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return `${startDate} to ${endDate}`;
   return `${start.toLocaleDateString(undefined, { month: "short", day: "numeric" })} to ${end.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
 }
@@ -32,7 +32,7 @@ function platformIcon(platform: SocialPlatform) {
 }
 
 function dayHeader(isoDate: string) {
-  const date = new Date(`${isoDate}T00:00:00Z`);
+  const date = new Date(`${isoDate}T00:00:00`);
   if (Number.isNaN(date.getTime())) return { weekday: isoDate, date: "" };
   return {
     weekday: date.toLocaleDateString(undefined, { weekday: "short" }),
@@ -40,11 +40,18 @@ function dayHeader(isoDate: string) {
   };
 }
 
+function toLocalIsoDate(input: Date) {
+  const year = input.getFullYear();
+  const month = String(input.getMonth() + 1).padStart(2, "0");
+  const day = String(input.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 function addDaysIso(isoDate: string, days: number) {
-  const date = new Date(`${isoDate}T00:00:00Z`);
+  const date = new Date(`${isoDate}T00:00:00`);
   if (Number.isNaN(date.getTime())) return isoDate;
-  date.setUTCDate(date.getUTCDate() + days);
-  return date.toISOString().slice(0, 10);
+  date.setDate(date.getDate() + days);
+  return toLocalIsoDate(date);
 }
 
 function statusTone(status: SocialPostStatus) {
@@ -157,12 +164,12 @@ export function SocialPlanBoard({
   }, [days, dateOverrides]);
 
   const dates = useMemo(() => {
-    const start = new Date(`${plan.startDate}T00:00:00Z`);
+    const start = new Date(`${plan.startDate}T00:00:00`);
     const values: string[] = [];
     for (let idx = 0; idx < 7; idx += 1) {
       const date = new Date(start);
-      date.setUTCDate(date.getUTCDate() + idx);
-      values.push(date.toISOString().slice(0, 10));
+      date.setDate(date.getDate() + idx);
+      values.push(toLocalIsoDate(date));
     }
     return values;
   }, [plan.startDate]);
@@ -172,7 +179,7 @@ export function SocialPlanBoard({
     setActiveDayId(dayId);
   }
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = toLocalIsoDate(new Date());
   const tomorrow = addDaysIso(today, 1);
   const todayDays = useMemo(() => days.filter((day) => (dateOverrides[day.id] ?? day.date) === today), [days, dateOverrides, today]);
   const tomorrowDays = useMemo(() => days.filter((day) => (dateOverrides[day.id] ?? day.date) === tomorrow), [days, dateOverrides, tomorrow]);
