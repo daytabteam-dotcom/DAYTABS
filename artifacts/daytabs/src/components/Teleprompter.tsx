@@ -52,6 +52,7 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
   const maxScrollRef = useRef(0);
   const stopCameraAfterRecordingRef = useRef(false);
   const recordingRef = useRef(false);
+  const cameraOrientationRef = useRef<"portrait" | "landscape" | null>(null);
 
   useEffect(() => {
     recordingRef.current = recording;
@@ -192,18 +193,23 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
     }
 
     try {
+      const orientation: "portrait" | "landscape" =
+        typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(orientation: portrait)").matches
+          ? "portrait"
+          : "landscape";
       stopMediaTracks();
       const supported = navigator.mediaDevices.getSupportedConstraints?.() ?? {};
-      const isPortrait = typeof window !== "undefined" && window.innerHeight > window.innerWidth;
-      const idealWidth = isPortrait ? 720 : 1280;
-      const idealHeight = isPortrait ? 1280 : 720;
+      const idealWidth = orientation === "portrait" ? 1080 : 1920;
+      const idealHeight = orientation === "portrait" ? 1920 : 1080;
+      const aspect = orientation === "portrait" ? 9 / 16 : 16 / 9;
 
       const videoConstraints: MediaTrackConstraints = {
         facingMode: "user",
       };
       if (supported.width) videoConstraints.width = { ideal: idealWidth };
       if (supported.height) videoConstraints.height = { ideal: idealHeight };
-      if (supported.aspectRatio) videoConstraints.aspectRatio = idealWidth / idealHeight;
+      if (supported.aspectRatio) videoConstraints.aspectRatio = aspect;
+      if (supported.frameRate) videoConstraints.frameRate = { ideal: 30, max: 60 };
       if ((supported as any).resizeMode) (videoConstraints as any).resizeMode = "crop-and-scale";
 
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -211,6 +217,7 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
         audio: true,
       });
       streamRef.current = stream;
+      cameraOrientationRef.current = orientation;
       if (videoRef.current) {
         const video = videoRef.current;
         video.muted = true;
@@ -285,7 +292,13 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
     setPreviewing(false);
     setSavedMessage(null);
 
-    const ready = cameraReady || await startCamera();
+    const desiredOrientation: "portrait" | "landscape" =
+      typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(orientation: portrait)").matches
+        ? "portrait"
+        : "landscape";
+
+    const mustRestartCamera = !cameraReady || cameraOrientationRef.current !== desiredOrientation;
+    const ready = mustRestartCamera ? await startCamera() : true;
     if (!ready) return;
 
     const runCountdown = (value: number) => {

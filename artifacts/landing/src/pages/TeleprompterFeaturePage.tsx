@@ -119,6 +119,7 @@ export default function TeleprompterFeaturePage() {
   const streamRef = useRef<MediaStream | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  const cameraOrientationRef = useRef<"portrait" | "landscape" | null>(null);
   const rafRef = useRef<number>(0);
   const lastTimeRef = useRef<number>(0);
   const scrollOffsetRef = useRef(0);
@@ -187,17 +188,23 @@ export default function TeleprompterFeaturePage() {
     try {
       stopMediaTracks();
       const supported = navigator.mediaDevices.getSupportedConstraints?.() ?? {};
-      const isPortrait = window.innerHeight > window.innerWidth;
-      const idealWidth = isPortrait ? 720 : 1280;
-      const idealHeight = isPortrait ? 1280 : 720;
+      const orientation: "portrait" | "landscape" =
+        typeof window.matchMedia === "function" && window.matchMedia("(orientation: portrait)").matches
+          ? "portrait"
+          : "landscape";
+      const idealWidth = orientation === "portrait" ? 1080 : 1920;
+      const idealHeight = orientation === "portrait" ? 1920 : 1080;
+      const aspect = orientation === "portrait" ? 9 / 16 : 16 / 9;
       const videoConstraints: MediaTrackConstraints = { facingMode: "user" };
       if (supported.width) videoConstraints.width = { ideal: idealWidth };
       if (supported.height) videoConstraints.height = { ideal: idealHeight };
-      if (supported.aspectRatio) videoConstraints.aspectRatio = idealWidth / idealHeight;
+      if (supported.aspectRatio) videoConstraints.aspectRatio = aspect;
+      if (supported.frameRate) videoConstraints.frameRate = { ideal: 30, max: 60 };
       if ((supported as any).resizeMode) (videoConstraints as any).resizeMode = "crop-and-scale";
 
       const stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints, audio: true });
       streamRef.current = stream;
+      cameraOrientationRef.current = orientation;
       if (videoRef.current) {
         const video = videoRef.current;
         video.muted = true;
@@ -285,7 +292,12 @@ export default function TeleprompterFeaturePage() {
     resetScrollPosition();
     setCameraError(null);
 
-    const ready = cameraReady || await startCamera();
+    const desiredOrientation: "portrait" | "landscape" =
+      typeof window.matchMedia === "function" && window.matchMedia("(orientation: portrait)").matches
+        ? "portrait"
+        : "landscape";
+    const mustRestartCamera = !cameraReady || cameraOrientationRef.current !== desiredOrientation;
+    const ready = mustRestartCamera ? await startCamera() : true;
     if (!ready) return;
 
     const runCountdown = (value: number) => {
@@ -599,4 +611,3 @@ export default function TeleprompterFeaturePage() {
     </div>
   );
 }
-
