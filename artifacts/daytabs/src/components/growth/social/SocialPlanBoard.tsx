@@ -226,10 +226,6 @@ export function SocialPlanBoard({
               Generate next week
             </Button>
             <div className="flex flex-wrap gap-2">
-              <Button type="button" variant="secondary" className="rounded-xl" onClick={() => setManualOpen(true)} disabled={working}>
-                <Plus className="mr-2 h-4 w-4" />
-                Add manual idea
-              </Button>
               <div className="flex flex-1 items-center rounded-xl border border-white/10 bg-white/3 p-1">
                 {([
                   { id: "calendar" as const, label: "Calendar", Icon: CalendarDays },
@@ -255,173 +251,6 @@ export function SocialPlanBoard({
         </PanelHeader>
       </PanelCard>
 
-      <PanelCardSoft className="border border-white/10 bg-[#120d1f]/60 p-5 backdrop-blur">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/40">What should I do next?</p>
-            <p className="mt-2 text-sm text-white/70">
-              {todayDays.length
-                ? "Start with today’s post."
-                : tomorrowDays.length
-                  ? "Review tomorrow’s plan or add an idea for today."
-                  : "Add a new idea or generate one to keep momentum."}
-            </p>
-          </div>
-          {taskProgress.total ? (
-            <span className="rounded-full border border-white/10 bg-white/4 px-3 py-1 text-xs text-white/60">
-              Growth tasks: <span className="text-white/80">{taskProgress.done}/{taskProgress.total}</span> completed
-            </span>
-          ) : null}
-        </div>
-        <div className="mt-4 flex flex-wrap gap-2">
-          <Button
-            type="button"
-            variant="secondary"
-            className="rounded-xl"
-            onClick={() => setTomorrowOpen(true)}
-          >
-            View tomorrow’s plan
-          </Button>
-          <Button
-            type="button"
-            className={cn("rounded-xl text-white", accent.gradient)}
-            onClick={() => {
-              setManualDraft((current) => ({ ...current, date: today }));
-              setManualOpen(true);
-            }}
-            disabled={working}
-          >
-            <Plus className="mr-2 h-4 w-4" />
-            Add idea for today
-          </Button>
-        </div>
-      </PanelCardSoft>
-
-      <PanelCardSoft className={cn("border p-5", accent.soft)}>
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/40">Today’s focus</p>
-            <p className="mt-2 text-sm text-white/75">
-              {new Date().toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}
-            </p>
-          </div>
-          {!todayDays.length ? (
-            <div className="grid w-full gap-2 sm:grid-cols-2">
-              <Button
-                type="button"
-                className={cn("w-full justify-center rounded-xl text-white", accent.gradient)}
-                onClick={() => {
-                  setManualDraft((current) => ({ ...current, date: today }));
-                  setManualOpen(true);
-                }}
-                disabled={working}
-              >
-                <Sparkles className="mr-2 h-4 w-4" />
-                Generate idea for today
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                className="w-full justify-center rounded-xl"
-                onClick={() => {
-                  setManualDraft((current) => ({ ...current, date: today }));
-                  setManualOpen(true);
-                }}
-                disabled={working}
-              >
-                <Plus className="mr-2 h-4 w-4" />
-                Add manual idea for today
-              </Button>
-            </div>
-          ) : null}
-        </div>
-
-        {todayDays.length ? (
-          <div className="mt-4 space-y-3">
-            {todayDays.map((day) => {
-              const status = (day.status ?? "not_finished") as SocialPostStatus;
-              const preview = plan.platform === "linkedin"
-                ? (day.postDraft || day.caption || day.hook)
-                : plan.platform === "tiktok"
-                  ? (day.script || day.caption || day.hook)
-                  : (day.caption || day.script || day.hook);
-              return (
-                <div key={`today-${day.id}`} className="rounded-2xl border border-white/10 bg-[#11111a]/40 p-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="flex min-w-0 items-start gap-3">
-                      <span className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border", accent.iconBg)}>
-                        <Icon className="h-5 w-5 text-white/85" />
-                      </span>
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-white">{day.contentIdea}</p>
-                        {preview ? <p className="mt-1 line-clamp-2 text-xs text-white/60">{preview}</p> : null}
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          <span className={cn("rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]", contentTypeTone(day.contentType))}>
-                            {day.contentType ? day.contentType.replace(/_/g, " ") : "post"}
-                          </span>
-                          <span className={cn("rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]", statusTone(status))}>
-                            {status === "not_finished" ? "Planned" : status}
-                          </span>
-                          <span className="rounded-full border border-white/10 bg-white/4 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/60">
-                            {day.bestPostingTime || "Time TBD"}
-                          </span>
-                          {(day.tags ?? []).slice(0, 2).map((tag) => (
-                            <span key={`${day.id}-today-tag-${tag}`} className="rounded-full border border-white/10 bg-white/4 px-2.5 py-1 text-[10px] text-white/60">
-                              {tag.startsWith("#") ? tag : `#${tag}`}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <Button type="button" variant="secondary" className="rounded-xl" onClick={() => openDay(day.id)}>
-                        Open
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        className="rounded-xl"
-                        onClick={async () => {
-                          await navigator.clipboard.writeText(copyTextForDay(plan.platform, day));
-                          toast({ title: "Copied", description: "Post copied to clipboard." });
-                        }}
-                      >
-                        <Copy className="mr-2 h-4 w-4" />
-                        Copy
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        className="rounded-xl"
-                        onClick={async () => {
-                          try {
-                            await onPatchDay(day, { status: "posted" });
-                            toast({ title: "Marked as posted", description: "Updated this post to Posted." });
-                          } catch (err) {
-                            toast({ variant: "destructive", title: "Could not update status", description: err instanceof Error ? err.message : "Please try again." });
-                          }
-                        }}
-                        disabled={working}
-                      >
-                        <CheckCircle2 className="mr-2 h-4 w-4" />
-                        Mark as posted
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-            {todayDays.length > 1 ? (
-              <p className="text-xs text-white/55">{todayDays.length} posts planned today.</p>
-            ) : null}
-          </div>
-        ) : (
-          <div className="mt-4 rounded-2xl border border-dashed border-white/10 bg-white/3 p-4 text-sm text-white/60">
-            No post planned for today.
-          </div>
-        )}
-      </PanelCardSoft>
-
       {plan.plan.summary ? (
         <PanelCardSoft className="border border-white/10 p-4 text-sm text-white/65">
           {plan.plan.summary}
@@ -429,8 +258,192 @@ export function SocialPlanBoard({
       ) : null}
 
       {viewMode === "calendar" ? (
-        <div className="overflow-x-auto pb-2">
-          <div className="flex min-w-max gap-3">
+        <div className="space-y-4">
+          {(() => {
+            const todayTasks = allTasks.filter((task) => task.date === today);
+            const hasTodayContent = todayDays.length > 0;
+            const hasTodayTasks = todayTasks.length > 0;
+            return (
+              <PanelCardSoft className={cn("border p-5", accent.soft)}>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/40">Today’s focus</p>
+                    <p className="mt-2 text-sm text-white/75">
+                      {new Date().toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}
+                    </p>
+                  </div>
+                  <Button type="button" variant="secondary" className="rounded-xl" onClick={() => setTomorrowOpen(true)}>
+                    View tomorrow’s plan
+                  </Button>
+                </div>
+
+                {!hasTodayContent && !hasTodayTasks ? (
+                  <div className="mt-4">
+                    <div className="rounded-2xl border border-dashed border-white/10 bg-white/3 p-4 text-sm text-white/60">
+                      No content or tasks planned for today.
+                    </div>
+                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                      <Button
+                        type="button"
+                        className={cn("w-full justify-center rounded-xl text-white", accent.gradient)}
+                        onClick={() => {
+                          setManualDraft((current) => ({ ...current, date: today }));
+                          setManualOpen(true);
+                        }}
+                        disabled={working}
+                      >
+                        <Sparkles className="mr-2 h-4 w-4" />
+                        Generate idea for today
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        className="w-full justify-center rounded-xl"
+                        onClick={() => {
+                          setManualDraft((current) => ({ ...current, date: today }));
+                          setManualOpen(true);
+                        }}
+                        disabled={working}
+                      >
+                        <Plus className="mr-2 h-4 w-4" />
+                        Add manual idea for today
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mt-4 space-y-6">
+                    {hasTodayContent ? (
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/40">Today’s content</p>
+                        <div className="mt-3 space-y-3">
+                          {todayDays.map((day) => {
+                            const status = (day.status ?? "not_finished") as SocialPostStatus;
+                            return (
+                              <div key={`today-${day.id}`} className="rounded-2xl border border-white/10 bg-[#11111a]/40 p-4">
+                                <div className="flex flex-wrap items-start justify-between gap-3">
+                                  <div className="flex min-w-0 items-start gap-3">
+                                    <span className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border", accent.iconBg)}>
+                                      <Icon className="h-5 w-5 text-white/85" />
+                                    </span>
+                                    <div className="min-w-0">
+                                      <p className="truncate text-sm font-semibold text-white">{day.contentIdea}</p>
+                                      <div className="mt-3 flex flex-wrap gap-2">
+                                        <span className={cn("rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]", contentTypeTone(day.contentType))}>
+                                          {day.contentType ? day.contentType.replace(/_/g, " ") : "post"}
+                                        </span>
+                                        <span className={cn("rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]", statusTone(status))}>
+                                          {status === "not_finished" ? "Planned" : status}
+                                        </span>
+                                        <span className="rounded-full border border-white/10 bg-white/4 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/60">
+                                          {day.bestPostingTime || "Time TBD"}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div className="flex flex-wrap gap-2">
+                                    <Button type="button" variant="secondary" className="rounded-xl" onClick={() => openDay(day.id)}>
+                                      Open
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      variant="secondary"
+                                      className="rounded-xl"
+                                      onClick={async () => {
+                                        await navigator.clipboard.writeText(copyTextForDay(plan.platform, day));
+                                        toast({ title: "Copied", description: "Post copied to clipboard." });
+                                      }}
+                                    >
+                                      <Copy className="mr-2 h-4 w-4" />
+                                      Copy
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      variant="secondary"
+                                      className="rounded-xl"
+                                      onClick={async () => {
+                                        try {
+                                          await onPatchDay(day, { status: "posted" });
+                                          toast({ title: "Marked as posted", description: "Updated this post to Posted." });
+                                        } catch (err) {
+                                          toast({ variant: "destructive", title: "Could not update status", description: err instanceof Error ? err.message : "Please try again." });
+                                        }
+                                      }}
+                                      disabled={working}
+                                    >
+                                      <CheckCircle2 className="mr-2 h-4 w-4" />
+                                      Mark as posted
+                                    </Button>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {hasTodayTasks ? (
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/40">Today’s tasks</p>
+                        <div className="mt-3 space-y-3">
+                          {todayTasks.map((task) => {
+                            const day = days.find((item) => item.id === task.planDayId) ?? null;
+                            const completed = Boolean(task.completed);
+                            return (
+                              <div key={`today-task-${task.key}`} className={cn("rounded-2xl border border-white/10 bg-white/3 p-4", completed && "opacity-70")}>
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="flex min-w-0 items-start gap-3">
+                                    <button
+                                      type="button"
+                                      onClick={async () => {
+                                        if (!day) return;
+                                        const tasks = day.growthTasks ?? [];
+                                        const next = tasks.map((item, index) => {
+                                          const key = item.id ? String(item.id) : `${day.id}:${index}`;
+                                          return key === task.key ? { ...item, completed: !completed } : item;
+                                        });
+                                        try {
+                                          await onPatchDay(day, { growthTasks: next });
+                                        } catch (err) {
+                                          toast({ variant: "destructive", title: "Could not update task", description: err instanceof Error ? err.message : "Please try again." });
+                                        }
+                                      }}
+                                      className={cn(
+                                        "mt-0.5 inline-flex h-6 w-6 items-center justify-center rounded-md border transition-colors",
+                                        completed ? "border-emerald-300/35 bg-emerald-500/15 text-emerald-100" : "border-white/15 bg-black/20 text-white/60 hover:bg-white/4 hover:text-white",
+                                      )}
+                                      aria-label={completed ? "Mark task as pending" : "Mark task as done"}
+                                    >
+                                      {completed ? <Check className="h-4 w-4" /> : null}
+                                    </button>
+                                    <div className="min-w-0">
+                                      <p className="text-sm font-semibold text-white">{task.title}</p>
+                                      <p className="mt-1 text-xs text-white/55">{task.suggestedTiming}</p>
+                                      {day ? (
+                                        <p className="mt-2 text-xs text-white/55">
+                                          Related: <button type="button" className="text-white/80 underline-offset-4 hover:underline" onClick={() => openDay(day.id)}>{task.ideaTitle}</button>
+                                        </p>
+                                      ) : null}
+                                    </div>
+                                  </div>
+                                  <span className={cn("rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]", completed ? "border-emerald-300/25 bg-emerald-400/10 text-emerald-100" : "border-white/10 bg-white/4 text-white/55")}>
+                                    {completed ? "Completed" : "Pending"}
+                                  </span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                )}
+              </PanelCardSoft>
+            );
+          })()}
+
+          <div className="overflow-x-auto pb-2">
+            <div className="flex min-w-max gap-3">
             {dates.map((date) => (
               <div
                 key={date}
@@ -567,19 +580,6 @@ export function SocialPlanBoard({
                           <Sparkles className="mr-2 h-4 w-4" />
                           Generate idea
                         </Button>
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          className="w-full justify-center rounded-xl"
-                          onClick={() => {
-                            setManualDraft((current) => ({ ...current, date }));
-                            setManualOpen(true);
-                          }}
-                          disabled={working}
-                        >
-                          <Plus className="mr-2 h-4 w-4" />
-                          Add manual idea
-                        </Button>
                       </div>
                     </PanelCardSoft>
                   ) : null}
@@ -599,6 +599,7 @@ export function SocialPlanBoard({
                 </div>
               </div>
             ))}
+            </div>
           </div>
         </div>
       ) : viewMode === "planner" ? (
@@ -1256,28 +1257,32 @@ export function SocialPlanBoard({
                       </div>
                     </div>
 
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      {([
-                        ["create", "Create"],
-                        ["visuals", "Visuals"],
-                        ["strategy", "Strategy"],
-                      ] as const).map(([id, label]) => (
-                        <button
-                          key={id}
-                          type="button"
-                          onClick={() => setActivePanelTab(id)}
-                          className={cn(
-                            "rounded-full border px-3 py-1 text-xs transition-colors",
-                            activePanelTab === id ? accent.tabActive : "border-white/10 bg-white/4 text-white/60 hover:bg-white/6 hover:text-white",
-                          )}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <div className="flex w-full rounded-2xl border border-white/10 bg-white/5 p-1">
+                    {([
+                      ["create", "Create"],
+                      ["visuals", "Visuals"],
+                      ["strategy", "Strategy"],
+                    ] as const).map(([id, label]) => (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => setActivePanelTab(id)}
+                        className={cn(
+                          "flex-1 rounded-xl px-4 py-2 text-sm font-semibold transition-all",
+                          activePanelTab === id
+                            ? cn("text-white shadow", accent.gradient)
+                            : "text-white/60 hover:bg-white/5 hover:text-white",
+                        )}
+                      >
+                        {label}
+                      </button>
+                    ))}
                   </div>
+                </div>
+              </div>
 
-                  <div className="max-h-[calc(86vh-150px)] overflow-y-auto p-6">
+              <div className="max-h-[calc(86vh-150px)] overflow-y-auto p-6">
                     {activePanelTab === "create" ? (
                       <div className="space-y-4">
                         {activeDay.hook ? (
