@@ -126,6 +126,8 @@ export default function TeleprompterFeaturePage() {
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const cameraOrientationRef = useRef<"portrait" | "landscape" | null>(null);
+  const canvasStreamRef = useRef<MediaStream | null>(null);
+  const drawRafRef = useRef<number>(0);
   const rafRef = useRef<number>(0);
   const lastTimeRef = useRef<number>(0);
   const scrollOffsetRef = useRef(0);
@@ -156,6 +158,14 @@ export default function TeleprompterFeaturePage() {
   }, [syncScrollBounds]);
 
   const stopMediaTracks = useCallback(() => {
+    if (drawRafRef.current) {
+      cancelAnimationFrame(drawRafRef.current);
+      drawRafRef.current = 0;
+    }
+    if (canvasStreamRef.current) {
+      for (const track of canvasStreamRef.current.getTracks()) track.stop();
+      canvasStreamRef.current = null;
+    }
     if (streamRef.current) {
       for (const track of streamRef.current.getTracks()) track.stop();
       streamRef.current = null;
@@ -305,7 +315,52 @@ export default function TeleprompterFeaturePage() {
     try {
       const mimeType = getSupportedMimeType();
       chunksRef.current = [];
-      const recorder = mimeType ? new MediaRecorder(streamRef.current, { mimeType }) : new MediaRecorder(streamRef.current);
+      const sourceVideo = videoRef.current;
+      if (!sourceVideo) {
+        setCameraError("Preview video unavailable.");
+        return false;
+      }
+
+      const isPortrait =
+        window.innerHeight > window.innerWidth ||
+        (typeof window.matchMedia === "function" && window.matchMedia("(orientation: portrait)").matches);
+      const outputWidth = isPortrait ? 1080 : 1920;
+      const outputHeight = isPortrait ? 1920 : 1080;
+
+      const canvas = document.createElement("canvas");
+      canvas.width = outputWidth;
+      canvas.height = outputHeight;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        setCameraError("Canvas unavailable.");
+        return false;
+      }
+
+      const draw = () => {
+        const vw = sourceVideo.videoWidth || outputWidth;
+        const vh = sourceVideo.videoHeight || outputHeight;
+        const scale = Math.max(outputWidth / vw, outputHeight / vh);
+        const sw = outputWidth / scale;
+        const sh = outputHeight / scale;
+        const sx = (vw - sw) / 2;
+        const sy = (vh - sh) / 2;
+        try {
+          ctx.drawImage(sourceVideo, sx, sy, sw, sh, 0, 0, outputWidth, outputHeight);
+        } catch {
+          // ignore
+        }
+        drawRafRef.current = requestAnimationFrame(draw);
+      };
+
+      if (drawRafRef.current) cancelAnimationFrame(drawRafRef.current);
+      draw();
+
+      const canvasStream = canvas.captureStream(30);
+      const audioTrack = streamRef.current.getAudioTracks()[0];
+      if (audioTrack) canvasStream.addTrack(audioTrack);
+      canvasStreamRef.current = canvasStream;
+
+      const recorder = mimeType ? new MediaRecorder(canvasStream, { mimeType }) : new MediaRecorder(canvasStream);
       recorderRef.current = recorder;
       recorder.ondataavailable = (event) => {
         if (event.data.size > 0) chunksRef.current.push(event.data);
@@ -315,6 +370,14 @@ export default function TeleprompterFeaturePage() {
         const blob = new Blob(chunksRef.current, { type: nextMimeType });
         chunksRef.current = [];
         recorderRef.current = null;
+        if (drawRafRef.current) {
+          cancelAnimationFrame(drawRafRef.current);
+          drawRafRef.current = 0;
+        }
+        if (canvasStreamRef.current) {
+          for (const track of canvasStreamRef.current.getTracks()) track.stop();
+          canvasStreamRef.current = null;
+        }
         setRecording(false);
         setPlaying(false);
         setPreviewing(false);
