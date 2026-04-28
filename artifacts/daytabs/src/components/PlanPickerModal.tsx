@@ -51,7 +51,7 @@ const PLAN_META = [
       "YouTube Growth tools (Coming Soon)",
     ],
     ctaClass:
-      "bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 shadow-lg shadow-amber-500/20",
+      "bg-linear-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 shadow-lg shadow-amber-500/20",
   },
   {
     key: "pro" as const,
@@ -72,7 +72,7 @@ const PLAN_META = [
       "60 script generations",
     ],
     ctaClass:
-      "bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-500 hover:to-purple-400 shadow-lg shadow-violet-500/20",
+      "bg-linear-to-r from-violet-600 to-purple-500 hover:from-violet-500 hover:to-purple-400 shadow-lg shadow-violet-500/20",
   },
   {
     key: "studio" as const,
@@ -93,7 +93,7 @@ const PLAN_META = [
       "Priority support",
     ],
     ctaClass:
-      "bg-gradient-to-r from-pink-600 to-rose-500 hover:from-pink-500 hover:to-rose-400 shadow-lg shadow-pink-500/20",
+      "bg-linear-to-r from-pink-600 to-rose-500 hover:from-pink-500 hover:to-rose-400 shadow-lg shadow-pink-500/20",
   },
 ];
 
@@ -184,7 +184,7 @@ export function PlanPickerModal({
                   className={`relative flex flex-col gap-4 rounded-[22px] border ${isHighlighted ? plan.border : "border-white/10"} ${isHighlighted ? plan.ring : ""} bg-[linear-gradient(180deg,rgba(255,255,255,0.06),transparent_24%),rgba(255,255,255,0.03)] p-5 backdrop-blur-xl`}
                 >
                   {plan.badge && (
-                    <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 bg-gradient-to-r from-violet-600 to-purple-500 rounded-full text-[10px] font-bold text-white shadow-md shadow-violet-500/30 whitespace-nowrap">
+                    <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 bg-linear-to-r from-violet-600 to-purple-500 rounded-full text-[10px] font-bold text-white shadow-md shadow-violet-500/30 whitespace-nowrap">
                       {plan.badge}
                     </div>
                   )}

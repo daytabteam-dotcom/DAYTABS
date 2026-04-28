@@ -287,7 +287,7 @@ export function SubtitlesTab({ jobId, data, replaceAudio }: SubtitlesTabProps) {
               <Button
                 onClick={handleExport}
                 disabled={exportMutation.isPending}
-                className="w-full h-14 text-lg font-bold rounded-xl bg-gradient-to-r from-primary to-purple-500 shadow-lg shadow-primary/25 hover-elevate active-elevate-2"
+                className="w-full h-14 text-lg font-bold rounded-xl bg-linear-to-r from-primary to-purple-500 shadow-lg shadow-primary/25 hover-elevate active-elevate-2"
               >
                 {exportMutation.isPending ? (
                   <span className="flex items-center gap-2">

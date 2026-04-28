@@ -130,7 +130,7 @@ export function SocialPlanSetup({
                 if (error) setError("");
               }}
               placeholder="Example: Building my AI video analysis app in public"
-              className="mt-2 border-white/10 bg-white/[0.04] text-white placeholder:text-white/30"
+              className="mt-2 border-white/10 bg-white/4 text-white placeholder:text-white/30"
             />
             {error ? <p className="mt-2 text-sm text-red-200">{error}</p> : null}
             <div className="mt-3 flex flex-wrap gap-2">
@@ -139,7 +139,7 @@ export function SocialPlanSetup({
                   key={example}
                   type="button"
                   onClick={() => setTopic(example)}
-                  className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs text-white/65 transition-colors hover:bg-white/[0.07] hover:text-white"
+                  className="rounded-full border border-white/10 bg-white/4 px-3 py-1 text-xs text-white/65 transition-colors hover:bg-white/7 hover:text-white"
                 >
                   {example}
                 </button>
@@ -162,7 +162,7 @@ export function SocialPlanSetup({
                       onClick={() => setPostingMode(mode.value)}
                       className={cn(
                         "flex flex-1 flex-col items-start rounded-2xl border p-3 text-left transition-all",
-                        postingMode === mode.value ? "border-violet-300/35 bg-violet-500/10" : "border-white/10 bg-white/[0.03] hover:bg-white/[0.05]",
+                        postingMode === mode.value ? "border-violet-300/35 bg-violet-500/10" : "border-white/10 bg-white/3 hover:bg-white/5",
                       )}
                     >
                       <p className="text-sm font-semibold text-white">{mode.label}</p>
@@ -173,21 +173,26 @@ export function SocialPlanSetup({
               </div>
             ) : null}
 
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-white/35">
-                How many times do you want to post this week?
-              </p>
-              <Input
-                value={String(postsPerWeek)}
-                onChange={(event) => setPostsPerWeek(Math.max(1, Math.min(7, Number(event.target.value || 0) || 0)) || 1)}
-                inputMode="numeric"
-                disabled={allowBestCase && postingMode === "ai_optimized"}
-                className="mt-2 border-white/10 bg-white/[0.04] text-white placeholder:text-white/30 disabled:opacity-60"
-              />
-              {allowBestCase && postingMode === "ai_optimized" ? (
-                <p className="mt-2 text-xs text-white/45">Best case mode chooses a realistic cadence automatically.</p>
-              ) : null}
-            </div>
+            {allowBestCase && postingMode === "ai_optimized" ? (
+              <PanelCardSoft className="lg:col-span-2 border border-white/10 bg-white/3 p-4 text-sm text-white/65">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/40">Best Case Selected</p>
+                <p className="mt-2 leading-6">
+                  DayTabs will choose the best number of posts, content mix, and posting days based on your topic, goal, and platform.
+                </p>
+              </PanelCardSoft>
+            ) : (
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-white/35">
+                  How many times do you want to post this week?
+                </p>
+                <Input
+                  value={String(postsPerWeek)}
+                  onChange={(event) => setPostsPerWeek(Math.max(1, Math.min(7, Number(event.target.value || 0) || 0)) || 1)}
+                  inputMode="numeric"
+                  className="mt-2 border-white/10 bg-white/4 text-white placeholder:text-white/30"
+                />
+              </div>
+            )}
 
             {allowBestCase && postingMode === "manual" ? (
               <div className="lg:col-span-2">
@@ -202,7 +207,7 @@ export function SocialPlanSetup({
                         onClick={() => setPreferredWeekdays((current) => active ? current.filter((item) => item !== day) : [...current, day])}
                         className={cn(
                           "rounded-full border px-3 py-1 text-xs transition-colors",
-                          active ? "border-violet-300/35 bg-violet-500/10 text-violet-100" : "border-white/10 bg-white/[0.04] text-white/60 hover:bg-white/[0.07] hover:text-white",
+                          active ? "border-violet-300/35 bg-violet-500/10 text-violet-100" : "border-white/10 bg-white/4 text-white/60 hover:bg-white/7 hover:text-white",
                         )}
                       >
                         {day}
@@ -220,7 +225,7 @@ export function SocialPlanSetup({
               <select
                 value={goal}
                 onChange={(event) => setGoal(event.target.value as any)}
-                className="mt-2 w-full rounded-md border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white"
+                className="mt-2 w-full rounded-md border border-white/10 bg-white/4 px-3 py-2 text-sm text-white"
               >
                 <option value="">Select a goal</option>
                 {GOAL_OPTIONS.map((item) => (
@@ -234,7 +239,7 @@ export function SocialPlanSetup({
               <select
                 value={tone}
                 onChange={(event) => setTone(event.target.value as any)}
-                className="mt-2 w-full rounded-md border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white"
+                className="mt-2 w-full rounded-md border border-white/10 bg-white/4 px-3 py-2 text-sm text-white"
               >
                 <option value="">Select a tone</option>
                 {TONE_OPTIONS.map((item) => (
@@ -249,7 +254,7 @@ export function SocialPlanSetup({
                 value={audience}
                 onChange={(event) => setAudience(event.target.value)}
                 placeholder="Example: early-stage founders building in public"
-                className="mt-2 border-white/10 bg-white/[0.04] text-white placeholder:text-white/30"
+                className="mt-2 border-white/10 bg-white/4 text-white placeholder:text-white/30"
               />
             </div>
 
@@ -259,7 +264,7 @@ export function SocialPlanSetup({
                 value={formatPreference}
                 onChange={(event) => setFormatPreference(event.target.value)}
                 placeholder="Example: carousels, founder stories, behind-the-scenes"
-                className="mt-2 border-white/10 bg-white/[0.04] text-white placeholder:text-white/30"
+                className="mt-2 border-white/10 bg-white/4 text-white placeholder:text-white/30"
               />
             </div>
           </div>
@@ -300,7 +305,7 @@ export function SocialPlanSetup({
                   });
                 }}
                 disabled={generating}
-                className="rounded-lg bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white hover:from-violet-400 hover:to-fuchsia-400"
+                className="rounded-lg bg-linear-to-r from-violet-500 to-fuchsia-500 text-white hover:from-violet-400 hover:to-fuchsia-400"
               >
                 <Wand2 className="mr-2 h-4 w-4" />
                 {generating ? "Generating..." : "Generate My Weekly Plan"}

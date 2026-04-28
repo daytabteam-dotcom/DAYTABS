@@ -38,12 +38,12 @@ export function ProgressIndicator({ currentStep, progress, mode }: ProgressIndic
   return (
     <div className="w-full max-w-2xl mx-auto py-12 px-6 glass-card rounded-3xl">
       <div className="text-center mb-10">
-        <h2 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-white/70 mb-4">
+        <h2 className="text-3xl font-bold bg-clip-text text-transparent bg-linear-to-r from-white to-white/70 mb-4">
           Analyzing Your Content
         </h2>
         <div className="h-2 w-full bg-secondary rounded-full overflow-hidden">
           <motion.div
-            className="h-full bg-gradient-to-r from-primary to-purple-400"
+            className="h-full bg-linear-to-r from-primary to-purple-400"
             initial={{ width: 0 }}
             animate={{ width: `${progress}%` }}
             transition={{ duration: 0.5 }}

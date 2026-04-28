@@ -56,6 +56,23 @@ export async function patchSocialDay(input: {
   });
 }
 
+export async function createSocialDay(input: {
+  planId: number;
+  platform: SocialPlatform;
+  date: string;
+  contentIdea: string;
+  contentType?: string;
+  hook?: string;
+  notes?: string;
+  tags?: string[];
+  bestPostingTime?: string;
+}) {
+  return await jsonFetch<{ plan: SocialWeeklyPlan; day: { id: string } }>(`/api/social-growth/plans/${input.planId}/days`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
 export async function deleteSocialDay(input: { planId: number; dayId: string }) {
   return await jsonFetch<{ plan: SocialWeeklyPlan }>(`/api/social-growth/plans/${input.planId}/days/${input.dayId}`, {
     method: "DELETE",

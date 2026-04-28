@@ -12,6 +12,7 @@ import type {
 import { generateSocialWeeklyPlanAi, regenerateSocialPlanDayAi } from "../../services/socialGrowthAiService";
 import {
   createSocialWeeklyPlan,
+  addSocialPlanDay,
   deleteSocialPlanDay,
   getLatestFeedbackForPlan,
   getLatestSocialWeeklyPlan,
@@ -57,6 +58,10 @@ function weekRangeForStart(startDate: string) {
   return { startDate, endDate: addDaysIso(startDate, 6) };
 }
 
+function normalizeString(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
 router.get("/plans", async (req, res) => {
   const platform = req.query.platform;
   if (!isPlatform(platform)) {
@@ -75,6 +80,70 @@ router.get("/plans/latest", async (req, res) => {
   }
   const plan = await getLatestSocialWeeklyPlan(req.auth!.user_id, platform);
   res.json({ plan });
+});
+
+router.post("/plans/:id/days", async (req, res) => {
+  const planId = Number(req.params.id);
+  if (!Number.isFinite(planId) || planId <= 0) {
+    res.status(400).json({ error: "Invalid plan id" });
+    return;
+  }
+
+  const {
+    date,
+    contentIdea,
+    contentType,
+    hook,
+    notes,
+    tags,
+    bestPostingTime,
+    platform,
+  } = req.body as Record<string, unknown>;
+
+  if (!isPlatform(platform)) {
+    res.status(400).json({ error: "Invalid platform" });
+    return;
+  }
+  if (!isIsoDate(date)) {
+    res.status(400).json({ error: "Invalid date" });
+    return;
+  }
+
+  const title = normalizeString(contentIdea);
+  if (!title) {
+    res.status(400).json({ error: "Idea title is required" });
+    return;
+  }
+
+  const hookText = normalizeString(hook) || title;
+  const noteText = normalizeString(notes);
+  const normalizedTags = Array.isArray(tags)
+    ? tags.map((item) => normalizeString(item)).filter(Boolean).slice(0, 18)
+    : normalizeString(tags).split(",").map((item) => item.trim()).filter(Boolean).slice(0, 18);
+
+  const created = await addSocialPlanDay(req.auth!.user_id, planId, {
+    date,
+    patch: {
+      contentIdea: title,
+      contentType: normalizeString(contentType) || undefined,
+      hook: hookText,
+      outline: [],
+      postContext: noteText || undefined,
+      bestPostingTime: normalizeString(bestPostingTime),
+      rationale: "",
+      tags: normalizedTags,
+      descriptionSuggestion: noteText,
+      thumbnailConcept: "",
+      status: "not_finished",
+      ideaOrigin: "manual",
+      aiImproved: false,
+    },
+  });
+  if (!created) {
+    res.status(404).json({ error: "Plan not found" });
+    return;
+  }
+  res.json({ plan: created.plan, day: created.day });
 });
 
 router.post("/plans/generate", async (req, res) => {

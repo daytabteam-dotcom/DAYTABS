@@ -96,7 +96,7 @@ export default function ApiWakeGate({ children }: Props) {
 
             <div className="mt-6 overflow-hidden rounded-full bg-white/10">
               <motion.div
-                className="h-2 rounded-full bg-gradient-to-r from-orange-400 via-rose-400 to-red-500"
+                className="h-2 rounded-full bg-linear-to-r from-orange-400 via-rose-400 to-red-500"
                 animate={{ width: `${progress}%` }}
                 transition={{ duration: 0.35, ease: "easeOut" }}
               />

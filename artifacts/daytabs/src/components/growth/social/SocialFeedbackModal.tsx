@@ -92,7 +92,7 @@ export function SocialFeedbackModal({
                     <select
                       value={value.status}
                       onChange={(event) => setDraft((prev) => ({ ...prev, [day.id]: { ...value, status: event.target.value } }))}
-                      className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-xs text-white"
+                      className="rounded-lg border border-white/10 bg-white/4 px-3 py-2 text-xs text-white"
                     >
                       {STATUS_OPTIONS.map((opt) => (
                         <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -107,7 +107,7 @@ export function SocialFeedbackModal({
                           ? "border-emerald-300/20 bg-emerald-500/10"
                           : value.performance === "poor"
                             ? "border-red-300/20 bg-red-500/10"
-                            : "border-white/10 bg-white/[0.04]",
+                            : "border-white/10 bg-white/4",
                       )}
                     >
                       {PERF_OPTIONS.map((opt) => (
@@ -122,37 +122,37 @@ export function SocialFeedbackModal({
                     value={value.viewsOrImpressions}
                     onChange={(event) => setDraft((prev) => ({ ...prev, [day.id]: { ...value, viewsOrImpressions: event.target.value } }))}
                     placeholder="Views or impressions"
-                    className="border-white/10 bg-white/[0.04] text-white placeholder:text-white/30"
+                    className="border-white/10 bg-white/4 text-white placeholder:text-white/30"
                   />
                   <Input
                     value={value.likes}
                     onChange={(event) => setDraft((prev) => ({ ...prev, [day.id]: { ...value, likes: event.target.value } }))}
                     placeholder="Likes"
-                    className="border-white/10 bg-white/[0.04] text-white placeholder:text-white/30"
+                    className="border-white/10 bg-white/4 text-white placeholder:text-white/30"
                   />
                   <Input
                     value={value.comments}
                     onChange={(event) => setDraft((prev) => ({ ...prev, [day.id]: { ...value, comments: event.target.value } }))}
                     placeholder="Comments"
-                    className="border-white/10 bg-white/[0.04] text-white placeholder:text-white/30"
+                    className="border-white/10 bg-white/4 text-white placeholder:text-white/30"
                   />
                   <Input
                     value={value.shares}
                     onChange={(event) => setDraft((prev) => ({ ...prev, [day.id]: { ...value, shares: event.target.value } }))}
                     placeholder="Shares"
-                    className="border-white/10 bg-white/[0.04] text-white placeholder:text-white/30"
+                    className="border-white/10 bg-white/4 text-white placeholder:text-white/30"
                   />
                   <Input
                     value={value.saves}
                     onChange={(event) => setDraft((prev) => ({ ...prev, [day.id]: { ...value, saves: event.target.value } }))}
                     placeholder="Saves"
-                    className="border-white/10 bg-white/[0.04] text-white placeholder:text-white/30"
+                    className="border-white/10 bg-white/4 text-white placeholder:text-white/30"
                   />
                   <Input
                     value={value.newFollowers}
                     onChange={(event) => setDraft((prev) => ({ ...prev, [day.id]: { ...value, newFollowers: event.target.value } }))}
                     placeholder="New followers"
-                    className="border-white/10 bg-white/[0.04] text-white placeholder:text-white/30"
+                    className="border-white/10 bg-white/4 text-white placeholder:text-white/30"
                   />
                 </div>
 
@@ -161,19 +161,19 @@ export function SocialFeedbackModal({
                     value={value.whatWorked}
                     onChange={(event) => setDraft((prev) => ({ ...prev, [day.id]: { ...value, whatWorked: event.target.value } }))}
                     placeholder="What worked?"
-                    className="border-white/10 bg-white/[0.04] text-white placeholder:text-white/30"
+                    className="border-white/10 bg-white/4 text-white placeholder:text-white/30"
                   />
                   <Input
                     value={value.whatDidNotWork}
                     onChange={(event) => setDraft((prev) => ({ ...prev, [day.id]: { ...value, whatDidNotWork: event.target.value } }))}
                     placeholder="What did not work?"
-                    className="border-white/10 bg-white/[0.04] text-white placeholder:text-white/30"
+                    className="border-white/10 bg-white/4 text-white placeholder:text-white/30"
                   />
                   <Input
                     value={value.userNotes}
                     onChange={(event) => setDraft((prev) => ({ ...prev, [day.id]: { ...value, userNotes: event.target.value } }))}
                     placeholder="Notes"
-                    className="border-white/10 bg-white/[0.04] text-white placeholder:text-white/30"
+                    className="border-white/10 bg-white/4 text-white placeholder:text-white/30"
                   />
                 </div>
               </PanelCardSoft>

@@ -9,7 +9,7 @@ import type { SocialPlanDay, SocialPostStatus } from "./types";
 function statusTone(status: SocialPostStatus) {
   if (status === "posted") return "border-emerald-300/25 bg-emerald-400/10 text-emerald-100";
   if (status === "skipped") return "border-red-300/25 bg-red-400/10 text-red-100";
-  return "border-white/10 bg-white/[0.04] text-white/55";
+  return "border-white/10 bg-white/4 text-white/55";
 }
 
 export function SocialPlanCard({
@@ -49,7 +49,7 @@ export function SocialPlanCard({
 
   if (!editing) {
     return (
-      <PanelCardSoft className="border border-white/10 p-4 transition-all hover:-translate-y-0.5 hover:bg-white/[0.05]">
+      <PanelCardSoft className="border border-white/10 p-4 transition-all hover:-translate-y-0.5 hover:bg-white/5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/35">{dateLabel}</p>
@@ -64,24 +64,24 @@ export function SocialPlanCard({
         </div>
 
         <div className="mt-4 grid gap-2 md:grid-cols-2">
-          <div className="rounded-xl border border-white/10 bg-white/[0.035] p-3">
+          <div className="rounded-xl border border-white/10 bg-white/3.5 p-3">
             <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/35">Outline</p>
             <ul className="mt-2 space-y-1 text-sm text-white/70">
               {day.outline.slice(0, 6).map((line, idx) => <li key={`${day.id}-o-${idx}`}>• {line}</li>)}
             </ul>
           </div>
-          <div className="rounded-xl border border-white/10 bg-white/[0.035] p-3">
+          <div className="rounded-xl border border-white/10 bg-white/3.5 p-3">
             <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/35">Post direction</p>
             <p className="mt-2 text-sm leading-6 text-white/70 line-clamp-6">{day.descriptionSuggestion}</p>
           </div>
         </div>
 
         <div className="mt-4 grid gap-2 md:grid-cols-3">
-          <div className="rounded-xl border border-white/10 bg-white/[0.035] p-3">
+          <div className="rounded-xl border border-white/10 bg-white/3.5 p-3">
             <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/35">Best time</p>
             <p className="mt-2 text-sm text-white/70">{day.bestPostingTime || "Time TBD"}</p>
           </div>
-          <div className="rounded-xl border border-white/10 bg-white/[0.035] p-3 md:col-span-2">
+          <div className="rounded-xl border border-white/10 bg-white/3.5 p-3 md:col-span-2">
             <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/35">Why this works</p>
             <p className="mt-2 text-sm leading-6 text-white/70 line-clamp-4">{day.rationale}</p>
           </div>
@@ -90,7 +90,7 @@ export function SocialPlanCard({
         {day.tags.length ? (
           <div className="mt-4 flex flex-wrap gap-2">
             {day.tags.slice(0, 14).map((tag) => (
-              <span key={`${day.id}-t-${tag}`} className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs text-white/65">
+              <span key={`${day.id}-t-${tag}`} className="rounded-full border border-white/10 bg-white/4 px-3 py-1 text-xs text-white/65">
                 {tag.startsWith("#") ? tag : `#${tag}`}
               </span>
             ))}
@@ -125,7 +125,7 @@ export function SocialPlanCard({
           <select
             value={draft.status}
             onChange={(event) => setDraft((prev) => ({ ...prev, status: event.target.value as SocialPostStatus }))}
-            className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-xs text-white"
+            className="rounded-lg border border-white/10 bg-white/4 px-3 py-2 text-xs text-white"
           >
             <option value="not_finished">Planned</option>
             <option value="posted">Posted</option>
@@ -137,35 +137,35 @@ export function SocialPlanCard({
       <div className="mt-4 grid gap-3 lg:grid-cols-2">
         <div className="lg:col-span-2">
           <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/35">Content idea</p>
-          <Textarea value={draft.contentIdea} onChange={(e) => setDraft((p) => ({ ...p, contentIdea: e.target.value }))} className="mt-2 min-h-16 border-white/10 bg-white/[0.04] text-white" />
+          <Textarea value={draft.contentIdea} onChange={(e) => setDraft((p) => ({ ...p, contentIdea: e.target.value }))} className="mt-2 min-h-16 border-white/10 bg-white/4 text-white" />
         </div>
         <div className="lg:col-span-2">
           <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/35">Hook</p>
-          <Textarea value={draft.hook} onChange={(e) => setDraft((p) => ({ ...p, hook: e.target.value }))} className="mt-2 min-h-16 border-white/10 bg-white/[0.04] text-white" />
+          <Textarea value={draft.hook} onChange={(e) => setDraft((p) => ({ ...p, hook: e.target.value }))} className="mt-2 min-h-16 border-white/10 bg-white/4 text-white" />
         </div>
         <div>
           <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/35">Outline (one per line)</p>
-          <Textarea value={draft.outline} onChange={(e) => setDraft((p) => ({ ...p, outline: e.target.value }))} className="mt-2 min-h-40 border-white/10 bg-white/[0.04] text-white" />
+          <Textarea value={draft.outline} onChange={(e) => setDraft((p) => ({ ...p, outline: e.target.value }))} className="mt-2 min-h-40 border-white/10 bg-white/4 text-white" />
         </div>
         <div>
           <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/35">Description or caption</p>
-          <Textarea value={draft.descriptionSuggestion} onChange={(e) => setDraft((p) => ({ ...p, descriptionSuggestion: e.target.value }))} className="mt-2 min-h-40 border-white/10 bg-white/[0.04] text-white" />
+          <Textarea value={draft.descriptionSuggestion} onChange={(e) => setDraft((p) => ({ ...p, descriptionSuggestion: e.target.value }))} className="mt-2 min-h-40 border-white/10 bg-white/4 text-white" />
         </div>
         <div>
           <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/35">Best posting time</p>
-          <Textarea value={draft.bestPostingTime} onChange={(e) => setDraft((p) => ({ ...p, bestPostingTime: e.target.value }))} className="mt-2 min-h-16 border-white/10 bg-white/[0.04] text-white" />
+          <Textarea value={draft.bestPostingTime} onChange={(e) => setDraft((p) => ({ ...p, bestPostingTime: e.target.value }))} className="mt-2 min-h-16 border-white/10 bg-white/4 text-white" />
         </div>
         <div>
           <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/35">Hashtags</p>
-          <Textarea value={draft.tags} onChange={(e) => setDraft((p) => ({ ...p, tags: e.target.value }))} className="mt-2 min-h-16 border-white/10 bg-white/[0.04] text-white" />
+          <Textarea value={draft.tags} onChange={(e) => setDraft((p) => ({ ...p, tags: e.target.value }))} className="mt-2 min-h-16 border-white/10 bg-white/4 text-white" />
         </div>
         <div className="lg:col-span-2">
           <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/35">Why this works</p>
-          <Textarea value={draft.rationale} onChange={(e) => setDraft((p) => ({ ...p, rationale: e.target.value }))} className="mt-2 min-h-24 border-white/10 bg-white/[0.04] text-white" />
+          <Textarea value={draft.rationale} onChange={(e) => setDraft((p) => ({ ...p, rationale: e.target.value }))} className="mt-2 min-h-24 border-white/10 bg-white/4 text-white" />
         </div>
         <div className="lg:col-span-2">
           <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/35">Cover or visual concept</p>
-          <Textarea value={draft.thumbnailConcept} onChange={(e) => setDraft((p) => ({ ...p, thumbnailConcept: e.target.value }))} className="mt-2 min-h-16 border-white/10 bg-white/[0.04] text-white" />
+          <Textarea value={draft.thumbnailConcept} onChange={(e) => setDraft((p) => ({ ...p, thumbnailConcept: e.target.value }))} className="mt-2 min-h-16 border-white/10 bg-white/4 text-white" />
         </div>
       </div>
 

@@ -51,6 +51,8 @@ export interface SocialPlanDay {
   date: string; // ISO YYYY-MM-DD
   contentIdea: string;
   contentType?: string;
+  ideaOrigin?: "ai" | "manual";
+  aiImproved?: boolean;
   hook: string;
   outline: string[];
   postContext?: string;

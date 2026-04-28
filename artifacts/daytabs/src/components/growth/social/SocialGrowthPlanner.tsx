@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { PanelCardSoft } from "@/components/panel-system";
 import type { SocialPlatform, SocialPlanDay, SocialPostPerformanceFeedback, SocialPostingMode, SocialWeekday, SocialWeeklyPlan } from "./types";
-import { fetchLatestSocialPlan, generateNextWeekSocialPlan, generateSocialPlan, patchSocialDay, deleteSocialDay, regenerateSocialDay } from "./socialApi";
+import { createSocialDay, fetchLatestSocialPlan, generateNextWeekSocialPlan, generateSocialPlan, patchSocialDay, deleteSocialDay, regenerateSocialDay } from "./socialApi";
 import { SocialPlanSetup } from "./SocialPlanSetup";
 import { SocialPlanBoard } from "./SocialPlanBoard";
 import { SocialFeedbackModal } from "./SocialFeedbackModal";
@@ -112,6 +112,22 @@ export default function SocialGrowthPlanner({ platform }: { platform: SocialPlat
     }
   }, [plan, platform]);
 
+  const handleCreateDay = useCallback(async (input: { date: string; contentIdea: string; contentType?: string; hook?: string; notes?: string; tags?: string[]; bestPostingTime?: string }) => {
+    if (!plan) return null;
+    setWorking("create-day");
+    setError(null);
+    try {
+      const data = await createSocialDay({ planId: plan.id, platform, ...input });
+      setPlan(data.plan);
+      return data.day?.id ?? null;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not add idea");
+      return null;
+    } finally {
+      setWorking(null);
+    }
+  }, [plan, platform]);
+
   const handleGenerateNextWeek = useCallback(() => {
     if (!plan) return;
     setError(null);
@@ -189,6 +205,7 @@ export default function SocialGrowthPlanner({ platform }: { platform: SocialPlat
             onPatchDay={handlePatchDay}
             onDeleteDay={handleDeleteDay}
             onRegenerateDay={handleRegenerateDay}
+            onCreateDay={handleCreateDay}
           />
 
           <SocialFeedbackModal

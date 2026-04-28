@@ -202,7 +202,7 @@ export function UploadSection({ onUpload, isUploading }: UploadSectionProps) {
             <Button 
               onClick={handleAnalyze} 
               disabled={!file || isUploading}
-              className="w-full h-14 text-lg font-bold rounded-xl bg-gradient-to-r from-primary to-purple-500 hover:from-primary hover:to-purple-400 shadow-xl shadow-primary/25 hover:shadow-primary/40 transition-all hover-elevate active-elevate-2"
+              className="w-full h-14 text-lg font-bold rounded-xl bg-linear-to-r from-primary to-purple-500 hover:from-primary hover:to-purple-400 shadow-xl shadow-primary/25 hover:shadow-primary/40 transition-all hover-elevate active-elevate-2"
             >
               {isUploading ? (
                 <span className="flex items-center">
