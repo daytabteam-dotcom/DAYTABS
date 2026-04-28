@@ -2,7 +2,28 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
  
 import { Helmet } from "react-helmet-async";
 import { motion } from "framer-motion";
-import { Camera, Circle, Download, Play, Pause, RotateCcw, ShieldCheck, UserPlus, X, LogIn } from "lucide-react";
+import {
+  BadgeCheck,
+  Camera,
+  Circle,
+  Clock,
+  Download,
+  EyeOff,
+  FileText,
+  GraduationCap,
+  Lock,
+  LogIn,
+  MonitorSmartphone,
+  Pause,
+  Play,
+  RotateCcw,
+  Sparkles,
+  UserPlus,
+  Users,
+  Video,
+  X,
+  Zap,
+} from "lucide-react";
 import Navbar from "@/components/Navbar";
 import { authApi } from "@/lib/api";
 
@@ -92,7 +113,9 @@ function downloadBlob(blob: Blob) {
 }
 
 export default function TeleprompterFeaturePage() {
-  const [script, setScript] = useState(`Paste your script here.\n\nTip: Keep sentences short and easy to read out loud.`);
+  const [script, setScript] = useState(
+    `Write or paste your script…\n\nTip: Keep sentences short and easy to read out loud.\n\nExample:\n“Hey — quick update. Today I’m going to show you…”`,
+  );
   const lines = useMemo(() => script.split(/\n+/).map((l) => l.trim()).filter(Boolean), [script]);
 
   const [playing, setPlaying] = useState(false);
@@ -339,13 +362,20 @@ export default function TeleprompterFeaturePage() {
       const draw = () => {
         const vw = sourceVideo.videoWidth || outputWidth;
         const vh = sourceVideo.videoHeight || outputHeight;
-        const scale = Math.max(outputWidth / vw, outputHeight / vh);
-        const sw = outputWidth / scale;
-        const sh = outputHeight / scale;
-        const sx = (vw - sw) / 2;
-        const sy = (vh - sh) / 2;
+
+        ctx.clearRect(0, 0, outputWidth, outputHeight);
+        if (!vw || !vh) {
+          drawRafRef.current = requestAnimationFrame(draw);
+          return;
+        }
+
+        const scale = Math.min(outputWidth / vw, outputHeight / vh);
+        const drawWidth = vw * scale;
+        const drawHeight = vh * scale;
+        const dx = (outputWidth - drawWidth) / 2;
+        const dy = (outputHeight - drawHeight) / 2;
         try {
-          ctx.drawImage(sourceVideo, sx, sy, sw, sh, 0, 0, outputWidth, outputHeight);
+          ctx.drawImage(sourceVideo, dx, dy, drawWidth, drawHeight);
         } catch {
           // ignore
         }
@@ -481,6 +511,27 @@ export default function TeleprompterFeaturePage() {
   }, [clearCountdown, stopMediaTracks, stopRecording]);
 
   const canDownloadNow = Boolean(asToken());
+  const featureRef = useRef<HTMLDivElement>(null);
+
+  const heroStartRecording = useCallback(() => {
+    featureRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    window.setTimeout(() => void beginRecord(), 250);
+  }, [beginRecord]);
+
+  const heroTryDemo = useCallback(() => {
+    featureRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    window.setTimeout(() => void beginPreview(), 250);
+  }, [beginPreview]);
+
+  const sectionMotion = useMemo(
+    () => ({
+      initial: { opacity: 0, y: 18 },
+      whileInView: { opacity: 1, y: 0 },
+      viewport: { once: true, amount: 0.25 },
+      transition: { duration: 0.5 },
+    }),
+    [],
+  );
 
   useEffect(() => {
     if (!downloadGateOpen) return;
@@ -511,209 +562,473 @@ export default function TeleprompterFeaturePage() {
       </Helmet>
       <Navbar />
 
-      <div className="pt-28 pb-20 px-6">
-        <div className="max-w-6xl mx-auto">
-          <motion.div
-            initial={{ opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5 }}
-            className="max-w-3xl"
-          >
-            <h1 className="text-4xl md:text-5xl font-black leading-tight">Online Teleprompter with Recording</h1>
-            <p className="mt-3 text-xl md:text-2xl font-semibold text-white/85">Speak naturally and record videos in one take</p>
-            <p className="mt-5 text-white/55 leading-7">
-              Use a simple browser-based teleprompter that scrolls your script while you record. No downloads, no setup, and your video stays on your device.
-            </p>
-          </motion.div>
-
-          <div className="mt-10 max-w-3xl text-white/55 leading-7 space-y-4">
-            <p>
-              If you’ve ever tried to record a video while reading a script, you know how difficult it feels. You either look away from the camera, forget your lines, or keep restarting over and over again.
-            </p>
-            <p>
-              This online teleprompter solves that problem by combining script reading and video recording in one place.
-            </p>
-            <p>
-              You can write your script, follow it while it scrolls, and record your video at the same time. Everything happens directly in your browser, so you can start instantly without installing anything.
-            </p>
+      <main className="pt-20">
+        <section className="relative overflow-hidden px-6 pt-14 pb-24">
+          <div className="pointer-events-none absolute inset-0">
+            <div className="absolute -top-40 left-1/2 h-[520px] w-[900px] -translate-x-1/2 rounded-full bg-violet-600/20 blur-3xl" />
+            <div className="absolute -bottom-56 right-[-10%] h-[520px] w-[620px] rounded-full bg-fuchsia-500/10 blur-3xl" />
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(124,58,237,0.20),transparent_55%)]" />
           </div>
 
-          <div className="mt-10">
-            <h2 className="text-2xl font-bold">Start recording your video</h2>
-            <p className="mt-2 text-white/55 leading-7 max-w-3xl">
-              Write your script, press record, and let the teleprompter guide you through your delivery. No complicated tools, no editing setup, and no wasted time.
-            </p>
-          </div>
-
-          <div className="mt-10 grid gap-6 lg:grid-cols-2">
-            <div className="glass rounded-3xl border border-white/10 p-6">
-              <h2 className="text-lg font-bold">Your script</h2>
-              <p className="mt-2 text-sm text-white/55">Paste your script and start recording. After you finish, sign up free to download (no credit card required).</p>
-              <textarea
-                value={script}
-                onChange={(e) => setScript(e.target.value)}
-                className="mt-4 w-full min-h-56 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-violet-500/30"
-              />
-              <div className="mt-4 flex flex-wrap gap-3">
-                <button
-                  type="button"
-                  onClick={previewing ? () => { setPlaying(false); setPreviewing(false); } : beginPreview}
-                  disabled={recording || countdownValue !== null}
-                  className={`inline-flex items-center gap-2 rounded-2xl border px-4 py-3 text-sm font-semibold transition-colors ${
-                    previewing ? "border-white/10 bg-white text-black" : "border-white/10 bg-white/[0.03] text-white/80 hover:bg-white/[0.06] hover:text-white"
-                  }`}
-                >
-                  {previewing ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-                  {previewing ? "Stop preview" : "Preview"}
-                </button>
-                {!recording ? (
-                  <button
-                    type="button"
-                    onClick={beginRecord}
-                    disabled={countdownValue !== null}
-                    className="inline-flex items-center gap-2 rounded-2xl bg-red-500 px-4 py-3 text-sm font-semibold text-white hover:bg-red-400 disabled:opacity-50"
-                  >
-                    <Camera className="w-4 h-4" />
-                    Record
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={stopRecording}
-                    className="inline-flex items-center gap-2 rounded-2xl bg-red-500 px-4 py-3 text-sm font-semibold text-white hover:bg-red-400"
-                  >
-                    <Circle className="w-4 h-4 fill-current" />
-                    End recording
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={reset}
-                  className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm font-semibold text-white/80 hover:bg-white/[0.06] hover:text-white"
-                >
-                  <RotateCcw className="w-4 h-4" />
-                  Restart
-                </button>
-              </div>
-
-              {cameraError ? (
-                <div className="mt-4 rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">
-                  {cameraError}
+          <div className="relative mx-auto max-w-[1200px]">
+            <div className="grid items-center gap-12 lg:grid-cols-2">
+              <motion.div {...sectionMotion}>
+                <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-xs font-semibold text-white/70">
+                  <Sparkles className="h-4 w-4 text-violet-200" />
+                  Teleprompter + recording in your browser
                 </div>
-              ) : null}
+                <h1 className="mt-5 max-w-xl text-5xl font-black leading-[1.05] tracking-tight">
+                  Record videos without looking away from the camera.
+                </h1>
+                <p className="mt-5 max-w-xl text-lg text-white/60 leading-7">
+                  Write a script, press record, and follow a smooth scroll. No downloads, no setup — your video stays on your device.
+                </p>
 
-              <div className="mt-4 text-xs text-white/45">
-                {recording ? "Recording locally…" : countdownValue !== null ? "Countdown running…" : cameraReady ? "Camera ready" : "Camera permission requested only when you press Record"}
-                {!canDownloadNow ? " • Download requires signup" : " • Downloads enabled"}
-              </div>
-            </div>
+                <div className="mt-8 flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={heroStartRecording}
+                    className="inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-violet-500 to-fuchsia-500 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-fuchsia-500/10 hover:opacity-95"
+                  >
+                    <Camera className="h-4 w-4" />
+                    Start Recording
+                  </button>
+                  <button
+                    type="button"
+                    onClick={heroTryDemo}
+                    className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-5 py-3 text-sm font-semibold text-white/85 hover:bg-white/[0.06]"
+                  >
+                    <Play className="h-4 w-4" />
+                    Try Demo
+                  </button>
+                </div>
 
-            <div className="glass rounded-3xl border border-white/10 p-6">
-              <h2 className="text-lg font-bold">Teleprompter view</h2>
-              <p className="mt-2 text-sm text-white/55">Your text scrolls from the top when you press Record.</p>
+                <div className="mt-8 flex flex-wrap gap-2 text-xs text-white/55">
+                  <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1">
+                    <Lock className="h-4 w-4" />
+                    Local recording
+                  </span>
+                  <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1">
+                    <MonitorSmartphone className="h-4 w-4" />
+                    Works on any device
+                  </span>
+                  <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1">
+                    <Clock className="h-4 w-4" />
+                    Start in seconds
+                  </span>
+                </div>
+              </motion.div>
 
-              <div className="mt-4 relative overflow-hidden rounded-3xl border border-white/10 bg-black min-h-[520px]">
-                <video
-                  ref={videoRef}
-                  className={cameraReady ? "absolute inset-0 h-full w-full object-cover scale-x-[-1]" : "hidden"}
-                  autoPlay
-                  muted
-                  playsInline
-                />
-                <div className="absolute inset-0 bg-black/55" />
+              <motion.div {...sectionMotion} transition={{ duration: 0.55, delay: 0.05 }}>
+                <div className="relative rounded-2xl border border-white/10 bg-white/[0.03] p-4 shadow-2xl shadow-black/40 backdrop-blur-xl">
+                  <div className="pointer-events-none absolute -inset-6 rounded-[28px] bg-gradient-to-tr from-violet-500/15 via-fuchsia-500/10 to-transparent blur-2xl" />
+                  <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-black/50">
+                    <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
+                      <div className="text-xs font-semibold uppercase tracking-[0.18em] text-white/50">Teleprompter preview</div>
+                      <div className="flex items-center gap-2">
+                        <span className="h-2 w-2 rounded-full bg-white/15" />
+                        <span className="h-2 w-2 rounded-full bg-white/15" />
+                        <span className="h-2 w-2 rounded-full bg-white/15" />
+                      </div>
+                    </div>
+                    <div className="relative h-[360px] overflow-hidden">
+                      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.08),transparent_60%)]" />
+                      <div className="absolute left-5 top-5 z-10 inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/40 px-3 py-1 text-xs text-white/70 backdrop-blur">
+                        <span className="dt-record-dot" />
+                        REC
+                      </div>
+                      <div className="absolute right-5 top-5 z-10">
+                        <div className="dt-record-pulse inline-flex items-center justify-center rounded-full bg-red-500/90 p-3 shadow-lg shadow-red-500/20">
+                          <Camera className="h-4 w-4 text-white" />
+                        </div>
+                      </div>
 
-                {countdownValue !== null ? (
-                  <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center">
-                    <div className="rounded-full border border-white/15 bg-black/70 px-10 py-8 text-center shadow-2xl shadow-black/60 backdrop-blur-md">
-                      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-white/45">Recording starts in</p>
-                      <p className="mt-2 text-7xl font-black leading-none text-white">{countdownValue}</p>
+                      <div className="absolute inset-x-0 bottom-0 top-0 px-8 py-10">
+                        <div className="dt-tele-scroll space-y-6">
+                          {[
+                            "Hey — quick update.",
+                            "Today I’ll show you the exact setup I use…",
+                            "No memorizing. No retakes.",
+                            "Just press record and follow the scroll.",
+                            "Download your video immediately.",
+                            "Works right in your browser.",
+                          ].map((line) => (
+                            <p key={line} className="text-2xl font-semibold leading-relaxed text-white/90">
+                              {line}
+                            </p>
+                          ))}
+                          <div className="space-y-6">
+                            {[
+                              "Hey — quick update.",
+                              "Today I’ll show you the exact setup I use…",
+                              "No memorizing. No retakes.",
+                              "Just press record and follow the scroll.",
+                              "Download your video immediately.",
+                              "Works right in your browser.",
+                            ].map((line) => (
+                              <p key={`dup-${line}`} className="text-2xl font-semibold leading-relaxed text-white/90">
+                                {line}
+                              </p>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="pointer-events-none absolute inset-x-0 top-0 h-16 bg-gradient-to-b from-black/70 to-transparent" />
+                      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-black/70 to-transparent" />
                     </div>
                   </div>
-                ) : null}
+                </div>
+              </motion.div>
+            </div>
+          </div>
+        </section>
 
-                <div ref={containerRef} className="relative z-10 h-[520px] overflow-hidden px-8 py-10">
-                  <div ref={contentRef} className="space-y-7">
-                    {lines.map((line, idx) => (
-                      <p key={`${idx}-${line.slice(0, 24)}`} className="text-3xl font-semibold leading-relaxed text-white/92">
-                        {line}
-                      </p>
-                    ))}
+        <section className="px-6 py-20">
+          <div className="mx-auto max-w-[1200px] grid gap-6 lg:grid-cols-2">
+            <motion.div {...sectionMotion} className="rounded-2xl border border-white/10 bg-gradient-to-b from-red-500/10 to-transparent p-6">
+              <div className="flex items-center gap-3">
+                <div className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.03]">
+                  <EyeOff className="h-5 w-5 text-red-200" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold">The problem</h2>
+                  <p className="mt-1 text-sm text-white/55">Reading a script breaks eye contact and flow.</p>
+                </div>
+              </div>
+              <div className="mt-5 grid gap-3">
+                {[
+                  { title: "You look away from camera", icon: EyeOff },
+                  { title: "You forget lines", icon: FileText },
+                  { title: "You keep restarting", icon: RotateCcw },
+                ].map((item) => (
+                  <div key={item.title} className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                    <div className="flex items-center gap-3">
+                      <item.icon className="h-5 w-5 text-white/70" />
+                      <div className="text-sm font-semibold text-white/85">{item.title}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+
+            <motion.div {...sectionMotion} className="rounded-2xl border border-white/10 bg-gradient-to-b from-violet-500/12 to-transparent p-6">
+              <div className="flex items-center gap-3">
+                <div className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.03]">
+                  <BadgeCheck className="h-5 w-5 text-violet-200" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold">The solution</h2>
+                  <p className="mt-1 text-sm text-white/55">A single view for script + record.</p>
+                </div>
+              </div>
+              <div className="mt-5 grid gap-3">
+                {[
+                  { title: "Script scrolls while you speak", icon: Zap },
+                  { title: "Record instantly", icon: Video },
+                  { title: "Stay natural on camera", icon: Users },
+                ].map((item) => (
+                  <div key={item.title} className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                    <div className="flex items-center gap-3">
+                      <item.icon className="h-5 w-5 text-white/70" />
+                      <div className="text-sm font-semibold text-white/85">{item.title}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+          </div>
+        </section>
+
+        <section ref={featureRef} className="px-6 py-20">
+          <div className="mx-auto max-w-[1200px]">
+            <motion.div {...sectionMotion} className="max-w-2xl">
+              <h2 className="text-3xl font-black tracking-tight">Try it instantly</h2>
+              <p className="mt-2 text-white/55 leading-7">
+                Write your script on the left and follow the teleprompter on the right. Your script will start scrolling automatically when recording begins.
+              </p>
+            </motion.div>
+
+            <motion.div {...sectionMotion} className="mt-8 glass rounded-2xl border border-white/10 p-6">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2 text-xs font-semibold text-white/55">
+                  <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1">
+                    <FileText className="h-4 w-4" />
+                    Script
+                  </span>
+                  <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1">
+                    <Video className="h-4 w-4" />
+                    Teleprompter
+                  </span>
+                </div>
+                <div className="text-xs text-white/45">Preview first, then record when ready.</div>
+              </div>
+
+              <div className="mt-6 grid gap-6 lg:grid-cols-2">
+                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
+                  <h3 className="text-sm font-bold">Your script</h3>
+                  <p className="mt-2 text-xs text-white/55">Write or paste your script…</p>
+                  <textarea
+                    value={script}
+                    onChange={(e) => setScript(e.target.value)}
+                    className="mt-4 w-full min-h-56 rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-400/30"
+                  />
+                  <p className="mt-3 text-xs text-white/45">
+                    Your script will start scrolling automatically when recording begins.
+                  </p>
+
+                  <div className="mt-4 flex flex-wrap gap-3">
+                    <button
+                      type="button"
+                      onClick={
+                        previewing
+                          ? () => {
+                              setPlaying(false);
+                              setPreviewing(false);
+                            }
+                          : beginPreview
+                      }
+                      disabled={recording || countdownValue !== null}
+                      className={`inline-flex items-center gap-2 rounded-2xl border px-4 py-3 text-sm font-semibold transition-colors ${
+                        previewing
+                          ? "border-white/10 bg-white text-black"
+                          : "border-white/10 bg-white/[0.03] text-white/80 hover:bg-white/[0.06] hover:text-white"
+                      }`}
+                    >
+                      {previewing ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                      {previewing ? "Stop demo" : "Try demo"}
+                    </button>
+                    {!recording ? (
+                      <button
+                        type="button"
+                        onClick={beginRecord}
+                        disabled={countdownValue !== null}
+                        className="dt-record-pulse inline-flex items-center gap-2 rounded-2xl bg-red-500 px-4 py-3 text-sm font-semibold text-white hover:bg-red-400 disabled:opacity-50"
+                      >
+                        <Camera className="w-4 h-4" />
+                        Record
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={stopRecording}
+                        className="inline-flex items-center gap-2 rounded-2xl bg-red-500 px-4 py-3 text-sm font-semibold text-white hover:bg-red-400"
+                      >
+                        <Circle className="w-4 h-4 fill-current" />
+                        End recording
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={reset}
+                      className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm font-semibold text-white/80 hover:bg-white/[0.06] hover:text-white"
+                    >
+                      <RotateCcw className="w-4 h-4" />
+                      Restart
+                    </button>
+                  </div>
+
+                  {cameraError ? (
+                    <div className="mt-4 rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">
+                      {cameraError}
+                    </div>
+                  ) : null}
+
+                  <div className="mt-4 text-xs text-white/45">
+                    {recording
+                      ? "Recording locally…"
+                      : countdownValue !== null
+                        ? "Countdown running…"
+                        : cameraReady
+                          ? "Camera ready"
+                          : "Camera permission requested only when you press Record"}
+                    {!canDownloadNow ? " • Download requires signup" : " • Downloads enabled"}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
+                  <h3 className="text-sm font-bold">Teleprompter view</h3>
+                  <p className="mt-2 text-xs text-white/55">Your text scrolls from the top when you press Record.</p>
+
+                  <div className="mt-4 relative overflow-hidden rounded-2xl border border-white/10 bg-black min-h-[520px] shadow-xl shadow-black/40">
+                    <video
+                      ref={videoRef}
+                      className={cameraReady ? "absolute inset-0 h-full w-full object-cover scale-x-[-1]" : "hidden"}
+                      autoPlay
+                      muted
+                      playsInline
+                    />
+                    <div className="absolute inset-0 bg-black/55" />
+
+                    {countdownValue !== null ? (
+                      <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center">
+                        <div className="rounded-full border border-white/15 bg-black/70 px-10 py-8 text-center shadow-2xl shadow-black/60 backdrop-blur-md">
+                          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-white/45">Recording starts in</p>
+                          <p className="mt-2 text-7xl font-black leading-none text-white">{countdownValue}</p>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    <div ref={containerRef} className="relative z-10 h-[520px] overflow-hidden px-8 py-10">
+                      <div ref={contentRef} className="space-y-7">
+                        {lines.map((line, idx) => (
+                          <p key={`${idx}-${line.slice(0, 24)}`} className="text-3xl font-semibold leading-relaxed text-white/92">
+                            {line}
+                          </p>
+                        ))}
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
+            </motion.div>
+          </div>
+        </section>
+
+        <section className="px-6 py-20">
+          <div className="mx-auto max-w-[1200px]">
+            <motion.div {...sectionMotion} className="max-w-2xl">
+              <h2 className="text-3xl font-black tracking-tight">How it works</h2>
+              <p className="mt-2 text-white/55 leading-7">Three simple steps from script to finished video.</p>
+            </motion.div>
+
+            <div className="mt-10 grid gap-6 lg:grid-cols-3">
+              {[
+                { step: "1", title: "Write your script", desc: "Type or paste your text — keep it short and readable.", icon: FileText },
+                { step: "2", title: "Press record + follow scroll", desc: "A quick countdown, then smooth scrolling while you speak.", icon: Camera },
+                { step: "3", title: "Download your video", desc: "Save locally and use it anywhere — no setup required.", icon: Download },
+              ].map((item, idx) => (
+                <motion.div
+                  key={item.title}
+                  {...sectionMotion}
+                  transition={{ duration: 0.45, delay: idx * 0.05 }}
+                  className="relative rounded-2xl border border-white/10 bg-white/[0.03] p-6 shadow-lg shadow-black/30 hover:scale-[1.02] hover:border-white/15 transition"
+                >
+                  <div className="flex items-start gap-4">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-black/20">
+                      <item.icon className="h-5 w-5 text-white/75" />
+                    </div>
+                    <div>
+                      <div className="inline-flex items-center gap-2 text-xs font-semibold text-white/55">
+                        <span className="rounded-full border border-white/10 bg-white/[0.03] px-2 py-0.5">Step {item.step}</span>
+                      </div>
+                      <h3 className="mt-3 text-lg font-bold">{item.title}</h3>
+                      <p className="mt-2 text-sm text-white/55 leading-6">{item.desc}</p>
+                    </div>
+                  </div>
+                  {idx < 2 ? (
+                    <div className="pointer-events-none absolute -right-3 top-1/2 hidden h-px w-6 -translate-y-1/2 bg-white/10 lg:block" />
+                  ) : null}
+                </motion.div>
+              ))}
             </div>
           </div>
+        </section>
 
-          <div className="mt-16 grid gap-10 max-w-3xl">
-            <section>
-              <h2 className="text-2xl font-bold">How the teleprompter works</h2>
-              <div className="mt-3 space-y-3 text-white/55 leading-7">
-                <p>Start by writing or pasting your script into the editor.</p>
-                <p>
-                  When you press record, the app gives you a short countdown and then begins recording using your camera. At the same time, your script scrolls smoothly from top to bottom so you can follow along naturally.
-                </p>
-                <p>This allows you to maintain eye contact with the camera while speaking clearly and confidently.</p>
-                <p>Once you finish, your video is ready to download immediately.</p>
-              </div>
-            </section>
+        <section className="relative px-6 py-20">
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(124,58,237,0.10),transparent_55%)]" />
+          <div className="relative mx-auto max-w-[1200px]">
+            <motion.div {...sectionMotion} className="max-w-2xl">
+              <h2 className="text-3xl font-black tracking-tight">Benefits</h2>
+              <p className="mt-2 text-white/55 leading-7">Designed to help you record faster with better delivery.</p>
+            </motion.div>
 
-            <section>
-              <h2 className="text-2xl font-bold">Record videos while reading your script</h2>
-              <div className="mt-3 space-y-3 text-white/55 leading-7">
-                <p>This feature is designed for anyone who wants to record videos more efficiently without memorizing content.</p>
-                <p>
-                  Instead of switching between notes and camera, you can keep everything in a single view. Your script stays visible, your recording runs smoothly, and your delivery feels more natural.
-                </p>
-                <p>This is especially useful for talking head videos, tutorials, product demos, and social media content.</p>
-              </div>
-            </section>
-
-            <section>
-              <h2 className="text-2xl font-bold">No download, no setup, fully online</h2>
-              <div className="mt-3 space-y-3 text-white/55 leading-7">
-                <p>Unlike traditional teleprompter software, this tool runs entirely in your browser.</p>
-                <p>You don’t need to install any apps or configure anything. Just open the page, paste your script, and start recording.</p>
-                <p>Because it works online, you can use it on any device with a camera and a browser.</p>
-              </div>
-            </section>
-
-            <section>
-              <h2 className="text-2xl font-bold">Private recording on your device</h2>
-              <div className="mt-3 space-y-3 text-white/55 leading-7">
-                <p>Your video is recorded locally on your device, not uploaded to a server.</p>
-                <p>This means your content stays private and under your control. You can review it, download it, and use it however you want without worrying about storage or sharing.</p>
-              </div>
-            </section>
-
-            <section>
-              <h2 className="text-2xl font-bold">Who should use an online teleprompter</h2>
-              <div className="mt-3 text-white/55 leading-7">
-                <ul className="list-disc pl-6 space-y-1.5">
-                  <li>Content creators recording YouTube or short-form videos</li>
-                  <li>Founders and teams creating product updates or demos</li>
-                  <li>Educators and coaches recording lessons or courses</li>
-                  <li>Anyone who wants to speak clearly on camera without memorizing a script</li>
-                </ul>
-              </div>
-            </section>
-
-            <section>
-              <h2 className="text-2xl font-bold">Why use a teleprompter for video recording</h2>
-              <div className="mt-3 text-white/55 leading-7">
-                <ul className="list-disc pl-6 space-y-1.5">
-                  <li>Speak more confidently</li>
-                  <li>Reduce mistakes and retakes</li>
-                  <li>Save time during recording</li>
-                  <li>Deliver your message clearly and consistently</li>
-                </ul>
-                <p className="mt-4">
-                  When combined with recording, it becomes a complete workflow that helps you go from script to finished video much faster.
-                </p>
-              </div>
-            </section>
+            <div className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+              {[
+                { title: "Stay focused", desc: "No more memorizing lines.", icon: Zap },
+                { title: "Record faster", desc: "Reduce retakes and restarts.", icon: Clock },
+                { title: "Keep eye contact", desc: "Look natural on camera.", icon: EyeOff },
+                { title: "No setup", desc: "Works instantly in your browser.", icon: MonitorSmartphone },
+                { title: "Smooth delivery", desc: "Scroll at a comfortable pace.", icon: Sparkles },
+                { title: "Download ready", desc: "Save your video locally.", icon: Download },
+              ].map((item, idx) => (
+                <motion.div
+                  key={item.title}
+                  {...sectionMotion}
+                  transition={{ duration: 0.45, delay: idx * 0.03 }}
+                  className="rounded-2xl border border-white/10 bg-white/[0.03] p-6 shadow-lg shadow-black/25 backdrop-blur hover:scale-[1.02] hover:border-white/15 transition"
+                >
+                  <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-black/20">
+                    <item.icon className="h-5 w-5 text-white/75" />
+                  </div>
+                  <h3 className="mt-4 text-base font-bold">{item.title}</h3>
+                  <p className="mt-2 text-sm text-white/55 leading-6">{item.desc}</p>
+                </motion.div>
+              ))}
+            </div>
           </div>
-        </div>
-      </div>
+        </section>
+
+        <section className="px-6 py-20">
+          <div className="mx-auto max-w-[1200px] grid gap-6 lg:grid-cols-2">
+            <motion.div {...sectionMotion} className="rounded-2xl border border-white/10 bg-white/[0.03] p-6">
+              <div className="flex items-center gap-3">
+                <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-black/20">
+                  <Lock className="h-5 w-5 text-violet-200" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold">Private by default</h2>
+                  <p className="mt-1 text-sm text-white/55">Your video is recorded locally on your device.</p>
+                </div>
+              </div>
+              <div className="mt-5 flex flex-wrap gap-2">
+                {["Local recording", "No upload", "No credit card"].map((label) => (
+                  <span
+                    key={label}
+                    className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/20 px-3 py-1 text-xs font-semibold text-white/65"
+                  >
+                    <BadgeCheck className="h-4 w-4 text-white/70" />
+                    {label}
+                  </span>
+                ))}
+              </div>
+            </motion.div>
+
+            <motion.div {...sectionMotion} className="rounded-2xl border border-white/10 bg-white/[0.03] p-6">
+              <h2 className="text-lg font-bold">Who it’s for</h2>
+              <p className="mt-1 text-sm text-white/55">Built for anyone recording speaking-to-camera videos.</p>
+              <div className="mt-5 flex flex-wrap gap-2">
+                {[
+                  { label: "YouTubers", icon: Video },
+                  { label: "Founders", icon: Users },
+                  { label: "Coaches", icon: BadgeCheck },
+                  { label: "Educators", icon: GraduationCap },
+                ].map((item) => (
+                  <span
+                    key={item.label}
+                    className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/20 px-3 py-1 text-xs font-semibold text-white/70 hover:bg-white/[0.04] transition"
+                  >
+                    <item.icon className="h-4 w-4 text-white/65" />
+                    {item.label}
+                  </span>
+                ))}
+              </div>
+            </motion.div>
+          </div>
+        </section>
+
+        <section className="relative overflow-hidden px-6 py-24">
+          <div className="pointer-events-none absolute inset-0">
+            <div className="absolute -top-40 left-1/2 h-[520px] w-[900px] -translate-x-1/2 rounded-full bg-violet-600/18 blur-3xl" />
+            <div className="absolute -bottom-44 left-[-10%] h-[420px] w-[520px] rounded-full bg-fuchsia-500/10 blur-3xl" />
+          </div>
+          <div className="relative mx-auto max-w-[900px] text-center">
+            <motion.div {...sectionMotion}>
+              <h2 className="text-4xl font-black tracking-tight">Ready to record your video?</h2>
+              <p className="mt-3 text-lg text-white/60 leading-7">Start in seconds. No setup.</p>
+              <div className="mt-8 flex items-center justify-center">
+                <button
+                  type="button"
+                  onClick={heroStartRecording}
+                  className="inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-violet-500 to-fuchsia-500 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-fuchsia-500/10 hover:opacity-95"
+                >
+                  <Camera className="h-4 w-4" />
+                  Start Recording
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        </section>
+      </main>
 
       {downloadGateOpen ? (
         <div className="fixed inset-0 z-[200] flex items-center justify-center px-6">
@@ -853,7 +1168,7 @@ export default function TeleprompterFeaturePage() {
 
                   <div className="mt-2 flex items-center justify-between text-xs text-white/40">
                     <span className="inline-flex items-center gap-2">
-                      <ShieldCheck className="w-4 h-4 text-emerald-200" />
+                      <Lock className="w-4 h-4 text-emerald-200" />
                       Local-only video
                     </span>
                     <span className="inline-flex items-center gap-2">

@@ -55,6 +55,44 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
+@layer utilities {
+  @keyframes dtTeleScroll {
+    from {
+      transform: translate3d(0, 0, 0);
+    }
+    to {
+      transform: translate3d(0, -50%, 0);
+    }
+  }
+
+  @keyframes dtRecordPulse {
+    0%,
+    100% {
+      box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.35);
+    }
+    55% {
+      box-shadow: 0 0 0 14px rgba(239, 68, 68, 0);
+    }
+  }
+
+  .dt-tele-scroll {
+    animation: dtTeleScroll 10s linear infinite;
+    will-change: transform;
+  }
+
+  .dt-record-pulse {
+    animation: dtRecordPulse 1.4s ease-in-out infinite;
+  }
+
+  .dt-record-dot {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 999px;
+    background: rgba(239, 68, 68, 0.92);
+    box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.18);
+  }
+}
+
 :root {
   --button-outline: rgba(255,255,255, .10);
   --badge-outline: rgba(255,255,255, .05);

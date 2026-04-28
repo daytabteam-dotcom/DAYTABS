@@ -191,13 +191,21 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
       const draw = () => {
         const vw = sourceVideo.videoWidth || outputWidth;
         const vh = sourceVideo.videoHeight || outputHeight;
-        const scale = Math.max(outputWidth / vw, outputHeight / vh);
-        const sw = outputWidth / scale;
-        const sh = outputHeight / scale;
-        const sx = (vw - sw) / 2;
-        const sy = (vh - sh) / 2;
+
+        ctx.clearRect(0, 0, outputWidth, outputHeight);
+
+        if (!vw || !vh) {
+          drawRafRef.current = requestAnimationFrame(draw);
+          return;
+        }
+
+        const scale = Math.min(outputWidth / vw, outputHeight / vh);
+        const drawWidth = vw * scale;
+        const drawHeight = vh * scale;
+        const dx = (outputWidth - drawWidth) / 2;
+        const dy = (outputHeight - drawHeight) / 2;
         try {
-          ctx.drawImage(sourceVideo, sx, sy, sw, sh, 0, 0, outputWidth, outputHeight);
+          ctx.drawImage(sourceVideo, dx, dy, drawWidth, drawHeight);
         } catch {
           // ignore transient draw errors
         }
