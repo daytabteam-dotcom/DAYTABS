@@ -54,6 +54,7 @@ type TabId = (typeof TABS)[number]["id"];
 
 function getTabFromUrl(): TabId {
   const tab = new URLSearchParams(window.location.search).get("tab");
+  if (tab === "content-planner") return "script-planner";
   if (tab === "youtube-transcript") return "youtube-audit";
   const match = TABS.find((item) => item.id === tab);
   return match?.id ?? "dashboard";

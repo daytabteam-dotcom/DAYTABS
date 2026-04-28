@@ -17,6 +17,7 @@ import BlogIndexPage from "@/pages/BlogIndexPage";
 import BlogPostPage from "@/pages/BlogPostPage";
 import FeaturesIndexPage from "@/pages/FeaturesIndexPage";
 import TeleprompterFeaturePage from "@/pages/TeleprompterFeaturePage";
+import ContentPlannerFeaturePage from "@/pages/ContentPlannerFeaturePage";
 import FeaturesSlugPage from "@/pages/FeaturesSlugPage";
 import { LandingI18nProvider } from "@/lib/i18n";
 
@@ -37,6 +38,7 @@ function Router() {
       <Route path="/refund-policy" component={RefundPolicyPage} />
       <Route path="/features" component={FeaturesIndexPage} />
       <Route path="/features/teleprompter" component={TeleprompterFeaturePage} />
+      <Route path="/features/content-planner" component={ContentPlannerFeaturePage} />
       <Route path="/features/:slug" component={FeaturesSlugPage} />
       <Route path="/blog" component={BlogIndexPage} />
       <Route path="/blog/:slug" component={BlogPostPage} />

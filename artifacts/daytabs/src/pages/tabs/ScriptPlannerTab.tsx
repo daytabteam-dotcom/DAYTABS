@@ -98,7 +98,7 @@ const STARTER_PROMPTS = [
 
 export default function ScriptPlannerTab() {
   const { user } = useUser();
-  const { getScriptPlannerLimits } = usePlan();
+  const { getScriptPlannerLimits, loading: planLoading } = usePlan();
   const plan = user?.plan ?? "free";
   const isFreeUser = plan === "free";
   const scriptLimits = getScriptPlannerLimits();
@@ -108,6 +108,11 @@ export default function ScriptPlannerTab() {
   const [apiHistory, setApiHistory] = useState<ApiChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [generationError, setGenerationError] = useState("");
+  const [subscriptionLimitError, setSubscriptionLimitError] = useState("");
+  const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
+  const pendingPromptHandledRef = useRef(false);
+  const pendingPromptRetryRef = useRef(false);
 
   // Result state
   const [result, setResult] = useState<ScriptResult | null>(null);
@@ -131,6 +136,7 @@ export default function ScriptPlannerTab() {
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const pendingPromptRef = useRef<string | null>(null);
 
   // Derived limits
   const usageRemaining = scriptLimits.generationsRemaining;
@@ -148,6 +154,20 @@ export default function ScriptPlannerTab() {
   }, []);
 
   useEffect(() => { loadChatList(); }, [loadChatList]);
+
+  useEffect(() => {
+    if (pendingPromptHandledRef.current) return;
+    const redirectTarget = localStorage.getItem("postSignupRedirect");
+    const storedPrompt = localStorage.getItem("pendingContentPlannerPrompt");
+    if (redirectTarget !== "content-planner" || !storedPrompt) return;
+    pendingPromptHandledRef.current = true;
+    pendingPromptRef.current = storedPrompt;
+    setPendingPrompt(storedPrompt);
+    setInput(storedPrompt);
+    setGenerationError("");
+    setSubscriptionLimitError("");
+    setTimeout(() => inputRef.current?.focus(), 150);
+  }, []);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -244,9 +264,12 @@ export default function ScriptPlannerTab() {
 
   // ── Send message ─────────────────────────────────────────────────────────
 
-  const sendMessage = useCallback(async (text: string) => {
+  const sendMessage = useCallback(async (
+    text: string,
+    options?: { preserveInput?: boolean; source?: "manual" | "pending" },
+  ): Promise<boolean> => {
     const trimmed = text.trim();
-    if (!trimmed || loading || isAtGenerationLimit) return;
+    if (!trimmed || loading || isAtGenerationLimit) return false;
 
     const userMsgId = crypto.randomUUID();
     const asstMsgId = crypto.randomUUID();
@@ -256,8 +279,10 @@ export default function ScriptPlannerTab() {
 
     const updatedDisplay = [...displayMessages, newUserDisplay, loadingDisplay];
     setDisplayMessages(updatedDisplay);
-    setInput("");
+    if (!options?.preserveInput) setInput("");
     setLoading(true);
+    setGenerationError("");
+    setSubscriptionLimitError("");
 
     const newApiHistory: ApiChatMessage[] = [...apiHistory, { role: "user", content: trimmed }];
 
@@ -274,7 +299,7 @@ export default function ScriptPlannerTab() {
         setDisplayMessages(prev => prev.filter(m => m.id !== asstMsgId && m.id !== userMsgId));
         setShowUpgrade(true);
         setLoading(false);
-        return;
+        return false;
       }
 
       if (!res.ok) throw new Error(data.error || "Generation failed");
@@ -302,16 +327,59 @@ export default function ScriptPlannerTab() {
 
       await persistChat(finalDisplay, finalApiHistory, scriptResult, activeChatId, trimmed.slice(0, 80));
 
+      if (options?.source === "pending") {
+        localStorage.removeItem("pendingContentPlannerPrompt");
+        localStorage.removeItem("postSignupRedirect");
+      }
+
+      return true;
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Something went wrong.";
       setDisplayMessages(prev =>
         prev.map(m => m.id === asstMsgId ? { ...m, summary: `Error: ${msg}`, content: "error" } : m)
       );
+      setGenerationError("We could not start your content plan. Please try again.");
+      if (options?.preserveInput) setInput(trimmed);
+      return false;
     } finally {
       setLoading(false);
       setTimeout(() => inputRef.current?.focus(), 100);
     }
   }, [loading, isAtGenerationLimit, displayMessages, apiHistory, activeChatId, persistChat]);
+
+  useEffect(() => {
+    const stored = pendingPromptRef.current;
+    if (!stored || !user || planLoading) return;
+
+    const redirectTarget = localStorage.getItem("postSignupRedirect");
+    const storedPrompt = localStorage.getItem("pendingContentPlannerPrompt");
+    if (redirectTarget !== "content-planner" || !storedPrompt) return;
+
+    const canCreateSession = !isFreeUser || scriptLimits.generationsUsed < 1;
+    if (!canCreateSession) {
+      setSubscriptionLimitError(
+        "You have reached your Content Planner limit on your current plan. Upgrade your plan to create more content planning sessions.",
+      );
+      return;
+    }
+
+    if (pendingPromptRetryRef.current) return;
+    pendingPromptRetryRef.current = true;
+    void sendMessage(storedPrompt, { preserveInput: true, source: "pending" });
+  }, [isFreeUser, planLoading, scriptLimits.generationsUsed, sendMessage, user]);
+
+  useEffect(() => {
+    if (!subscriptionLimitError) return;
+    const storedPrompt = localStorage.getItem("pendingContentPlannerPrompt");
+    const redirectTarget = localStorage.getItem("postSignupRedirect");
+    if (redirectTarget !== "content-planner" || !storedPrompt) return;
+    const canCreateSession = !isFreeUser || scriptLimits.generationsUsed < 1;
+    if (!canCreateSession) return;
+    setSubscriptionLimitError("");
+    if (pendingPromptRetryRef.current) return;
+    pendingPromptRetryRef.current = true;
+    void sendMessage(storedPrompt, { preserveInput: true, source: "pending" });
+  }, [isFreeUser, scriptLimits.generationsUsed, sendMessage, subscriptionLimitError]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(input); }
@@ -571,6 +639,48 @@ export default function ScriptPlannerTab() {
                     </button>
                   </div>
                 )}
+
+                {subscriptionLimitError ? (
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-2.5">
+                    <p className="text-xs leading-snug text-amber-200">{subscriptionLimitError}</p>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowUpgrade(true)}
+                        className="shrink-0 text-xs font-semibold text-amber-300 hover:text-amber-200"
+                      >
+                        Upgrade Plan
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSubscriptionLimitError("")}
+                        className="shrink-0 text-xs font-semibold text-white/50 hover:text-white/70"
+                      >
+                        Keep My Idea
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+
+                {generationError ? (
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-500/25 bg-red-500/10 px-4 py-2.5">
+                    <p className="text-xs leading-snug text-red-200">{generationError}</p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const storedPrompt = localStorage.getItem("pendingContentPlannerPrompt");
+                        const redirectTarget = localStorage.getItem("postSignupRedirect");
+                        if (redirectTarget !== "content-planner" || !storedPrompt) return;
+                        pendingPromptRetryRef.current = false;
+                        setGenerationError("");
+                        void sendMessage(storedPrompt, { preserveInput: true, source: "pending" });
+                      }}
+                      className="shrink-0 text-xs font-semibold text-red-200 hover:text-red-100"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                ) : null}
 
                 {result && !isAtGenerationLimit && (
                   <div className="mb-3 flex snap-x gap-2 overflow-x-auto pb-1 scrollbar-none">
@@ -935,6 +1045,48 @@ export default function ScriptPlannerTab() {
                 </button>
               </div>
             )}
+
+            {subscriptionLimitError ? (
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-500/20 bg-amber-500/10 px-4 py-2.5">
+                <p className="text-xs leading-snug text-amber-200">{subscriptionLimitError}</p>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowUpgrade(true)}
+                    className="shrink-0 whitespace-nowrap text-xs font-semibold text-amber-300 hover:text-amber-200"
+                  >
+                    Upgrade Plan
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSubscriptionLimitError("")}
+                    className="shrink-0 whitespace-nowrap text-xs font-semibold text-white/50 hover:text-white/70"
+                  >
+                    Keep My Idea
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {generationError ? (
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-500/25 bg-red-500/10 px-4 py-2.5">
+                <p className="text-xs leading-snug text-red-200">{generationError}</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const storedPrompt = localStorage.getItem("pendingContentPlannerPrompt");
+                    const redirectTarget = localStorage.getItem("postSignupRedirect");
+                    if (redirectTarget !== "content-planner" || !storedPrompt) return;
+                    pendingPromptRetryRef.current = false;
+                    setGenerationError("");
+                    void sendMessage(storedPrompt, { preserveInput: true, source: "pending" });
+                  }}
+                  className="shrink-0 whitespace-nowrap text-xs font-semibold text-red-200 hover:text-red-100"
+                >
+                  Retry
+                </button>
+              </div>
+            ) : null}
 
             {result && !isAtGenerationLimit && (
               <div className="mb-3 flex flex-wrap gap-1.5">

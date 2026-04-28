@@ -1,6 +1,6 @@
 import { Link } from "wouter";
 import { motion } from "framer-motion";
-import { ChevronRight, Mic2, Video, Wand2, LayoutDashboard } from "lucide-react";
+import { ChevronRight, Mic2, Video, Wand2, LayoutDashboard, CalendarDays } from "lucide-react";
 import Navbar from "@/components/Navbar";
 
 const FEATURES = [
@@ -9,6 +9,13 @@ const FEATURES = [
     title: "Teleprompter",
     desc: "Read your script smoothly with optional local recording and a 3–2–1 countdown.",
     icon: Mic2,
+    comingSoon: false,
+  },
+  {
+    slug: "content-planner",
+    title: "AI Content Planner",
+    desc: "Turn one idea into structured content plans, hooks, and angles across platforms.",
+    icon: CalendarDays,
     comingSoon: false,
   },
   {

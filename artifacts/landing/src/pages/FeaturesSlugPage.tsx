@@ -9,6 +9,11 @@ const FEATURE_COPY: Record<string, { title: string; desc: string; status: "live"
     desc: "Read your script smoothly with a prompter view, preview mode, and optional local recording.",
     status: "live",
   },
+  "content-planner": {
+    title: "AI Content Planner",
+    desc: "Turn one rough idea into a clear plan with angles, hooks, and formats across platforms.",
+    status: "live",
+  },
   "video-analyzer": {
     title: "Video Analyzer",
     desc: "Upload a video and get actionable feedback on hooks, pacing, structure, and retention.",
@@ -34,6 +39,10 @@ export default function FeaturesSlugPage() {
   const feature = FEATURE_COPY[slug];
   if (slug === "teleprompter") {
     navigate("/features/teleprompter");
+    return null;
+  }
+  if (slug === "content-planner") {
+    navigate("/features/content-planner");
     return null;
   }
 
