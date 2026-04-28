@@ -195,6 +195,7 @@ export async function getOrCreateUsage(userId: number) {
         videoAnalysisTokensUsed: productTokens.videoAnalysis,
         contentPlannerTokensUsed: productTokens.contentPlanner,
         youtubeGrowthTokensUsed: productTokens.youtubeGrowth,
+        socialGrowthPlansUsed: 0,
         lastUpdated: new Date(),
       })
       .returning();
@@ -217,6 +218,7 @@ export async function getOrCreateUsage(userId: number) {
         videoAnalysisTokensUsed: productTokens.videoAnalysis,
         contentPlannerTokensUsed: productTokens.contentPlanner,
         youtubeGrowthTokensUsed: productTokens.youtubeGrowth,
+        socialGrowthPlansUsed: 0,
         lastUpdated: new Date(),
       })
       .where(eq(userUsageTable.userId, userId))
@@ -333,4 +335,48 @@ export async function checkAndIncrementScriptGeneration(userId: number, rawPlan:
     .where(eq(userUsageTable.userId, userId));
 
   return { allowed: true, used: used + 1, limit: planLimit };
+}
+
+// ─── Social Growth Planner limit check + increment ───────────────────────────
+
+function socialGrowthPlanLimit(plan: ReturnType<typeof normalizePlan>) {
+  // Keep this simple and aligned with existing plan tiers.
+  if (plan === "free") return 1;
+  if (plan === "creator") return 10;
+  if (plan === "pro") return 25;
+  return 80;
+}
+
+export async function checkAndIncrementSocialGrowthPlan(userId: number, rawPlan: string): Promise<{
+  allowed: boolean;
+  used: number;
+  limit: number;
+  error?: { error: string };
+}> {
+  const plan = normalizePlan(rawPlan);
+  const limit = socialGrowthPlanLimit(plan);
+
+  const usage = await getOrCreateUsage(userId);
+  const used = usage.socialGrowthPlansUsed ?? 0;
+
+  if (used >= limit) {
+    return {
+      allowed: false,
+      used,
+      limit,
+      error: {
+        error: "You have reached your Growth Planner limit on your current plan. Upgrade your plan to create more weekly plans.",
+      },
+    };
+  }
+
+  await db
+    .update(userUsageTable)
+    .set({
+      socialGrowthPlansUsed: used + 1,
+      lastUpdated: new Date(),
+    })
+    .where(eq(userUsageTable.userId, userId));
+
+  return { allowed: true, used: used + 1, limit };
 }

@@ -22,6 +22,7 @@ import YouTubeGrowthPlannerV2Tab, {
   getGrowthPlannerNotificationCounts,
   getGrowthPlannerNotifications,
 } from "./tabs/YouTubeGrowthPlannerV2Tab";
+import GrowthPlannerPage from "@/components/growth/GrowthPlannerPage";
 import { PlanPickerModal } from "@/components/PlanPickerModal";
 import {
   usePlan,
@@ -636,7 +637,7 @@ export default function Home() {
           <VideoAnalyzerTab {...tabCallbacks} />
         )}
         {activeTab === "script-planner" && <ScriptPlannerTab />}
-        {activeTab === "growth-planner" && <YouTubeGrowthPlannerV2Tab />}
+        {activeTab === "growth-planner" && <GrowthPlannerPage />}
         {activeTab === "youtube-audit" && <YouTubeAuditTab />}
         {activeTab === "teleprompter" && <TeleprompterTab />}
       </main>

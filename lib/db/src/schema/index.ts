@@ -5,3 +5,4 @@ export * from "./userUsage";
 export * from "./youtube";
 export * from "./tokenLogs";
 export * from "./blogs";
+export * from "./socialGrowth";
