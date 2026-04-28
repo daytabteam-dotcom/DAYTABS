@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useLocation } from "wouter";
+ 
+import { Helmet } from "react-helmet-async";
 import { motion } from "framer-motion";
-import { Camera, Circle, Download, Play, Pause, RotateCcw, ShieldCheck, UserPlus, X } from "lucide-react";
+import { Camera, Circle, Download, Play, Pause, RotateCcw, ShieldCheck, UserPlus, X, LogIn } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import { authApi } from "@/lib/api";
 
@@ -91,8 +92,6 @@ function downloadBlob(blob: Blob) {
 }
 
 export default function TeleprompterFeaturePage() {
-  const [, navigate] = useLocation();
-
   const [script, setScript] = useState(`Paste your script here.\n\nTip: Keep sentences short and easy to read out loud.`);
   const lines = useMemo(() => script.split(/\n+/).map((l) => l.trim()).filter(Boolean), [script]);
 
@@ -112,6 +111,13 @@ export default function TeleprompterFeaturePage() {
   const [signupPassword, setSignupPassword] = useState("");
   const [signupError, setSignupError] = useState("");
   const [signupWorking, setSignupWorking] = useState(false);
+  const [authMode, setAuthMode] = useState<"signup" | "login">("signup");
+
+  const discardPendingRecording = useCallback(() => {
+    pendingBlobRef.current = null;
+    setGateImage("");
+    setDownloadGateOpen(false);
+  }, []);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -258,14 +264,9 @@ export default function TeleprompterFeaturePage() {
         stopMediaTracks();
 
         if (blob.size <= 0) return;
-        const token = asToken();
-        if (!token) {
-          pendingBlobRef.current = blob;
-          setGateImage(await createSignupGateImage());
-          setDownloadGateOpen(true);
-          return;
-        }
-        downloadBlob(blob);
+        pendingBlobRef.current = blob;
+        setGateImage(await createSignupGateImage());
+        setDownloadGateOpen(true);
       };
       recorder.start();
       setRecording(true);
@@ -363,6 +364,13 @@ export default function TeleprompterFeaturePage() {
 
   return (
     <div className="min-h-screen bg-background text-foreground overflow-x-hidden">
+      <Helmet>
+        <title>Online Teleprompter with Recording | Free Browser Teleprompter Tool</title>
+        <meta
+          name="description"
+          content="Use a free online teleprompter with recording. Write your script, scroll it while speaking, and record videos directly in your browser. No download required."
+        />
+      </Helmet>
       <Navbar />
 
       <div className="pt-28 pb-20 px-6">
@@ -373,32 +381,36 @@ export default function TeleprompterFeaturePage() {
             transition={{ duration: 0.5 }}
             className="max-w-3xl"
           >
-            <div className="flex items-center gap-2 text-xs font-semibold tracking-wide uppercase text-white/40">
-              <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">Features</span>
-              <span>/</span>
-              <span>Teleprompter</span>
-            </div>
-            <h1 className="mt-4 text-4xl md:text-5xl font-black leading-tight">Teleprompter + record (local)</h1>
-            <p className="mt-4 text-white/55 leading-7">
-              Paste your script, press Record, approve camera permission, then you’ll get a 3–2–1 countdown and local recording starts.
-              Your video stays on your device — we only ask you to create a free account to unlock the download.
+            <h1 className="text-4xl md:text-5xl font-black leading-tight">Online Teleprompter with Recording</h1>
+            <p className="mt-3 text-xl md:text-2xl font-semibold text-white/85">Speak naturally and record videos in one take</p>
+            <p className="mt-5 text-white/55 leading-7">
+              Use a simple browser-based teleprompter that scrolls your script while you record. No downloads, no setup, and your video stays on your device.
             </p>
-            <div className="mt-5 flex flex-wrap items-center gap-3 text-sm text-white/55">
-              <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1">
-                <ShieldCheck className="w-4 h-4 text-emerald-200" />
-                Local recording
-              </span>
-              <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1">
-                <UserPlus className="w-4 h-4 text-violet-200" />
-                No credit card required
-              </span>
-            </div>
           </motion.div>
+
+          <div className="mt-10 max-w-3xl text-white/55 leading-7 space-y-4">
+            <p>
+              If you’ve ever tried to record a video while reading a script, you know how difficult it feels. You either look away from the camera, forget your lines, or keep restarting over and over again.
+            </p>
+            <p>
+              This online teleprompter solves that problem by combining script reading and video recording in one place.
+            </p>
+            <p>
+              You can write your script, follow it while it scrolls, and record your video at the same time. Everything happens directly in your browser, so you can start instantly without installing anything.
+            </p>
+          </div>
+
+          <div className="mt-10">
+            <h2 className="text-2xl font-bold">Start recording your video</h2>
+            <p className="mt-2 text-white/55 leading-7 max-w-3xl">
+              Write your script, press record, and let the teleprompter guide you through your delivery. No complicated tools, no editing setup, and no wasted time.
+            </p>
+          </div>
 
           <div className="mt-10 grid gap-6 lg:grid-cols-2">
             <div className="glass rounded-3xl border border-white/10 p-6">
               <h2 className="text-lg font-bold">Your script</h2>
-              <p className="mt-2 text-sm text-white/55">Paste your script and start recording. Download unlocks after signup.</p>
+              <p className="mt-2 text-sm text-white/55">Paste your script and start recording. After you finish, sign up free to download (no credit card required).</p>
               <textarea
                 value={script}
                 onChange={(e) => setScript(e.target.value)}
@@ -493,6 +505,75 @@ export default function TeleprompterFeaturePage() {
               </div>
             </div>
           </div>
+
+          <div className="mt-16 grid gap-10 max-w-3xl">
+            <section>
+              <h2 className="text-2xl font-bold">How the teleprompter works</h2>
+              <div className="mt-3 space-y-3 text-white/55 leading-7">
+                <p>Start by writing or pasting your script into the editor.</p>
+                <p>
+                  When you press record, the app gives you a short countdown and then begins recording using your camera. At the same time, your script scrolls smoothly from top to bottom so you can follow along naturally.
+                </p>
+                <p>This allows you to maintain eye contact with the camera while speaking clearly and confidently.</p>
+                <p>Once you finish, your video is ready to download immediately.</p>
+              </div>
+            </section>
+
+            <section>
+              <h2 className="text-2xl font-bold">Record videos while reading your script</h2>
+              <div className="mt-3 space-y-3 text-white/55 leading-7">
+                <p>This feature is designed for anyone who wants to record videos more efficiently without memorizing content.</p>
+                <p>
+                  Instead of switching between notes and camera, you can keep everything in a single view. Your script stays visible, your recording runs smoothly, and your delivery feels more natural.
+                </p>
+                <p>This is especially useful for talking head videos, tutorials, product demos, and social media content.</p>
+              </div>
+            </section>
+
+            <section>
+              <h2 className="text-2xl font-bold">No download, no setup, fully online</h2>
+              <div className="mt-3 space-y-3 text-white/55 leading-7">
+                <p>Unlike traditional teleprompter software, this tool runs entirely in your browser.</p>
+                <p>You don’t need to install any apps or configure anything. Just open the page, paste your script, and start recording.</p>
+                <p>Because it works online, you can use it on any device with a camera and a browser.</p>
+              </div>
+            </section>
+
+            <section>
+              <h2 className="text-2xl font-bold">Private recording on your device</h2>
+              <div className="mt-3 space-y-3 text-white/55 leading-7">
+                <p>Your video is recorded locally on your device, not uploaded to a server.</p>
+                <p>This means your content stays private and under your control. You can review it, download it, and use it however you want without worrying about storage or sharing.</p>
+              </div>
+            </section>
+
+            <section>
+              <h2 className="text-2xl font-bold">Who should use an online teleprompter</h2>
+              <div className="mt-3 text-white/55 leading-7">
+                <ul className="list-disc pl-6 space-y-1.5">
+                  <li>Content creators recording YouTube or short-form videos</li>
+                  <li>Founders and teams creating product updates or demos</li>
+                  <li>Educators and coaches recording lessons or courses</li>
+                  <li>Anyone who wants to speak clearly on camera without memorizing a script</li>
+                </ul>
+              </div>
+            </section>
+
+            <section>
+              <h2 className="text-2xl font-bold">Why use a teleprompter for video recording</h2>
+              <div className="mt-3 text-white/55 leading-7">
+                <ul className="list-disc pl-6 space-y-1.5">
+                  <li>Speak more confidently</li>
+                  <li>Reduce mistakes and retakes</li>
+                  <li>Save time during recording</li>
+                  <li>Deliver your message clearly and consistently</li>
+                </ul>
+                <p className="mt-4">
+                  When combined with recording, it becomes a complete workflow that helps you go from script to finished video much faster.
+                </p>
+              </div>
+            </section>
+          </div>
         </div>
       </div>
 
@@ -501,18 +582,18 @@ export default function TeleprompterFeaturePage() {
           <button
             type="button"
             className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-            onClick={() => setDownloadGateOpen(false)}
+            onClick={discardPendingRecording}
             aria-label="Close signup gate"
           />
           <div className="relative w-full max-w-2xl glass rounded-3xl border border-white/10 p-6">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <p className="text-sm font-semibold text-white">Download unlocked after signup</p>
+                <p className="text-sm font-semibold text-white">Sign up free to download</p>
                 <p className="mt-1 text-xs text-white/45">No credit card required. Your recording stays on your device.</p>
               </div>
               <button
                 type="button"
-                onClick={() => setDownloadGateOpen(false)}
+                onClick={discardPendingRecording}
                 className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-white/70 hover:bg-white/[0.06] hover:text-white"
               >
                 <X className="w-4 h-4" />
@@ -535,12 +616,14 @@ export default function TeleprompterFeaturePage() {
                 ) : null}
 
                 <div className="space-y-3">
-                  <input
-                    value={signupName}
-                    onChange={(e) => setSignupName(e.target.value)}
-                    placeholder="Name"
-                    className="w-full rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-violet-500/30"
-                  />
+                  {authMode === "signup" ? (
+                    <input
+                      value={signupName}
+                      onChange={(e) => setSignupName(e.target.value)}
+                      placeholder="Name"
+                      className="w-full rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-violet-500/30"
+                    />
+                  ) : null}
                   <input
                     value={signupEmail}
                     onChange={(e) => setSignupEmail(e.target.value)}
@@ -551,7 +634,7 @@ export default function TeleprompterFeaturePage() {
                   <input
                     value={signupPassword}
                     onChange={(e) => setSignupPassword(e.target.value)}
-                    placeholder="Password (min 6 chars)"
+                    placeholder={authMode === "signup" ? "Password (min 6 chars)" : "Password"}
                     type="password"
                     className="w-full rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-violet-500/30"
                   />
@@ -562,34 +645,46 @@ export default function TeleprompterFeaturePage() {
                       setSignupError("");
                       setSignupWorking(true);
                       try {
-                        const { token } = await authApi.signup(signupEmail, signupPassword, signupName);
+                        const response = authMode === "signup"
+                          ? await authApi.signup(signupEmail, signupPassword, signupName)
+                          : await authApi.login(signupEmail, signupPassword);
+                        const token = response.token;
                         localStorage.setItem("daytabs_token", token);
                         const blob = pendingBlobRef.current;
                         pendingBlobRef.current = null;
+                        setGateImage("");
                         setDownloadGateOpen(false);
                         if (blob) downloadBlob(blob);
                       } catch (err) {
-                        setSignupError(err instanceof Error ? err.message : "Signup failed");
+                        setSignupError(err instanceof Error ? err.message : (authMode === "signup" ? "Signup failed" : "Login failed"));
                       } finally {
                         setSignupWorking(false);
                       }
                     }}
-                    disabled={!signupEmail.trim() || signupPassword.length < 6 || signupWorking}
+                    disabled={!signupEmail.trim() || (authMode === "signup" ? signupPassword.length < 6 : signupPassword.length < 1) || signupWorking}
                     className="w-full inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-purple-500 px-4 py-3 text-sm font-semibold text-white hover:from-violet-500 hover:to-purple-400 disabled:opacity-50"
                   >
-                    <UserPlus className="w-4 h-4" />
-                    {signupWorking ? "Creating account…" : "Sign up & download"}
+                    {authMode === "signup" ? <UserPlus className="w-4 h-4" /> : <LogIn className="w-4 h-4" />}
+                    {signupWorking ? (authMode === "signup" ? "Creating account…" : "Logging in…") : (authMode === "signup" ? "Sign up & download" : "Log in & download")}
                   </button>
 
                   <button
                     type="button"
                     onClick={() => {
-                      // Keep the blob in memory but allow the user to use the full signup page if they prefer.
-                      navigate("/signup");
+                      setSignupError("");
+                      setAuthMode((mode) => (mode === "signup" ? "login" : "signup"));
                     }}
                     className="w-full inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm font-semibold text-white/75 hover:bg-white/[0.06] hover:text-white"
                   >
-                    Go to signup page
+                    {authMode === "signup" ? "Already have an account? Log in" : "New here? Create a free account"}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={discardPendingRecording}
+                    className="w-full inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.02] px-4 py-3 text-sm font-semibold text-white/55 hover:bg-white/[0.05] hover:text-white/75"
+                  >
+                    Not now (discard recording)
                   </button>
 
                   <div className="mt-2 flex items-center justify-between text-xs text-white/40">
