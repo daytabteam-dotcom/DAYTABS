@@ -196,7 +196,7 @@ export function UserProfileMenu() {
         className="flex items-center gap-2 rounded-xl px-3 py-2 hover:bg-white/5 transition-colors group cursor-pointer"
         data-testid="button-user-profile"
       >
-        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-600 to-purple-500 flex items-center justify-center text-xs font-bold text-white shadow-md shadow-violet-500/30 shrink-0">
+        <div className="w-8 h-8 rounded-full bg-linear-to-br from-violet-600 to-purple-500 flex items-center justify-center text-xs font-bold text-white shadow-md shadow-violet-500/30 shrink-0">
           {initials}
         </div>
         <span className="text-sm font-medium text-white/80 hidden sm:block max-w-[120px] truncate">
@@ -215,7 +215,7 @@ export function UserProfileMenu() {
           {/* Profile header */}
           <div className="px-4 py-4 border-b border-white/8">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-violet-600 to-purple-500 flex items-center justify-center text-sm font-bold text-white shadow-lg shadow-violet-500/20 shrink-0">
+              <div className="w-10 h-10 rounded-full bg-linear-to-br from-violet-600 to-purple-500 flex items-center justify-center text-sm font-bold text-white shadow-lg shadow-violet-500/20 shrink-0">
                 {initials}
               </div>
               <div className="min-w-0">

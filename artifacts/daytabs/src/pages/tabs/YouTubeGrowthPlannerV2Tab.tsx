@@ -83,6 +83,7 @@ type InsightConfidence = "high" | "medium" | "low";
 type IdeaOrigin = "ai" | "manual";
 type IdeaFeedback = "liked" | "disliked" | null;
 type GrowthSubtab = "overview" | "plan" | "competitors" | "insights" | "tasks";
+type DetailTab = "create" | "visuals" | "growth" | "strategy";
 
 const YOUTUBE_THUMBNAIL_WIDTH = 1280;
 const YOUTUBE_THUMBNAIL_HEIGHT = 720;
@@ -582,7 +583,7 @@ function normalizeConfidence(confidence?: string): InsightConfidence {
 function confidenceClass(confidence?: string) {
   if (confidence === "high") return "border-emerald-400/25 bg-emerald-500/12 text-emerald-200";
   if (confidence === "medium") return "border-amber-400/25 bg-amber-500/12 text-amber-200";
-  return "border-white/10 bg-white/[0.04] text-white/55";
+  return "border-white/10 bg-white/4 text-white/55";
 }
 
 function toCardId(day: PlanDay) {
@@ -909,7 +910,7 @@ function IdeaPackageFields({ day, ui, compact = false }: { day: PlanDay; ui: Ret
         {tags.length ? (
           <div className="mt-2 flex flex-wrap gap-1.5">
             {tags.slice(0, 10).map((tag) => (
-              <span key={tag} className="rounded-full border border-white/10 bg-white/[0.05] px-2 py-1 text-[10px] text-white/65">{tag}</span>
+              <span key={tag} className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[10px] text-white/65">{tag}</span>
             ))}
           </div>
         ) : <p className="mt-1 text-xs text-white/35">{ui.planner.aiImproveTagsHint}</p>}
@@ -1534,7 +1535,7 @@ function VideoPicker({
     () => [...videos].sort((a, b) => new Date(b.publishedAt || 0).getTime() - new Date(a.publishedAt || 0).getTime()),
     [videos],
   );
-  if (!videos.length) return <p className="mt-3 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-white/35">{ui.consistencyTracker.emptyNoUploads} {ui.consistencyTracker.emptyRefreshHint}</p>;
+  if (!videos.length) return <p className="mt-3 rounded-lg border border-white/10 bg-white/3 px-3 py-2 text-xs text-white/35">{ui.consistencyTracker.emptyNoUploads} {ui.consistencyTracker.emptyRefreshHint}</p>;
   return (
     <div className="mt-3">
       <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
@@ -1549,14 +1550,14 @@ function VideoPicker({
             onClick={() => onSelect(video.id)}
             className={cn(
               "flex w-full items-center gap-3 rounded-lg border p-2 text-left transition-all",
-              active ? "border-emerald-300/50 bg-emerald-500/10 shadow-[0_12px_32px_rgba(16,185,129,0.12)]" : "border-white/10 bg-white/[0.03] hover:-translate-y-0.5 hover:bg-white/[0.06]",
+              active ? "border-emerald-300/50 bg-emerald-500/10 shadow-[0_12px_32px_rgba(16,185,129,0.12)]" : "border-white/10 bg-white/3 hover:-translate-y-0.5 hover:bg-white/6",
               disabled && "opacity-35",
             )}
           >
             {video.thumbnailUrl ? (
-              <img src={video.thumbnailUrl} alt="" className="h-[45px] w-20 rounded-md object-cover" />
+              <img src={video.thumbnailUrl} alt="" className="h-11.25 w-20 rounded-md object-cover" />
             ) : (
-              <div className="flex h-[45px] w-20 items-center justify-center rounded-md bg-[#151515]"><Play className="h-4 w-4 text-white/60" /></div>
+              <div className="flex h-11.25 w-20 items-center justify-center rounded-md bg-[#151515]"><Play className="h-4 w-4 text-white/60" /></div>
             )}
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm text-white">{video.title}</p>
@@ -1600,7 +1601,7 @@ function VideoDiagnosticCard({
           {diagnostic.video.thumbnailUrl ? (
             <img src={diagnostic.video.thumbnailUrl} alt="" className="h-full w-full object-cover opacity-90 transition-transform duration-500 group-hover:scale-105" />
           ) : (
-            <div className="flex h-full w-full items-center justify-center bg-white/[0.04]">
+            <div className="flex h-full w-full items-center justify-center bg-white/4">
               <Play className="h-8 w-8 text-white/45" />
             </div>
           )}
@@ -1616,7 +1617,7 @@ function VideoDiagnosticCard({
             )}>
               {positive ? "Repeat" : "Fix"}
             </span>
-            <span className="inline-flex items-center rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/55">
+            <span className="inline-flex items-center rounded-full border border-white/10 bg-white/4 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/55">
               {formatNumber(diagnostic.video.viewCount)} views
             </span>
           </div>
@@ -1627,9 +1628,9 @@ function VideoDiagnosticCard({
       </div>
       <div className="mt-4 grid gap-2 md:grid-cols-2">
         {metricItems.map(({ label, value, Icon, className }) => (
-          <div key={label} className="rounded-xl border border-white/10 bg-white/[0.035] p-3">
+          <div key={label} className="rounded-xl border border-white/10 bg-white/3.5 p-3">
             <div className="mb-2 flex items-center gap-2">
-              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/[0.05]">
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/5">
                 <Icon className={cn("h-4 w-4", className)} />
               </span>
               <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-white/40">{label}</p>
@@ -1736,7 +1737,7 @@ function CommandStat({
 }) {
   return (
     <PanelCardSoft className="flex items-center gap-3 p-3">
-      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.05]">
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/5">
         <Icon className="h-4 w-4 text-white/55" />
       </span>
       <div className="min-w-0">
@@ -1780,7 +1781,7 @@ function CalendarPreviewCard({
           onKeyDown={(event) => {
             if (event.key === "Enter" || event.key === " ") onOpen(day);
           }}
-          className={cn("group relative w-full overflow-hidden rounded-2xl border text-left transition-all hover:-translate-y-1 hover:bg-white/[0.06]", origin.cardClassName)}
+          className={cn("group relative w-full overflow-hidden rounded-2xl border text-left transition-all hover:-translate-y-1 hover:bg-white/6", origin.cardClassName)}
         >
           <div className={cn("h-2 bg-gradient-to-r", linked ? "from-emerald-300 to-emerald-500" : origin.accentClassName)} />
           {linked ? (
@@ -1801,7 +1802,7 @@ function CalendarPreviewCard({
               </span>
             </PopoverTrigger>
             <PopoverContent align="end" className="w-40 border-white/10 bg-[#120d1f] p-1 text-white">
-              <button type="button" onClick={(event) => { event.stopPropagation(); onOpen(day); }} className="w-full rounded-md px-3 py-2 text-left text-sm text-white/70 hover:bg-white/[0.06] hover:text-white">{ui.planner.openBrief}</button>
+              <button type="button" onClick={(event) => { event.stopPropagation(); onOpen(day); }} className="w-full rounded-md px-3 py-2 text-left text-sm text-white/70 hover:bg-white/6 hover:text-white">{ui.planner.openBrief}</button>
               <button type="button" onClick={(event) => { event.stopPropagation(); onDelete(day); }} className="w-full rounded-md px-3 py-2 text-left text-sm text-red-200 hover:bg-red-500/10 hover:text-red-100">{ui.planner.delete}</button>
             </PopoverContent>
           </Popover>
@@ -1992,7 +1993,7 @@ function CurrentWeekConsistencyChart({ rows }: { rows: Array<{ iso: string; day:
           { label: "Published Days", value: summary.published, caption: `${summary.uploads} upload${summary.uploads === 1 ? "" : "s"} landed this week`, tone: "border-emerald-300/20 bg-emerald-400/10 text-emerald-100" },
           { label: "Still Planned", value: summary.planned, caption: "Scheduled days still on track", tone: "border-sky-300/20 bg-sky-400/10 text-sky-100" },
           { label: "Missed", value: summary.missed, caption: "Scheduled days with no live upload", tone: "border-red-300/20 bg-red-400/10 text-red-100" },
-          { label: "Open Days", value: summary.open, caption: "No schedule and no upload yet", tone: "border-white/10 bg-white/[0.04] text-white/75" },
+          { label: "Open Days", value: summary.open, caption: "No schedule and no upload yet", tone: "border-white/10 bg-white/4 text-white/75" },
         ].map((item) => (
           <PanelCardSoft key={item.label} className={cn("border p-4", item.tone)}>
             <p className="text-[11px] uppercase tracking-[0.16em] opacity-70">{item.label}</p>
@@ -2027,7 +2028,7 @@ function CurrentWeekConsistencyChart({ rows }: { rows: Array<{ iso: string; day:
                   day.status === "posted" && "border-emerald-300/25 bg-emerald-400/15 text-emerald-100",
                   day.status === "missed" && "border-red-300/25 bg-red-400/15 text-red-100",
                   day.status === "planned" && "border-sky-300/25 bg-sky-400/15 text-sky-100",
-                  day.status === "empty" && "border-white/10 bg-white/[0.04] text-white/50",
+                  day.status === "empty" && "border-white/10 bg-white/4 text-white/50",
                 )}>
                   {day.status === "posted" ? "Live" : day.status === "missed" ? "Missed" : day.status === "planned" ? "Planned" : "Open"}
                 </span>
@@ -2058,7 +2059,7 @@ function PlannerIdeaCard({ day, ui, onDragStart, onDelete, onOpen, onCreateThumb
     <div
       draggable
       onDragStart={() => onDragStart(day)}
-      className={cn("relative rounded-lg border p-3 pr-10 transition-all hover:-translate-y-0.5 hover:bg-white/[0.07]", origin.cardClassName)}
+      className={cn("relative rounded-lg border p-3 pr-10 transition-all hover:-translate-y-0.5 hover:bg-white/7", origin.cardClassName)}
     >
       <Popover>
         <PopoverTrigger asChild>
@@ -2067,7 +2068,7 @@ function PlannerIdeaCard({ day, ui, onDragStart, onDelete, onOpen, onCreateThumb
           </button>
         </PopoverTrigger>
         <PopoverContent align="end" className="w-40 border-white/10 bg-[#120d1f] p-1 text-white">
-          <button type="button" onClick={() => onOpen(day)} className="w-full rounded-md px-3 py-2 text-left text-sm text-white/70 hover:bg-white/[0.06] hover:text-white">{ui.planner.openBrief}</button>
+          <button type="button" onClick={() => onOpen(day)} className="w-full rounded-md px-3 py-2 text-left text-sm text-white/70 hover:bg-white/6 hover:text-white">{ui.planner.openBrief}</button>
           <button type="button" onClick={() => onDelete(day)} className="w-full rounded-md px-3 py-2 text-left text-sm text-red-200 hover:bg-red-500/10 hover:text-red-100">{ui.planner.delete}</button>
         </PopoverContent>
       </Popover>
@@ -2125,7 +2126,7 @@ function BestTimeHeatmap({ cells, ui, locale }: { cells?: Array<{ day: string; h
   const max = Math.max(...cells.map((cell) => cell.value), 1);
   return (
     <div className="mt-4 overflow-hidden rounded-lg border border-white/10">
-      <div className="grid grid-cols-[64px_repeat(4,minmax(0,1fr))] bg-white/[0.03] text-[11px] text-white/45">
+      <div className="grid grid-cols-[64px_repeat(4,minmax(0,1fr))] bg-white/3 text-[11px] text-white/45">
         <div className="px-3 py-2 text-left">{ui.performanceSignals.heatmapDayHeader}</div>
         {hourBuckets.map((bucket) => <div key={bucket.label} className="px-3 py-2 text-center">{`${bucket.label}-${String(bucket.end).padStart(2, "0")}:00`}</div>)}
       </div>
@@ -2151,7 +2152,7 @@ function BestTimeHeatmap({ cells, ui, locale }: { cells?: Array<{ day: string; h
           })}
         </div>
       ))}
-      <div className="flex items-center justify-between gap-3 border-t border-white/10 bg-white/[0.03] px-3 py-2 text-[11px] text-white/45">
+      <div className="flex items-center justify-between gap-3 border-t border-white/10 bg-white/3 px-3 py-2 text-[11px] text-white/45">
         <span>{ui.performanceSignals.lowerViewDensity}</span>
         <div className="flex items-center gap-1">
           {[0.2, 0.45, 0.7, 1].map((opacity) => <span key={opacity} className="h-3 w-6 rounded-sm" style={{ backgroundColor: `rgba(248, 113, 113, ${opacity})` }} />)}
@@ -2163,7 +2164,7 @@ function BestTimeHeatmap({ cells, ui, locale }: { cells?: Array<{ day: string; h
 }
 
 function weekRating(posted: number, missed: number, scheduled: number) {
-  if (scheduled === 0) return { label: "No schedule", className: "border-white/10 bg-white/[0.04] text-white/45" };
+  if (scheduled === 0) return { label: "No schedule", className: "border-white/10 bg-white/4 text-white/45" };
   if (missed === 0 && posted >= scheduled) return { label: "Excellent", className: "border-emerald-300/25 bg-emerald-400/10 text-emerald-100" };
   if (posted / scheduled >= 0.7) return { label: "Good", className: "border-sky-300/25 bg-sky-400/10 text-sky-100" };
   if (posted > 0) return { label: "Needs focus", className: "border-amber-300/25 bg-amber-400/10 text-amber-100" };
@@ -2213,7 +2214,7 @@ function PostingPatternStrip({
       <div className="mt-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-sm text-white/60">Four-week consistency view. Green means published, red means scheduled but missed, grey means no post was scheduled.</p>
-          <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs text-white/50">
+          <span className="rounded-full border border-white/10 bg-white/4 px-3 py-1 text-xs text-white/50">
             {rangeStart && rangeEnd ? `${formatIsoDate(rangeStart)} to ${formatIsoDate(rangeEnd)}` : "Month range"}
           </span>
         </div>
@@ -2239,7 +2240,7 @@ function PostingPatternStrip({
                           day.posted && "border-emerald-300/35 bg-emerald-400/80 text-emerald-950",
                           day.missed && "border-red-300/35 bg-red-400/80 text-red-950",
                           !day.posted && !day.missed && day.scheduled && "border-sky-300/25 bg-sky-400/15 text-sky-100",
-                          !day.posted && !day.missed && !day.scheduled && "border-white/10 bg-white/[0.05] text-white/35",
+                          !day.posted && !day.missed && !day.scheduled && "border-white/10 bg-white/5 text-white/35",
                         )}>
                           <span className="text-[9px] uppercase opacity-70">{day.weekday.slice(0, 1)}</span>
                           {day.dayNumber}
@@ -2255,7 +2256,7 @@ function PostingPatternStrip({
                 ))}
               </div>
               <div className="mt-3 grid grid-cols-3 gap-2 text-center text-xs">
-                <div className="rounded-lg border border-white/10 bg-white/[0.03] px-2 py-2">
+                <div className="rounded-lg border border-white/10 bg-white/3 px-2 py-2">
                   <p className="font-semibold text-white">{week.scheduled}</p>
                   <p className="mt-0.5 text-white/35">Scheduled</p>
                 </div>
@@ -2294,7 +2295,7 @@ function HookComparisonChart({ rows }: { rows: Array<{ type: string; averageView
             </div>
             <span className="text-sm text-white/70">{formatNumber(row.averageViews)} avg views</span>
           </div>
-          <div className="mt-2 h-3 overflow-hidden rounded-full bg-white/[0.06]">
+          <div className="mt-2 h-3 overflow-hidden rounded-full bg-white/6">
             <div className="h-full rounded-full bg-red-400" style={{ width: `${Math.max(8, (row.averageViews / max) * 100)}%` }} />
           </div>
         </div>
@@ -2457,7 +2458,7 @@ function PerformanceInsightCard({
   const [open, setOpen] = useState(false);
   const Card = compact ? PanelCardSoft : PanelCardStrong;
   return (
-    <Card className={cn("border border-white/10 p-5 transition-all hover:-translate-y-1 hover:bg-white/[0.05]", compact ? "bg-white/[0.03]" : "bg-white/[0.04]")}>
+    <Card className={cn("border border-white/10 p-5 transition-all hover:-translate-y-1 hover:bg-white/5", compact ? "bg-white/3" : "bg-white/4")}>
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-white/35">{insightLabel(insight.type)}</p>
@@ -2578,7 +2579,7 @@ function LoadingState() {
       <PanelHeader className="justify-between gap-6">
         <div className="space-y-3">
           <Skeleton className="h-6 w-40 bg-white/10" />
-          <Skeleton className="h-12 w-[28rem] max-w-full bg-white/10" />
+          <Skeleton className="h-12 w-md max-w-full bg-white/10" />
           <Skeleton className="h-5 w-[36rem] max-w-full bg-white/10" />
         </div>
         <div className="flex gap-2">
@@ -2632,6 +2633,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
   const [error, setError] = useState<string | null>(null);
   const [resultSelections, setResultSelections] = useState<Record<number, string>>({});
   const [detailDay, setDetailDay] = useState<PlanDay | null>(null);
+  const [detailTab, setDetailTab] = useState<DetailTab>("create");
   const [customOpen, setCustomOpen] = useState(false);
   const [customIdea, setCustomIdea] = useState<CustomIdeaDraft>({ title: "", angle: "", date: "", description: "", tags: "", thumbnail: "" });
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -2661,6 +2663,10 @@ export default function YouTubeGrowthPlannerV2Tab() {
   const latestResults = status?.latestResults ?? [];
   const preferredPostsPerWeek = status?.settings?.preferredPostsPerWeek ?? 3;
   const needsPostingPreference = Boolean(status?.connected && status?.settings?.needsPostingPreference);
+
+  useEffect(() => {
+    if (detailDay) setDetailTab("create");
+  }, [detailDay]);
 
   useEffect(() => {
     setDays(hydrateVisiblePlanDays(latestPlan?.plan?.days ?? []));
@@ -3269,7 +3275,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
           <Button variant={viewMode === "planner" ? "default" : "secondary"} className="rounded-lg" onClick={() => setViewMode("planner")}><ListChecks className="mr-2 h-4 w-4" />{ui.viewModes.planner}</Button>
         </div>
       </div>
-      <div className="mt-5 rounded-lg border border-white/10 bg-white/[0.03] p-4">
+      <div className="mt-5 rounded-lg border border-white/10 bg-white/3 p-4">
         <div className="flex items-center justify-between gap-3 text-sm text-white/70">
           <span>{ui.planner.plannedThisWeekSummary(progressState.planned, progressState.posted)}</span>
           <span>{progressState.progress}%</span>
@@ -3285,7 +3291,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
             const hasPublished = dateDays.some((day) => resultsByDay.has(day.day));
             const isToday = date === new Date().toISOString().slice(0, 10);
             return (
-              <div key={date} onDragOver={(event) => event.preventDefault()} onDrop={() => handleDropOnDate(date)} className={cn("min-h-[260px] w-[290px] shrink-0 rounded-2xl border bg-white/[0.025] p-3 transition-all hover:bg-white/[0.04] xl:w-[calc((100vw-10rem)/4)] xl:max-w-[320px]", isToday ? "border-red-300/35" : "border-white/10")}>
+              <div key={date} onDragOver={(event) => event.preventDefault()} onDrop={() => handleDropOnDate(date)} className={cn("min-h-65 w-[290px] shrink-0 rounded-2xl border bg-white/2.5 p-3 transition-all hover:bg-white/4 xl:w-[calc((100vw-10rem)/4)] xl:max-w-[320px]", isToday ? "border-red-300/35" : "border-white/10")}>
                 <div className="mb-3 flex items-start justify-between gap-2 rounded-xl border border-white/10 bg-black/10 px-3 py-2">
                   <div>
                     <p className="text-sm font-semibold text-white">{dayName(date)}</p>
@@ -3295,7 +3301,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
                     ? <span className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-2 py-1 text-[10px] font-medium text-emerald-200">{ui.planner.publishedChip}</span>
                     : dateDays.length
                       ? <span className="rounded-full border border-sky-400/25 bg-sky-500/10 px-2 py-1 text-[10px] font-medium text-sky-100">{ui.planner.plannedChip(dateDays.length)}</span>
-                      : <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-[10px] font-medium text-white/35">{ui.planner.openChip}</span>}
+                      : <span className="rounded-full border border-white/10 bg-white/4 px-2 py-1 text-[10px] font-medium text-white/35">{ui.planner.openChip}</span>}
                 </div>
                 {dateDays.length ? (
                   <div className="space-y-3">
@@ -3329,9 +3335,9 @@ export default function YouTubeGrowthPlannerV2Tab() {
                   <button
                     type="button"
                     onClick={() => openCustomIdeaForDate(date)}
-                    className="flex h-[180px] w-full flex-col items-center justify-center rounded-2xl border border-dashed border-white/10 bg-black/10 text-center text-sm text-white/30 transition-all hover:-translate-y-0.5 hover:border-red-300/30 hover:bg-red-500/10 hover:text-white"
+                    className="flex h-45 w-full flex-col items-center justify-center rounded-2xl border border-dashed border-white/10 bg-black/10 text-center text-sm text-white/30 transition-all hover:-translate-y-0.5 hover:border-red-300/30 hover:bg-red-500/10 hover:text-white"
                   >
-                    <span className="mb-3 flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-white/[0.05]">
+                    <span className="mb-3 flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-white/5">
                       <Plus className="h-5 w-5" />
                     </span>
                     Add idea
@@ -3346,7 +3352,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
       ) : (
         <div className="mt-5 grid gap-3 lg:grid-cols-5">
           {stages.map((stage) => (
-            <div key={stage.id} onDragOver={(event) => event.preventDefault()} onDrop={() => handleDropOnStage(stage.id)} className="min-h-[260px] rounded-lg border border-white/10 bg-white/[0.025] p-3">
+            <div key={stage.id} onDragOver={(event) => event.preventDefault()} onDrop={() => handleDropOnStage(stage.id)} className="min-h-65 rounded-lg border border-white/10 bg-white/2.5 p-3">
               <p className="mb-3 text-sm font-semibold text-white">{stage.label}</p>
               <div className="space-y-3">
                 {days.filter((day) => effectivePlannerStage(day, resultsByDay, recentVideoById) === stage.id).map((day) => <PlannerIdeaCard key={toCardId(day)} day={day} ui={ui} onDragStart={handleDragStart} onDelete={deleteDay} onOpen={setDetailDay} onCreateThumbnail={openThumbnailDialog} />)}
@@ -3359,7 +3365,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
   );
 
   const consistencySection = (
-    <PanelCard id="posting-consistency" className="p-6 transition-all hover:-translate-y-1 hover:bg-white/[0.04]">
+    <PanelCard id="posting-consistency" className="p-6 transition-all hover:-translate-y-1 hover:bg-white/4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <div className="flex items-center gap-3">
@@ -3393,7 +3399,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
       </div>
       <div className="mt-5 grid gap-3 md:grid-cols-3">
         {[
-          { label: ui.overviewPanel.reviewUploadsLabel, value: unlinkedWeekVideos.length, caption: ui.overviewPanel.reviewUploadsCaption, tone: "border-white/10 bg-white/[0.04] text-white" },
+          { label: ui.overviewPanel.reviewUploadsLabel, value: unlinkedWeekVideos.length, caption: ui.overviewPanel.reviewUploadsCaption, tone: "border-white/10 bg-white/4 text-white" },
           { label: ui.overviewPanel.linkToPlanLabel, value: unlinkedWeekVideos.filter((video) => (daysByDate.get(video.publishedAt?.slice(0, 10) ?? "") ?? []).some((day) => !resultsByDay.has(day.day))).length, caption: ui.overviewPanel.linkToPlanCaption, tone: "border-emerald-300/20 bg-emerald-400/10 text-emerald-100" },
           { label: ui.overviewPanel.createNewIdeaLabel, value: unlinkedWeekVideos.filter((video) => !(daysByDate.get(video.publishedAt?.slice(0, 10) ?? "") ?? []).some((day) => !resultsByDay.has(day.day))).length, caption: ui.overviewPanel.createNewIdeaCaption, tone: "border-amber-300/20 bg-amber-400/10 text-amber-100" },
         ].map((item) => (
@@ -3409,9 +3415,9 @@ export default function YouTubeGrowthPlannerV2Tab() {
           const videoDate = video.publishedAt?.slice(0, 10) ?? "";
           const matchingIdeas = (daysByDate.get(videoDate) ?? []).filter((day) => !resultsByDay.has(day.day));
           return (
-            <PanelCardSoft key={video.id} className="border border-white/10 p-4 transition-all hover:-translate-y-0.5 hover:bg-white/[0.05]">
+            <PanelCardSoft key={video.id} className="border border-white/10 p-4 transition-all hover:-translate-y-0.5 hover:bg-white/5">
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs text-white/65">
+                <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/4 px-3 py-1 text-xs text-white/65">
                   <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-400/15 text-emerald-100">{index + 1}</span>
                   {ui.overviewPanel.reviewUploadChip}
                 </div>
@@ -3419,7 +3425,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
               </div>
               <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                 <div className="flex min-w-0 items-start gap-3">
-                  {video.thumbnailUrl ? <img src={video.thumbnailUrl} alt="" className="h-20 w-32 rounded-xl object-cover" /> : <div className="flex h-20 w-32 items-center justify-center rounded-xl bg-white/[0.05]"><Play className="h-5 w-5 text-white/50" /></div>}
+                  {video.thumbnailUrl ? <img src={video.thumbnailUrl} alt="" className="h-20 w-32 rounded-xl object-cover" /> : <div className="flex h-20 w-32 items-center justify-center rounded-xl bg-white/5"><Play className="h-5 w-5 text-white/50" /></div>}
                   <div className="min-w-0">
                     <p className="mt-2 line-clamp-2 text-base font-semibold text-white">{video.title}</p>
                     <p className="mt-1 text-sm text-white/50">{uploadReviewPrompt(video, matchingIdeas)}</p>
@@ -3436,7 +3442,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
                     key={`${video.id}-${day.day}`}
                     type="button"
                     onClick={() => void linkVideoToPlannedDay(video, day)}
-                    className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-left text-sm text-white transition-all hover:-translate-y-0.5 hover:border-emerald-300/35 hover:bg-emerald-500/10"
+                    className="rounded-xl border border-white/10 bg-white/4 px-4 py-3 text-left text-sm text-white transition-all hover:-translate-y-0.5 hover:border-emerald-300/35 hover:bg-emerald-500/10"
                   >
                     <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-100/65">{ui.overviewPanel.linkItHere}</p>
                     <p className="font-semibold">{day.contentIdea}</p>
@@ -3467,7 +3473,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
   ];
 
   const subtabNav = (
-    <div className="sticky top-4 z-20 overflow-hidden rounded-3xl bg-white/[0.055] p-1.5 shadow-xl shadow-black/10 backdrop-blur-xl">
+    <div className="sticky top-4 z-20 overflow-hidden rounded-3xl bg-white/5.5 p-1.5 shadow-xl shadow-black/10 backdrop-blur-xl">
       <div className="flex w-full gap-1.5 overflow-x-auto">
         {growthSubtabs.map((tab) => {
           const isActive = activeSubtab === tab.id;
@@ -3482,15 +3488,15 @@ export default function YouTubeGrowthPlannerV2Tab() {
                 "group relative flex min-w-[128px] flex-1 items-center justify-center gap-2 overflow-hidden rounded-2xl px-3 py-3 text-center transition-all duration-200",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-200/50 focus-visible:ring-offset-2 focus-visible:ring-offset-black",
                 isActive
-                  ? "bg-white/[0.14] text-white shadow-[0_10px_30px_rgba(0,0,0,0.18)]"
-                  : "text-white/58 hover:bg-white/[0.075] hover:text-white",
+                  ? "bg-white/14 text-white shadow-[0_10px_30px_rgba(0,0,0,0.18)]"
+                  : "text-white/58 hover:bg-white/7.5 hover:text-white",
               )}
               aria-current={isActive ? "page" : undefined}
             >
-              <span className={cn("pointer-events-none absolute inset-0 bg-gradient-to-br opacity-0 transition-opacity duration-200", tab.accent, isActive ? "opacity-100" : "group-hover:opacity-70")} />
+              <span className={cn("pointer-events-none absolute inset-0 bg-linear-to-br opacity-0 transition-opacity duration-200", tab.accent, isActive ? "opacity-100" : "group-hover:opacity-70")} />
               {isActive ? <span className="pointer-events-none absolute inset-x-5 bottom-0 h-0.5 rounded-full bg-white/65" /> : null}
               <span className="relative flex min-w-0 items-center justify-center gap-2.5">
-                <span className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition-all", isActive ? "bg-white/16 text-white" : "bg-white/[0.045] text-white/50 group-hover:text-white")}>
+                <span className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition-all", isActive ? "bg-white/16 text-white" : "bg-white/4.5 text-white/50 group-hover:text-white")}>
                   <Icon className="h-4 w-4" />
                 </span>
                 <span className="truncate text-sm font-semibold">{tab.label}</span>
@@ -3534,7 +3540,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
       {todayPlannedDays.length ? (
         <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {todayPlannedDays.map((day) => (
-            <PanelCardSoft key={`today-${toCardId(day)}`} className="border border-white/10 p-4 transition-all duration-200 hover:-translate-y-1 hover:border-red-300/25 hover:bg-white/[0.05]">
+            <PanelCardSoft key={`today-${toCardId(day)}`} className="border border-white/10 p-4 transition-all duration-200 hover:-translate-y-1 hover:border-red-300/25 hover:bg-white/5">
               <p className="text-base font-semibold text-white">{day.contentIdea}</p>
               {day.hook && day.hook !== day.contentIdea ? <p className="mt-2 text-sm text-white/55">{day.hook}</p> : null}
               <div className="mt-4 flex gap-2">
@@ -3556,7 +3562,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
     <div className="space-y-6">
       {todayActionCard}
       <div className="grid gap-4 xl:grid-cols-2">
-        <PanelCard className="p-5 transition-all hover:-translate-y-1 hover:bg-white/[0.04]">
+        <PanelCard className="p-5 transition-all hover:-translate-y-1 hover:bg-white/4">
           <div className="flex items-center gap-3">
             <CalendarDays className="h-5 w-5 text-red-300" />
             <h3 className="text-xl font-semibold text-white">{ui.overviewPanel.planAtGlanceTitle}</h3>
@@ -3581,7 +3587,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
           </Button>
         </PanelCard>
 
-        <PanelCard className="p-5 transition-all hover:-translate-y-1 hover:bg-white/[0.04]">
+        <PanelCard className="p-5 transition-all hover:-translate-y-1 hover:bg-white/4">
           <div className="flex items-center gap-3">
             <BarChart3 className="h-5 w-5 text-emerald-300" />
             <h3 className="text-xl font-semibold text-white">{ui.overviewPanel.needsAttentionTitle}</h3>
@@ -3686,7 +3692,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
                 <div className="relative">
                   <Avatar className="h-20 w-20 rounded-[20px] border border-white/10">
                     <AvatarImage src={status.channel?.channelThumbnailUrl ?? undefined} alt={status.channel?.channelName ?? "YouTube channel"} />
-                    <AvatarFallback className="rounded-[20px] bg-white/[0.08] text-lg text-white">{initials(status.channel?.channelName)}</AvatarFallback>
+                    <AvatarFallback className="rounded-[20px] bg-white/8 text-lg text-white">{initials(status.channel?.channelName)}</AvatarFallback>
                   </Avatar>
                   <span className="absolute -bottom-1 -right-1 flex h-7 w-7 items-center justify-center rounded-full border border-white/10 bg-red-500 text-white">
                     <Youtube className="h-4 w-4" />
@@ -3739,8 +3745,8 @@ export default function YouTubeGrowthPlannerV2Tab() {
           {activeSubtab === "insights" ? (
             <>
           <section id="repeat-or-fix" className="scroll-mt-24">
-            <PanelCard className="overflow-hidden border border-white/10 p-0 transition-all hover:-translate-y-1 hover:bg-white/[0.04]">
-              <div className="border-b border-white/10 bg-white/[0.03] p-6">
+            <PanelCard className="overflow-hidden border border-white/10 p-0 transition-all hover:-translate-y-1 hover:bg-white/4">
+              <div className="border-b border-white/10 bg-white/3 p-6">
                 <div className="flex flex-wrap items-start justify-between gap-4">
                   <div>
                     <div className="flex items-center gap-3">
@@ -3749,7 +3755,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
                     </div>
                     <p className="mt-2 max-w-3xl text-sm leading-6 text-white/55">{ui.repeatOrFix.subtitle}</p>
                   </div>
-                  <Badge className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-white/65 hover:brightness-100">
+                  <Badge className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-white/65 hover:brightness-100">
                     {topDiagnostics.length + underperformerDiagnostics.length} cards
                   </Badge>
                 </div>
@@ -3781,7 +3787,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
 
           {consistencySection}
 
-          <PanelCard id="performance-signals" className="scroll-mt-24 p-6 transition-all hover:-translate-y-1 hover:bg-white/[0.04]">
+          <PanelCard id="performance-signals" className="scroll-mt-24 p-6 transition-all hover:-translate-y-1 hover:bg-white/4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <div className="flex items-center gap-3">
@@ -3800,12 +3806,12 @@ export default function YouTubeGrowthPlannerV2Tab() {
                 ["your-tag-performance", "Tags"],
                 ["trending-tags", "Tags to Test"],
               ].map(([id, label]) => (
-                <a key={id} href={`#${id}`} className="rounded-full border border-white/10 px-3 py-1 text-xs text-white/55 transition-colors hover:bg-white/[0.06] hover:text-white">{label}</a>
+                <a key={id} href={`#${id}`} className="rounded-full border border-white/10 px-3 py-1 text-xs text-white/55 transition-colors hover:bg-white/6 hover:text-white">{label}</a>
               ))}
             </div>
 
             <div className="mt-6 space-y-6">
-              <PanelCardSoft id="optimal-posting-schedule" className="border border-white/10 p-5 transition-all hover:-translate-y-1 hover:bg-white/[0.05]">
+              <PanelCardSoft id="optimal-posting-schedule" className="border border-white/10 p-5 transition-all hover:-translate-y-1 hover:bg-white/5">
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <h3 className="text-xl font-semibold text-white">{ui.performanceSignals.bestTimesTitle}</h3>
@@ -3822,7 +3828,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
               </PanelCardSoft>
 
               {hookRows.length ? (
-                <PanelCardSoft id="hook-efficacy-analysis" className="border border-white/10 p-5 transition-all hover:-translate-y-1 hover:bg-white/[0.05]">
+                <PanelCardSoft id="hook-efficacy-analysis" className="border border-white/10 p-5 transition-all hover:-translate-y-1 hover:bg-white/5">
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <h3 className="text-xl font-semibold text-white">{ui.performanceSignals.hooksTitle}</h3>
@@ -3840,7 +3846,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
               ) : null}
 
               {titleLengthSummary.points.length ? (
-                <PanelCardSoft id="optimal-title-length" className="border border-white/10 p-5 transition-all hover:-translate-y-1 hover:bg-white/[0.05]">
+                <PanelCardSoft id="optimal-title-length" className="border border-white/10 p-5 transition-all hover:-translate-y-1 hover:bg-white/5">
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <h3 className="text-xl font-semibold text-white">{ui.performanceSignals.optimalTitleLengthTitle}</h3>
@@ -3851,7 +3857,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
                   <TitleLengthBarChart buckets={titleLengthSummary.buckets} winnerLabel={titleLengthSummary.winningBucket?.label} />
                   <div className="mt-4 overflow-x-auto rounded-lg border border-white/10">
                     <table className="min-w-full text-sm">
-                      <thead className="bg-white/[0.03] text-left text-white/45">
+                      <thead className="bg-white/3 text-left text-white/45">
                         <tr>
                           <th className="px-4 py-3 font-medium">{ui.performanceSignals.topTitlesHeader}</th>
                           <th className="px-4 py-3 font-medium">{ui.performanceSignals.charsViewsHeader}</th>
@@ -3884,7 +3890,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
               ) : null}
 
               {subscriberGrowth.timeline.length ? (
-                <PanelCardSoft id="subscriber-growth-chart" className="border border-white/10 p-5 transition-all hover:-translate-y-1 hover:bg-white/[0.05]">
+                <PanelCardSoft id="subscriber-growth-chart" className="border border-white/10 p-5 transition-all hover:-translate-y-1 hover:bg-white/5">
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <h3 className="text-xl font-semibold text-white">{ui.performanceSignals.subscriberGrowthTitle}</h3>
@@ -3925,7 +3931,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
               ) : null}
 
               {tagPerformance.length ? (
-                <PanelCardSoft id="your-tag-performance" className="border border-white/10 p-5 transition-all hover:-translate-y-1 hover:bg-white/[0.05]">
+                <PanelCardSoft id="your-tag-performance" className="border border-white/10 p-5 transition-all hover:-translate-y-1 hover:bg-white/5">
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <h3 className="text-xl font-semibold text-white">{ui.performanceSignals.tagsTitle}</h3>
@@ -3936,7 +3942,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
                   <p className="mt-4 text-sm text-white/55">{ui.performanceSignals.tagsLegend}</p>
                   <div className="mt-4 flex flex-wrap gap-2">
                     {(tagExpanded ? tagPerformance : tagPerformance.slice(0, 15)).map((tag) => (
-                      <span key={tag.tag} className={cn("inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm", tag.tone === "positive" && "border-emerald-400/25 bg-emerald-500/10 text-emerald-100", tag.tone === "negative" && "border-red-400/25 bg-red-500/10 text-red-100", tag.tone === "neutral" && "border-white/10 bg-white/[0.05] text-white/70")}>
+                      <span key={tag.tag} className={cn("inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm", tag.tone === "positive" && "border-emerald-400/25 bg-emerald-500/10 text-emerald-100", tag.tone === "negative" && "border-red-400/25 bg-red-500/10 text-red-100", tag.tone === "neutral" && "border-white/10 bg-white/5 text-white/70")}>
                         <span>#{tag.tag}</span>
                         <span className="text-xs opacity-75">{formatNumber(tag.averageViews)}</span>
                       </span>
@@ -3951,7 +3957,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
               ) : null}
 
               {trendingTagSuggestions.length ? (
-                <PanelCardSoft id="trending-tags" className="border border-white/10 p-5 transition-all hover:-translate-y-1 hover:bg-white/[0.05]">
+                <PanelCardSoft id="trending-tags" className="border border-white/10 p-5 transition-all hover:-translate-y-1 hover:bg-white/5">
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <h3 className="text-xl font-semibold text-white">{ui.performanceSignals.nicheTagsTitle}</h3>
@@ -3981,7 +3987,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
 
           {activeSubtab === "competitors" ? (
           <section id="competitor-playbook" className="scroll-mt-24">
-            <PanelCard className="p-6 transition-all hover:-translate-y-1 hover:bg-white/[0.04]">
+            <PanelCard className="p-6 transition-all hover:-translate-y-1 hover:bg-white/4">
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
                   <h2 className="text-2xl font-semibold text-white">{ui.competitorsPanel.title}</h2>
@@ -3998,7 +4004,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
                       onChange={(event) => setCompetitorReference(event.target.value)}
                       placeholder={ui.competitorsPanel.addCompetitorPlaceholder}
                       disabled={Boolean(working)}
-                      className="border-white/10 bg-white/[0.04] text-white placeholder:text-white/30"
+                      className="border-white/10 bg-white/4 text-white placeholder:text-white/30"
                     />
                     <Button type="submit" className="rounded-lg" disabled={!competitorReference.trim() || Boolean(working)}>
                       {working === "competitor-add" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
@@ -4022,12 +4028,12 @@ export default function YouTubeGrowthPlannerV2Tab() {
                         const isRemoving = working === `competitor-remove:${competitor.id}`;
                         const relative = relativeCompetitorLabel(competitor, ownSubscribers);
                         return (
-                          <PanelCardSoft key={competitor.id} className="border border-emerald-400/25 p-4 transition-all hover:-translate-y-0.5 hover:bg-white/[0.05]">
+                          <PanelCardSoft key={competitor.id} className="border border-emerald-400/25 p-4 transition-all hover:-translate-y-0.5 hover:bg-white/5">
                             <div className="flex items-start justify-between gap-3">
                               <div className="flex items-center gap-3">
                                 <Avatar className="h-12 w-12">
                                   <AvatarImage src={competitor.thumbnailUrl ?? undefined} alt={competitor.channelName} />
-                                  <AvatarFallback className="bg-white/[0.08] text-sm text-white">{initials(competitor.channelName)}</AvatarFallback>
+                                  <AvatarFallback className="bg-white/8 text-sm text-white">{initials(competitor.channelName)}</AvatarFallback>
                                 </Avatar>
                                 <div>
                                   <p className="font-medium text-white">{competitor.channelName}</p>
@@ -4080,13 +4086,39 @@ export default function YouTubeGrowthPlannerV2Tab() {
       )}
 
       <Dialog open={Boolean(detailDay)} onOpenChange={(open) => !open && setDetailDay(null)}>
-        <DialogContent className="max-h-[80vh] max-w-2xl overflow-y-auto pt-10">
-        <DialogHeader>
-          <DialogTitle>{detailDay?.contentIdea}</DialogTitle>
-          <DialogDescription>{ui.planner.fullBriefSubtitle}</DialogDescription>
-        </DialogHeader>
-          {detailDay ? (
-            <div className="space-y-4 text-sm text-white/70">
+        <DialogContent className="w-[min(92vw,720px)] max-h-[85vh] overflow-hidden p-0">
+          <div className="flex max-h-[85vh] flex-col">
+            <div className="sticky top-0 z-10 border-b border-white/10 bg-[#0b0714]/90 px-6 pb-4 pt-5 backdrop-blur-xl">
+              <DialogHeader className="space-y-1 pr-10">
+                <DialogTitle className="text-xl text-white">{detailDay?.contentIdea}</DialogTitle>
+                <DialogDescription className="text-white/55">{ui.planner.fullBriefSubtitle}</DialogDescription>
+              </DialogHeader>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {([
+                  { id: "create" as const, label: "Create" },
+                  { id: "visuals" as const, label: "Visuals" },
+                  { id: "growth" as const, label: "Growth" },
+                  { id: "strategy" as const, label: "Strategy" },
+                ]).map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setDetailTab(tab.id)}
+                    className={cn(
+                      "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+                      detailTab === tab.id
+                        ? "border-red-300/35 bg-red-500/15 text-white"
+                        : "border-white/10 bg-white/3 text-white/60 hover:bg-white/6 hover:text-white",
+                    )}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto px-6 pb-6 pt-5">
+              {detailDay ? (
+                <div className="space-y-4 text-sm text-white/70">
               {(() => {
                 const weekday = daysOfWeek[new Date(`${detailDay.date}T00:00:00Z`).getUTCDay()];
                 const slot = bestPostingSlotByDay[weekday];
@@ -4099,6 +4131,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
                 const showGeneratedSections = isAiIdea(detailDay);
                 return (
                   <>
+                    {detailTab === "create" ? (
                     <PanelCardSoft className={cn("border p-4", isManualIdea(detailDay) ? "border-sky-300/20 bg-sky-500/10" : "border-red-400/20 bg-red-500/10")}>
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div>
@@ -4149,12 +4182,13 @@ export default function YouTubeGrowthPlannerV2Tab() {
                         </div>
                       ) : null}
                     </PanelCardSoft>
-                    {slot ? (
+                    ) : null}
+                    {detailTab === "strategy" && slot ? (
                       <PanelCardSoft className="p-4">
                         <p className="text-white">{weekday} {slot.slot} is your best window for this day at about {formatNumber(slot.value)} average views.</p>
                       </PanelCardSoft>
                     ) : null}
-                    {detailDay.rationale ? (
+                    {(detailTab === "create" || detailTab === "strategy") && detailDay.rationale ? (
                       <PanelCardSoft className="p-4">
                         <p className="text-xs uppercase tracking-[0.16em] text-white/40">{showGeneratedSections ? "Why this might work" : "Notes"}</p>
                         <p className="mt-3 leading-6 text-white/70">
@@ -4162,6 +4196,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
                         </p>
                       </PanelCardSoft>
                     ) : null}
+                    {(detailTab === "create" || detailTab === "visuals") ? (
                     <PanelCardSoft className="p-4">
                       <div className="flex items-center justify-between gap-3">
                         <p className="text-xs uppercase tracking-[0.16em] text-white/40">{ui.planner.publishPackageLabel}</p>
@@ -4180,7 +4215,8 @@ export default function YouTubeGrowthPlannerV2Tab() {
                       ) : null}
                       <IdeaPackageFields day={detailDay} ui={ui} />
                     </PanelCardSoft>
-                    {(detailDay.outline ?? []).length ? (
+                    ) : null}
+                    {detailTab === "create" && (detailDay.outline ?? []).length ? (
                       <PanelCardSoft className="p-4">
                         <p className="text-xs uppercase tracking-[0.16em] text-white/40">{ui.planner.outlineLabel}</p>
                         <div className="mt-3 space-y-2">
@@ -4192,12 +4228,13 @@ export default function YouTubeGrowthPlannerV2Tab() {
                         </div>
                       </PanelCardSoft>
                     ) : null}
-                    {detailDay.competitorReference ? (
+                    {detailTab === "strategy" && detailDay.competitorReference ? (
                       <PanelCardSoft className="p-4">
                         <p className="text-xs uppercase tracking-[0.16em] text-white/40">{ui.planner.competitorReferenceLabel}</p>
                         <p className="mt-3 leading-6 text-white/70">{detailDay.competitorReference}</p>
                       </PanelCardSoft>
                     ) : null}
+                    {detailTab === "growth" ? (
                     <PanelCardSoft className="p-4">
                       <div className="mb-3 flex items-center justify-between gap-3">
                         <p className="text-xs uppercase tracking-[0.16em] text-white/40">{ui.planner.publishSyncLabel}</p>
@@ -4253,7 +4290,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
                         <div className="rounded-2xl border border-emerald-400/20 bg-emerald-500/5 p-3">
                           <div className="flex items-start justify-between gap-3">
                             <div className="flex items-center gap-3">
-                              {linkedVideo?.thumbnailUrl ? <img src={linkedVideo.thumbnailUrl} alt="" className="h-[45px] w-20 rounded-md object-cover" /> : <div className="flex h-[45px] w-20 items-center justify-center rounded-md bg-[#151515]"><Play className="h-4 w-4 text-white/60" /></div>}
+                              {linkedVideo?.thumbnailUrl ? <img src={linkedVideo.thumbnailUrl} alt="" className="h-11.25 w-20 rounded-md object-cover" /> : <div className="flex h-11.25 w-20 items-center justify-center rounded-md bg-[#151515]"><Play className="h-4 w-4 text-white/60" /></div>}
                               <div className="min-w-0">
                                 <p className="line-clamp-2 text-sm text-white">{linkedVideo?.title ?? linked.plannedTitle}</p>
                                 <p className="mt-1 text-xs text-white/45">{linkedVideo ? formatIsoDate(linkedVideo.publishedAt) : "Published"}{linkedVideo?.viewCount ? ` · ${formatNumber(linkedVideo.viewCount)} views` : ""}</p>
@@ -4285,22 +4322,29 @@ export default function YouTubeGrowthPlannerV2Tab() {
                         </div>
                       )}
                     </PanelCardSoft>
+                    ) : null}
                   </>
                 );
               })()}
+                </div>
+              ) : null}
             </div>
-          ) : null}
+          </div>
         </DialogContent>
       </Dialog>
 
       <Dialog open={Boolean(movingDay)} onOpenChange={(open) => !open && setMovingDay(null)}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>{ui.planner.moveIdeaTitle}</DialogTitle>
-            <DialogDescription>{ui.planner.moveIdeaSubtitle}</DialogDescription>
-          </DialogHeader>
-          {movingDay ? (
-            <div className="space-y-4">
+        <DialogContent className="w-[min(92vw,520px)] max-h-[85vh] overflow-hidden p-0">
+          <div className="flex max-h-[85vh] flex-col">
+            <div className="sticky top-0 z-10 border-b border-white/10 bg-[#0b0714]/90 px-6 pb-4 pt-5 backdrop-blur-xl">
+              <DialogHeader className="space-y-1 pr-10">
+                <DialogTitle className="text-xl text-white">{ui.planner.moveIdeaTitle}</DialogTitle>
+                <DialogDescription className="text-white/55">{ui.planner.moveIdeaSubtitle}</DialogDescription>
+              </DialogHeader>
+            </div>
+            <div className="flex-1 overflow-y-auto px-6 pb-6 pt-5">
+              {movingDay ? (
+                <div className="space-y-4">
               <PanelCardSoft className="p-4">
                 <p className="text-sm font-semibold text-white">{movingDay.contentIdea}</p>
                 {movingDay.hook && movingDay.hook !== movingDay.contentIdea ? <p className="mt-2 text-sm text-white/55">{movingDay.hook}</p> : null}
@@ -4329,19 +4373,25 @@ export default function YouTubeGrowthPlannerV2Tab() {
               >
                 {ui.planner.delete}
               </Button>
+                </div>
+              ) : null}
             </div>
-          ) : null}
+          </div>
         </DialogContent>
       </Dialog>
 
       <Dialog open={Boolean(thumbnailDay)} onOpenChange={(open) => !open && closeThumbnailDialog()}>
-        <DialogContent className="max-h-[85vh] max-w-3xl overflow-y-auto pt-10">
-          <DialogHeader>
-            <DialogTitle>{ui.thumbnailDialog.title}</DialogTitle>
-            <DialogDescription>{ui.thumbnailDialog.subtitle}</DialogDescription>
-          </DialogHeader>
-          {thumbnailDay ? (
-            <div className="space-y-4">
+        <DialogContent className="w-[min(92vw,900px)] max-h-[85vh] overflow-hidden p-0">
+          <div className="flex max-h-[85vh] flex-col">
+            <div className="sticky top-0 z-10 border-b border-white/10 bg-[#0b0714]/90 px-6 pb-4 pt-5 backdrop-blur-xl">
+              <DialogHeader className="space-y-1 pr-10">
+                <DialogTitle className="text-xl text-white">{ui.thumbnailDialog.title}</DialogTitle>
+                <DialogDescription className="text-white/55">{ui.thumbnailDialog.subtitle}</DialogDescription>
+              </DialogHeader>
+            </div>
+            <div className="flex-1 overflow-y-auto px-6 pb-6 pt-5">
+              {thumbnailDay ? (
+                <div className="space-y-4">
               <PanelCardSoft className="p-4">
                 <p className="text-xs uppercase tracking-[0.16em] text-white/40">{ui.thumbnailDialog.ideaLabel}</p>
                 <p className="mt-2 text-base font-semibold text-white">{thumbnailDay.contentIdea}</p>
@@ -4367,7 +4417,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
                     </div>
                   ))}
                   {thumbnailSourceImages.length < 4 ? (
-                    <label className="flex h-28 w-40 cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-white/10 bg-white/[0.03] text-center text-sm text-white/45 hover:border-white/20 hover:text-white/70">
+                    <label className="flex h-28 w-40 cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-white/10 bg-white/3 text-center text-sm text-white/45 hover:border-white/20 hover:text-white/70">
                       <ImagePlus className="mb-2 h-5 w-5" />
                       {ui.thumbnailDialog.addImageButton}
                       <input
@@ -4390,7 +4440,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
                       onClick={() => setPreserveThumbnailSourceImage(true)}
                       className={cn(
                         "rounded-xl border p-3 text-left transition-all",
-                        preserveThumbnailSourceImage ? "border-emerald-300/35 bg-emerald-400/10 text-white" : "border-white/10 bg-white/[0.03] text-white/55 hover:bg-white/[0.06] hover:text-white",
+                        preserveThumbnailSourceImage ? "border-emerald-300/35 bg-emerald-400/10 text-white" : "border-white/10 bg-white/3 text-white/55 hover:bg-white/6 hover:text-white",
                       )}
                     >
                       <span className="text-sm font-semibold">{ui.thumbnailDialog.preserveMyImageTitle}</span>
@@ -4401,7 +4451,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
                       onClick={() => setPreserveThumbnailSourceImage(false)}
                       className={cn(
                         "rounded-xl border p-3 text-left transition-all",
-                        !preserveThumbnailSourceImage ? "border-red-300/35 bg-red-400/10 text-white" : "border-white/10 bg-white/[0.03] text-white/55 hover:bg-white/[0.06] hover:text-white",
+                        !preserveThumbnailSourceImage ? "border-red-300/35 bg-red-400/10 text-white" : "border-white/10 bg-white/3 text-white/55 hover:bg-white/6 hover:text-white",
                       )}
                     >
                       <span className="text-sm font-semibold">{ui.thumbnailDialog.allowRedesignTitle}</span>
@@ -4431,7 +4481,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
                     <a
                       href={thumbnailDay.generatedThumbnail.imageDataUrl}
                       download={`${thumbnailDay.contentIdea.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "youtube-thumbnail"}.${thumbnailDownloadExtension(thumbnailDay.generatedThumbnail.imageDataUrl)}`}
-                      className="inline-flex items-center rounded-lg border border-white/10 px-3 py-2 text-sm text-white/75 transition-colors hover:bg-white/[0.06] hover:text-white"
+                      className="inline-flex items-center rounded-lg border border-white/10 px-3 py-2 text-sm text-white/75 transition-colors hover:bg-white/6 hover:text-white"
                     >
                       <Download className="mr-2 h-4 w-4" />
                       Download thumbnail
@@ -4442,30 +4492,39 @@ export default function YouTubeGrowthPlannerV2Tab() {
                   </div>
                 </PanelCardSoft>
               ) : null}
-
-              <div className="flex flex-wrap justify-end gap-2">
-                <Button type="button" variant="secondary" className="rounded-lg" onClick={closeThumbnailDialog}>
-                  Close
-                </Button>
-                <Button type="button" className="rounded-lg" onClick={() => void generateThumbnailForDay()} disabled={working === "thumbnail"}>
-                  {working === "thumbnail" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-                  {thumbnailDay.generatedThumbnail?.imageDataUrl ? ui.planner.generateAgain : ui.planner.generateThumbnail}
-                </Button>
-              </div>
+                </div>
+              ) : null}
             </div>
-          ) : null}
+            {thumbnailDay ? (
+              <div className="sticky bottom-0 z-10 border-t border-white/10 bg-[#0b0714]/90 px-6 py-4 backdrop-blur-xl">
+                <div className="flex flex-wrap justify-end gap-2">
+                  <Button type="button" variant="secondary" className="rounded-lg" onClick={closeThumbnailDialog}>
+                    Close
+                  </Button>
+                  <Button type="button" className="rounded-lg" onClick={() => void generateThumbnailForDay()} disabled={working === "thumbnail"}>
+                    {working === "thumbnail" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+                    {thumbnailDay.generatedThumbnail?.imageDataUrl ? ui.planner.generateAgain : ui.planner.generateThumbnail}
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+          </div>
         </DialogContent>
       </Dialog>
 
       <Dialog open={settingsOpen || needsPostingPreference} onOpenChange={(open) => {
         if (!needsPostingPreference) setSettingsOpen(open);
       }}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>{needsPostingPreference ? "How many videos do you want to post per week?" : "Posting settings"}</DialogTitle>
-            <DialogDescription>{needsPostingPreference ? "Choose your weekly target so YouTube Growth only generates the number of ideas you actually want to ship." : "Update how many videos YouTube Growth should schedule each week."}</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
+        <DialogContent className="w-[min(92vw,520px)] max-h-[85vh] overflow-hidden p-0">
+          <div className="flex max-h-[85vh] flex-col">
+            <div className="sticky top-0 z-10 border-b border-white/10 bg-[#0b0714]/90 px-6 pb-4 pt-5 backdrop-blur-xl">
+              <DialogHeader className="space-y-1 pr-10">
+                <DialogTitle className="text-xl text-white">{needsPostingPreference ? "How many videos do you want to post per week?" : "Posting settings"}</DialogTitle>
+                <DialogDescription className="text-white/55">{needsPostingPreference ? "Choose your weekly target so YouTube Growth only generates the number of ideas you actually want to ship." : "Update how many videos YouTube Growth should schedule each week."}</DialogDescription>
+              </DialogHeader>
+            </div>
+            <div className="flex-1 overflow-y-auto px-6 pb-6 pt-5">
+              <div className="space-y-4">
             <div className="grid grid-cols-4 gap-2">
               {[1, 2, 3, 4, 5, 6, 7].map((value) => (
                 <Button
@@ -4493,21 +4552,27 @@ export default function YouTubeGrowthPlannerV2Tab() {
               {savingSettings ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Save posting preference
             </Button>
+              </div>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
 
       <Dialog open={channelDetailsOpen} onOpenChange={setChannelDetailsOpen}>
-        <DialogContent className="max-w-xl">
-          <DialogHeader>
-            <DialogTitle>{status?.channel?.channelName}</DialogTitle>
-            <DialogDescription>{ui.channelDetailsDialog.subtitle}</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 text-sm text-white/70">
+        <DialogContent className="w-[min(92vw,720px)] max-h-[85vh] overflow-hidden p-0">
+          <div className="flex max-h-[85vh] flex-col">
+            <div className="sticky top-0 z-10 border-b border-white/10 bg-[#0b0714]/90 px-6 pb-4 pt-5 backdrop-blur-xl">
+              <DialogHeader className="space-y-1 pr-10">
+                <DialogTitle className="text-xl text-white">{status?.channel?.channelName}</DialogTitle>
+                <DialogDescription className="text-white/55">{ui.channelDetailsDialog.subtitle}</DialogDescription>
+              </DialogHeader>
+            </div>
+            <div className="flex-1 overflow-y-auto px-6 pb-6 pt-5">
+              <div className="space-y-4 text-sm text-white/70">
             <div className="flex items-center gap-4">
               <Avatar className="h-20 w-20 rounded-[20px] border border-white/10">
                 <AvatarImage src={status?.channel?.channelThumbnailUrl ?? undefined} alt={status?.channel?.channelName ?? "YouTube channel"} />
-                <AvatarFallback className="rounded-[20px] bg-white/[0.08] text-lg text-white">{initials(status?.channel?.channelName)}</AvatarFallback>
+                <AvatarFallback className="rounded-[20px] bg-white/8 text-lg text-white">{initials(status?.channel?.channelName)}</AvatarFallback>
               </Avatar>
               <div className="grid flex-1 gap-2 sm:grid-cols-3">
                 <PanelCardSoft className="p-3">
@@ -4528,17 +4593,23 @@ export default function YouTubeGrowthPlannerV2Tab() {
               <p className="text-xs uppercase tracking-[0.16em] text-white/40">{ui.channelDetailsDialog.descriptionLabel}</p>
               <p className="mt-3 whitespace-pre-wrap text-white/70">{channelDescription(status?.channel) || "No description available."}</p>
             </PanelCardSoft>
+              </div>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
 
       <Dialog open={customOpen} onOpenChange={setCustomOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{ui.customIdeaDialog.title}</DialogTitle>
-            <DialogDescription>{ui.customIdeaDialog.subtitle}</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3">
+        <DialogContent className="w-[min(92vw,720px)] max-h-[85vh] overflow-hidden p-0">
+          <div className="flex max-h-[85vh] flex-col">
+            <div className="sticky top-0 z-10 border-b border-white/10 bg-[#0b0714]/90 px-6 pb-4 pt-5 backdrop-blur-xl">
+              <DialogHeader className="space-y-1 pr-10">
+                <DialogTitle className="text-xl text-white">{ui.customIdeaDialog.title}</DialogTitle>
+                <DialogDescription className="text-white/55">{ui.customIdeaDialog.subtitle}</DialogDescription>
+              </DialogHeader>
+            </div>
+            <div className="flex-1 overflow-y-auto px-6 pb-6 pt-5">
+              <div className="space-y-3">
             <Input value={customIdea.title} onChange={(event) => setCustomIdea((current) => ({ ...current, title: event.target.value }))} placeholder={ui.customIdeaDialog.titlePlaceholder} />
             <Input type="date" value={customIdea.date} onChange={(event) => setCustomIdea((current) => ({ ...current, date: event.target.value }))} />
             <Textarea value={customIdea.angle} onChange={(event) => setCustomIdea((current) => ({ ...current, angle: event.target.value }))} placeholder={ui.customIdeaDialog.anglePlaceholder} className="min-h-28" />
@@ -4548,6 +4619,8 @@ export default function YouTubeGrowthPlannerV2Tab() {
             <div className="flex gap-2">
               <Button variant="secondary" className="flex-1 rounded-lg" onClick={improveCustomIdea} disabled={working === "improve"}>{working === "improve" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}{ui.customIdeaDialog.aiImproveButton}</Button>
               <Button className="flex-1 rounded-lg" onClick={addCustomIdea}><Plus className="mr-2 h-4 w-4" />{ui.customIdeaDialog.addIdeaButton}</Button>
+            </div>
+              </div>
             </div>
           </div>
         </DialogContent>

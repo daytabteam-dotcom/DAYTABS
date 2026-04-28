@@ -793,7 +793,7 @@ function sectionVisualMeta(label: string) {
 function ScoreDonut({ score, label }: { score: number; label: string }) {
   const meta = scoreColorMeta(score);
   return (
-    <div className={`rounded-[28px] border bg-gradient-to-br p-5 ${meta.panel} ${meta.bg}`}>
+    <div className={`rounded-[28px] border bg-linear-to-br p-5 ${meta.panel} ${meta.bg}`}>
       <div className="flex items-center justify-between gap-4">
         <div>
           <p className="text-[11px] uppercase tracking-[0.16em] text-white/40">Readiness Score</p>

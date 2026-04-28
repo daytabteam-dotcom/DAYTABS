@@ -78,7 +78,7 @@ export default function ApiWakeGate({ children }: Props) {
               <motion.div
                 animate={state === "ready" ? { scale: [1, 1.08, 1] } : { rotate: 360 }}
                 transition={state === "ready" ? { duration: 0.5 } : { repeat: Infinity, duration: 1.6, ease: "linear" }}
-                className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-orange-400 to-rose-500 shadow-lg shadow-orange-500/20"
+                className="flex h-14 w-14 items-center justify-center rounded-2xl bg-linear-to-br from-orange-400 to-rose-500 shadow-lg shadow-orange-500/20"
               >
                 {state === "ready" ? <CheckCircle2 className="h-7 w-7" /> : <LoaderCircle className="h-7 w-7" />}
               </motion.div>

@@ -186,7 +186,7 @@ export function SocialPlanBoard({
         <div className="overflow-x-auto pb-2">
           <div className="flex min-w-max gap-3">
             {dates.map((date) => (
-              <div key={date} className="min-h-[260px] w-[340px] shrink-0 rounded-2xl border border-white/10 bg-white/[0.025] p-3 transition-all hover:bg-white/[0.04]">
+              <div key={date} className="min-h-65 w-[340px] shrink-0 rounded-2xl border border-white/10 bg-white/[0.025] p-3 transition-all hover:bg-white/[0.04]">
                 <div className="mb-3 flex items-start justify-between gap-2 rounded-xl border border-white/10 bg-black/10 px-3 py-2">
                   <div>
                     <p className="text-sm font-semibold text-white">{dayHeader(date).weekday}</p>
