@@ -193,31 +193,93 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
     }
 
     try {
-      const orientation: "portrait" | "landscape" =
-        typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(orientation: portrait)").matches
-          ? "portrait"
-          : "landscape";
+      const desiredOrientation: "portrait" | "landscape" = (() => {
+        if (typeof window === "undefined") return "landscape";
+        if (typeof window.matchMedia === "function" && window.matchMedia("(orientation: portrait)").matches) return "portrait";
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const screenOrientation = (window.screen as any)?.orientation?.type as string | undefined;
+        if (screenOrientation?.includes("portrait")) return "portrait";
+        return window.innerHeight > window.innerWidth ? "portrait" : "landscape";
+      })();
+
       stopMediaTracks();
       const supported = navigator.mediaDevices.getSupportedConstraints?.() ?? {};
-      const idealWidth = orientation === "portrait" ? 1080 : 1920;
-      const idealHeight = orientation === "portrait" ? 1920 : 1080;
-      const aspect = orientation === "portrait" ? 9 / 16 : 16 / 9;
 
-      const videoConstraints: MediaTrackConstraints = {
-        facingMode: "user",
+      const buildConstraints = (orientation: "portrait" | "landscape", strict: boolean): MediaTrackConstraints => {
+        const idealWidth = orientation === "portrait" ? 1080 : 1920;
+        const idealHeight = orientation === "portrait" ? 1920 : 1080;
+        const aspect = orientation === "portrait" ? 9 / 16 : 16 / 9;
+        const videoConstraints: MediaTrackConstraints = { facingMode: "user" };
+        if (supported.width) videoConstraints.width = strict ? { ideal: idealWidth, min: 720 } : { ideal: idealWidth };
+        if (supported.height) videoConstraints.height = strict ? { ideal: idealHeight, min: 720 } : { ideal: idealHeight };
+        if (supported.aspectRatio) videoConstraints.aspectRatio = strict ? { exact: aspect } : aspect;
+        if (supported.frameRate) videoConstraints.frameRate = { ideal: 30, max: 60 };
+        if ((supported as any).resizeMode) (videoConstraints as any).resizeMode = "crop-and-scale";
+        // Encourage higher-quality modes when available.
+        if (!strict) {
+          (videoConstraints as any).advanced = [
+            supported.width && supported.height ? { width: idealWidth, height: idealHeight } : {},
+          ].filter((x: any) => Object.keys(x).length);
+        }
+        return videoConstraints;
       };
-      if (supported.width) videoConstraints.width = { ideal: idealWidth };
-      if (supported.height) videoConstraints.height = { ideal: idealHeight };
-      if (supported.aspectRatio) videoConstraints.aspectRatio = aspect;
-      if (supported.frameRate) videoConstraints.frameRate = { ideal: 30, max: 60 };
-      if ((supported as any).resizeMode) (videoConstraints as any).resizeMode = "crop-and-scale";
 
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: videoConstraints,
+        video: buildConstraints(desiredOrientation, false),
         audio: true,
       });
+
+      const track = stream.getVideoTracks()[0];
+      const settings = track?.getSettings?.() ?? {};
+      const width = typeof settings.width === "number" ? settings.width : null;
+      const height = typeof settings.height === "number" ? settings.height : null;
+      const actualOrientation: "portrait" | "landscape" | null =
+        width && height ? (height >= width ? "portrait" : "landscape") : null;
+
+      if (track && actualOrientation && actualOrientation !== desiredOrientation) {
+        // Attempt to correct without re-prompting by tightening constraints.
+        try {
+          await track.applyConstraints(buildConstraints(desiredOrientation, true));
+        } catch {
+          // ignore
+        }
+        const next = track.getSettings?.() ?? {};
+        const nextW = typeof next.width === "number" ? next.width : null;
+        const nextH = typeof next.height === "number" ? next.height : null;
+        const nextOrientation: "portrait" | "landscape" | null =
+          nextW && nextH ? (nextH >= nextW ? "portrait" : "landscape") : null;
+
+        if (nextOrientation && nextOrientation !== desiredOrientation) {
+          // Hard fallback: restart the stream with strict constraints.
+          for (const t of stream.getTracks()) t.stop();
+          const retry = await navigator.mediaDevices.getUserMedia({
+            video: buildConstraints(desiredOrientation, true),
+            audio: true,
+          });
+          streamRef.current = retry;
+          cameraOrientationRef.current = desiredOrientation;
+          if (videoRef.current) {
+            const video = videoRef.current;
+            video.muted = true;
+            video.playsInline = true;
+            video.srcObject = retry;
+            video.onloadedmetadata = () => {
+              setCameraReady(true);
+              void video.play().catch(() => undefined);
+            };
+            if (video.readyState >= 1) {
+              setCameraReady(true);
+              await video.play().catch(() => undefined);
+            }
+          } else {
+            setCameraReady(true);
+          }
+          return true;
+        }
+      }
+
       streamRef.current = stream;
-      cameraOrientationRef.current = orientation;
+      cameraOrientationRef.current = desiredOrientation;
       if (videoRef.current) {
         const video = videoRef.current;
         video.muted = true;
