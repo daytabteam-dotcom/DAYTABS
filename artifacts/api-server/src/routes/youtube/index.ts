@@ -43,7 +43,6 @@ import {
 } from "../../lib/youtube";
 import { normalizePlan } from "../../lib/planLimits";
 import { getUiLocaleFromRequest } from "../../lib/uiLocale";
-import { exportThumbnailComposerImage, generateThumbnailComposerBlueprint } from "../../lib/thumbnailComposer";
 
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET!;
@@ -1350,73 +1349,6 @@ router.post("/audit-thumbnail", requireAuth, async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "YouTube audit thumbnail generation error");
     res.status(500).json({ error: err instanceof Error ? err.message : "Failed to generate audit thumbnail" });
-  }
-});
-
-router.post("/thumbnail-composer/blueprint", requireAuth, async (req, res) => {
-  try {
-    const plan = normalizePlan(req.auth?.plan ?? "free");
-    if (plan !== "studio") {
-      res.status(403).json({
-        code: "STUDIO_REQUIRED",
-        error: "Thumbnail Composer is available on the Studio plan.",
-      });
-      return;
-    }
-
-    const sourceImages = Array.isArray(req.body?.sourceImages) ? req.body.sourceImages : [];
-    if (!sourceImages.length) {
-      res.status(400).json({ error: "At least one source image is required." });
-      return;
-    }
-
-    const blueprint = await generateThumbnailComposerBlueprint(req.auth!.user_id, {
-      sourceImages,
-      thumbnailIdea: typeof req.body?.thumbnailIdea === "string" ? req.body.thumbnailIdea : null,
-      preferredOverlayText: typeof req.body?.preferredOverlayText === "string" ? req.body.preferredOverlayText : null,
-      stylePreference: typeof req.body?.stylePreference === "string" ? req.body.stylePreference : null,
-      thingsToAvoid: typeof req.body?.thingsToAvoid === "string" ? req.body.thingsToAvoid : null,
-      videoTitle: typeof req.body?.videoTitle === "string" ? req.body.videoTitle : null,
-      videoDescription: typeof req.body?.videoDescription === "string" ? req.body.videoDescription : null,
-      transcriptOpening: typeof req.body?.transcriptOpening === "string" ? req.body.transcriptOpening : null,
-      currentThumbnailDataUrl: typeof req.body?.currentThumbnailDataUrl === "string" ? req.body.currentThumbnailDataUrl : null,
-      auditInsights: typeof req.body?.auditInsights === "string" ? req.body.auditInsights : null,
-    });
-
-    res.json({ blueprint });
-  } catch (err) {
-    req.log.error({ err }, "Thumbnail composer blueprint error");
-    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to generate thumbnail blueprint" });
-  }
-});
-
-router.post("/thumbnail-composer/export", requireAuth, async (req, res) => {
-  try {
-    const plan = normalizePlan(req.auth?.plan ?? "free");
-    if (plan !== "studio") {
-      res.status(403).json({
-        code: "STUDIO_REQUIRED",
-        error: "Thumbnail Composer export is available on the Studio plan.",
-      });
-      return;
-    }
-
-    const sourceImages = Array.isArray(req.body?.sourceImages) ? req.body.sourceImages : [];
-    const blueprint = req.body?.blueprint;
-    if (!sourceImages.length) {
-      res.status(400).json({ error: "At least one source image is required." });
-      return;
-    }
-    if (!blueprint || typeof blueprint !== "object") {
-      res.status(400).json({ error: "A valid blueprint payload is required." });
-      return;
-    }
-
-    const base64 = await exportThumbnailComposerImage(blueprint, sourceImages);
-    res.json({ imageDataUrl: `data:image/jpeg;base64,${base64}` });
-  } catch (err) {
-    req.log.error({ err }, "Thumbnail composer export error");
-    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to export thumbnail" });
   }
 });
 
