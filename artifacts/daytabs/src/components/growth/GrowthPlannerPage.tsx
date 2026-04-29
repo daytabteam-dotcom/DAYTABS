@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import ExistingYoutubeGrowthPlanner from "@/components/growth/youtube/ExistingYoutubeGrowthPlanner";
 import SocialGrowthPlanner from "@/components/growth/social/SocialGrowthPlanner";
-import { PlatformSidebar, type GrowthPlatformTab } from "@/components/growth/PlatformTabs";
+import { PlatformMobileSwitcher, PlatformSidebar, type GrowthPlatformTab } from "@/components/growth/PlatformTabs";
 
 function tabFromStorage(): GrowthPlatformTab | null {
   const value = localStorage.getItem("daytabs_growth_platform");
@@ -17,14 +17,17 @@ export default function GrowthPlannerPage() {
   }, [platform]);
 
   return (
-    <div>
+    <div className="mx-auto flex w-full max-w-[1440px] gap-6 px-4 md:px-6 xl:px-8">
       <PlatformSidebar value={platform} onChange={setPlatform} />
-      <main className="mt-8 min-w-0 lg:mt-0 lg:pl-[120px]">
+      <div className="min-w-0 flex-1">
+        <PlatformMobileSwitcher value={platform} onChange={setPlatform} className="lg:hidden" />
+        <main className="mt-6 min-w-0 lg:mt-0">
           {platform === "youtube" ? <ExistingYoutubeGrowthPlanner /> : null}
           {platform === "linkedin" ? <SocialGrowthPlanner platform="linkedin" /> : null}
           {platform === "tiktok" ? <SocialGrowthPlanner platform="tiktok" /> : null}
           {platform === "instagram" ? <SocialGrowthPlanner platform="instagram" /> : null}
-      </main>
+        </main>
+      </div>
     </div>
   );
 }
