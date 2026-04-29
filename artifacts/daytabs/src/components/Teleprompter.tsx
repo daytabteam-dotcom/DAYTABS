@@ -17,6 +17,43 @@ import {
   Settings,
 } from "lucide-react";
 
+type RecordingFormatSetting = "auto" | "vertical" | "horizontal";
+
+function isMobileOrTablet() {
+  if (typeof navigator === "undefined" || typeof window === "undefined") return false;
+  const ua = navigator.userAgent || (navigator as any).vendor || "";
+  const isMobileUA = /android|iphone|ipad|ipod|mobile/i.test(ua);
+  const isTouchTablet = (navigator.maxTouchPoints ?? 0) > 1 && window.innerWidth <= 1366;
+  return isMobileUA || isTouchTablet;
+}
+
+function getReliablePortraitOrientation() {
+  if (typeof window === "undefined") return false;
+  const orientationType = window.screen?.orientation?.type;
+
+  if (orientationType?.includes("portrait")) return true;
+  if (orientationType?.includes("landscape")) return false;
+
+  if (typeof window.matchMedia === "function") {
+    return window.matchMedia("(orientation: portrait)").matches;
+  }
+
+  return window.innerHeight > window.innerWidth;
+}
+
+function getRecordingPortraitOrientation(userSetting?: RecordingFormatSetting) {
+  if (userSetting === "vertical") return true;
+  if (userSetting === "horizontal") return false;
+
+  const mobileOrTablet = isMobileOrTablet();
+  if (mobileOrTablet) {
+    return getReliablePortraitOrientation();
+  }
+
+  // Desktop default: always horizontal unless user overrides.
+  return false;
+}
+
 interface TeleprompterProps {
   script: string;
   onClose: () => void;
@@ -29,8 +66,9 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
   const [speed, setSpeed] = useState(2);
   const [fontSize, setFontSize] = useState(36);
   const [isPortrait, setIsPortrait] = useState(
-    typeof window !== "undefined" ? window.innerHeight > window.innerWidth : false,
+    typeof window !== "undefined" ? getReliablePortraitOrientation() : false,
   );
+  const [recordingFormatSetting, setRecordingFormatSetting] = useState<RecordingFormatSetting>("auto");
   const [showControls, setShowControls] = useState(true);
   const [cameraRequested, setCameraRequested] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
@@ -67,7 +105,7 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
 
   useEffect(() => {
     const update = () => {
-      setIsPortrait(window.innerHeight > window.innerWidth);
+      setIsPortrait(getReliablePortraitOrientation());
     };
 
     window.addEventListener("resize", update);
@@ -269,7 +307,7 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
       }
 
       if (drawRafRef.current) cancelAnimationFrame(drawRafRef.current);
-      recordingPortraitRef.current = isPortraitRef.current;
+      recordingPortraitRef.current = getRecordingPortraitOrientation(recordingFormatSetting);
       drawVideoToCanvas(sourceVideo, canvas, ctx);
 
       const canvasStream = canvas.captureStream(30);
@@ -311,7 +349,7 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
       setCameraError(error instanceof Error ? error.message : "Could not start recording.");
       return false;
     }
-  }, [drawVideoToCanvas, getSupportedMimeType, saveBlobToDevice, stopMediaTracks]);
+  }, [drawVideoToCanvas, getSupportedMimeType, recordingFormatSetting, saveBlobToDevice, stopMediaTracks]);
 
   const startCamera = useCallback(async () => {
     stopMediaTracks();
@@ -325,7 +363,7 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
     }
 
     try {
-      const desiredPortrait = isPortraitRef.current;
+      const desiredPortrait = getRecordingPortraitOrientation(recordingFormatSetting);
       const desiredOrientation: "portrait" | "landscape" = desiredPortrait ? "portrait" : "landscape";
 
       const supported = navigator.mediaDevices.getSupportedConstraints?.() ?? {};
@@ -367,7 +405,7 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
       setCameraError(error instanceof Error ? error.message : "Could not access the front camera.");
       return false;
     }
-  }, [stopMediaTracks]);
+  }, [recordingFormatSetting, stopMediaTracks]);
 
   const stopRecordingSession = useCallback(() => {
     clearCountdown();
@@ -420,7 +458,7 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
     setPreviewing(false);
     setSavedMessage(null);
 
-    const desiredOrientation: "portrait" | "landscape" = isPortraitRef.current ? "portrait" : "landscape";
+    const desiredOrientation: "portrait" | "landscape" = getRecordingPortraitOrientation(recordingFormatSetting) ? "portrait" : "landscape";
 
     const mustRestartCamera = !cameraReady || cameraOrientationRef.current !== desiredOrientation;
     const ready = mustRestartCamera ? await startCamera() : true;
@@ -445,7 +483,7 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
     };
 
     runCountdown(3);
-  }, [cameraReady, clearCountdown, countdownValue, resetScrollPosition, revealControls, startCamera, startRecording]);
+  }, [cameraReady, clearCountdown, countdownValue, recordingFormatSetting, resetScrollPosition, revealControls, startCamera, startRecording]);
 
   const reset = useCallback(() => {
     clearCountdown();
@@ -700,6 +738,37 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
               <span>{savedMessage ?? (countdownValue !== null ? "Countdown running" : recording ? "Recording locally" : previewing ? "Previewing" : "Not recording")}</span>
             </div>
 
+            {startInRecordMode ? (
+              <div className="flex flex-col items-center gap-1.5">
+                <div className="flex items-center gap-1 text-white/40">
+                  <Settings className="w-3.5 h-3.5" />
+                  <span className="text-[11px] font-semibold uppercase tracking-widest">Format</span>
+                </div>
+                <div className="flex items-center gap-1 rounded-xl border border-white/10 bg-black/35 p-1 text-xs">
+                  {([
+                    { id: "auto" as const, label: "Auto" },
+                    { id: "vertical" as const, label: "Vert" },
+                    { id: "horizontal" as const, label: "Horiz" },
+                  ]).map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => setRecordingFormatSetting(item.id)}
+                      disabled={recording || countdownValue !== null}
+                      className={`rounded-lg px-2.5 py-1 font-semibold transition-colors ${
+                        recordingFormatSetting === item.id
+                          ? "border border-emerald-400/25 bg-emerald-500/15 text-emerald-50"
+                          : "text-white/60 hover:bg-white/6 hover:text-white"
+                      }`}
+                      title={item.id === "auto" ? "Auto: mobile/tablet follows device orientation; desktop horizontal." : undefined}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
             <div className="flex flex-col items-center gap-1.5">
               <div className="flex items-center gap-1 text-white/40">
                 <Gauge className="w-3.5 h-3.5" />
@@ -827,6 +896,35 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
                 <span className="font-semibold uppercase tracking-[0.16em]">Teleprompter settings</span>
                 <span>{savedMessage ?? (countdownValue !== null ? "Countdown running" : recording ? "Recording locally" : previewing ? "Previewing" : "Not recording")}</span>
               </div>
+              {startInRecordMode ? (
+                <div className="space-y-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/45">Recording format</p>
+                  <div className="grid grid-cols-3 gap-2">
+                    {([
+                      { id: "auto" as const, label: "Auto" },
+                      { id: "vertical" as const, label: "Vertical" },
+                      { id: "horizontal" as const, label: "Horizontal" },
+                    ]).map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => setRecordingFormatSetting(item.id)}
+                        disabled={recording || countdownValue !== null}
+                        className={`rounded-2xl border px-4 py-3 text-sm font-medium transition-all ${
+                          recordingFormatSetting === item.id
+                            ? "border-emerald-400/30 bg-emerald-500/15 text-emerald-50"
+                            : "border-white/10 bg-white/[0.05] text-white"
+                        } ${recording || countdownValue !== null ? "opacity-60" : ""}`}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-xs text-white/45">
+                    Auto: mobile/tablet follows device orientation; desktop records horizontal.
+                  </p>
+                </div>
+              ) : null}
               <div className="grid grid-cols-2 gap-2">
                 <button
                   onClick={() => adjustSpeed(-0.5)}
