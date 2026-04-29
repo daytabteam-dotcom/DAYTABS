@@ -93,7 +93,7 @@ export function PlatformSidebar({
     <TooltipProvider delayDuration={120}>
       <aside
         className={cn(
-          "hidden lg:flex sticky top-6 z-20",
+          "hidden lg:flex sticky top-[120px] z-20",
           "h-[calc(100vh-48px)] max-h-[560px] min-h-[320px] w-[88px] shrink-0",
           "items-center justify-center rounded-[32px] bg-white/[0.04]",
           className,
