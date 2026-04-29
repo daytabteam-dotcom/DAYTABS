@@ -100,6 +100,8 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
   const isPortraitRef = useRef(isPortrait);
   const recordingPortraitRef = useRef<boolean | null>(null);
   const recordingOutputSizeRef = useRef<{ width: number; height: number } | null>(null);
+  const [debugOverlay, setDebugOverlay] = useState(false);
+  const [debugInfo, setDebugInfo] = useState<Record<string, string>>({});
 
   useEffect(() => {
     isPortraitRef.current = isPortrait;
@@ -145,6 +147,19 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
         return;
       }
 
+      if (debugOverlay) {
+        const orientationType = window.screen?.orientation?.type ?? "";
+        setDebugInfo({
+          device: isMobileOrTablet() ? "mobile_or_tablet" : "desktop",
+          userSetting: recordingFormatSettingRef.current,
+          reliablePortrait: String(getReliablePortraitOrientation()),
+          lockedPortrait: String(recordingPortraitRef.current),
+          canvas: `${canvas.width}x${canvas.height}`,
+          video: `${vw}x${vh}`,
+          screenOrientation: orientationType || "n/a",
+        });
+      }
+
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       const cameraIsPortrait = vh > vw;
@@ -184,7 +199,7 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
     }
 
     draw();
-  }, []);
+  }, [debugOverlay]);
 
   useEffect(() => {
     recordingRef.current = recording;
@@ -323,6 +338,11 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
       drawVideoToCanvas(sourceVideo, canvas, ctx);
 
       const canvasStream = canvas.captureStream(30);
+      const videoTrack = canvasStream.getVideoTracks()[0];
+      // Best-effort: some browsers may honor these constraints and fix incorrect default dimensions.
+      if (videoTrack?.applyConstraints) {
+        void videoTrack.applyConstraints({ width: outputWidth, height: outputHeight } as MediaTrackConstraints).catch(() => undefined);
+      }
       const audioTrack = streamRef.current.getAudioTracks()[0];
       if (audioTrack) canvasStream.addTrack(audioTrack);
       canvasStreamRef.current = canvasStream;
@@ -660,6 +680,17 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
       </div>
       <div className="absolute inset-0 bg-black/60" />
 
+      {debugOverlay && startInRecordMode ? (
+        <div className="absolute left-4 top-20 z-40 max-w-[92vw] rounded-xl border border-white/10 bg-black/70 p-3 text-[11px] text-white/80 backdrop-blur">
+          <p className="font-semibold text-white">Recording debug</p>
+          <div className="mt-2 grid gap-1">
+            {Object.entries(debugInfo).map(([key, value]) => (
+              <p key={key}><span className="text-white/45">{key}:</span> {value}</p>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       {countdownValue !== null ? (
         <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center">
           <div className="rounded-full border border-white/15 bg-black/70 px-10 py-8 text-center shadow-2xl shadow-black/60 backdrop-blur-md">
@@ -780,6 +811,16 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
                   ))}
                 </div>
               </div>
+            ) : null}
+
+            {startInRecordMode ? (
+              <button
+                type="button"
+                onClick={() => setDebugOverlay((v) => !v)}
+                className="hidden rounded-xl border border-white/10 bg-black/35 px-3 py-2 text-xs text-white/65 transition-colors hover:bg-white/6 xl:block"
+              >
+                {debugOverlay ? "Hide debug" : "Show debug"}
+              </button>
             ) : null}
 
             <div className="flex flex-col items-center gap-1.5">
