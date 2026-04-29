@@ -204,44 +204,17 @@ type AuditPreview = {
   };
 };
 
-type ThumbnailSourceImage = {
-  name: string;
-  dataUrl: string;
-};
-
-type ThumbnailAssetSlot = {
-  key: string;
-  label: string;
-  helper?: string;
-  isFace?: boolean;
-};
-
-type GeneratedAuditThumbnail = {
-  imageDataUrl: string;
-  prompt: string;
-  requestedText: string | null;
-  selectedStyle: string | null;
-  preserveUploadedImage: boolean;
-  createdAt: string;
-};
-
 type SavedAuditCard = {
   id: string;
   videoUrl: string;
   savedAt: string;
   preview: AuditPreview;
   report: QuickAuditReport | DeepAuditReport;
-  generatedThumbnail: GeneratedAuditThumbnail | null;
 };
 
 type TranscriptSegment = { start: number; end: number; text: string };
 
 const AUDIT_HISTORY_KEY = "daytabs_youtube_audit_history_v1";
-const THUMBNAIL_STYLES = ["Professional", "Realistic", "Minimal", "Cartoon", "Cinematic", "Bold"] as const;
-const YOUTUBE_THUMBNAIL_WIDTH = 1280;
-const YOUTUBE_THUMBNAIL_HEIGHT = 720;
-const YOUTUBE_THUMBNAIL_MIN_WIDTH = 640;
-const YOUTUBE_THUMBNAIL_MAX_BYTES = 2 * 1024 * 1024;
 
 function scoreRingGradient(score: number) {
   const value = Math.min(100, Math.max(0, score));
@@ -373,65 +346,7 @@ function normalizeSavedAuditCard(card: SavedAuditCard): SavedAuditCard {
   };
 }
 
-async function resizeImageFileToDataUrl(file: File) {
-  if (!/^image\/(jpeg|jpg)$/i.test(file.type) && !/\.jpe?g$/i.test(file.name)) {
-    throw new Error("Source images must be JPG files.");
-  }
-
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error(`Could not read ${file.name}`));
-    reader.onload = () => {
-      const src = typeof reader.result === "string" ? reader.result : "";
-      const image = new Image();
-      image.onerror = () => reject(new Error(`Could not load ${file.name}`));
-      image.onload = () => {
-        if (image.width < YOUTUBE_THUMBNAIL_MIN_WIDTH) {
-          reject(new Error(`${file.name} must be at least ${YOUTUBE_THUMBNAIL_MIN_WIDTH}px wide.`));
-          return;
-        }
-
-        const canvas = document.createElement("canvas");
-        canvas.width = YOUTUBE_THUMBNAIL_WIDTH;
-        canvas.height = YOUTUBE_THUMBNAIL_HEIGHT;
-        const context = canvas.getContext("2d");
-        if (!context) {
-          reject(new Error(`Could not process ${file.name}`));
-          return;
-        }
-
-        const coverScale = Math.max(canvas.width / image.width, canvas.height / image.height);
-        const coverWidth = image.width * coverScale;
-        const coverHeight = image.height * coverScale;
-        context.save();
-        context.filter = "blur(18px) brightness(0.72)";
-        context.drawImage(image, (canvas.width - coverWidth) / 2, (canvas.height - coverHeight) / 2, coverWidth, coverHeight);
-        context.restore();
-        context.fillStyle = "rgba(0, 0, 0, 0.18)";
-        context.fillRect(0, 0, canvas.width, canvas.height);
-
-        const containScale = Math.min(canvas.width / image.width, canvas.height / image.height);
-        const containWidth = image.width * containScale;
-        const containHeight = image.height * containScale;
-        context.drawImage(image, (canvas.width - containWidth) / 2, (canvas.height - containHeight) / 2, containWidth, containHeight);
-
-        let quality = 0.9;
-        let dataUrl = canvas.toDataURL("image/jpeg", quality);
-        while (dataUrlBytes(dataUrl) > YOUTUBE_THUMBNAIL_MAX_BYTES && quality > 0.6) {
-          quality -= 0.08;
-          dataUrl = canvas.toDataURL("image/jpeg", quality);
-        }
-        if (dataUrlBytes(dataUrl) > YOUTUBE_THUMBNAIL_MAX_BYTES) {
-          reject(new Error(`${file.name} could not be compressed under 2 MB as a JPG thumbnail.`));
-          return;
-        }
-        resolve(dataUrl);
-      };
-      image.src = src;
-    };
-    reader.readAsDataURL(file);
-  });
-}
+// Thumbnail image generation has been removed.
 
 export default function YouTubeAuditTab() {
   const { plan, loading: planLoading } = usePlan();
@@ -443,15 +358,6 @@ export default function YouTubeAuditTab() {
   const [error, setError] = useState<string | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [loadingReport, setLoadingReport] = useState(false);
-  const [thumbnailModalOpen, setThumbnailModalOpen] = useState(false);
-  const [thumbnailTextPreference, setThumbnailTextPreference] = useState("");
-  const [thumbnailSourceImages, setThumbnailSourceImages] = useState<ThumbnailSourceImage[]>([]);
-  const [thumbnailAssetAlternatives, setThumbnailAssetAlternatives] = useState<Record<string, string>>({});
-  const [preserveThumbnailSourceImage, setPreserveThumbnailSourceImage] = useState(true);
-  const [thumbnailStyle, setThumbnailStyle] = useState<string>("Professional");
-  const [generatedThumbnail, setGeneratedThumbnail] = useState<GeneratedAuditThumbnail | null>(null);
-  const [thumbnailWorking, setThumbnailWorking] = useState(false);
-  const [thumbnailPrompt, setThumbnailPrompt] = useState("");
 
   const [savedAuditsOpen, setSavedAuditsOpen] = useState(false);
 
@@ -466,14 +372,6 @@ export default function YouTubeAuditTab() {
   useEffect(() => {
     setSavedAudits(loadSavedAudits());
   }, []);
-
-  useEffect(() => {
-    const recommendedStyle =
-      ("fixes" in (report ?? {}) ? (report as DeepAuditReport).fixes.recommendedThumbnailStyle : null)
-      || preview?.recommendedThumbnailStyle
-      || "Professional";
-    setThumbnailStyle(recommendedStyle);
-  }, [preview, report]);
 
   const deepReport = report && (report as QuickAuditReport).auditMode !== "quick" ? (report as DeepAuditReport) : null;
   const reportDeepUnsafe = deepReport as unknown as AuditReport;
@@ -513,7 +411,6 @@ export default function YouTubeAuditTab() {
     setError(null);
     setPreview(null);
     setReport(null);
-    setGeneratedThumbnail(null);
     try {
       const previewData = await jsonFetch<{ preview: AuditPreview }>("/api/youtube/audit-preview", {
         method: "POST",
@@ -533,7 +430,6 @@ export default function YouTubeAuditTab() {
         savedAt: new Date().toISOString(),
         preview: previewData.preview,
         report: reportData.report,
-        generatedThumbnail: null,
       }).report;
       setReport(normalizedReport);
       const savedAt = new Date().toISOString();
@@ -543,7 +439,6 @@ export default function YouTubeAuditTab() {
         savedAt,
         preview: previewData.preview,
         report: normalizedReport,
-        generatedThumbnail: null,
       };
       setActiveAuditId(card.id);
       setSavedAudits((current) => {
@@ -564,18 +459,8 @@ export default function YouTubeAuditTab() {
     setVideoUrl(card.videoUrl);
     setPreview(normalizedCard.preview);
     setReport(normalizedCard.report);
-    setGeneratedThumbnail(normalizedCard.generatedThumbnail);
     setActiveAuditId(normalizedCard.id);
     setError(null);
-  }
-
-  function updateSavedAuditThumbnail(thumbnail: GeneratedAuditThumbnail | null) {
-    if (!activeAuditId) return;
-    setSavedAudits((current) => {
-      const next = current.map((card) => card.id === activeAuditId ? { ...card, generatedThumbnail: thumbnail } : card);
-      persistSavedAudits(next);
-      return next;
-    });
   }
 
   function updateSavedAuditReport(nextReport: AuditReport) {
@@ -585,144 +470,6 @@ export default function YouTubeAuditTab() {
       persistSavedAudits(next);
       return next;
     });
-  }
-
-  function openThumbnailModal() {
-    setThumbnailTextPreference("");
-    setThumbnailSourceImages([]);
-    setThumbnailAssetAlternatives({});
-    setPreserveThumbnailSourceImage(true);
-    setGeneratedThumbnail((current) => current);
-    setThumbnailPrompt(buildDefaultThumbnailPrompt());
-    setThumbnailModalOpen(true);
-  }
-
-  function inferThumbnailAssetSlots(): ThumbnailAssetSlot[] {
-    const text = [
-      quickReport?.thumbnailFix?.concept,
-      quickReport?.thumbnailFix?.focalSubject,
-      quickReport?.thumbnailFix?.designStyle,
-      deepReport?.fixes.thumbnailIdea,
-      deepReport?.fixes.recommendedThumbnailStyle,
-      deepReport?.visualAudit?.topFix,
-    ]
-      .filter(Boolean)
-      .join(" ")
-      .toLowerCase();
-
-    const slots: ThumbnailAssetSlot[] = [];
-    const wantsFace = /\b(face|reaction|expression|eyes|shocked|surprised|portrait|selfie)\b/.test(text);
-    const wantsProduct = /\b(product|tool|device|gadget|camera|microphone|laptop|phone)\b/.test(text);
-    const wantsScreenshot = /\b(screenshot|screen|ui|app|dashboard|analytics|graph|chart)\b/.test(text);
-
-    if (wantsFace) {
-      slots.push({
-        key: "face",
-        label: "Face / subject photo",
-        isFace: true,
-        helper:
-          "Upload the exact face/photo you want to use. DayTabs will only improve lighting, sharpness, color, background, and composition. It will NOT change your face.",
-      });
-    }
-    if (wantsProduct) slots.push({ key: "product", label: "Product / object image" });
-    if (wantsScreenshot) slots.push({ key: "screenshot", label: "Screenshot / UI image" });
-
-    if (!slots.length) {
-      slots.push({ key: "optional", label: "Optional image (face/product/screenshot)" });
-    }
-
-    return slots;
-  }
-
-  function buildDefaultThumbnailPrompt() {
-    const quick = quickReport;
-    const deep = deepReport;
-    const base = [
-      quick ? `Quick audit: ${quick.oneSentenceDiagnosis}` : "",
-      quick?.thumbnailFix?.concept ? `Concept: ${quick.thumbnailFix.concept}` : deep?.fixes.thumbnailIdea ? `Concept: ${deep.fixes.thumbnailIdea}` : "",
-      quick?.thumbnailFix?.focalSubject ? `Focal subject: ${quick.thumbnailFix.focalSubject}` : "",
-      quick?.thumbnailFix?.textOverlay ? `Text overlay idea: ${quick.thumbnailFix.textOverlay}` : "",
-      quick?.thumbnailFix?.layout ? `Layout: ${quick.thumbnailFix.layout}` : "",
-      quick?.thumbnailFix?.emotion ? `Emotion: ${quick.thumbnailFix.emotion}` : "",
-      quick?.thumbnailFix?.designStyle ? `Style: ${quick.thumbnailFix.designStyle}` : deep?.fixes.recommendedThumbnailStyle ? `Style: ${deep.fixes.recommendedThumbnailStyle}` : "",
-    ]
-      .filter(Boolean)
-      .join("\n");
-
-    return base;
-  }
-
-  async function generateAuditThumbnail() {
-    if (!preview || !report) return;
-    setThumbnailWorking(true);
-    setError(null);
-    try {
-      const quick = (report as QuickAuditReport).auditMode === "quick" ? (report as QuickAuditReport) : null;
-      const deep = quick ? null : (report as DeepAuditReport);
-
-      const diagnosisNotes = deep?.diagnosis?.length
-        ? deep.diagnosis
-          .filter((item) => item.area === "thumbnail" || item.area === "title" || item.area === "hook")
-          .map((item) => [
-            `${item.area.toUpperCase()} ISSUE: ${item.issue}`,
-            item.evidence ? `Evidence: ${item.evidence}` : "",
-            item.recommendedChange ? `How to improve it: ${item.recommendedChange}` : "",
-          ].filter(Boolean).join("\n"))
-          .filter(Boolean)
-          .join("\n\n")
-        : "";
-
-      const assetNotes = Object.entries(thumbnailAssetAlternatives)
-        .map(([key, value]) => (value.trim() ? `${key.toUpperCase()} ALTERNATIVE: ${value.trim()}` : ""))
-        .filter(Boolean)
-        .join("\n");
-
-      const strictFace = "STRICT FACE PRESERVATION: Use uploaded face exactly as-is. Do not modify identity or features. Only improve lighting, sharpness, color, and composition.";
-      const mergedPrompt = [thumbnailPrompt.trim(), strictFace].filter(Boolean).join("\n\n");
-
-      const analysisNotes = [
-        quick ? `Quick audit summary: ${quick.oneSentenceDiagnosis}` : deep?.summary || "",
-        deep?.fixes.packagingStrategy || "",
-        deep?.fixes.thumbnailIdea || "",
-        deep?.visualAudit?.topFix || "",
-        deep?.visualAudit?.lighting ? `Lighting note: ${deep.visualAudit.lighting}` : "",
-        deep?.visualAudit?.framing ? `Framing note: ${deep.visualAudit.framing}` : "",
-        deep?.visualAudit?.sharpness ? `Sharpness note: ${deep.visualAudit.sharpness}` : "",
-        diagnosisNotes,
-        quick?.thumbnailFix?.concept ? `Concept: ${quick.thumbnailFix.concept}` : "",
-        quick?.thumbnailFix?.problem ? `Problem: ${quick.thumbnailFix.problem}` : "",
-        quick?.thumbnailFix?.focalSubject ? `Focal subject: ${quick.thumbnailFix.focalSubject}` : "",
-        quick?.thumbnailFix?.textOverlay ? `Text overlay: ${quick.thumbnailFix.textOverlay}` : "",
-        quick?.thumbnailFix?.layout ? `Layout: ${quick.thumbnailFix.layout}` : "",
-        quick?.thumbnailFix?.emotion ? `Emotion: ${quick.thumbnailFix.emotion}` : "",
-        quick?.thumbnailFix?.designStyle ? `Style: ${quick.thumbnailFix.designStyle}` : "",
-        assetNotes,
-        `PROMPT:\n${mergedPrompt}`,
-      ]
-        .filter(Boolean)
-        .join("\n\n");
-
-      const data = await jsonFetch<{ thumbnail: GeneratedAuditThumbnail }>("/api/youtube/audit-thumbnail", {
-        method: "POST",
-        body: JSON.stringify({
-          title: preview.video.title,
-          description: (quick ? quick.beforeAfter.descriptionRewrite : deep?.fixes.description) || preview.video.description,
-          tags: (quick ? quick.tags.recommended : deep?.fixes.tags)?.length ? (quick ? quick.tags.recommended : deep?.fixes.tags) : preview.video.tags,
-          textPreference: thumbnailTextPreference.trim() || null,
-          sourceImages: thumbnailSourceImages.map((image) => image.dataUrl),
-          fallbackSourceImageUrl: thumbnailSourceImages.length ? null : preview.video.thumbnailUrl,
-          preserveUploadedImage: preserveThumbnailSourceImage,
-          stylePreference: thumbnailStyle,
-          analysisNotes,
-        }),
-      });
-      setGeneratedThumbnail(data.thumbnail);
-      updateSavedAuditThumbnail(data.thumbnail);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not generate thumbnail");
-    } finally {
-      setThumbnailWorking(false);
-    }
   }
 
   if (planLoading) {
@@ -1045,10 +792,6 @@ export default function YouTubeAuditTab() {
                     <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Thumbnail Direction</p>
                     <p className="mt-2 text-sm text-white/55">Fix the packaging first. You’re selling the click before the watch.</p>
                   </div>
-                  <Button type="button" className="rounded-lg" onClick={() => openThumbnailModal()} disabled={!isStudio}>
-                    <Sparkles className="mr-2 h-4 w-4" />
-                    Generate thumbnail
-                  </Button>
                 </div>
 
                 <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
@@ -1061,9 +804,6 @@ export default function YouTubeAuditTab() {
                         <div className="grid h-full w-full place-items-center text-sm text-white/45">No thumbnail detected</div>
                       )}
                     </div>
-                    {!isStudio ? (
-                      <p className="text-xs leading-5 text-white/45">Thumbnail generation is available on the Studio plan.</p>
-                    ) : null}
                   </div>
 
                   <div className="space-y-3">
@@ -1334,6 +1074,8 @@ export default function YouTubeAuditTab() {
         </div>
       ) : null}
 
+      {/* Thumbnail image generation has been removed. */}
+      {/*
       <Dialog open={thumbnailModalOpen} onOpenChange={setThumbnailModalOpen}>
         <DialogContent className="max-h-[85vh] max-w-3xl overflow-y-auto pt-10">
           <DialogHeader>
@@ -1566,6 +1308,7 @@ export default function YouTubeAuditTab() {
           ) : null}
         </DialogContent>
       </Dialog>
+      */}
     </PanelPage>
   );
 }

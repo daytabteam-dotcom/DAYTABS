@@ -1849,7 +1849,6 @@ function CalendarPreviewCard({
   onOpen,
   onDelete,
   onQuickPublish,
-  onCreateThumbnail,
 }: {
   day: PlanDay;
   ui: ReturnType<typeof useDayTabsI18n>["copy"]["growthPlanner"];
@@ -1858,7 +1857,6 @@ function CalendarPreviewCard({
   onOpen: (day: PlanDay) => void;
   onDelete: (day: PlanDay) => void;
   onQuickPublish: (day: PlanDay) => void;
-  onCreateThumbnail: (day: PlanDay) => void;
 }) {
   const origin = ideaOriginMeta(day, ui);
   return (
@@ -1899,11 +1897,6 @@ function CalendarPreviewCard({
             </PopoverContent>
           </Popover>
           <div className="p-4">
-            {day.generatedThumbnail?.imageDataUrl ? (
-              <div className="mb-3 overflow-hidden rounded-xl border border-white/10 bg-black/20">
-                <img src={day.generatedThumbnail.imageDataUrl} alt={`${day.contentIdea} thumbnail`} className="h-28 w-full object-cover" />
-              </div>
-            ) : null}
             <div className="mb-3 flex items-center justify-between gap-2">
               <div className="min-w-0 flex-1">
                 <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/35">{formatIsoDate(day.date, { month: "short", day: "numeric" })}</p>
@@ -1938,19 +1931,6 @@ function CalendarPreviewCard({
                 {linked ? ui.planner.linkedButton : ui.overviewPanel.publishButton}
               </Button>
             </div>
-            <Button
-              type="button"
-              size="sm"
-              variant="secondary"
-              className="mt-2 w-full rounded-lg"
-              onClick={(event) => {
-                event.stopPropagation();
-                onCreateThumbnail(day);
-              }}
-            >
-              <ImagePlus className="mr-2 h-4 w-4" />
-              {day.generatedThumbnail?.imageDataUrl ? ui.planner.regenerateThumbnailButton : ui.planner.createThumbnailButton}
-            </Button>
           </div>
         </div>
       </HoverCardTrigger>
@@ -2145,7 +2125,7 @@ function CurrentWeekConsistencyChart({ rows }: { rows: Array<{ iso: string; day:
   );
 }
 
-function PlannerIdeaCard({ day, ui, onDragStart, onDelete, onOpen, onCreateThumbnail }: { day: PlanDay; ui: ReturnType<typeof useDayTabsI18n>["copy"]["growthPlanner"]; onDragStart: (day: PlanDay) => void; onDelete: (day: PlanDay) => void; onOpen: (day: PlanDay) => void; onCreateThumbnail: (day: PlanDay) => void }) {
+function PlannerIdeaCard({ day, ui, onDragStart, onDelete, onOpen }: { day: PlanDay; ui: ReturnType<typeof useDayTabsI18n>["copy"]["growthPlanner"]; onDragStart: (day: PlanDay) => void; onDelete: (day: PlanDay) => void; onOpen: (day: PlanDay) => void }) {
   const origin = ideaOriginMeta(day, ui);
   return (
     <div
@@ -2167,25 +2147,10 @@ function PlannerIdeaCard({ day, ui, onDragStart, onDelete, onOpen, onCreateThumb
       <div className="flex items-start gap-2">
         <GripVertical className="mt-1 h-4 w-4 shrink-0 text-white/25" />
         <div className="min-w-0">
-          {day.generatedThumbnail?.imageDataUrl ? (
-            <div className="mb-3 overflow-hidden rounded-xl border border-white/10 bg-black/20">
-              <img src={day.generatedThumbnail.imageDataUrl} alt={`${day.contentIdea} thumbnail`} className="h-24 w-full object-cover" />
-            </div>
-          ) : null}
           <span className={cn("inline-flex rounded-full border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]", origin.chipClassName)}>
             {origin.label}
           </span>
           <IdeaPackageFields day={day} ui={ui} compact />
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            className="mt-3 rounded-lg"
-            onClick={() => onCreateThumbnail(day)}
-          >
-            <ImagePlus className="mr-2 h-4 w-4" />
-            {day.generatedThumbnail?.imageDataUrl ? ui.planner.regenerateThumbnailButton : ui.planner.createThumbnailButton}
-          </Button>
         </div>
       </div>
     </div>
@@ -2754,11 +2719,6 @@ export default function YouTubeGrowthPlannerV2Tab() {
   const [postingFrequencyInput, setPostingFrequencyInput] = useState("3");
   const [savingSettings, setSavingSettings] = useState(false);
   const [competitorReference, setCompetitorReference] = useState("");
-  const [thumbnailDay, setThumbnailDay] = useState<PlanDay | null>(null);
-  const [thumbnailTextPreference, setThumbnailTextPreference] = useState("");
-  const [thumbnailSourceImages, setThumbnailSourceImages] = useState<ThumbnailSourceImage[]>([]);
-  const [thumbnailStyleReferenceImages, setThumbnailStyleReferenceImages] = useState<ThumbnailSourceImage[]>([]);
-  const [preserveThumbnailSourceImage, setPreserveThumbnailSourceImage] = useState(true);
   const [refreshingInsights, setRefreshingInsights] = useState(false);
   const lastStatusRefreshRef = useRef(0);
 
@@ -3031,24 +2991,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
     setDays(hydrateVisiblePlanDays(nextPlan.plan.days ?? []));
     if (nextDay) {
       setDetailDay((current) => current && current.day === nextDay.day ? { ...current, ...nextDay } : current);
-      setThumbnailDay((current) => current && current.day === nextDay.day ? { ...current, ...nextDay } : current);
     }
-  }
-
-  function openThumbnailDialog(day: PlanDay) {
-    setThumbnailDay(day);
-    setThumbnailTextPreference(day.generatedThumbnail?.requestedText || "");
-    setPreserveThumbnailSourceImage(day.generatedThumbnail?.preserveUploadedImage ?? true);
-    setThumbnailSourceImages([]);
-    setThumbnailStyleReferenceImages([]);
-  }
-
-  function closeThumbnailDialog() {
-    setThumbnailDay(null);
-    setThumbnailTextPreference("");
-    setThumbnailSourceImages([]);
-    setThumbnailStyleReferenceImages([]);
-    setPreserveThumbnailSourceImage(true);
   }
 
   async function deleteDay(day: PlanDay) {
@@ -3209,73 +3152,6 @@ export default function YouTubeGrowthPlannerV2Tab() {
       } : current);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not remove competitor");
-    } finally {
-      setWorking(null);
-    }
-  }
-
-  async function handleThumbnailSourceFiles(files: FileList | null) {
-    const slots = Math.max(0, 4 - thumbnailSourceImages.length);
-    const nextFiles = Array.from(files ?? []).slice(0, slots);
-    if (!nextFiles.length) return;
-    setError(null);
-    try {
-      const processed: ThumbnailSourceImage[] = [];
-      const failures: string[] = [];
-
-      for (const file of nextFiles) {
-        try {
-          processed.push({
-            name: file.name,
-            dataUrl: await resizeImageFileToDataUrl(file),
-          });
-        } catch (err) {
-          failures.push(err instanceof Error ? err.message : `Could not read ${file.name}`);
-        }
-      }
-
-      if (processed.length) {
-        setThumbnailSourceImages((current) => [...current, ...processed].slice(0, 4));
-      }
-      if (failures.length) {
-        setError(failures.length === 1 ? failures[0]! : `${failures[0]} (+${failures.length - 1} more)`);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not read source images");
-    }
-  }
-
-  async function handleThumbnailStyleReferenceFiles(files: FileList | null) {
-    const nextFile = Array.from(files ?? []).slice(0, 1)[0] ?? null;
-    if (!nextFile) return;
-    setError(null);
-    try {
-      setThumbnailStyleReferenceImages([{
-        name: nextFile.name,
-        dataUrl: await resizeImageFileToDataUrl(nextFile),
-      }]);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not read style reference thumbnail");
-    }
-  }
-
-  async function generateThumbnailForDay() {
-    if (!latestPlan || !thumbnailDay) return;
-    setWorking("thumbnail");
-    setError(null);
-    try {
-      const data = await jsonFetch<{ plan: YoutubeWeeklyPlan; day: PlanDay }>(`/api/youtube/plans/${latestPlan.id}/days/${thumbnailDay.day}/thumbnail`, {
-        method: "POST",
-        body: JSON.stringify({
-          textPreference: thumbnailTextPreference.trim() || null,
-          sourceImages: thumbnailSourceImages.map((image) => image.dataUrl),
-          styleReferenceImages: thumbnailStyleReferenceImages.map((image) => image.dataUrl),
-          preserveUploadedImage: preserveThumbnailSourceImage,
-        }),
-      });
-      applyServerPlanUpdate(data.plan, data.day);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not generate thumbnail");
     } finally {
       setWorking(null);
     }
@@ -3555,7 +3431,6 @@ export default function YouTubeGrowthPlannerV2Tab() {
                         onDragStart={handleDragStart}
                         onOpen={setDetailDay}
                         onDelete={deleteDay}
-                        onCreateThumbnail={openThumbnailDialog}
                         onQuickPublish={(targetDay) => {
                           setDetailDay(targetDay);
                           setLinkingDay(targetDay.day);
@@ -3596,7 +3471,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
             <div key={stage.id} onDragOver={(event) => event.preventDefault()} onDrop={() => handleDropOnStage(stage.id)} className="min-h-65 rounded-lg border border-white/10 bg-white/2.5 p-3">
               <p className="mb-3 text-sm font-semibold text-white">{stage.label}</p>
               <div className="space-y-3">
-                {days.filter((day) => effectivePlannerStage(day, resultsByDay, recentVideoById) === stage.id).map((day) => <PlannerIdeaCard key={toCardId(day)} day={day} ui={ui} onDragStart={handleDragStart} onDelete={deleteDay} onOpen={setDetailDay} onCreateThumbnail={openThumbnailDialog} />)}
+                {days.filter((day) => effectivePlannerStage(day, resultsByDay, recentVideoById) === stage.id).map((day) => <PlannerIdeaCard key={toCardId(day)} day={day} ui={ui} onDragStart={handleDragStart} onDelete={deleteDay} onOpen={setDetailDay} />)}
               </div>
             </div>
           ))}
@@ -4478,17 +4353,8 @@ export default function YouTubeGrowthPlannerV2Tab() {
                         <p className="text-xs uppercase tracking-[0.16em] text-white/40">{ui.planner.publishPackageLabel}</p>
                         <div className="flex items-center gap-2">
                           <p className="text-xs text-white/45">{detailDay.contentIdea.length} chars · Sweet spot: {titleRange}</p>
-                          <Button type="button" size="sm" variant="secondary" className="rounded-lg" onClick={() => openThumbnailDialog(detailDay)}>
-                            <ImagePlus className="mr-2 h-4 w-4" />
-                            {detailDay.generatedThumbnail?.imageDataUrl ? "Regenerate thumbnail" : "Create thumbnail"}
-                          </Button>
                         </div>
                       </div>
-                      {detailDay.generatedThumbnail?.imageDataUrl ? (
-                        <div className="mt-4 overflow-hidden rounded-xl border border-white/10 bg-black/20">
-                          <img src={detailDay.generatedThumbnail.imageDataUrl} alt={`${detailDay.contentIdea} thumbnail`} className="w-full object-cover" />
-                        </div>
-                      ) : null}
                       <IdeaPackageFields day={detailDay} ui={ui} />
                     </PanelCardSoft>
                     ) : null}
@@ -4656,6 +4522,8 @@ export default function YouTubeGrowthPlannerV2Tab() {
         </DialogContent>
       </Dialog>
 
+      {/* Thumbnail image generation has been removed. */}
+      {/*
       <Dialog open={Boolean(thumbnailDay)} onOpenChange={(open) => !open && closeThumbnailDialog()}>
         <DialogContent className="w-[min(92vw,900px)] max-h-[85vh] overflow-hidden p-0">
           <div className="flex max-h-[85vh] flex-col">
@@ -4823,6 +4691,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
           </div>
         </DialogContent>
       </Dialog>
+      */}
 
       <Dialog open={settingsOpen || needsPostingPreference} onOpenChange={(open) => {
         if (!needsPostingPreference) setSettingsOpen(open);
