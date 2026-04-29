@@ -49,7 +49,9 @@ export interface SocialPlanDay {
   id: string;
   day: number;
   date: string; // ISO YYYY-MM-DD
+  platform?: SocialPlatform;
   contentIdea: string;
+  format?: string;
   contentType?: string;
   ideaOrigin?: "ai" | "manual";
   aiImproved?: boolean;
@@ -76,6 +78,9 @@ export interface SocialPlanDay {
   growthTasks?: GrowthTask[];
   soundSuggestion?: string | null;
   status?: SocialPostStatus;
+  behaviorSignalUsed?: string;
+  whyThisFitsUser?: string;
+  avoidBecause?: string;
 }
 
 export interface PlanPayload {

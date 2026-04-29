@@ -84,6 +84,13 @@ For every idea, provide enough detail so the user can create the content immedia
 
 Core rule: the strongest signal is user behavior. When a user behavior summary is provided, prioritize it over generic best practices.
 
+Platform-native planning:
+- LinkedIn: prioritize authority, lessons learned, founder/building-in-public stories, practical frameworks, honest opinions, soft CTAs, and conversation-driven posts.
+- TikTok: prioritize fast hooks, visual movement, curiosity gaps, repeatable series, trends only when relevant, and simple execution.
+- Instagram: prioritize strong visual concepts, carousels, reels, saveable posts, personal storytelling, and shareable insights.
+
+Never use the same idea across platforms without adapting the format, hook, and CTA.
+
 You must consider:
 - selected platform
 - weekly topic
@@ -97,6 +104,10 @@ You must consider:
 
 Growth tasks must be ethical, practical, and related to the selected platform.
 Never suggest spam, fake engagement, bots, buying followers, or mass copy-paste commenting.
+
+Anti-generic rule:
+Bad: "Share tips about productivity."
+Good: "Post a 7-slide carousel: 'I stopped planning my day around tasks and started planning around energy.' Slide 1 hooks the pain, slides 2-5 show the old vs new method, slide 6 gives a mini framework, slide 7 CTA asks: 'Do you plan by time or energy?'"
 
 Return valid JSON only.
 Do not include markdown.
@@ -143,7 +154,9 @@ function jsonShape() {
       "id": "string",
       "day": number,
       "date": "YYYY-MM-DD",
+      "platform": "linkedin|tiktok|instagram",
       "contentIdea": "string",
+      "format": "string",
       "contentType": "string",
       "hook": "string",
       "outline": ["string"],
@@ -180,7 +193,10 @@ function jsonShape() {
         }
       ],
       "soundSuggestion": "string | null",
-      "status": "not_finished"
+      "status": "not_finished",
+      "behaviorSignalUsed": "string",
+      "whyThisFitsUser": "string",
+      "avoidBecause": "string"
     }
   ]
 }`;
@@ -251,13 +267,20 @@ Previous week user behavior summary (highest priority signal; do NOT request raw
 ${params.previousWeekBehaviorSummary ? JSON.stringify(params.previousWeekBehaviorSummary) : "null"}
 
 Rules:
-- User behavior is the strongest signal. Follow the behavior summary above.
-- If a post performed great or good, create a fresh related angle, not a duplicate.
-- If a post performed poorly, avoid repeating the same hook, format, or angle.
-- If the user skipped or did not finish a post, do not assume it failed.
-- Follow the native content criteria of ${params.platform}.
+- User behavior is the strongest signal. Use it before generic platform advice.
+- Manual posts/ideas created by the user are the strongest preference signal.
+- Completed or published posts show what the user is willing to execute.
+- Great/good performing posts should inspire fresh related angles, not duplicates.
+- Poor performing posts should not be repeated with the same hook, format, angle, or CTA.
+- Skipped/incomplete posts are neutral signals, not failures.
+- Deleted/disliked AI ideas are negative signals. Avoid similar concepts unless there is a clear reason.
+- If the user ignored AI-generated ideas but added manual ones, adapt toward the manual style.
+- Each idea must include a clear behaviorSignalUsed.
+- Each idea must explain whyThisFitsUser.
+- Each idea must mention avoidBecause.
+- Follow native content criteria of ${params.platform}.
 - Do not generate generic content.
-- Include growthTasks for each day, keep them ethical and non-spammy.
+- Include ethical, non-spammy growthTasks for each day.
 - Return valid JSON matching the shape.
 
 JSON shape:
@@ -315,8 +338,12 @@ ${jsonShape()}
       id: typeof day.id === "string" && day.id.trim() ? day.id.trim() : `day-${index + 1}-${Math.random().toString(16).slice(2)}`,
       day: index + 1,
       date: isIsoDate(day.date) && withinWindow(day.date) ? day.date : scheduledDates[index % scheduledDates.length]!,
+      platform: params.platform,
       contentIdea: String(day.contentIdea ?? "").trim(),
-      contentType: typeof day.contentType === "string" ? day.contentType.trim() : undefined,
+      format: typeof (day as any).format === "string" ? (day as any).format.trim() : undefined,
+      contentType: typeof day.contentType === "string"
+        ? day.contentType.trim()
+        : (typeof (day as any).format === "string" ? (day as any).format.trim() : undefined),
       hook: String(day.hook ?? "").trim(),
       outline: Array.isArray(day.outline) ? day.outline.map((line) => String(line)).filter(Boolean).slice(0, 12) : [],
       postContext: typeof day.postContext === "string" ? day.postContext.trim() : undefined,
@@ -362,6 +389,9 @@ ${jsonShape()}
       growthTasks: normalizeGrowthTasks((day as any).growthTasks),
       soundSuggestion: day.soundSuggestion == null ? null : String(day.soundSuggestion),
       status: "not_finished",
+      behaviorSignalUsed: typeof (day as any).behaviorSignalUsed === "string" ? (day as any).behaviorSignalUsed.trim() : undefined,
+      whyThisFitsUser: typeof (day as any).whyThisFitsUser === "string" ? (day as any).whyThisFitsUser.trim() : undefined,
+      avoidBecause: typeof (day as any).avoidBecause === "string" ? (day as any).avoidBecause.trim() : undefined,
     }));
 
   const finalDays = (params.postingMode === "manual"
@@ -408,6 +438,7 @@ Return JSON with:
 {
   "contentIdea": "string",
   "contentType": "string",
+  "format": "string",
   "hook": "string",
   "outline": ["string"],
   "postContext": "string",
@@ -427,7 +458,10 @@ Return JSON with:
   "caption": "string",
   "cta": "string",
   "growthTasks": [{ "platform": "${params.platform}", "taskType": "comment", "title": "string", "description": "string", "suggestedTiming": "string", "reason": "string", "targetProfileType": "string", "targetTopicOrHashtag": "string" }],
-  "soundSuggestion": "string | null"
+  "soundSuggestion": "string | null",
+  "behaviorSignalUsed": "string",
+  "whyThisFitsUser": "string",
+  "avoidBecause": "string"
 }`;
 
   const completion = await openai.chat.completions.create({
@@ -452,6 +486,7 @@ Return JSON with:
   return {
     contentIdea: String(parsed.contentIdea ?? "").trim(),
     contentType: typeof parsed.contentType === "string" ? parsed.contentType.trim() : undefined,
+    format: typeof (parsed as any).format === "string" ? (parsed as any).format.trim() : undefined,
     hook: String(parsed.hook ?? "").trim(),
     outline: Array.isArray(parsed.outline) ? parsed.outline.map((line) => String(line)).filter(Boolean).slice(0, 12) : [],
     postContext: typeof parsed.postContext === "string" ? parsed.postContext.trim() : undefined,
@@ -472,5 +507,8 @@ Return JSON with:
     cta: typeof parsed.cta === "string" ? parsed.cta.trim() : undefined,
     growthTasks: Array.isArray((parsed as any).growthTasks) ? (parsed as any).growthTasks as any : undefined,
     soundSuggestion: parsed.soundSuggestion == null ? null : String(parsed.soundSuggestion),
+    behaviorSignalUsed: typeof (parsed as any).behaviorSignalUsed === "string" ? (parsed as any).behaviorSignalUsed.trim() : undefined,
+    whyThisFitsUser: typeof (parsed as any).whyThisFitsUser === "string" ? (parsed as any).whyThisFitsUser.trim() : undefined,
+    avoidBecause: typeof (parsed as any).avoidBecause === "string" ? (parsed as any).avoidBecause.trim() : undefined,
   } satisfies Partial<SocialPlanDay>;
 }
