@@ -89,14 +89,51 @@ export function PlatformSidebar({
 }) {
   return (
     <TooltipProvider delayDuration={120}>
-      <aside
-        className={cn(
-          "w-full rounded-[28px] bg-white/[0.045] p-4",
-          "lg:sticky lg:top-[260px] lg:h-[calc(100vh-300px)] lg:min-h-[320px] lg:w-[88px] lg:rounded-[32px] lg:bg-white/[0.04] lg:p-5",
-        )}
-      >
-        <div className="flex items-center justify-center lg:h-full">
-          <div className="flex w-full items-center justify-start gap-6 overflow-x-auto lg:h-full lg:flex-col lg:items-center lg:justify-center lg:overflow-visible">
+      <>
+        <aside className="w-full rounded-[28px] bg-white/[0.045] p-4 lg:hidden">
+          <div className="flex items-center justify-center">
+            <div className="flex w-full items-center justify-start gap-6 overflow-x-auto">
+              {TABS.map((tab) => {
+                const isActive = value === tab.id;
+                const Icon = tab.Icon;
+                return (
+                  <Tooltip key={tab.id}>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={() => onChange(tab.id)}
+                        className={cn(
+                          "group relative grid h-12 w-12 shrink-0 place-items-center rounded-2xl transition-colors",
+                          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300/45 focus-visible:ring-offset-2 focus-visible:ring-offset-black",
+                          isActive
+                            ? "bg-gradient-to-br from-violet-500/35 via-violet-500/18 to-fuchsia-500/20 text-white shadow-[0_0_0_1px_rgba(167,139,250,0.28),0_18px_46px_rgba(167,139,250,0.20)]"
+                            : "bg-black/30 text-white/60 hover:bg-black/22 hover:text-white",
+                        )}
+                        aria-current={isActive ? "page" : undefined}
+                      >
+                        <Icon className={cn("h-5 w-5", isActive ? "text-violet-100" : "text-white/60 group-hover:text-white")} />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent className="border-white/10 bg-black/80 text-white">
+                      <div className="text-xs font-semibold">{tab.label}</div>
+                    </TooltipContent>
+                  </Tooltip>
+                );
+              })}
+            </div>
+          </div>
+        </aside>
+
+        <aside
+          className={cn(
+            "hidden lg:flex",
+            "fixed top-[280px] z-30",
+            "left-[calc((100vw-1440px)/2+48px)]",
+            "h-[calc(100vh-320px)] min-h-[320px] max-h-[560px] w-[88px]",
+            "items-center justify-center rounded-[32px] bg-white/[0.04]",
+          )}
+        >
+          <div className="flex h-full flex-col items-center justify-center gap-6">
             {TABS.map((tab) => {
               const isActive = value === tab.id;
               const Icon = tab.Icon;
@@ -125,8 +162,8 @@ export function PlatformSidebar({
               );
             })}
           </div>
-        </div>
-      </aside>
+        </aside>
+      </>
     </TooltipProvider>
   );
 }
