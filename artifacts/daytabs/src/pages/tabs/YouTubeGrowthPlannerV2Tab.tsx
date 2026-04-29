@@ -36,6 +36,7 @@ import {
   Trash2,
   ThumbsDown,
   ThumbsUp,
+  TrendingUp,
   TrendingDown,
   Type,
   X,
@@ -86,6 +87,7 @@ type IdeaOrigin = "ai" | "manual";
 type IdeaFeedback = "liked" | "disliked" | null;
 type GrowthSubtab = "overview" | "plan" | "competitors" | "insights" | "tasks";
 type DetailTab = "create" | "visuals" | "growth" | "strategy";
+type InsightsRange = "all_time" | "last_week" | "last_month" | "last_season" | "last_year";
 
 const YOUTUBE_THUMBNAIL_WIDTH = 1280;
 const YOUTUBE_THUMBNAIL_HEIGHT = 720;
@@ -1584,6 +1586,15 @@ function VideoDiagnosticCard({
   tone: "positive" | "negative";
 }) {
   const positive = tone === "positive";
+  const publishStamp = (() => {
+    const publishedAt = diagnostic.video.publishedAt;
+    if (!publishedAt) return null;
+    const date = new Date(publishedAt);
+    if (Number.isNaN(date.getTime())) return null;
+    const weekday = date.toLocaleDateString(undefined, { weekday: "short" });
+    const time = date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+    return `${weekday} ${time}`;
+  })();
   const metricItems: Array<{ label: string; value: string; Icon: LucideIcon; className: string }> = [
     { label: "Hook", value: diagnostic.hook, Icon: Sparkles, className: positive ? "text-emerald-200" : "text-red-200" },
     { label: "Tags", value: diagnostic.tags, Icon: Hash, className: "text-amber-200" },
@@ -1622,6 +1633,11 @@ function VideoDiagnosticCard({
             <span className="inline-flex items-center rounded-full border border-white/10 bg-white/4 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/55">
               {formatNumber(diagnostic.video.viewCount)} views
             </span>
+            {publishStamp ? (
+              <span className="inline-flex items-center rounded-full border border-white/10 bg-white/4 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/55">
+                {publishStamp}
+              </span>
+            ) : null}
           </div>
           <a href={diagnostic.video.url} target="_blank" rel="noreferrer" className="line-clamp-2 text-base font-semibold leading-6 text-white transition-colors hover:text-white/80">
             {diagnostic.video.title}
@@ -2308,7 +2324,16 @@ function HookComparisonChart({ rows }: { rows: Array<{ type: string; averageView
 
 function TitleLengthBarChart({ buckets, winnerLabel }: { buckets: TitleLengthBucket[]; winnerLabel?: string }) {
   const max = Math.max(...buckets.map((bucket) => bucket.averageViews), 1);
-  const chartData = buckets.map((bucket) => ({ name: bucket.label.replace(" chars", ""), views: bucket.averageViews, fill: bucket.label === winnerLabel ? "#34d399" : "#fca5a5" }));
+  const channelAverageViews = buckets.reduce((sum, bucket) => sum + bucket.averageViews * bucket.count, 0) / Math.max(1, buckets.reduce((sum, bucket) => sum + bucket.count, 0));
+  const chartData = buckets.map((bucket) => {
+    const above = bucket.averageViews >= channelAverageViews;
+    const isWinner = bucket.label === winnerLabel;
+    return {
+      name: bucket.label.replace(" chars", ""),
+      views: bucket.averageViews,
+      fill: isWinner ? "#34d399" : above ? "rgba(52,211,153,0.7)" : "rgba(248,113,113,0.75)",
+    };
+  });
   return (
     <div className="mt-4 h-72">
       <ChartContainer config={{ views: { label: "Average views", color: "#fca5a5" } }} className="h-full w-full">
@@ -2328,7 +2353,11 @@ function TitleLengthBarChart({ buckets, winnerLabel }: { buckets: TitleLengthBuc
               );
             }}
           />
-          <Bar dataKey="views" radius={[8, 8, 0, 0]} />
+          <Bar dataKey="views" radius={[8, 8, 0, 0]}>
+            {chartData.map((entry, index) => (
+              <Cell key={`cell-${index}`} fill={entry.fill} />
+            ))}
+          </Bar>
         </BarChart>
       </ChartContainer>
     </div>
@@ -2642,6 +2671,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [channelDetailsOpen, setChannelDetailsOpen] = useState(false);
   const [tagExpanded, setTagExpanded] = useState(false);
+  const [insightsRange, setInsightsRange] = useState<InsightsRange>("all_time");
   const [savingResultDay, setSavingResultDay] = useState<number | null>(null);
   const [saveConfirmationDay, setSaveConfirmationDay] = useState<number | null>(null);
   const [linkingDay, setLinkingDay] = useState<number | null>(null);
@@ -2668,6 +2698,27 @@ export default function YouTubeGrowthPlannerV2Tab() {
   const latestResults = status?.latestResults ?? [];
   const preferredPostsPerWeek = status?.settings?.preferredPostsPerWeek ?? 3;
   const needsPostingPreference = Boolean(status?.connected && status?.settings?.needsPostingPreference);
+
+  const insightsStartIso = useMemo(() => {
+    if (insightsRange === "all_time") return null;
+    const now = new Date();
+    const start = new Date(now);
+    if (insightsRange === "last_week") start.setDate(start.getDate() - 7);
+    if (insightsRange === "last_month") start.setDate(start.getDate() - 30);
+    if (insightsRange === "last_season") start.setDate(start.getDate() - 90);
+    if (insightsRange === "last_year") start.setDate(start.getDate() - 365);
+    return start.toISOString().slice(0, 10);
+  }, [insightsRange]);
+
+  const insightsVideos = useMemo(() => {
+    if (!insightsStartIso) return recentVideos;
+    return recentVideos.filter((video) => (video.publishedAt ?? "").slice(0, 10) >= insightsStartIso);
+  }, [insightsStartIso, recentVideos]);
+
+  const insightsAnalyticsPoints = useMemo(() => {
+    if (!insightsStartIso) return analyticsPoints;
+    return analyticsPoints.filter((point) => (point.date ?? "") >= insightsStartIso);
+  }, [analyticsPoints, insightsStartIso]);
 
   useEffect(() => {
     if (detailDay) setDetailTab("create");
@@ -2786,14 +2837,15 @@ export default function YouTubeGrowthPlannerV2Tab() {
   const progressState = weekProgress(days, status?.latestResults ?? []);
   const overview = useMemo(() => buildOverviewSections(recentVideos), [recentVideos]);
   const dataInsights = useMemo(() => deriveYoutubeDataInsights({
-    recentVideos,
-    analyticsDaily: analyticsPoints,
+    recentVideos: insightsVideos,
+    analyticsDaily: insightsAnalyticsPoints,
     latestPlan,
     latestResults,
-  }), [analyticsPoints, latestPlan, latestResults, recentVideos]);
+  }), [insightsAnalyticsPoints, insightsVideos, latestPlan, latestResults]);
   const bestTimeInsight = dataInsights.bestTimesToPost;
   const bestTime = bestTimeInsight.chartData;
-  const bestTimeSummary = useMemo(() => deriveBestTimeSummary(recentVideos), [recentVideos]);
+  const bestTimeSummary = useMemo(() => deriveBestTimeSummary(insightsVideos), [insightsVideos]);
+  const overviewBestTimeSummary = useMemo(() => deriveBestTimeSummary(recentVideos), [recentVideos]);
   const bestPostingSlotByDay = useMemo(() => deriveBestPostingSlotByDay(bestTime.cells), [bestTime.cells]);
   const hooksChartRows = useMemo(() => dataInsights.hookPatterns.chartData.rows.map((row) => ({
     type: row.type.charAt(0).toUpperCase() + row.type.slice(1),
@@ -2801,15 +2853,16 @@ export default function YouTubeGrowthPlannerV2Tab() {
     count: row.count,
     sample: row.evidenceVideos?.[0]?.title,
   })), [dataInsights.hookPatterns.chartData.rows]);
-  const hookRows = useMemo(() => deriveHookRows(recentVideos), [recentVideos]);
-  const hookInsight = useMemo(() => deriveHookInsight(recentVideos), [recentVideos]);
+  const hookRows = useMemo(() => deriveHookRows(insightsVideos), [insightsVideos]);
+  const hookInsight = useMemo(() => deriveHookInsight(insightsVideos), [insightsVideos]);
   const titleLengthBuckets = dataInsights.optimalTitleLength.chartData.buckets;
   const winningTitleBucket = dataInsights.optimalTitleLength.chartData.winningBucket?.label ?? null;
   const winningTitleBucketDetail = useMemo(
     () => winningTitleBucket ? titleLengthBuckets.find((bucket) => bucket.label === winningTitleBucket) ?? null : null,
     [titleLengthBuckets, winningTitleBucket],
   );
-  const titleLengthSummary = useMemo(() => deriveTitleLengthSummary(recentVideos), [recentVideos]);
+  const titleLengthSummary = useMemo(() => deriveTitleLengthSummary(insightsVideos), [insightsVideos]);
+  const overviewTitleLengthSummary = useMemo(() => deriveTitleLengthSummary(recentVideos), [recentVideos]);
   const subscriberGrowth = dataInsights.subscriberGrowth.chartData;
   const tagPerformance = useMemo(() => dataInsights.tagsPerformance.chartData.map((row) => ({
     tag: row.tag,
@@ -2828,8 +2881,23 @@ export default function YouTubeGrowthPlannerV2Tab() {
   const competitorRows = useMemo(() => deriveCompetitorRows(ownSubscribers, recentVideos, status?.competitors ?? []), [ownSubscribers, recentVideos, status?.competitors]);
   const recentVideoById = useMemo(() => new Map(recentVideos.map((video) => [video.id, video])), [recentVideos]);
   const resultsByDay = useMemo(() => new Map(latestResults.map((result) => [result.dayIndex, result])), [latestResults]);
-  const topDiagnostics = useMemo(() => buildVideoDiagnostics(overview.whatWorkedVideos ?? [], recentVideos, titleLengthSummary, bestTimeSummary, "top"), [overview, recentVideos, titleLengthSummary, bestTimeSummary]);
-  const underperformerDiagnostics = useMemo(() => buildVideoDiagnostics(overview.underperformerVideos ?? [], recentVideos, titleLengthSummary, bestTimeSummary, "bottom"), [overview, recentVideos, titleLengthSummary, bestTimeSummary]);
+  const topDiagnostics = useMemo(() => buildVideoDiagnostics(overview.whatWorkedVideos ?? [], recentVideos, overviewTitleLengthSummary, overviewBestTimeSummary, "top"), [overview, recentVideos, overviewTitleLengthSummary, overviewBestTimeSummary]);
+  const underperformerDiagnostics = useMemo(() => buildVideoDiagnostics(overview.underperformerVideos ?? [], recentVideos, overviewTitleLengthSummary, overviewBestTimeSummary, "bottom"), [overview, recentVideos, overviewTitleLengthSummary, overviewBestTimeSummary]);
+  const topPerformingDiagnostics = useMemo(() => {
+    const videos = [...insightsVideos].sort((a, b) => parseNumber(b.viewCount) - parseNumber(a.viewCount)).slice(0, 5);
+    return buildVideoDiagnostics(videos, insightsVideos, titleLengthSummary, bestTimeSummary, "top");
+  }, [bestTimeSummary, insightsVideos, titleLengthSummary]);
+  const underperformingDiagnostics = useMemo(() => {
+    const now = Date.now();
+    const videos = [...insightsVideos]
+      .filter((video) => {
+        const published = video.publishedAt ? new Date(video.publishedAt).getTime() : 0;
+        return published ? (now - published) > 24 * 60 * 60 * 1000 : false;
+      })
+      .sort((a, b) => parseNumber(a.viewCount) - parseNumber(b.viewCount))
+      .slice(0, 5);
+    return buildVideoDiagnostics(videos, insightsVideos, titleLengthSummary, bestTimeSummary, "bottom");
+  }, [bestTimeSummary, insightsVideos, titleLengthSummary]);
   const reachableCompetitors = useMemo(() => filterReachableCompetitors(ownSubscribers, competitorRows), [ownSubscribers, competitorRows]);
   const weeklyComparison = useMemo(() => deriveWeeklyComparisonData(reachableCompetitors, latestPlan, recentVideos, status?.channel?.channelName), [reachableCompetitors, latestPlan, recentVideos, status?.channel?.channelName]);
   const publishableVideos = useMemo(
@@ -3653,7 +3721,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
             </PanelCardSoft>
             <PanelCardSoft className="border border-white/10 p-4">
               <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">{ui.overviewPanel.bestNextSlotLabel}</p>
-              <p className="mt-2 text-lg font-semibold text-white">{bestTime.highest ? `${bestTime.highest.day} ${bestTime.highest.hour}` : ui.stats.bestSlotNoData}</p>
+              <p className="mt-2 text-lg font-semibold text-white">{overviewBestTimeSummary.highest ? `${overviewBestTimeSummary.highest.day} ${overviewBestTimeSummary.highest.hour}` : ui.stats.bestSlotNoData}</p>
             </PanelCardSoft>
           </div>
           <Button type="button" className="mt-5 rounded-lg" onClick={() => setActiveSubtab("plan")}>
@@ -3818,47 +3886,6 @@ export default function YouTubeGrowthPlannerV2Tab() {
 
           {activeSubtab === "insights" ? (
             <>
-          <section id="repeat-or-fix" className="scroll-mt-24">
-            <PanelCard className="overflow-hidden border border-white/10 p-0 transition-all hover:-translate-y-1 hover:bg-white/4">
-              <div className="border-b border-white/10 bg-white/3 p-6">
-                <div className="flex flex-wrap items-start justify-between gap-4">
-                  <div>
-                    <div className="flex items-center gap-3">
-                      <BarChart3 className="h-5 w-5 text-emerald-300" />
-                      <h2 className="text-2xl font-semibold text-white">{ui.repeatOrFix.title}</h2>
-                    </div>
-                    <p className="mt-2 max-w-3xl text-sm leading-6 text-white/55">{ui.repeatOrFix.subtitle}</p>
-                  </div>
-                  <Badge className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-white/65 hover:brightness-100">
-                    {topDiagnostics.length + underperformerDiagnostics.length} cards
-                  </Badge>
-                </div>
-                {channelDescription(status.channel) ? (
-                  <PanelCardSoft className="mt-5 border border-white/10 p-4">
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/35">{ui.repeatOrFix.contextLabel}</p>
-                    <p className="mt-2 text-sm leading-6 text-white/65">{channelDescription(status.channel)}</p>
-                  </PanelCardSoft>
-                ) : null}
-              </div>
-              <div className="grid gap-4 p-5 md:p-6 2xl:grid-cols-2">
-                <AnalysisLane
-                  title={ui.repeatOrFix.whatWorkedTitle}
-                  subtitle={ui.repeatOrFix.whatWorkedSubtitle}
-                  Icon={CheckCircle2}
-                  diagnostics={topDiagnostics}
-                  tone="positive"
-                />
-                <AnalysisLane
-                  title={ui.repeatOrFix.needsWorkTitle}
-                  subtitle={ui.repeatOrFix.needsWorkSubtitle}
-                  Icon={TrendingDown}
-                  diagnostics={underperformerDiagnostics}
-                  tone="negative"
-                />
-              </div>
-            </PanelCard>
-          </section>
-
           {consistencySection}
 
 	          <PanelCard id="performance-signals" className="scroll-mt-24 p-6 transition-all hover:-translate-y-1 hover:bg-white/4">
@@ -3870,15 +3897,38 @@ export default function YouTubeGrowthPlannerV2Tab() {
 	                </div>
 	                <p className="mt-2 text-sm text-white/45">{ui.performanceSignals.subtitle}</p>
 	              </div>
-	              <Button
-	                variant="secondary"
-	                className="rounded-lg"
-	                onClick={refreshYoutubeInsights}
-	                disabled={refreshingInsights || Boolean(working)}
-	              >
-	                {refreshingInsights ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="mr-2 h-4 w-4" />}
-	                Refresh insights
-	              </Button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex items-center gap-1 rounded-lg border border-white/10 bg-white/4 p-1 text-xs">
+                    {([
+                      { id: "all_time" as const, label: "All time" },
+                      { id: "last_week" as const, label: "Last week" },
+                      { id: "last_month" as const, label: "Last Month" },
+                      { id: "last_season" as const, label: "Last Season" },
+                      { id: "last_year" as const, label: "Last Year" },
+                    ]).map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => setInsightsRange(item.id)}
+                        className={cn(
+                          "rounded-md px-2.5 py-1 font-semibold transition-colors",
+                          insightsRange === item.id ? "bg-white text-black" : "text-white/65 hover:bg-white/6 hover:text-white",
+                        )}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                  <Button
+                    variant="secondary"
+                    className="rounded-lg"
+                    onClick={refreshYoutubeInsights}
+                    disabled={refreshingInsights || Boolean(working)}
+                  >
+                    {refreshingInsights ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="mr-2 h-4 w-4" />}
+                    Refresh insights
+                  </Button>
+                </div>
 	            </div>
             <div className="sticky top-4 z-10 mt-5 flex flex-wrap gap-2 rounded-xl border border-white/10 bg-[#120d1f]/90 p-3 backdrop-blur">
               {[
@@ -3896,6 +3946,27 @@ export default function YouTubeGrowthPlannerV2Tab() {
             </div>
 
             <div className="mt-6 space-y-6">
+              <section id="top-performing-videos" className="scroll-mt-24">
+                <PanelCardSoft className="border border-white/10 p-5 transition-all hover:-translate-y-1 hover:bg-white/5">
+                  <div className="grid gap-4 2xl:grid-cols-2">
+                    <AnalysisLane
+                      title="Top Performing Videos"
+                      subtitle="Your highest-view uploads in this range, with deterministic patterns (hook, tags, timing, title length)."
+                      Icon={TrendingUp}
+                      diagnostics={topPerformingDiagnostics}
+                      tone="positive"
+                    />
+                    <AnalysisLane
+                      title="Underperforming Videos"
+                      subtitle="Your lowest-view uploads in this range (excluding last 24h), with deterministic patterns to test."
+                      Icon={TrendingDown}
+                      diagnostics={underperformingDiagnostics}
+                      tone="negative"
+                    />
+                  </div>
+                </PanelCardSoft>
+              </section>
+
               <PanelCardSoft id="optimal-posting-schedule" className="border border-white/10 p-5 transition-all hover:-translate-y-1 hover:bg-white/5">
                 <div className="flex items-center justify-between gap-3">
                   <div>
@@ -4068,66 +4139,6 @@ export default function YouTubeGrowthPlannerV2Tab() {
                   </div>
                   <div className="mt-4 space-y-2 text-sm text-white/65">
                     {trendingTagSuggestions.map((tag) => <p key={`${tag.tag}-why`}><span className="text-white">#{tag.tag}</span>: {tag.why}</p>)}
-                  </div>
-                </PanelCardSoft>
-              ) : null}
-
-              {dataInsights.topVideos.chartData.length ? (
-                <PanelCardSoft id="top-performing-videos" className="border border-white/10 p-5 transition-all hover:-translate-y-1 hover:bg-white/5">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <h3 className="text-xl font-semibold text-white">Top Performing Videos</h3>
-                      <p className="mt-2 text-sm text-white/45">Based on view count from your recent uploads.</p>
-                    </div>
-                    <Badge className={`${confidenceClass(dataInsights.topVideos.confidence)} hover:brightness-100`}>{dataInsights.topVideos.confidence}</Badge>
-                  </div>
-                  <div className="mt-4 space-y-3">
-                    {dataInsights.topVideos.chartData.map((video) => (
-                      <a key={video.id} href={video.url} target="_blank" rel="noreferrer" className="block rounded-xl border border-white/10 bg-white/3 p-4 transition-all hover:bg-white/5">
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="line-clamp-2 font-semibold text-white">{video.title}</p>
-                            <p className="mt-1 text-xs text-white/45">{formatIsoDate(video.publishedAt)} · {formatNumber(video.views)} views · {video.hookType} hook · {video.titleLength} chars</p>
-                            {video.tags?.length ? <p className="mt-2 text-xs text-white/55">{video.tags.map((tag) => `#${tag}`).join(" ")}</p> : null}
-                          </div>
-                          <span className="rounded-full border border-emerald-400/25 bg-emerald-500/10 px-3 py-1 text-xs text-emerald-100">{formatNumber(video.views)}</span>
-                        </div>
-                      </a>
-                    ))}
-                  </div>
-                  <div className="mt-4 space-y-2 text-sm text-white/65">
-                    <p>{dataInsights.topVideos.summary}</p>
-                    <p className="text-white/55">{dataInsights.topVideos.recommendation}</p>
-                  </div>
-                </PanelCardSoft>
-              ) : null}
-
-              {dataInsights.underperformingVideos.chartData.length ? (
-                <PanelCardSoft id="underperforming-videos" className="border border-white/10 p-5 transition-all hover:-translate-y-1 hover:bg-white/5">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <h3 className="text-xl font-semibold text-white">Underperforming Videos</h3>
-                      <p className="mt-2 text-sm text-white/45">Lowest view counts (excluding uploads from the last 24 hours).</p>
-                    </div>
-                    <Badge className={`${confidenceClass(dataInsights.underperformingVideos.confidence)} hover:brightness-100`}>{dataInsights.underperformingVideos.confidence}</Badge>
-                  </div>
-                  <div className="mt-4 space-y-3">
-                    {dataInsights.underperformingVideos.chartData.map((video) => (
-                      <a key={video.id} href={video.url} target="_blank" rel="noreferrer" className="block rounded-xl border border-white/10 bg-white/3 p-4 transition-all hover:bg-white/5">
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="line-clamp-2 font-semibold text-white">{video.title}</p>
-                            <p className="mt-1 text-xs text-white/45">{formatIsoDate(video.publishedAt)} · {formatNumber(video.views)} views · {video.hookType} hook · {video.titleLength} chars</p>
-                            <p className="mt-2 text-xs text-white/55">Why: {video.reason}</p>
-                          </div>
-                          <span className="rounded-full border border-red-400/25 bg-red-500/10 px-3 py-1 text-xs text-red-100">{formatNumber(video.views)}</span>
-                        </div>
-                      </a>
-                    ))}
-                  </div>
-                  <div className="mt-4 space-y-2 text-sm text-white/65">
-                    <p>{dataInsights.underperformingVideos.summary}</p>
-                    <p className="text-white/55">{dataInsights.underperformingVideos.recommendation}</p>
                   </div>
                 </PanelCardSoft>
               ) : null}

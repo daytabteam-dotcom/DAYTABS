@@ -256,7 +256,26 @@ export function deriveYoutubeDataInsights(input: {
 
   const subscriberGrowth = (() => {
     const points = [...analyticsDaily].filter((point) => point.date).sort((a, b) => a.date.localeCompare(b.date));
-    const spike = points.length ? [...points].sort((a, b) => b.subscribersNet - a.subscribersNet)[0] : null;
+    const todayIso = new Date().toISOString().slice(0, 10);
+    const padded = points.length ? (() => {
+      const byDate = new Map(points.map((p) => [p.date, p]));
+      const start = points[0]!.date;
+      const out: YoutubeAnalyticsPoint[] = [];
+      for (let cursor = start; cursor <= todayIso; cursor = addDaysIso(cursor, 1)) {
+        const hit = byDate.get(cursor);
+        out.push(hit ?? {
+          date: cursor,
+          views: 0,
+          subscribersGained: 0,
+          subscribersLost: 0,
+          subscribersNet: 0,
+          estimatedMinutesWatched: 0,
+          averageViewDuration: 0,
+        });
+      }
+      return out;
+    })() : [];
+    const spike = padded.length ? [...padded].sort((a, b) => b.subscribersNet - a.subscribersNet)[0] : null;
     const spikeIso = spike?.date ?? null;
     const spikeVideo = spikeIso
       ? [...visibleVideos].find((video) => isoFromPublishedAt(video.publishedAt) === spikeIso)
@@ -277,7 +296,7 @@ export function deriveYoutubeDataInsights(input: {
       markerByDate.set(iso, items);
     }
 
-    const timeline = points.map((point) => ({
+    const timeline = padded.map((point) => ({
       date: point.date.slice(5),
       rawDate: point.date,
       subscribersNet: point.subscribersNet,
