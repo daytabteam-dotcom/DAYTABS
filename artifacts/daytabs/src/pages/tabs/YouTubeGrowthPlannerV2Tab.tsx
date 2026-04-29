@@ -286,6 +286,8 @@ interface VideoDiagnostic {
   conceptType: string;
   timing: string;
   suggestion: string;
+  titleInOptimalRange: boolean;
+  timingInOptimalSlot: boolean;
 }
 
 interface YoutubeStatus {
@@ -1016,6 +1018,7 @@ function buildVideoDiagnostics(
       return hour >= item.start && hour < item.end;
     }) : null;
     const strongestWindow = bestTime.highest ? `${bestTime.highest.day} ${bestTime.highest.hour === "00:00" ? "00:00-06:00" : bestTime.highest.hour === "06:00" ? "06:00-12:00" : bestTime.highest.hour === "12:00" ? "12:00-18:00" : "18:00-24:00"}` : "your strongest window";
+    const isInStrongestWindow = Boolean(bestTime.highest && bucket && postedDay === bestTime.highest.day && bucket.label === bestTime.highest.hour);
     return {
       video,
       hook: kind === "top"
@@ -1036,6 +1039,8 @@ function buildVideoDiagnostics(
       suggestion: kind === "top"
         ? `Repeat the ${type.toLowerCase()} hook pattern, keep the title close to ${titleLengthSummary.winningBucket ? `${titleLengthSummary.winningBucket.min}-${Number.isFinite(titleLengthSummary.winningBucket.max) ? titleLengthSummary.winningBucket.max : "70+"}` : "35-55"} characters, and publish in a proven window.`
         : `Try a stronger hook like "What happens if ${video.title.replace(/[?!.]+$/, "").slice(0, 58)}?" or "I tested ${video.title.replace(/[?!.]+$/, "").slice(0, 58)} so you do not have to." Pair it with tighter niche tags and your best posting window.`,
+      titleInOptimalRange: inRange,
+      timingInOptimalSlot: isInStrongestWindow,
     } satisfies VideoDiagnostic;
   });
 }
@@ -1595,13 +1600,13 @@ function VideoDiagnosticCard({
     const time = date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
     return `${weekday} ${time}`;
   })();
-  const metricItems: Array<{ label: string; value: string; Icon: LucideIcon; className: string }> = [
-    { label: "Hook", value: diagnostic.hook, Icon: Sparkles, className: positive ? "text-emerald-200" : "text-red-200" },
-    { label: "Tags", value: diagnostic.tags, Icon: Hash, className: "text-amber-200" },
-    { label: "Title length", value: diagnostic.titleLength, Icon: Type, className: "text-sky-200" },
-    { label: "Concept", value: diagnostic.conceptType, Icon: Paintbrush, className: "text-pink-200" },
-    { label: "Timing", value: diagnostic.timing, Icon: Clock, className: "text-violet-200" },
-    { label: positive ? "Repeat this" : "Suggested fix", value: diagnostic.suggestion, Icon: Lightbulb, className: positive ? "text-emerald-200" : "text-amber-200" },
+  const titleTone = diagnostic.titleInOptimalRange ? "good" : "warn";
+  const timingTone = diagnostic.timingInOptimalSlot ? "good" : "warn";
+
+  const metricItems: Array<{ label: string; value: string; Icon: LucideIcon; iconClassName: string; tone?: "good" | "warn" }> = [
+    { label: "Tags", value: diagnostic.tags, Icon: Hash, iconClassName: "text-amber-200" },
+    { label: "Title length", value: diagnostic.titleLength, Icon: Type, iconClassName: titleTone === "good" ? "text-emerald-200" : "text-amber-200", tone: titleTone },
+    { label: "Timing", value: diagnostic.timing, Icon: Clock, iconClassName: timingTone === "good" ? "text-emerald-200" : "text-amber-200", tone: timingTone },
   ];
 
   return (
@@ -1645,11 +1650,17 @@ function VideoDiagnosticCard({
         </div>
       </div>
       <div className="mt-4 grid gap-2 md:grid-cols-2">
-        {metricItems.map(({ label, value, Icon, className }) => (
-          <div key={label} className="rounded-xl border border-white/10 bg-white/3.5 p-3">
+        {metricItems.map(({ label, value, Icon, iconClassName, tone }) => (
+          <div
+            key={label}
+            className={cn(
+              "rounded-xl border p-3",
+              tone === "good" ? "border-emerald-300/20 bg-emerald-500/10" : tone === "warn" ? "border-amber-300/20 bg-amber-500/10" : "border-white/10 bg-white/3.5",
+            )}
+          >
             <div className="mb-2 flex items-center gap-2">
               <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/5">
-                <Icon className={cn("h-4 w-4", className)} />
+                <Icon className={cn("h-4 w-4", iconClassName)} />
               </span>
               <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-white/40">{label}</p>
             </div>
@@ -2872,12 +2883,11 @@ export default function YouTubeGrowthPlannerV2Tab() {
     deltaPercent: row.deltaPercent,
   })), [dataInsights.tagsPerformance.chartData]);
   const existingTags = useMemo(() => new Set(tagPerformance.map((item) => item.tag)), [tagPerformance]);
-  const trendingTagSuggestions = useMemo(() => dataInsights.tagsToTest.chartData.map((item) => ({
-    tag: item.tag,
-    signal: 1,
-    why: item.reason,
-    bestUse: item.relatedTopVideo ? `Related: "${item.relatedTopVideo}"` : "",
-  })), [dataInsights.tagsToTest.chartData]);
+  const trendVideos = useMemo(() => (contextSnapshot?.trends ?? []) as RecentVideo[], [contextSnapshot?.trends]);
+  const trendingTagSuggestions = useMemo(
+    () => deriveTrendingTagSuggestions(planPayload.viralTags, trendVideos, existingTags),
+    [existingTags, planPayload.viralTags, trendVideos],
+  );
   const competitorRows = useMemo(() => deriveCompetitorRows(ownSubscribers, recentVideos, status?.competitors ?? []), [ownSubscribers, recentVideos, status?.competitors]);
   const recentVideoById = useMemo(() => new Map(recentVideos.map((video) => [video.id, video])), [recentVideos]);
   const resultsByDay = useMemo(() => new Map(latestResults.map((result) => [result.dayIndex, result])), [latestResults]);
@@ -3762,6 +3772,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
           </div>
         </PanelCard>
       </div>
+      {consistencySection}
     </div>
   );
 
@@ -3886,8 +3897,6 @@ export default function YouTubeGrowthPlannerV2Tab() {
 
           {activeSubtab === "insights" ? (
             <>
-          {consistencySection}
-
 	          <PanelCard id="performance-signals" className="scroll-mt-24 p-6 transition-all hover:-translate-y-1 hover:bg-white/4">
 	            <div className="flex flex-wrap items-center justify-between gap-3">
 	              <div>
@@ -3949,20 +3958,24 @@ export default function YouTubeGrowthPlannerV2Tab() {
               <section id="top-performing-videos" className="scroll-mt-24">
                 <PanelCardSoft className="border border-white/10 p-5 transition-all hover:-translate-y-1 hover:bg-white/5">
                   <div className="grid gap-4 2xl:grid-cols-2">
-                    <AnalysisLane
-                      title="Top Performing Videos"
-                      subtitle="Your highest-view uploads in this range, with deterministic patterns (hook, tags, timing, title length)."
-                      Icon={TrendingUp}
-                      diagnostics={topPerformingDiagnostics}
-                      tone="positive"
-                    />
-                    <AnalysisLane
-                      title="Underperforming Videos"
-                      subtitle="Your lowest-view uploads in this range (excluding last 24h), with deterministic patterns to test."
-                      Icon={TrendingDown}
-                      diagnostics={underperformingDiagnostics}
-                      tone="negative"
-                    />
+                    <div>
+                      <AnalysisLane
+                        title="Top Performing Videos"
+                        subtitle="Your highest-view uploads in this range, with deterministic patterns (tags, timing, title length)."
+                        Icon={TrendingUp}
+                        diagnostics={topPerformingDiagnostics}
+                        tone="positive"
+                      />
+                    </div>
+                    <div id="underperforming-videos" className="scroll-mt-24">
+                      <AnalysisLane
+                        title="Underperforming Videos"
+                        subtitle="Your lowest-view uploads in this range (excluding last 24h), with deterministic patterns to test."
+                        Icon={TrendingDown}
+                        diagnostics={underperformingDiagnostics}
+                        tone="negative"
+                      />
+                    </div>
                   </div>
                 </PanelCardSoft>
               </section>
@@ -4022,18 +4035,23 @@ export default function YouTubeGrowthPlannerV2Tab() {
                         </tr>
                       </thead>
                       <tbody>
-                        {Array.from({ length: 5 }).map((_, index) => {
-                          const top = winningTitleBucketDetail?.topTitles?.[index];
-                          const bottom = winningTitleBucketDetail?.bottomTitles?.[index];
-                          return (
-                            <tr key={`title-row-${index}`} className="border-t border-white/10">
-                              <td className="px-4 py-3 text-white">{top?.title ?? "No data"}</td>
-                              <td className="px-4 py-3 text-white/65">{top ? `${top.titleLength} · ${formatNumber(top.views)}` : "No data"}</td>
-                              <td className="px-4 py-3 text-white">{bottom?.title ?? "No data"}</td>
-                              <td className="px-4 py-3 text-white/65">{bottom ? `${bottom.titleLength} · ${formatNumber(bottom.views)}` : "No data"}</td>
-                            </tr>
-                          );
-                        })}
+                        {(() => {
+                          const topRows = (winningTitleBucketDetail?.topTitles ?? []).slice(0, 5);
+                          const bottomRows = (winningTitleBucketDetail?.bottomTitles ?? []).slice(0, 5);
+                          const rows = Math.min(5, Math.max(topRows.length, bottomRows.length));
+                          return Array.from({ length: rows }).map((_, index) => {
+                            const top = topRows[index];
+                            const bottom = bottomRows[index];
+                            return (
+                              <tr key={`title-row-${index}`} className="border-t border-white/10">
+                                <td className="px-4 py-3 text-white">{top?.title ?? ""}</td>
+                                <td className="px-4 py-3 text-white/65">{top ? `${top.titleLength} · ${formatNumber(top.views)}` : ""}</td>
+                                <td className="px-4 py-3 text-white">{bottom?.title ?? ""}</td>
+                                <td className="px-4 py-3 text-white/65">{bottom ? `${bottom.titleLength} · ${formatNumber(bottom.views)}` : ""}</td>
+                              </tr>
+                            );
+                          });
+                        })()}
                       </tbody>
                     </table>
                   </div>
@@ -4126,7 +4144,9 @@ export default function YouTubeGrowthPlannerV2Tab() {
 	                      <h3 className="text-xl font-semibold text-white">{ui.performanceSignals.nicheTagsTitle}</h3>
 	                      <p className="mt-2 text-sm text-white/45">{ui.performanceSignals.nicheTagsSubtitle}</p>
 	                    </div>
-	                    <Badge className={`${confidenceClass(dataInsights.tagsToTest.confidence)} hover:brightness-100`}>{dataInsights.tagsToTest.confidence}</Badge>
+	                    <Badge className={`${confidenceClass(trendingTagSuggestions.length >= 6 ? "high" : trendingTagSuggestions.length >= 3 ? "medium" : "low")} hover:brightness-100`}>
+                        {trendingTagSuggestions.length >= 6 ? "high" : trendingTagSuggestions.length >= 3 ? "medium" : "low"}
+                      </Badge>
 	                  </div>
                   <div className="mt-4 flex flex-wrap gap-2">
                     {trendingTagSuggestions.map((tag) => (
