@@ -372,6 +372,69 @@ type WeeklyComparisonWeekdayRow = {
   youUploads: number;
 } & Record<string, string | number>;
 
+function buildPlanningMemory({
+  latestPlan,
+  days,
+  latestResults,
+  recentVideos,
+  competitors,
+  analytics,
+}: {
+  latestPlan: YoutubeWeeklyPlan | null;
+  days: PlanDay[];
+  latestResults: YoutubePlanResult[];
+  recentVideos: RecentVideo[];
+  competitors: YoutubeCompetitor[];
+  analytics: YoutubeAnalyticsPoint[];
+}) {
+  const postedDayIndexes = new Set(latestResults.map((result) => result.dayIndex));
+
+  return {
+    previousWeek: {
+      startDate: latestPlan?.startDate,
+      endDate: latestPlan?.endDate,
+
+      completedIdeas: days.filter((day) => postedDayIndexes.has(day.day)),
+      notCompletedIdeas: days.filter((day) => !postedDayIndexes.has(day.day) && !day.isDeleted),
+      deletedIdeas: days.filter((day) => day.isDeleted),
+      likedAiIdeas: days.filter((day) => day.ideaOrigin === "ai" && day.aiFeedback === "liked"),
+      dislikedAiIdeas: days.filter((day) => day.ideaOrigin === "ai" && day.aiFeedback === "disliked"),
+      manualIdeas: days.filter((day) => day.ideaOrigin === "manual"),
+
+      stageBreakdown: {
+        idea: days.filter((day) => day.stage === "idea").length,
+        recording: days.filter((day) => day.stage === "recording").length,
+        editing: days.filter((day) => day.stage === "editing").length,
+        draft: days.filter((day) => day.stage === "draft").length,
+        published: days.filter((day) => day.stage === "published").length,
+      },
+    },
+
+    performance: {
+      recentVideos: recentVideos.slice(0, 20),
+      topVideos: [...recentVideos]
+        .sort((a, b) => Number(b.viewCount || 0) - Number(a.viewCount || 0))
+        .slice(0, 5),
+      weakVideos: [...recentVideos]
+        .sort((a, b) => Number(a.viewCount || 0) - Number(b.viewCount || 0))
+        .slice(0, 5),
+      analytics: analytics.slice(-30),
+    },
+
+    competitors: competitors.slice(0, 5),
+
+    generationRules: [
+      "Create more ideas similar to manual ideas the user added themselves.",
+      "Create more ideas similar to AI ideas the user liked.",
+      "Avoid patterns from deleted or disliked AI ideas.",
+      "Do not repeat last week's unfinished ideas unless they are clearly strong and should be rescheduled.",
+      "Prioritize formats proven by top recent videos.",
+      "Use competitor ideas only as inspiration, not copies.",
+      "Generate a practical weekly plan based on the user's preferred posting frequency.",
+    ],
+  };
+}
+
 const WEEKDAY_VIEW_COLORS = ["#38bdf8", "#f97316", "#a78bfa", "#f43f5e", "#22c55e", "#eab308", "#14b8a6"];
 
 const daysOfWeek = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -3076,7 +3139,19 @@ export default function YouTubeGrowthPlannerV2Tab() {
     setWorking("plan");
     setError(null);
     try {
-      await jsonFetch("/api/youtube/plans/generate", { method: "POST", body: "{}" });
+      await jsonFetch("/api/youtube/plans/generate", {
+        method: "POST",
+        body: JSON.stringify({
+          planningMemory: buildPlanningMemory({
+            latestPlan,
+            days,
+            latestResults: status?.latestResults ?? [],
+            recentVideos: status?.channel?.recentVideos ?? [],
+            competitors: status?.competitors ?? [],
+            analytics: status?.channelAnalytics?.daily ?? [],
+          }),
+        }),
+      });
       await loadStatus();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not generate YouTube plan");

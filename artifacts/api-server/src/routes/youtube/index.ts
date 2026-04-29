@@ -1419,7 +1419,10 @@ router.delete("/competitors/:competitorId", requireAuth, async (req, res) => {
 router.post("/plans/generate", requireAuth, async (req, res) => {
   try {
     const uiLocale = getUiLocaleFromRequest(req);
-    const plan = await generateYoutubeWeeklyPlan(req.auth!.user_id, { uiLocale });
+    const planningMemory = req.body?.planningMemory && typeof req.body.planningMemory === "object"
+      ? req.body.planningMemory
+      : null;
+    const plan = await generateYoutubeWeeklyPlan(req.auth!.user_id, { uiLocale, planningMemory });
     res.json({ plan });
   } catch (err) {
     req.log.error({ err }, "YouTube plan generation error");

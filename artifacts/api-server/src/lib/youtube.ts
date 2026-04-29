@@ -4869,7 +4869,10 @@ async function updatePlanDay(
   return { plan: saved, day: updatedDay };
 }
 
-export async function generateYoutubeWeeklyPlan(userId: number, options?: { uiLocale?: string | null }) {
+export async function generateYoutubeWeeklyPlan(
+  userId: number,
+  options?: { uiLocale?: string | null; planningMemory?: unknown | null },
+) {
   const [profile] = await db.select().from(youtubeChannelProfilesTable).where(eq(youtubeChannelProfilesTable.userId, userId)).limit(1);
   if (!profile) throw new Error("Connect YouTube before generating a plan");
   const connection = await getYoutubeConnection(userId);
@@ -4970,6 +4973,7 @@ export async function generateYoutubeWeeklyPlan(userId: number, options?: { uiLo
       targetAudience: asString(nicheProfile.targetAudience),
       keywords: asArray(nicheProfile.keywords).map(String).slice(0, 12),
     },
+    planningMemory: (options?.planningMemory && typeof options.planningMemory === "object") ? options.planningMemory : null,
     nextWeek: {
       weekNumber,
       startDate,
@@ -5033,14 +5037,26 @@ export async function generateYoutubeWeeklyPlan(userId: number, options?: { uiLo
     messages: [
       {
         role: "system",
-        content: `You are a YouTube growth strategist who thinks like a top creator, not a content agency.
-Your job is to generate a weekly content plan for one specific creator based on their real channel data, past performance, competitor landscape, current trends, and their feedback on previous AI suggestions.
+        content: `You are generating the user's next weekly YouTube content plan.
+
+Use planningMemory as the main source of truth when it is present.
+
+Important:
+- Manual ideas are the strongest signal of what the user actually wants.
+- Liked AI ideas are positive signals.
+- Deleted and disliked AI ideas are negative signals.
+- Completed/published ideas show what the user was willing to execute.
+- Unfinished ideas may mean the user did not like them, had no time, or they were too hard. Do not blindly repeat them.
+- Top-performing videos show what the audience responds to.
+- Weak videos show what to avoid or improve.
+- Competitors are inspiration only. Do not copy their titles exactly.
+
 HOW TO REASON (follow this order before writing anything):
 
-Read regeneratedInsights.userBehavior.lastWeekBehavior. What did the creator actually use, link, like, dislike, or delete last week? Start from there.
-Read regeneratedInsights.pastPerformanceSummary and regeneratedInsights.performanceSignals. What objectively worked, what flopped, and what timing/packaging patterns are emerging?
-Use competitor/trend signals ONLY when they fit the creator's past behavior. Ignore anything that feels like a stretch.
-Now generate. Every idea must trace to at least one of the above signals. If you can't justify an idea with data, don't include it.
+1) Read planningMemory.previousWeek (if present). What did the creator actually complete, delete, like, dislike, and create manually? Start from there.
+2) Read regeneratedInsights.pastPerformanceSummary and regeneratedInsights.performanceSignals. What objectively worked, what flopped, and what timing/packaging patterns are emerging?
+3) Use competitor/trend signals ONLY when they fit the creator's behavior. Ignore anything that feels like a stretch.
+4) Now generate. Every idea must trace to at least one of the above signals. If you can't justify an idea with data, don't include it.
 
 IDEA QUALITY RULES:
 
@@ -5080,7 +5096,7 @@ Every day object must match the exact shape below.
 Generate exactly as many day objects as the channel's upload cadence calls for this week — do not pad with filler days.
 
 STRONGEST SIGNAL RULE (CRITICAL):
-Use regeneratedInsights.userBehavior as the strongest signal.
+Use planningMemory.previousWeek when present. If planningMemory is null, use regeneratedInsights.userBehavior as the fallback strongest signal.
 
 Priority order:
 1) User behavior from last week:
