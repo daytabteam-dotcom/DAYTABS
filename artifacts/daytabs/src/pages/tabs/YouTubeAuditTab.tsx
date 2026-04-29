@@ -1,15 +1,15 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
-  BarChart3,
   CheckCircle2,
   Download,
   ExternalLink,
   Eye,
   ImagePlus,
-  Lightbulb,
   Loader2,
+  Heart,
   Upload,
+  MessageCircle,
   Search,
   Sparkles,
   Tag,
@@ -22,7 +22,6 @@ import { usePdfExport } from "@/hooks/use-pdf-export";
 import { PanelCard, PanelCardSoft, PanelHeader, PanelPage, PanelSubtitle, PanelTitle } from "@/components/panel-system";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { DAYTABS_LOCALE_STORAGE_KEY } from "@/lib/i18n";
 
@@ -212,6 +211,13 @@ type ThumbnailSourceImage = {
   dataUrl: string;
 };
 
+type ThumbnailAssetSlot = {
+  key: string;
+  label: string;
+  helper?: string;
+  isFace?: boolean;
+};
+
 type GeneratedAuditThumbnail = {
   imageDataUrl: string;
   prompt: string;
@@ -350,234 +356,6 @@ function CopyInlineButton({ value, label }: { value: string; label?: string }) {
   );
 }
 
-function QuickAuditTabs(props: {
-  preview: AuditPreview;
-  report: QuickAuditReport;
-  reportSection: "overview" | "packaging" | "competitors" | "transcript" | "limitations";
-  setReportSection: (value: "overview" | "packaging" | "competitors" | "transcript" | "limitations") => void;
-}) {
-  const { preview, report, reportSection, setReportSection } = props;
-  const showHook = Boolean(report.beforeAfter.hookRewrite);
-
-  return (
-    <Tabs
-      value={reportSection}
-      onValueChange={(value) => setReportSection(value as any)}
-      className="space-y-4"
-      data-audit-report-tabs="true"
-    >
-      <div className="sticky top-3 z-10 rounded-2xl border border-white/10 bg-black/40 p-2 backdrop-blur">
-        <TabsList className="h-auto w-full flex-wrap justify-start gap-1 bg-transparent p-0 text-white/60">
-          <TabsTrigger value="overview" className="rounded-xl px-3 py-2 text-xs font-semibold text-white/60 data-[state=active]:bg-white/[0.08] data-[state=active]:text-white">
-            Audit
-          </TabsTrigger>
-          <TabsTrigger value="packaging" className="rounded-xl px-3 py-2 text-xs font-semibold text-white/60 data-[state=active]:bg-white/[0.08] data-[state=active]:text-white">
-            Before / After
-          </TabsTrigger>
-          <TabsTrigger value="competitors" className="rounded-xl px-3 py-2 text-xs font-semibold text-white/60 data-[state=active]:bg-white/[0.08] data-[state=active]:text-white">
-            Competitors
-          </TabsTrigger>
-          <TabsTrigger value="transcript" className="rounded-xl px-3 py-2 text-xs font-semibold text-white/60 data-[state=active]:bg-white/[0.08] data-[state=active]:text-white">
-            Transcript tools
-          </TabsTrigger>
-          <TabsTrigger value="limitations" className="rounded-xl px-3 py-2 text-xs font-semibold text-white/60 data-[state=active]:bg-white/[0.08] data-[state=active]:text-white">
-            Notes
-          </TabsTrigger>
-        </TabsList>
-      </div>
-
-      <TabsContent value="overview" forceMount data-pdf-tab-section="true" className="mt-0 space-y-4">
-        <div className="grid gap-4 lg:grid-cols-[1.05fr,0.95fr]">
-          <PanelCard className="p-5">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div className="min-w-0">
-                <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Quick audit</p>
-                <p className="mt-3 text-sm leading-6 text-white/78">{report.oneSentenceDiagnosis}</p>
-              </div>
-              <ScoreRing score={report.score} label={report.scoreLabel} />
-            </div>
-            <div className="mt-5 rounded-2xl border border-emerald-400/10 bg-emerald-500/5 p-4">
-              <p className="text-[11px] uppercase tracking-[0.14em] text-emerald-100/55">Do this first</p>
-              <p className="mt-2 text-sm font-semibold text-white">{report.doThisFirst.action}</p>
-              <p className="mt-2 text-xs leading-6 text-white/60">{report.doThisFirst.why}</p>
-              <p className="mt-2 text-xs leading-6 text-white/60">{report.doThisFirst.expectedImpact}</p>
-            </div>
-          </PanelCard>
-
-          <PanelCard className="p-5">
-            <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Top 3 fixes</p>
-            <div className="mt-4 space-y-3">
-              {report.topFixes.slice(0, 3).map((fix) => (
-                <div key={`${fix.area}-${fix.priority}`} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="text-sm font-semibold text-white capitalize">{fix.area}</p>
-                    <div className="flex items-center gap-2">
-                      <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/65">
-                        Priority {fix.priority}
-                      </span>
-                      <span className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] ${confidenceClass(fix.confidence)}`}>
-                        {fix.confidence}
-                      </span>
-                    </div>
-                  </div>
-                  <p className="mt-2 text-sm text-white/78">{fix.problem}</p>
-                  {fix.evidence ? <p className="mt-2 text-xs leading-6 text-white/55">{fix.evidence}</p> : null}
-                  <div className="mt-3 rounded-xl border border-emerald-400/10 bg-emerald-500/5 p-3">
-                    <p className="text-[11px] uppercase tracking-[0.14em] text-emerald-100/55">Fix</p>
-                    <p className="mt-2 text-sm leading-6 text-white/82">{fix.fix}</p>
-                    {fix.example ? (
-                      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-                        <p className="text-xs text-white/60">Example: {fix.example}</p>
-                        <CopyInlineButton value={fix.example} />
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </PanelCard>
-        </div>
-
-        <PanelCard className="p-5">
-          <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Thumbnail direction</p>
-          <div className="mt-4 grid gap-4 lg:grid-cols-[220px,1fr]">
-            {preview.video.thumbnailUrl ? (
-              <img src={preview.video.thumbnailUrl} alt={preview.video.title} className="h-32 w-full rounded-2xl border border-white/10 object-cover" />
-            ) : (
-              <div className="grid h-32 place-items-center rounded-2xl border border-white/10 bg-white/[0.03] text-xs text-white/55">
-                No thumbnail preview
-              </div>
-            )}
-            <div className="space-y-3">
-              <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                <p className="text-sm font-semibold text-white">{report.thumbnailFix.concept || "New thumbnail concept"}</p>
-                <p className="mt-2 text-xs leading-6 text-white/60">{report.thumbnailFix.problem}</p>
-              </div>
-              <div className="grid gap-3 md:grid-cols-2">
-                {[
-                  ["Focal subject", report.thumbnailFix.focalSubject],
-                  ["Text overlay", report.thumbnailFix.textOverlay],
-                  ["Layout", report.thumbnailFix.layout],
-                  ["Emotion", report.thumbnailFix.emotion],
-                ].map(([label, value]) => (
-                  <div key={label} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                    <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">{label}</p>
-                    <p className="mt-2 text-sm text-white/78">{value || "—"}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </PanelCard>
-      </TabsContent>
-
-      <TabsContent value="packaging" forceMount data-pdf-tab-section="true" className="mt-0 space-y-4">
-        <div className="grid gap-4 xl:grid-cols-[1fr,1fr]">
-          <PanelCard className="p-5">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Current title</p>
-                <p className="mt-2 text-sm font-semibold text-white">{report.beforeAfter.currentTitle}</p>
-              </div>
-              <CopyInlineButton value={report.beforeAfter.currentTitle} />
-            </div>
-            <div className="mt-5 rounded-2xl border border-emerald-400/10 bg-emerald-500/5 p-4">
-              <p className="text-[11px] uppercase tracking-[0.14em] text-emerald-100/55">Better titles</p>
-              <div className="mt-3 space-y-2">
-                {report.beforeAfter.betterTitles.slice(0, 6).map((title) => (
-                  <div key={title} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/10 bg-black/20 px-3 py-2">
-                    <p className="text-sm text-white/85">{title}</p>
-                    <CopyInlineButton value={title} />
-                  </div>
-                ))}
-              </div>
-            </div>
-          </PanelCard>
-
-          <PanelCard className="p-5">
-            <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Description rewrite</p>
-            <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-white/78">{report.beforeAfter.descriptionRewrite}</p>
-            <div className="mt-4">
-              <CopyInlineButton value={report.beforeAfter.descriptionRewrite} label="Copy description" />
-            </div>
-          </PanelCard>
-        </div>
-
-        {showHook ? (
-          <PanelCard className="p-5">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div className="min-w-0">
-                <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Better first 15 seconds</p>
-                <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-white/82">{report.beforeAfter.hookRewrite}</p>
-              </div>
-              <CopyInlineButton value={report.beforeAfter.hookRewrite || ""} label="Copy hook" />
-            </div>
-          </PanelCard>
-        ) : null}
-      </TabsContent>
-
-      <TabsContent value="competitors" forceMount data-pdf-tab-section="true" className="mt-0 space-y-4">
-        <PanelCard className="p-5">
-          <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Competitor patterns (inspiration only)</p>
-          <p className="mt-3 text-sm leading-6 text-white/78">{report.competitorPattern.summary}</p>
-          <div className="mt-5 grid gap-4 md:grid-cols-2">
-            <div className="rounded-2xl border border-emerald-400/10 bg-emerald-500/5 p-4">
-              <p className="text-[11px] uppercase tracking-[0.14em] text-emerald-100/55">Patterns to borrow</p>
-              <ul className="mt-3 space-y-2">
-                {report.competitorPattern.patternsToBorrow.map((item) => (
-                  <li key={item} className="text-sm text-white/80">{item}</li>
-                ))}
-              </ul>
-            </div>
-            <div className="rounded-2xl border border-rose-400/10 bg-rose-500/5 p-4">
-              <p className="text-[11px] uppercase tracking-[0.14em] text-rose-100/55">Patterns to avoid</p>
-              <ul className="mt-3 space-y-2">
-                {report.competitorPattern.patternsToAvoid.map((item) => (
-                  <li key={item} className="text-sm text-white/80">{item}</li>
-                ))}
-              </ul>
-            </div>
-          </div>
-        </PanelCard>
-
-        <PanelCard className="p-5">
-          <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Tags</p>
-          <p className="mt-3 text-sm text-white/78">{report.tags.why}</p>
-          <div className="mt-4 flex flex-wrap gap-2">
-            {report.tags.recommended.map((tag) => (
-              <span key={tag} className="rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
-                {tag}
-              </span>
-            ))}
-          </div>
-        </PanelCard>
-      </TabsContent>
-
-      <TabsContent value="transcript" forceMount data-pdf-tab-section="true" className="mt-0 space-y-4">
-        <PanelCard className="p-5">
-          <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Transcript tools</p>
-          <p className="mt-3 text-sm leading-6 text-white/70">
-            Transcript tools (fetch/translate/AI voice) are available in the deep-audit view right now.
-          </p>
-          <p className="mt-2 text-xs leading-6 text-white/45">
-            Quick audit keeps cost low by not pulling full transcript data into the report payload.
-          </p>
-        </PanelCard>
-      </TabsContent>
-
-      <TabsContent value="limitations" forceMount data-pdf-tab-section="true" className="mt-0 space-y-4">
-        <PanelCard className="p-5">
-          <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Notes</p>
-          <ul className="mt-4 space-y-2">
-            {report.limitations.map((item, index) => (
-              <li key={`${item}-${index}`} className="text-sm text-white/70">{item}</li>
-            ))}
-          </ul>
-        </PanelCard>
-      </TabsContent>
-    </Tabs>
-  );
-}
 
 async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
   const token = localStorage.getItem("daytabs_token");
@@ -785,10 +563,12 @@ export default function YouTubeAuditTab() {
   const [thumbnailModalOpen, setThumbnailModalOpen] = useState(false);
   const [thumbnailTextPreference, setThumbnailTextPreference] = useState("");
   const [thumbnailSourceImages, setThumbnailSourceImages] = useState<ThumbnailSourceImage[]>([]);
+  const [thumbnailAssetAlternatives, setThumbnailAssetAlternatives] = useState<Record<string, string>>({});
   const [preserveThumbnailSourceImage, setPreserveThumbnailSourceImage] = useState(true);
   const [thumbnailStyle, setThumbnailStyle] = useState<string>("Professional");
   const [generatedThumbnail, setGeneratedThumbnail] = useState<GeneratedAuditThumbnail | null>(null);
   const [thumbnailWorking, setThumbnailWorking] = useState(false);
+  const [thumbnailPrompt, setThumbnailPrompt] = useState("");
 
   const [loadingTranscript, setLoadingTranscript] = useState(false);
   const [editableTranscript, setEditableTranscript] = useState<EditableTranscriptResponse["editableTranscript"] | null>(null);
@@ -807,7 +587,6 @@ export default function YouTubeAuditTab() {
   const [translationAudio, setTranslationAudio] = useState<TranslationAudioResponse | null>(null);
 
   const [savedAuditsOpen, setSavedAuditsOpen] = useState(false);
-  const [reportSection, setReportSection] = useState<"overview" | "packaging" | "competitors" | "transcript" | "limitations">("overview");
 
   const isStudio = plan.isStudio;
   const isRunningAudit = loadingPreview || loadingReport;
@@ -820,18 +599,6 @@ export default function YouTubeAuditTab() {
   useEffect(() => {
     setSavedAudits(loadSavedAudits());
   }, []);
-
-  const topMetrics = useMemo(() => {
-    const source = "video" in (report ?? {}) ? (report as DeepAuditReport).video : preview?.video;
-    const performance = "performanceContext" in (report ?? {}) ? (report as DeepAuditReport).performanceContext : null;
-    if (!source) return [];
-    return [
-      { label: "Views", value: formatNumber(source.viewCount) },
-      { label: "Likes", value: formatNumber(source.likeCount) },
-      { label: "Comments", value: formatNumber(source.commentCount) },
-      { label: "Views / day", value: formatNumber(performance?.viewsPerDay) },
-    ];
-  }, [preview, report]);
 
   useEffect(() => {
     const recommendedStyle =
@@ -846,12 +613,39 @@ export default function YouTubeAuditTab() {
   const normalizedTranslatedSegments = useMemo(() => sanitizeSegments(translatedSegments), [translatedSegments]);
   const deepReport = report && (report as QuickAuditReport).auditMode !== "quick" ? (report as DeepAuditReport) : null;
   const reportDeepUnsafe = deepReport as unknown as AuditReport;
+  const isQuickReport = report ? (report as QuickAuditReport).auditMode === "quick" : false;
+  const quickReport = isQuickReport ? (report as QuickAuditReport) : null;
+
+  function scrollToSection(sectionId: string) {
+    const node = document.getElementById(sectionId);
+    if (!node) return;
+    node.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  const quickFix = (area: QuickAuditReport["topFixes"][number]["area"]) => quickReport?.topFixes.find((item) => item.area === area) ?? null;
+  const deepDiagnosis = (area: DeepAuditReport["diagnosis"][number]["area"]) => deepReport?.diagnosis.find((item) => item.area === area) ?? null;
+  const transcriptSeemsAvailable = Boolean(
+    editableTranscript?.transcript.available
+    || editableTranscript?.captions.available
+    || deepReport?.transcript.available
+    || preview?.transcript.available
+    || preview?.captions.available,
+  );
+
+  function currentHookFromTranscriptSegments(segmentsToUse: TranscriptSegment[]) {
+    if (!segmentsToUse.length) return null;
+    const snippet = segmentsToUse
+      .filter((segment) => segment.start < 15)
+      .map((segment) => segment.text.trim())
+      .filter(Boolean)
+      .join(" ");
+    return snippet.trim() || null;
+  }
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     if (!videoUrl.trim()) return;
     setSavedAuditsOpen(false);
-    setReportSection("overview");
     setLoadingPreview(true);
     setLoadingReport(false);
     setError(null);
@@ -905,32 +699,6 @@ export default function YouTubeAuditTab() {
       setError(err instanceof Error ? err.message : "Failed to audit video");
     } finally {
       setLoadingPreview(false);
-      setLoadingReport(false);
-    }
-  }
-
-  async function runDeepAudit() {
-    if (!videoUrl.trim() || !preview) return;
-    setLoadingReport(true);
-    setError(null);
-    try {
-      const reportData = await jsonFetch<{ report: DeepAuditReport }>("/api/youtube/audit", {
-        method: "POST",
-        body: JSON.stringify({ videoUrl: videoUrl.trim(), auditMode: "deep" }),
-      });
-      const normalizedReport = normalizeSavedAuditCard({
-        id: "",
-        videoUrl: videoUrl.trim(),
-        savedAt: new Date().toISOString(),
-        preview,
-        report: reportData.report,
-        generatedThumbnail: generatedThumbnail ?? null,
-      }).report;
-      setReport(normalizedReport);
-      setReportSection("overview");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to run deep audit");
-    } finally {
       setLoadingReport(false);
     }
   }
@@ -1155,66 +923,127 @@ export default function YouTubeAuditTab() {
     }
   }
 
-  async function handleThumbnailSourceFiles(files: FileList | null) {
-    const nextFiles = Array.from(files ?? []).slice(0, 4);
-    if (!nextFiles.length) return;
-    setError(null);
-    try {
-      const processed = await Promise.all(nextFiles.map(async (file) => ({
-        name: file.name,
-        dataUrl: await resizeImageFileToDataUrl(file),
-      })));
-      setThumbnailSourceImages((current) => [...current, ...processed].slice(0, 4));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not read source images");
-    }
-  }
-
   function openThumbnailModal() {
     setThumbnailTextPreference("");
     setThumbnailSourceImages([]);
+    setThumbnailAssetAlternatives({});
     setPreserveThumbnailSourceImage(true);
     setGeneratedThumbnail((current) => current);
+    setThumbnailPrompt(buildDefaultThumbnailPrompt());
     setThumbnailModalOpen(true);
+  }
+
+  function inferThumbnailAssetSlots(): ThumbnailAssetSlot[] {
+    const text = [
+      quickReport?.thumbnailFix?.concept,
+      quickReport?.thumbnailFix?.focalSubject,
+      quickReport?.thumbnailFix?.designStyle,
+      deepReport?.fixes.thumbnailIdea,
+      deepReport?.fixes.recommendedThumbnailStyle,
+      deepReport?.visualAudit?.topFix,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+
+    const slots: ThumbnailAssetSlot[] = [];
+    const wantsFace = /\b(face|reaction|expression|eyes|shocked|surprised|portrait|selfie)\b/.test(text);
+    const wantsProduct = /\b(product|tool|device|gadget|camera|microphone|laptop|phone)\b/.test(text);
+    const wantsScreenshot = /\b(screenshot|screen|ui|app|dashboard|analytics|graph|chart)\b/.test(text);
+
+    if (wantsFace) {
+      slots.push({
+        key: "face",
+        label: "Face / subject photo",
+        isFace: true,
+        helper:
+          "Upload the exact face/photo you want to use. DayTabs will only improve lighting, sharpness, color, background, and composition. It will NOT change your face.",
+      });
+    }
+    if (wantsProduct) slots.push({ key: "product", label: "Product / object image" });
+    if (wantsScreenshot) slots.push({ key: "screenshot", label: "Screenshot / UI image" });
+
+    if (!slots.length) {
+      slots.push({ key: "optional", label: "Optional image (face/product/screenshot)" });
+    }
+
+    return slots;
+  }
+
+  function buildDefaultThumbnailPrompt() {
+    const quick = quickReport;
+    const deep = deepReport;
+    const base = [
+      quick ? `Quick audit: ${quick.oneSentenceDiagnosis}` : "",
+      quick?.thumbnailFix?.concept ? `Concept: ${quick.thumbnailFix.concept}` : deep?.fixes.thumbnailIdea ? `Concept: ${deep.fixes.thumbnailIdea}` : "",
+      quick?.thumbnailFix?.focalSubject ? `Focal subject: ${quick.thumbnailFix.focalSubject}` : "",
+      quick?.thumbnailFix?.textOverlay ? `Text overlay idea: ${quick.thumbnailFix.textOverlay}` : "",
+      quick?.thumbnailFix?.layout ? `Layout: ${quick.thumbnailFix.layout}` : "",
+      quick?.thumbnailFix?.emotion ? `Emotion: ${quick.thumbnailFix.emotion}` : "",
+      quick?.thumbnailFix?.designStyle ? `Style: ${quick.thumbnailFix.designStyle}` : deep?.fixes.recommendedThumbnailStyle ? `Style: ${deep.fixes.recommendedThumbnailStyle}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    return base;
   }
 
   async function generateAuditThumbnail() {
     if (!preview || !report) return;
-    if ((report as QuickAuditReport).auditMode === "quick") {
-      setError("Thumbnail generation currently requires a deep audit.");
-      return;
-    }
     setThumbnailWorking(true);
     setError(null);
     try {
-      const deepReport = report as DeepAuditReport;
-      const thumbnailDiagnosisNotes = deepReport.diagnosis
-        .filter((item) => item.area === "thumbnail" || item.area === "title" || item.area === "hook")
-        .map((item) => [
-          `${item.area.toUpperCase()} ISSUE: ${item.issue}`,
-          item.evidence ? `Evidence: ${item.evidence}` : "",
-          item.recommendedChange ? `How to improve it: ${item.recommendedChange}` : "",
-        ].filter(Boolean).join("\n"))
+      const quick = (report as QuickAuditReport).auditMode === "quick" ? (report as QuickAuditReport) : null;
+      const deep = quick ? null : (report as DeepAuditReport);
+
+      const diagnosisNotes = deep?.diagnosis?.length
+        ? deep.diagnosis
+          .filter((item) => item.area === "thumbnail" || item.area === "title" || item.area === "hook")
+          .map((item) => [
+            `${item.area.toUpperCase()} ISSUE: ${item.issue}`,
+            item.evidence ? `Evidence: ${item.evidence}` : "",
+            item.recommendedChange ? `How to improve it: ${item.recommendedChange}` : "",
+          ].filter(Boolean).join("\n"))
+          .filter(Boolean)
+          .join("\n\n")
+        : "";
+
+      const assetNotes = Object.entries(thumbnailAssetAlternatives)
+        .map(([key, value]) => (value.trim() ? `${key.toUpperCase()} ALTERNATIVE: ${value.trim()}` : ""))
+        .filter(Boolean)
+        .join("\n");
+
+      const strictFace = "STRICT FACE PRESERVATION: Use uploaded face exactly as-is. Do not modify identity or features. Only improve lighting, sharpness, color, and composition.";
+      const mergedPrompt = [thumbnailPrompt.trim(), strictFace].filter(Boolean).join("\n\n");
+
+      const analysisNotes = [
+        quick ? `Quick audit summary: ${quick.oneSentenceDiagnosis}` : deep?.summary || "",
+        deep?.fixes.packagingStrategy || "",
+        deep?.fixes.thumbnailIdea || "",
+        deep?.visualAudit?.topFix || "",
+        deep?.visualAudit?.lighting ? `Lighting note: ${deep.visualAudit.lighting}` : "",
+        deep?.visualAudit?.framing ? `Framing note: ${deep.visualAudit.framing}` : "",
+        deep?.visualAudit?.sharpness ? `Sharpness note: ${deep.visualAudit.sharpness}` : "",
+        diagnosisNotes,
+        quick?.thumbnailFix?.concept ? `Concept: ${quick.thumbnailFix.concept}` : "",
+        quick?.thumbnailFix?.problem ? `Problem: ${quick.thumbnailFix.problem}` : "",
+        quick?.thumbnailFix?.focalSubject ? `Focal subject: ${quick.thumbnailFix.focalSubject}` : "",
+        quick?.thumbnailFix?.textOverlay ? `Text overlay: ${quick.thumbnailFix.textOverlay}` : "",
+        quick?.thumbnailFix?.layout ? `Layout: ${quick.thumbnailFix.layout}` : "",
+        quick?.thumbnailFix?.emotion ? `Emotion: ${quick.thumbnailFix.emotion}` : "",
+        quick?.thumbnailFix?.designStyle ? `Style: ${quick.thumbnailFix.designStyle}` : "",
+        assetNotes,
+        `PROMPT:\n${mergedPrompt}`,
+      ]
         .filter(Boolean)
         .join("\n\n");
-      const analysisNotes = [
-        deepReport.summary,
-        deepReport.fixes.packagingStrategy,
-        deepReport.fixes.thumbnailIdea,
-        deepReport.visualAudit?.topFix || "",
-        deepReport.visualAudit?.lighting ? `Lighting note: ${deepReport.visualAudit.lighting}` : "",
-        deepReport.visualAudit?.framing ? `Framing note: ${deepReport.visualAudit.framing}` : "",
-        deepReport.visualAudit?.sharpness ? `Sharpness note: ${deepReport.visualAudit.sharpness}` : "",
-        thumbnailDiagnosisNotes,
-        deepReport.fixes.qualityFixes.length ? `Packaging notes:\n${deepReport.fixes.qualityFixes.map((item) => `- ${item}`).join("\n")}` : "",
-      ].filter(Boolean).join("\n");
 
       const data = await jsonFetch<{ thumbnail: GeneratedAuditThumbnail }>("/api/youtube/audit-thumbnail", {
         method: "POST",
         body: JSON.stringify({
           title: preview.video.title,
-          description: deepReport.fixes.description || preview.video.description,
-          tags: deepReport.fixes.tags.length ? deepReport.fixes.tags : preview.video.tags,
+          description: (quick ? quick.beforeAfter.descriptionRewrite : deep?.fixes.description) || preview.video.description,
+          tags: (quick ? quick.tags.recommended : deep?.fixes.tags)?.length ? (quick ? quick.tags.recommended : deep?.fixes.tags) : preview.video.tags,
           textPreference: thumbnailTextPreference.trim() || null,
           sourceImages: thumbnailSourceImages.map((image) => image.dataUrl),
           fallbackSourceImageUrl: thumbnailSourceImages.length ? null : preview.video.thumbnailUrl,
@@ -1328,7 +1157,6 @@ export default function YouTubeAuditTab() {
                   type="button"
                   onClick={() => {
                     loadSavedAudit(card);
-                    setReportSection("overview");
                     setSavedAuditsOpen(false);
                   }}
                   className={`rounded-2xl border p-4 text-left transition-colors ${activeAuditId === card.id ? "border-primary/30 bg-primary/10" : "border-white/10 bg-white/[0.03] hover:border-white/20"}`}
@@ -1363,7 +1191,7 @@ export default function YouTubeAuditTab() {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Audit report</p>
-                <p className="mt-2 text-sm text-white/55">Jump between sections—export prints the full report.</p>
+                <p className="mt-2 text-sm text-white/55">Export prints the full report.</p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 {savedAudits.length ? (
@@ -1376,95 +1204,79 @@ export default function YouTubeAuditTab() {
                   {isPdfExporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
                   Export report
                 </Button>
-                {(report as QuickAuditReport | null)?.auditMode === "quick" ? (
-                  <Button type="button" variant="secondary" className="rounded-lg" onClick={() => void runDeepAudit()} disabled={loadingReport || isRunningAudit}>
-                    <Sparkles className="mr-2 h-4 w-4" />
-                    Run deep audit
-                  </Button>
-                ) : null}
               </div>
             </div>
           ) : null}
 
-          <div className="grid gap-4 lg:grid-cols-[1.1fr,0.9fr]">
-            <PanelCard className="p-5">
-              <div className="flex gap-4">
-                {preview.video.thumbnailUrl ? (
-                  <img src={preview.video.thumbnailUrl} alt={preview.video.title} className="h-28 w-44 rounded-2xl border border-white/10 object-cover" />
-                ) : null}
-                <div className="min-w-0 flex-1">
-                  <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Video loaded</p>
-                  <h3 className="mt-2 text-xl font-semibold text-white">{preview.video.title}</h3>
-                  <p className="mt-1 text-sm text-white/45">{preview.video.channelName}</p>
-                  {report ? (
-                    <p className="mt-3 text-sm leading-6 text-white/72">
-                      {(report as QuickAuditReport).auditMode === "quick"
-                        ? (report as QuickAuditReport).oneSentenceDiagnosis
-                        : (report as DeepAuditReport).summary}
-                    </p>
-                  ) : (
-                    <p className="mt-3 text-sm leading-6 text-white/60">
-                      Metadata loaded. Building the full audit report with comparable videos, transcript checks, and packaging fixes now.
-                    </p>
-                  )}
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-semibold text-white/70">
-                      Inferred niche: {preview.nicheInference.label}
-                    </span>
-                    <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-semibold text-white/70">{preview.video.likelyFormat}</span>
-                    <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-semibold text-white/70">
-                      {preview.transcript.available
-                        ? `Transcript: ${preview.transcript.source === "manual" ? "Manual" : preview.transcript.source === "uploaded" ? "Uploaded" : "Auto"}${preview.transcript.language ? ` · ${preview.transcript.language}` : ""}`
-                        : "Transcript unavailable"}
-                    </span>
-                    <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-semibold text-white/70">
-                      {preview.captions.available
-                        ? `Captions: ${preview.captions.source === "manual" ? "Manual" : "Auto"}${preview.captions.language ? ` · ${preview.captions.language}` : ""}`
-                        : "Captions not detected"}
-                    </span>
-                  </div>
-                  {report ? (
-                    (report as QuickAuditReport).auditMode === "quick" ? (
-                      <p className="mt-3 text-xs leading-5 text-white/45">
-                        Quick audit: focused on packaging decisions, not long-form niche inference.
-                      </p>
-                    ) : (
-                      <p className="mt-3 text-xs leading-5 text-white/45">
-                        Niche confidence: {(report as DeepAuditReport).nicheInference.confidence} · {(report as DeepAuditReport).nicheInference.basis}
-                      </p>
-                    )
-                  ) : (
-                    <p className="mt-3 text-xs leading-5 text-white/45">Audit report is loading…</p>
-                  )}
+          <PanelCard className="p-5">
+            <div className="flex gap-4">
+              {preview.video.thumbnailUrl ? (
+                <img src={preview.video.thumbnailUrl} alt={preview.video.title} className="h-28 w-44 rounded-2xl border border-white/10 object-cover" />
+              ) : null}
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Video loaded</p>
+                <h3 className="mt-2 text-xl font-semibold text-white">{preview.video.title}</h3>
+                <p className="mt-1 text-sm text-white/45">{preview.video.channelName}</p>
+                {report ? (
+                  <p className="mt-3 text-sm leading-6 text-white/72">
+                    {isQuickReport ? (quickReport as QuickAuditReport).oneSentenceDiagnosis : (deepReport as DeepAuditReport).summary}
+                  </p>
+                ) : (
+                  <p className="mt-3 text-sm leading-6 text-white/60">
+                    Metadata loaded. Building the full audit report with comparable videos, transcript checks, and packaging fixes now.
+                  </p>
+                )}
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-semibold text-white/70">
+                    Inferred niche: {preview.nicheInference.label}
+                  </span>
+                  <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-semibold text-white/70">{preview.video.likelyFormat}</span>
+                  <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-semibold text-white/70">
+                    {preview.transcript.available
+                      ? `Transcript: ${preview.transcript.source === "manual" ? "Manual" : preview.transcript.source === "uploaded" ? "Uploaded" : "Auto"}${preview.transcript.language ? ` · ${preview.transcript.language}` : ""}`
+                      : "Transcript unavailable"}
+                  </span>
+                  <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-semibold text-white/70">
+                    {preview.captions.available
+                      ? `Captions: ${preview.captions.source === "manual" ? "Manual" : "Auto"}${preview.captions.language ? ` · ${preview.captions.language}` : ""}`
+                      : "Captions not detected"}
+                  </span>
                 </div>
-              </div>
-            </PanelCard>
 
-            <PanelCard className="p-5">
-              <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Public performance context</p>
-              <div className="mt-4 grid grid-cols-2 gap-3">
-                {topMetrics.map((metric) => (
-                  <div key={metric.label} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                    <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">{metric.label}</p>
-                    <p className="mt-2 text-2xl font-semibold text-white">{metric.value}</p>
+                <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-white/60">
+                  <div className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2">
+                    <Eye className="h-4 w-4 text-white/40" />
+                    <span className="font-semibold text-white/85">{formatNumber(preview.video.viewCount)}</span>
+                    <span className="text-white/45">Views</span>
                   </div>
-                ))}
+                  <div className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2">
+                    <Heart className="h-4 w-4 text-white/40" />
+                    <span className="font-semibold text-white/85">{formatNumber(preview.video.likeCount)}</span>
+                    <span className="text-white/45">Likes</span>
+                  </div>
+                  <div className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2">
+                    <MessageCircle className="h-4 w-4 text-white/40" />
+                    <span className="font-semibold text-white/85">{formatNumber(preview.video.commentCount)}</span>
+                    <span className="text-white/45">Comments</span>
+                  </div>
+                </div>
+
+                {report ? (
+                  isQuickReport ? (
+                    <p className="mt-3 text-xs leading-5 text-white/45">
+                      Quick audit: focused on packaging decisions, not long-form niche inference.
+                    </p>
+                  ) : (
+                    <p className="mt-3 text-xs leading-5 text-white/45">
+                      Niche confidence: {(deepReport as DeepAuditReport).nicheInference.confidence} · {(deepReport as DeepAuditReport).nicheInference.basis}
+                    </p>
+                  )
+                ) : (
+                  <p className="mt-3 text-xs leading-5 text-white/45">Audit report is loading…</p>
+                )}
               </div>
-              {"performanceContext" in (report ?? {}) ? (
-                <div className="mt-4 text-xs leading-6 text-white/50">
-                  Age: {(report as DeepAuditReport).performanceContext.ageDays != null ? `${(report as DeepAuditReport).performanceContext.ageDays} day${(report as DeepAuditReport).performanceContext.ageDays === 1 ? "" : "s"}` : "n/a"} · Channel median: {formatNumber((report as DeepAuditReport).performanceContext.channelMedianViews)} · Competitor median: {formatNumber((report as DeepAuditReport).performanceContext.competitorMedianViews)}
-                </div>
-              ) : report ? (
-                <div className="mt-4 text-xs leading-6 text-white/45">
-                  Quick audit uses public stats + transcript opening (when available).
-                </div>
-              ) : (
-                <div className="mt-4 text-xs leading-6 text-white/45">
-                  Performance comparison and competitor context are still loading.
-                </div>
-              )}
-            </PanelCard>
-          </div>
+            </div>
+          </PanelCard>
 
           {!report && loadingReport ? (
             <PanelCard className="p-5">
@@ -1480,267 +1292,379 @@ export default function YouTubeAuditTab() {
             </PanelCard>
           ) : null}
 
-          {report && (report as QuickAuditReport).auditMode === "quick" ? (
-            <QuickAuditTabs
-              preview={preview}
-              report={report as QuickAuditReport}
-              reportSection={reportSection}
-              setReportSection={setReportSection}
-            />
-          ) : deepReport ? (
-            <Tabs
-              value={reportSection}
-              onValueChange={(value) => setReportSection(value as "overview" | "packaging" | "competitors" | "transcript" | "limitations")}
-              className="space-y-4"
-              data-audit-report-tabs="true"
-            >
-              <div className="sticky top-3 z-10 rounded-2xl border border-white/10 bg-black/40 p-2 backdrop-blur">
-                <TabsList className="h-auto w-full flex-wrap justify-start gap-1 bg-transparent p-0 text-white/60">
-                  <TabsTrigger value="overview" className="rounded-xl px-3 py-2 text-xs font-semibold text-white/60 data-[state=active]:bg-white/[0.08] data-[state=active]:text-white">
-                    Overview
-                  </TabsTrigger>
-                  <TabsTrigger value="packaging" className="rounded-xl px-3 py-2 text-xs font-semibold text-white/60 data-[state=active]:bg-white/[0.08] data-[state=active]:text-white">
-                    Packaging
-                  </TabsTrigger>
-                  <TabsTrigger value="competitors" className="rounded-xl px-3 py-2 text-xs font-semibold text-white/60 data-[state=active]:bg-white/[0.08] data-[state=active]:text-white">
-                    Competitors
-                  </TabsTrigger>
-                  <TabsTrigger value="transcript" className="rounded-xl px-3 py-2 text-xs font-semibold text-white/60 data-[state=active]:bg-white/[0.08] data-[state=active]:text-white">
-                    Transcript
-                  </TabsTrigger>
-                  <TabsTrigger value="limitations" className="rounded-xl px-3 py-2 text-xs font-semibold text-white/60 data-[state=active]:bg-white/[0.08] data-[state=active]:text-white">
-                    Limitations
-                  </TabsTrigger>
-                </TabsList>
-              </div>
+          {report ? (
+            <div className="space-y-4">
+              <PanelCard className="p-5" id="audit-quick">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Quick audit</p>
+                    <p className="mt-3 text-sm leading-6 text-white/78">
+                      {isQuickReport ? (quickReport as QuickAuditReport).oneSentenceDiagnosis : (deepReport as DeepAuditReport).summary}
+                    </p>
+                  </div>
+                  {isQuickReport ? (
+                    <ScoreRing score={(quickReport as QuickAuditReport).score} label={(quickReport as QuickAuditReport).scoreLabel} />
+                  ) : null}
+                </div>
 
-              <TabsContent value="overview" forceMount data-pdf-tab-section="true" className="mt-0 space-y-4">
-                <div className="grid gap-4 xl:grid-cols-[1fr,1fr]">
-                  <PanelCardSoft className="p-5">
-                    <div className="flex items-center gap-2">
-                      <AlertTriangle className="h-4 w-4 text-amber-300" />
-                      <p className="text-sm font-semibold text-white">What likely hurt performance</p>
-                    </div>
-                    <div className="mt-4 space-y-3">
-                      {deepReport.diagnosis.map((item, index) => (
-                        <div key={`${item.area}-${index}`} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                          <div className="flex items-center justify-between gap-3">
-                            <p className="text-sm font-semibold capitalize text-white">{item.area}</p>
-                            <div className="flex items-center gap-2">
-                              <span className="rounded-full border border-sky-400/20 bg-sky-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-sky-200">
-                                {priorityLabel(item.priority)}
-                              </span>
-                              <span className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] ${confidenceClass(item.confidence)}`}>{item.confidence}</span>
-                            </div>
-                          </div>
-                          <p className="mt-2 text-sm text-white/78">{item.issue}</p>
-                          <p className="mt-2 text-xs leading-6 text-white/50">{item.whyItHurts}</p>
-                          {item.evidence ? (
-                            <div className="mt-3 rounded-xl border border-white/8 bg-black/15 p-3">
-                              <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">What in the script caused this</p>
-                              <p className="mt-2 text-sm leading-6 text-white/78">{item.evidence}</p>
-                            </div>
-                          ) : null}
-                          {item.recommendedChange ? (
-                            <div className="mt-3 rounded-xl border border-emerald-400/10 bg-emerald-500/5 p-3">
-                              <p className="text-[11px] uppercase tracking-[0.14em] text-emerald-100/55">How to improve it</p>
-                              <p className="mt-2 text-sm leading-6 text-white/82">{item.recommendedChange}</p>
-                            </div>
-                          ) : null}
-                          <p className="mt-2 text-[11px] uppercase tracking-[0.14em] text-white/30">{item.sourceLabel}</p>
-                        </div>
-                      ))}
-                    </div>
-                  </PanelCardSoft>
-
-                  <PanelCardSoft className="p-5">
-                    <div className="flex items-center gap-2">
-                      <Target className="h-4 w-4 text-sky-300" />
-                      <p className="text-sm font-semibold text-white">Fixes to test next</p>
-                    </div>
-                    <div className="mt-4 space-y-4">
-                      <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                        <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">Better titles</p>
-                        <ul className="mt-3 space-y-2">
-                          {deepReport.fixes.titles.map((title, index) => (
-                            <li key={`${title}-${index}`} className="text-sm text-white/82">{index + 1}. {title}</li>
-                          ))}
-                        </ul>
+                {isQuickReport ? (
+                  <div className="mt-5 space-y-4">
+                    <div className="rounded-2xl border border-emerald-400/10 bg-emerald-500/5 p-4">
+                      <p className="text-[11px] uppercase tracking-[0.14em] text-emerald-100/55">Do this first</p>
+                      <p className="mt-2 text-sm font-semibold text-white">{(quickReport as QuickAuditReport).doThisFirst.action}</p>
+                      <p className="mt-2 text-xs leading-6 text-white/60">{(quickReport as QuickAuditReport).doThisFirst.why}</p>
+                      <p className="mt-2 text-xs leading-6 text-white/60">{(quickReport as QuickAuditReport).doThisFirst.expectedImpact}</p>
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        {(() => {
+                          const area = (quickReport as QuickAuditReport).doThisFirst.area;
+                          const mapping: Record<typeof area, { id: string; label: string }> = {
+                            title: { id: "audit-title", label: "See title suggestions" },
+                            thumbnail: { id: "audit-thumbnail", label: "Improve thumbnail" },
+                            hook: { id: "audit-hook", label: "See better hook" },
+                            description: { id: "audit-description", label: "See description rewrite" },
+                            tags: { id: "audit-tags", label: "See tag list" },
+                          };
+                          const next = mapping[area];
+                          return (
+                            <Button type="button" className="rounded-lg" onClick={() => scrollToSection(next.id)}>
+                              {next.label}
+                            </Button>
+                          );
+                        })()}
                       </div>
-                      {deepReport.transcript.available ? (
-                        deepReport.fixes.hookRewrite ? (
-                          <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                            <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">Better hook</p>
-                            <p className="mt-3 text-sm text-white/82">{deepReport.fixes.hookRewrite}</p>
-                            {deepReport.fixes.scriptDirection ? (
-                              <div className="mt-4 rounded-xl border border-white/8 bg-black/15 p-3">
-                                <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">Script changes to make</p>
-                                <p className="mt-2 text-sm leading-6 text-white/78">{deepReport.fixes.scriptDirection}</p>
+                    </div>
+
+                    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                      <p className="text-[11px] uppercase tracking-[0.14em] text-white/45">Next fixes</p>
+                      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                        {(quickReport as QuickAuditReport).topFixes
+                          .slice()
+                          .sort((a, b) => a.priority - b.priority)
+                          .slice(0, 4)
+                          .map((fix, index) => {
+                            const mapping: Record<QuickAuditReport["topFixes"][number]["area"], { id: string; label: string }> = {
+                              title: { id: "audit-title", label: "See title" },
+                              thumbnail: { id: "audit-thumbnail", label: "See thumbnail" },
+                              hook: { id: "audit-hook", label: "See hook" },
+                              description: { id: "audit-description", label: "See description" },
+                              tags: { id: "audit-tags", label: "See tags" },
+                            };
+                            const next = mapping[fix.area];
+                            return (
+                              <div key={`${fix.area}-${fix.problem}-${index}`} className="rounded-xl border border-white/10 bg-black/15 p-3">
+                                <div className="flex items-start justify-between gap-3">
+                                  <div>
+                                    <p className="text-xs font-semibold text-white/80">{fix.area.toUpperCase()}</p>
+                                    <p className="mt-2 text-xs leading-5 text-white/60">{fix.fix}</p>
+                                  </div>
+                                  <Button
+                                    type="button"
+                                    variant="secondary"
+                                    className="h-8 rounded-lg px-3 text-xs"
+                                    onClick={() => scrollToSection(next.id)}
+                                  >
+                                    {next.label}
+                                  </Button>
+                                </div>
                               </div>
-                            ) : null}
-                          </div>
-                        ) : null
+                            );
+                          })}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+              </PanelCard>
+
+              <PanelCard className="p-5" id="audit-thumbnail">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Thumbnail Direction</p>
+                    <p className="mt-2 text-sm text-white/55">Fix the packaging first. You’re selling the click before the watch.</p>
+                  </div>
+                  <Button type="button" className="rounded-lg" onClick={() => openThumbnailModal()} disabled={!isStudio}>
+                    <Sparkles className="mr-2 h-4 w-4" />
+                    Generate thumbnail
+                  </Button>
+                </div>
+
+                <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                  <div className="space-y-3">
+                    <p className="text-xs font-semibold text-white/80">Current thumbnail</p>
+                    <div className="aspect-video overflow-hidden rounded-2xl border border-white/10 bg-black/20">
+                      {preview?.video.thumbnailUrl ? (
+                        <img src={preview.video.thumbnailUrl} alt="Current thumbnail" className="h-full w-full object-contain" />
                       ) : (
-                        <div className="rounded-2xl border border-amber-400/15 bg-amber-500/10 p-4">
-                          <p className="text-[11px] uppercase tracking-[0.14em] text-amber-100/55">Transcript unavailable</p>
-                          <p className="mt-3 text-sm leading-6 text-amber-50/75">
-                            This audit was generated without full script analysis. Use the Transcript tools below to fetch or upload a transcript, then translate and generate aligned audio.
-                          </p>
-                        </div>
+                        <div className="grid h-full w-full place-items-center text-sm text-white/45">No thumbnail detected</div>
                       )}
-                      <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                        <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">Thumbnail idea</p>
-                        <p className="mt-3 text-sm leading-6 text-white/82">{deepReport.fixes.thumbnailIdea || "No thumbnail direction returned yet."}</p>
-                        <div className="mt-4 flex flex-wrap gap-2">
-                          <Button type="button" className="rounded-lg" onClick={openThumbnailModal}>
-                            <Sparkles className="mr-2 h-4 w-4" />
-                            Generate thumbnail
-                          </Button>
-                          <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-semibold text-white/65">
-                            Suggested style: {deepReport.fixes.recommendedThumbnailStyle}
+                    </div>
+                    {!isStudio ? (
+                      <p className="text-xs leading-5 text-white/45">Thumbnail generation is available on the Studio plan.</p>
+                    ) : null}
+                  </div>
+
+                  <div className="space-y-3">
+                    <div>
+                      <p className="text-xs font-semibold text-white/80">Analysis</p>
+                      <p className="mt-2 text-sm leading-6 text-white/70">
+                        {isQuickReport ? (quickReport as QuickAuditReport)?.thumbnailFix.problem : deepDiagnosis("thumbnail")?.whyItHurts || deepDiagnosis("thumbnail")?.issue || "The current thumbnail doesn’t clearly communicate a single clickable promise at a glance."}
+                      </p>
+                    </div>
+
+                    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                      <p className="text-xs font-semibold text-white/80">Design structure</p>
+                      <div className="mt-3 space-y-3 text-sm text-white/70">
+                        <div className="flex items-start justify-between gap-3">
+                          <span className="text-white/45">Focal subject</span>
+                          <span className="text-right">
+                            {isQuickReport ? (quickReport as QuickAuditReport)?.thumbnailFix.focalSubject : deepReport?.fixes.thumbnailIdea || "One clear subject"}
+                          </span>
+                        </div>
+                        <div className="flex items-start justify-between gap-3">
+                          <span className="text-white/45">Text overlay</span>
+                          <span className="text-right">
+                            {isQuickReport ? (quickReport as QuickAuditReport)?.thumbnailFix.textOverlay : "1–3 words max"}
+                          </span>
+                        </div>
+                        <div className="flex items-start justify-between gap-3">
+                          <span className="text-white/45">Layout</span>
+                          <span className="text-right">
+                            {isQuickReport ? (quickReport as QuickAuditReport)?.thumbnailFix.layout : "High contrast, clean hierarchy"}
+                          </span>
+                        </div>
+                        <div className="flex items-start justify-between gap-3">
+                          <span className="text-white/45">Emotion</span>
+                          <span className="text-right">
+                            {isQuickReport ? (quickReport as QuickAuditReport)?.thumbnailFix.emotion : "Clear tension / curiosity"}
+                          </span>
+                        </div>
+                        <div className="flex items-start justify-between gap-3">
+                          <span className="text-white/45">Style</span>
+                          <span className="text-right">
+                            {isQuickReport ? (quickReport as QuickAuditReport)?.thumbnailFix.designStyle : deepReport?.fixes.recommendedThumbnailStyle || preview?.recommendedThumbnailStyle || "Professional"}
                           </span>
                         </div>
                       </div>
                     </div>
-                  </PanelCardSoft>
+                  </div>
                 </div>
-              </TabsContent>
+              </PanelCard>
 
-              <TabsContent value="packaging" forceMount data-pdf-tab-section="true" className="mt-0 space-y-4">
-                <div className="grid gap-4 xl:grid-cols-[1fr,1fr]">
-                  <PanelCard className="p-5">
-                    <div className="flex items-center gap-2">
-                      <Tag className="h-4 w-4 text-primary" />
-                      <p className="text-sm font-semibold text-white">Description and tags</p>
+              <PanelCard className="p-5" id="audit-title">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Current Title</p>
+                    <p className="mt-2 text-sm text-white/55">Tighten the promise so the viewer knows exactly what they’ll get.</p>
+                  </div>
+                  <Button type="button" variant="secondary" className="rounded-lg" onClick={() => scrollToSection("audit-title")}>
+                    <Target className="mr-2 h-4 w-4" />
+                    Jump
+                  </Button>
+                </div>
+
+                {(() => {
+                  const fix = quickFix("title");
+                  const diagnosis = deepDiagnosis("title");
+                  const evidence = fix?.evidence || diagnosis?.evidence || "";
+                  const recommended = fix?.fix || diagnosis?.recommendedChange || "";
+                  const issue = fix?.problem || diagnosis?.issue || "";
+                  return (
+                    <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                      <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                        <p className="text-xs font-semibold text-white/80">Problem</p>
+                        <p className="mt-2 text-sm leading-6 text-white/70">{issue || "The title isn’t specific enough to earn the click."}</p>
+                        {evidence ? (
+                          <>
+                            <p className="mt-4 text-xs font-semibold text-white/80">Evidence</p>
+                            <p className="mt-2 text-sm leading-6 text-white/70">{evidence}</p>
+                          </>
+                        ) : null}
+                        {recommended ? (
+                          <>
+                            <p className="mt-4 text-xs font-semibold text-white/80">Recommended fix</p>
+                            <p className="mt-2 text-sm leading-6 text-white/70">{recommended}</p>
+                          </>
+                        ) : null}
+                        {fix?.example ? (
+                          <div className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/10 bg-black/20 px-3 py-2">
+                            <p className="text-xs text-white/70">{fix.example}</p>
+                            <CopyInlineButton value={fix.example} label="Copy example" />
+                          </div>
+                        ) : null}
+                      </div>
+
+                      <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                        <p className="text-xs font-semibold text-white/80">Title suggestions</p>
+                        <p className="mt-2 text-sm text-white/55">Pick one, then tweak 1–2 words to match your real video promise.</p>
+                        <div className="mt-4 space-y-3">
+                          {(isQuickReport ? (quickReport as QuickAuditReport)?.beforeAfter.betterTitles : deepReport?.fixes.titles || [])
+                            .filter(Boolean)
+                            .slice(0, 8)
+                            .map((title, index) => (
+                              <div key={`${title}-${index}`} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/10 bg-black/15 px-3 py-2">
+                                <p className="text-sm text-white/80">{title}</p>
+                                <CopyInlineButton value={title} />
+                              </div>
+                            ))}
+                          {!((isQuickReport ? (quickReport as QuickAuditReport)?.beforeAfter.betterTitles : deepReport?.fixes.titles) ?? []).length ? (
+                            <p className="text-sm text-white/55">No title suggestions returned for this video.</p>
+                          ) : null}
+                        </div>
+                      </div>
                     </div>
-                    <p className="mt-4 text-sm leading-6 text-white/78">{deepReport.fixes.description}</p>
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      {deepReport.fixes.tags.map((tag, index) => (
-                        <span key={`${tag}-${index}`} className="rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
-                          {tag}
-                        </span>
-                      ))}
-                    </div>
-                    <div className="mt-5 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                      <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">Packaging strategy</p>
-                      <p className="mt-2 text-sm leading-6 text-white/75">{deepReport.fixes.packagingStrategy}</p>
+                  );
+                })()}
+              </PanelCard>
+
+              {(() => {
+                const currentHook =
+                  (isQuickReport ? (quickReport as QuickAuditReport)?.beforeAfter.currentHook : null)
+                  || currentHookFromTranscriptSegments(normalizedSegments);
+                const improvedHook =
+                  (isQuickReport ? (quickReport as QuickAuditReport)?.beforeAfter.hookRewrite : null)
+                  || deepReport?.fixes.hookRewrite
+                  || "";
+
+                if (!transcriptSeemsAvailable || !currentHook) return null;
+
+                const hookFix = quickFix("hook");
+                const hookDiagnosis = deepDiagnosis("hook");
+                return (
+                  <PanelCard className="p-5" id="audit-hook">
+                    <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Better First 15 Seconds</p>
+                    <p className="mt-2 text-sm text-white/55">You have ~15 seconds to earn the next minute.</p>
+
+                    <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                      <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="text-xs font-semibold text-white/80">Current hook</p>
+                          <CopyInlineButton value={currentHook} label="Copy" />
+                        </div>
+                        <p className="mt-3 whitespace-pre-line text-sm leading-6 text-white/75">{currentHook}</p>
+                        {hookFix?.evidence || hookDiagnosis?.evidence ? (
+                          <>
+                            <p className="mt-4 text-xs font-semibold text-white/80">Evidence</p>
+                            <p className="mt-2 text-sm leading-6 text-white/70">{hookFix?.evidence || hookDiagnosis?.evidence}</p>
+                          </>
+                        ) : null}
+                      </div>
+
+                      <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="text-xs font-semibold text-white/80">Improved hook</p>
+                          <CopyInlineButton value={improvedHook} label="Copy" />
+                        </div>
+                        <p className="mt-3 whitespace-pre-line text-sm leading-6 text-white/75">
+                          {improvedHook || "No rewritten hook returned for this video."}
+                        </p>
+                        {hookFix?.fix || hookDiagnosis?.recommendedChange ? (
+                          <>
+                            <p className="mt-4 text-xs font-semibold text-white/80">Recommended fix</p>
+                            <p className="mt-2 text-sm leading-6 text-white/70">{hookFix?.fix || hookDiagnosis?.recommendedChange}</p>
+                          </>
+                        ) : null}
+                      </div>
                     </div>
                   </PanelCard>
+                );
+              })()}
 
-                  <PanelCard className="p-5">
-                    <div className="flex items-center gap-2">
-                      <Eye className="h-4 w-4 text-violet-300" />
-                      <p className="text-sm font-semibold text-white">Thumbnail packaging notes</p>
+              <PanelCard className="p-5" id="audit-description">
+                <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Description Rewrite</p>
+                <p className="mt-2 text-sm text-white/55">Make the first lines scan like a top creator: hook → value → bullets → CTA.</p>
+
+                {(() => {
+                  const fix = quickFix("description");
+                  const diagnosis = deepDiagnosis("description");
+                  const rewrite =
+                    (isQuickReport ? (quickReport as QuickAuditReport)?.beforeAfter.descriptionRewrite : null)
+                    || deepReport?.fixes.description
+                    || "";
+                  return (
+                    <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                      <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                        <p className="text-xs font-semibold text-white/80">Problem</p>
+                        <p className="mt-2 text-sm leading-6 text-white/70">{fix?.problem || diagnosis?.issue || "The description doesn’t convert scanners into watchers."}</p>
+                        {fix?.evidence || diagnosis?.evidence ? (
+                          <>
+                            <p className="mt-4 text-xs font-semibold text-white/80">Evidence</p>
+                            <p className="mt-2 text-sm leading-6 text-white/70">{fix?.evidence || diagnosis?.evidence}</p>
+                          </>
+                        ) : null}
+                        {fix?.fix || diagnosis?.recommendedChange ? (
+                          <>
+                            <p className="mt-4 text-xs font-semibold text-white/80">Recommended fix</p>
+                            <p className="mt-2 text-sm leading-6 text-white/70">{fix?.fix || diagnosis?.recommendedChange}</p>
+                          </>
+                        ) : null}
+                      </div>
+
+                      <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="text-xs font-semibold text-white/80">Suggested description</p>
+                          <CopyInlineButton value={rewrite} />
+                        </div>
+                        <p className="mt-3 whitespace-pre-line text-sm leading-6 text-white/75">
+                          {rewrite || "No description rewrite returned for this video."}
+                        </p>
+                      </div>
                     </div>
-                    {deepReport.visualAudit ? (
-                      <div className="mt-4 space-y-3">
+                  );
+                })()}
+              </PanelCard>
+
+              <PanelCard className="p-5" id="audit-tags">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">Tags</p>
+                    <p className="mt-2 text-sm text-white/55">Mix long-tail, mid-volume, and high-volume tags for search + suggested.</p>
+                  </div>
+                  <CopyInlineButton
+                    value={(
+                      (isQuickReport ? (quickReport as QuickAuditReport)?.tags.recommended : deepReport?.fixes.tags || []) ?? []
+                    )
+                      .filter(Boolean)
+                      .join(", ")}
+                    label="Copy all"
+                  />
+                </div>
+
+                {(() => {
+                  const fix = quickFix("tags");
+                  const diagnosis = deepDiagnosis("tags");
+                  const tagList = (isQuickReport ? (quickReport as QuickAuditReport)?.tags.recommended : deepReport?.fixes.tags || []) ?? [];
+                  return (
+                    <div className="mt-5 space-y-4">
+                      {fix?.evidence || diagnosis?.evidence || fix?.fix || diagnosis?.recommendedChange ? (
                         <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                          <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">Assessment basis</p>
-                          <p className="mt-2 text-sm text-white/78">Public thumbnail only. This is packaging feedback, not a full video quality audit.</p>
-                          <p className="mt-3 text-sm text-white/78">{deepReport.visualAudit.topFix}</p>
+                          <p className="text-xs font-semibold text-white/80">Notes</p>
+                          {fix?.evidence || diagnosis?.evidence ? (
+                            <p className="mt-2 text-sm leading-6 text-white/70">{fix?.evidence || diagnosis?.evidence}</p>
+                          ) : null}
+                          {fix?.fix || diagnosis?.recommendedChange ? (
+                            <p className="mt-2 text-sm leading-6 text-white/70">{fix?.fix || diagnosis?.recommendedChange}</p>
+                          ) : null}
                         </div>
-                        {[
-                          ["Lighting", deepReport.visualAudit.lighting],
-                          ["Framing", deepReport.visualAudit.framing],
-                          ["Sharpness", deepReport.visualAudit.sharpness],
-                        ].map(([label, value]) => (
-                          <div key={label} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                            <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">{label}</p>
-                            <p className="mt-2 text-sm leading-6 text-white/75">{value || "No note returned."}</p>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="mt-4 text-sm text-white/55">Visual audit was not available for this video.</p>
-                    )}
-                    {deepReport.fixes.qualityFixes.length ? (
-                      <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                        <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">Packaging notes from thumbnail</p>
-                        <ul className="mt-3 space-y-2">
-                          {deepReport.fixes.qualityFixes.map((item, index) => (
-                            <li key={`${item}-${index}`} className="text-sm text-white/78">{item}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    ) : null}
-                    {generatedThumbnail ? (
-                      <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                        <div className="flex items-center justify-between gap-3">
-                          <div>
-                            <p className="text-[11px] uppercase tracking-[0.14em] text-white/35">Generated thumbnail</p>
-                            <p className="mt-2 text-sm text-white/55">Created from your selected style, notes, and optional source images.</p>
-                          </div>
-                          <a
-                            href={generatedThumbnail.imageDataUrl}
-                            download={`${exportBaseName || "youtube-audit-thumbnail"}.${thumbnailDownloadExtension(generatedThumbnail.imageDataUrl)}`}
-                            className="inline-flex items-center rounded-lg border border-white/10 px-3 py-2 text-sm text-white/75 transition-colors hover:bg-white/[0.06] hover:text-white"
+                      ) : null}
+
+                      <div className="flex flex-wrap gap-2">
+                        {tagList.filter(Boolean).slice(0, 60).map((tagValue, index) => (
+                          <span
+                            key={`${tagValue}-${index}`}
+                            className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/15 px-3 py-1 text-xs font-semibold text-white/70"
                           >
-                            <Download className="mr-2 h-4 w-4" />
-                            Download
-                          </a>
-                        </div>
-                        <div className="mt-4 overflow-hidden rounded-xl border border-white/10 bg-black/20">
-                          <img src={generatedThumbnail.imageDataUrl} alt="Generated audit thumbnail" className="w-full object-cover" />
-                        </div>
+                            <Tag className="h-3.5 w-3.5 text-white/35" />
+                            {tagValue}
+                          </span>
+                        ))}
+                        {!tagList.length ? <p className="text-sm text-white/55">No tags returned for this video.</p> : null}
                       </div>
-                    ) : null}
-                  </PanelCard>
-                </div>
-              </TabsContent>
+                      <p className="text-xs leading-5 text-white/45">YouTube accepts up to ~500 characters of tags across your whole list.</p>
+                    </div>
+                  );
+                })()}
+              </PanelCard>
 
-              <TabsContent value="competitors" forceMount data-pdf-tab-section="true" className="mt-0 space-y-4">
-                <div className="grid gap-4 xl:grid-cols-[1fr,1fr]">
-                  <PanelCardSoft className="p-5">
-                    <div className="flex items-center gap-2">
-                      <BarChart3 className="h-4 w-4 text-emerald-300" />
-                      <p className="text-sm font-semibold text-white">Top creators in this lane</p>
-                    </div>
-                    <div className="mt-4 space-y-3">
-                      {deepReport.topCreators.length ? deepReport.topCreators.map((creator, index) => (
-                        <div key={`${creator.channelName}-${index}`} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                          <p className="text-sm font-semibold text-white">{creator.channelName}</p>
-                          <p className="mt-1 text-xs text-white/40">
-                            Avg views: {formatNumber(creator.averageViews)}
-                            {creator.subscriberCount > 0 ? ` · Subs: ${formatNumber(creator.subscriberCount)}` : ""}
-                          </p>
-                          <p className="mt-2 text-sm leading-6 text-white/72">{creator.whyTheyMatter}</p>
-                        </div>
-                      )) : (
-                        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm leading-6 text-white/55">
-                          We could not find enough strong comparable creators for this topic yet. Try another video or a more search-specific title.
-                        </div>
-                      )}
-                    </div>
-                  </PanelCardSoft>
-
-                  <PanelCardSoft className="p-5">
-                    <div className="flex items-center gap-2">
-                      <Sparkles className="h-4 w-4 text-amber-300" />
-                      <p className="text-sm font-semibold text-white">Competitor videos worth studying</p>
-                    </div>
-                    <div className="mt-4 space-y-3">
-                      {deepReport.competitorExamples.length ? deepReport.competitorExamples.map((video, index) => (
-                        <a key={`${video.url}-${index}`} href={video.url} target="_blank" rel="noreferrer" className="block rounded-2xl border border-white/10 bg-white/[0.03] p-4 transition-colors hover:border-primary/30">
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <p className="text-sm font-semibold text-white">{video.title}</p>
-                              <p className="mt-1 text-xs text-white/40">{video.channelName} · {formatNumber(video.viewCount)} views</p>
-                            </div>
-                            <ExternalLink className="mt-0.5 h-4 w-4 shrink-0 text-white/30" />
-                          </div>
-                          <p className="mt-2 text-sm leading-6 text-white/72">{video.whyItWins}</p>
-                        </a>
-                      )) : (
-                        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm leading-6 text-white/55">
-                          No strong comparable videos were found for this audit yet.
-                        </div>
-                      )}
-                    </div>
-                  </PanelCardSoft>
-                </div>
-              </TabsContent>
-
-              <TabsContent value="transcript" forceMount data-pdf-tab-section="true" className="mt-0 space-y-4">
+              <div id="audit-transcript" className="space-y-4">
                 {isStudio ? (
                   <PanelCard className="p-5">
                     <details>
@@ -1966,25 +1890,8 @@ export default function YouTubeAuditTab() {
                 ) : (
                   <PanelCard className="p-5 text-sm text-white/60">Transcript tools are available on the Studio plan.</PanelCard>
                 )}
-              </TabsContent>
-
-              <TabsContent value="limitations" forceMount data-pdf-tab-section="true" className="mt-0">
-                <PanelCard className="p-5">
-                  <div className="flex items-center gap-2">
-                    <Lightbulb className="h-4 w-4 text-amber-300" />
-                    <p className="text-sm font-semibold text-white">Current limitations</p>
-                  </div>
-                  <ul className="mt-4 space-y-2">
-                    {deepReport.limitations.map((item, index) => (
-                      <li key={`${item}-${index}`} className="flex items-start gap-2 text-sm text-white/65">
-                        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-white/30" />
-                        <span>{item}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </PanelCard>
-              </TabsContent>
-            </Tabs>
+              </div>
+            </div>
           ) : null}
         </div>
       ) : null}
@@ -1993,47 +1900,104 @@ export default function YouTubeAuditTab() {
         <DialogContent className="max-h-[85vh] max-w-3xl overflow-y-auto pt-10">
           <DialogHeader>
             <DialogTitle>Create Thumbnail</DialogTitle>
-            <DialogDescription>Upload optional source images, choose a style, add optional text, and generate a saved thumbnail for this audit.</DialogDescription>
+            <DialogDescription>Upload what the audit needs, set overlay text, and generate a 16:9 thumbnail for this video.</DialogDescription>
           </DialogHeader>
-          {deepReport && preview ? (
+          {report && preview ? (
             <div className="space-y-4">
               <PanelCardSoft className="p-4">
                 <p className="text-xs uppercase tracking-[0.16em] text-white/40">Video</p>
                 <p className="mt-2 text-base font-semibold text-white">{preview.video.title}</p>
-                <p className="mt-2 text-sm text-white/55">{deepReport.fixes.thumbnailIdea}</p>
+                <p className="mt-2 text-sm text-white/55">
+                  {isQuickReport ? quickReport?.thumbnailFix.concept : deepReport?.fixes.thumbnailIdea}
+                </p>
               </PanelCardSoft>
 
               <PanelCardSoft className="p-4">
-                <p className="text-xs uppercase tracking-[0.16em] text-white/40">Source images</p>
-                <p className="mt-2 text-sm text-white/55">Add up to 4 JPG images. Preserve mode keeps your upload as the base image and edits around it.</p>
-                <p className="mt-2 text-xs text-white/40">Requirements: JPG, 16:9 output, 1280 x 720px, minimum source width 640px, max 2 MB.</p>
-                <div className="mt-3 flex flex-wrap gap-3">
-                  {thumbnailSourceImages.map((image, index) => (
-                    <div key={`${image.name}-${index}`} className="relative overflow-hidden rounded-xl border border-white/10 bg-black/20">
-                      <img src={image.dataUrl} alt={image.name} className="h-28 w-40 object-cover" />
-                      <button
-                        type="button"
-                        onClick={() => setThumbnailSourceImages((current) => current.filter((_, itemIndex) => itemIndex !== index))}
-                        className="absolute right-2 top-2 rounded-full border border-white/10 bg-black/50 p-1 text-white/70 hover:text-white"
-                        aria-label={`Remove ${image.name}`}
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  ))}
-                  {thumbnailSourceImages.length < 4 ? (
-                    <label className="flex h-28 w-40 cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-white/10 bg-white/[0.03] text-center text-sm text-white/45 hover:border-white/20 hover:text-white/70">
-                      <ImagePlus className="mb-2 h-5 w-5" />
-                      Add image
-                      <input
-                        type="file"
-                        accept="image/jpeg,.jpg,.jpeg"
-                        multiple
-                        className="hidden"
-                        onChange={(event) => void handleThumbnailSourceFiles(event.target.files)}
-                      />
-                    </label>
-                  ) : null}
+                <p className="text-xs uppercase tracking-[0.16em] text-white/40">Assets</p>
+                <p className="mt-2 text-sm text-white/55">Upload only what you have. If you skip an upload, describe the alternative.</p>
+                <p className="mt-2 text-xs text-white/40">JPG only · 16:9 output · 1280×720px · min width 640px · max 2 MB</p>
+
+                {inferThumbnailAssetSlots().some((slot) => slot.isFace) ? (
+                  <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                    <p className="text-sm font-semibold text-white">Face handling</p>
+                    <p className="mt-2 text-sm leading-6 text-white/65">
+                      Upload the exact face/photo you want to use. DayTabs will only improve lighting, sharpness, color, background, and composition. It will NOT change your face.
+                    </p>
+                  </div>
+                ) : null}
+
+                <div className="mt-4 grid gap-4">
+                  {inferThumbnailAssetSlots().map((slot) => {
+                    const existing = thumbnailSourceImages.find((img) => img.name.startsWith(`${slot.key}:`)) ?? null;
+                    const alternative = thumbnailAssetAlternatives[slot.key] ?? "";
+                    return (
+                      <div key={slot.key} className="rounded-2xl border border-white/10 bg-black/15 p-4">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-semibold text-white">{slot.label}</p>
+                            {slot.helper ? <p className="mt-2 text-xs leading-5 text-white/55">{slot.helper}</p> : null}
+                          </div>
+                          {existing ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setThumbnailSourceImages((current) => current.filter((img) => !img.name.startsWith(`${slot.key}:`)));
+                              }}
+                              className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-white/70 hover:bg-white/[0.06] hover:text-white"
+                            >
+                              <X className="h-4 w-4" />
+                              Remove
+                            </button>
+                          ) : (
+                            <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-white/70 transition-colors hover:bg-white/[0.06] hover:text-white">
+                              <ImagePlus className="h-4 w-4" />
+                              Upload JPG
+                              <input
+                                type="file"
+                                accept="image/jpeg,image/jpg,.jpg,.jpeg"
+                                className="hidden"
+                                onChange={(event) => {
+                                  const file = event.target.files?.[0];
+                                  if (!file) return;
+                                  void (async () => {
+                                    try {
+                                      const dataUrl = await resizeImageFileToDataUrl(file);
+                                      setThumbnailSourceImages((current) => {
+                                        const withoutSlot = current.filter((img) => !img.name.startsWith(`${slot.key}:`));
+                                        return [...withoutSlot, { name: `${slot.key}:${file.name}`, dataUrl }].slice(0, 4);
+                                      });
+                                    } catch (err) {
+                                      setError(err instanceof Error ? err.message : "Could not read source image");
+                                    }
+                                  })();
+                                  event.target.value = "";
+                                }}
+                              />
+                            </label>
+                          )}
+                        </div>
+
+                        {existing ? (
+                          <div className="mt-4 overflow-hidden rounded-xl border border-white/10 bg-black/20">
+                            <img src={existing.dataUrl} alt={existing.name} className="h-44 w-full object-cover" />
+                          </div>
+                        ) : (
+                          <div className="mt-4">
+                            <p className="text-xs text-white/55">Describe alternative (e.g. no face, use product/visual instead)</p>
+                            <Textarea
+                              value={alternative}
+                              onChange={(event) => {
+                                const value = event.target.value;
+                                setThumbnailAssetAlternatives((current) => ({ ...current, [slot.key]: value }));
+                              }}
+                              placeholder="Optional"
+                              className="mt-3 min-h-20"
+                            />
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </PanelCardSoft>
 
@@ -2051,16 +2015,29 @@ export default function YouTubeAuditTab() {
                     </button>
                   ))}
                 </div>
-                <p className="mt-3 text-xs text-white/40">Auto-selected from audit: {deepReport.fixes.recommendedThumbnailStyle}</p>
+                <p className="mt-3 text-xs text-white/40">
+                  Auto-selected from audit: {deepReport?.fixes.recommendedThumbnailStyle || preview.recommendedThumbnailStyle}
+                </p>
               </PanelCardSoft>
 
               <PanelCardSoft className="p-4">
-                <p className="text-xs uppercase tracking-[0.16em] text-white/40">Text on thumbnail</p>
+                <p className="text-xs uppercase tracking-[0.16em] text-white/40">Overlay text</p>
                 <Textarea
                   value={thumbnailTextPreference}
                   onChange={(event) => setThumbnailTextPreference(event.target.value)}
                   placeholder="Optional. Leave empty and AI will generate the strongest thumbnail text."
                   className="mt-3 min-h-24"
+                />
+              </PanelCardSoft>
+
+              <PanelCardSoft className="p-4">
+                <p className="text-xs uppercase tracking-[0.16em] text-white/40">Prompt</p>
+                <p className="mt-2 text-sm text-white/55">Editable. We always append strict face-preservation rules when generating.</p>
+                <Textarea
+                  value={thumbnailPrompt}
+                  onChange={(event) => setThumbnailPrompt(event.target.value)}
+                  placeholder="Describe the thumbnail composition, lighting, text, and vibe."
+                  className="mt-3 min-h-28"
                 />
               </PanelCardSoft>
 
