@@ -504,7 +504,7 @@ function Dashboard({
 
 export default function Home() {
   const { copy } = useDayTabsI18n();
-  const pageContainerClass = "mx-auto w-full max-w-[1440px] px-6 md:px-8 xl:px-12";
+  const pageContainerClass = "mx-auto w-full max-w-[1440px] px-4 md:px-6 xl:px-8";
   const [activeTab, setActiveTab] = useState<TabId>(() => getTabFromUrl());
   const [activeTabHasData, setActiveTabHasData] = useState(false);
   const [showPlanModal, setShowPlanModal] = useState(false);
