@@ -118,9 +118,14 @@ function downloadBlob(blob: Blob) {
 
 export default function TeleprompterFeaturePage() {
   const [script, setScript] = useState(
-    `Write or paste your script…\n\nTip: Keep sentences short and easy to read out loud.\n\nExample:\n“Hey — quick update. Today I’m going to show you…”`,
+    `Write or paste your script…\n\nTip: Keep sentences short and easy to read out loud.\n\nExample script (feel free to replace):\n\nHey — quick update.\n\nIf you’ve ever tried to record a talking‑head video and kept forgetting your next line, you’re not alone.\n\nIn this video I’m going to walk you through a simple 3‑step system:\n1) how I structure the first 10 seconds\n2) how I keep my delivery natural\n3) how I record in one take without staring down at notes\n\nBy the end, you’ll have a repeatable script template you can use for your next post.\n\nAlright — let’s start with the hook…`,
   );
   const lines = useMemo(() => script.split(/\n+/).map((l) => l.trim()).filter(Boolean), [script]);
+
+  const [scrollSpeed, setScrollSpeed] = useState(1);
+  const [textScale, setTextScale] = useState(1);
+  const heroFontPx = Math.max(18, Math.min(40, 24 * textScale));
+  const demoFontPx = Math.max(20, Math.min(54, 30 * textScale));
 
   const [playing, setPlaying] = useState(false);
   const [recording, setRecording] = useState(false);
@@ -486,7 +491,7 @@ export default function TeleprompterFeaturePage() {
       const delta = now - (lastTimeRef.current || now);
       lastTimeRef.current = now;
 
-      scrollOffsetRef.current = Math.min(maxScrollRef.current, scrollOffsetRef.current + (2 * delta) / 12);
+      scrollOffsetRef.current = Math.min(maxScrollRef.current, scrollOffsetRef.current + ((2 * delta) / 12) * scrollSpeed);
       if (contentRef.current) contentRef.current.style.transform = `translate3d(0, -${scrollOffsetRef.current}px, 0)`;
       if (scrollOffsetRef.current >= maxScrollRef.current) {
         setPlaying(false);
@@ -503,7 +508,7 @@ export default function TeleprompterFeaturePage() {
       cancelAnimationFrame(rafRef.current);
     }
     return () => cancelAnimationFrame(rafRef.current);
-  }, [playing, previewing]);
+  }, [playing, previewing, scrollSpeed]);
 
   useEffect(() => {
     return () => {
@@ -646,38 +651,54 @@ export default function TeleprompterFeaturePage() {
                           <Camera className="h-4 w-4 text-white" />
                         </div>
                       </div>
-                      <div className="pointer-events-none absolute inset-x-0 bottom-4 z-10 px-5">
+                      <div className="absolute inset-x-0 bottom-4 z-10 px-5">
                         <div className="mx-auto flex max-w-[520px] items-center justify-between gap-3 rounded-2xl border border-white/10 bg-black/55 p-2 text-xs text-white/80 backdrop-blur">
                           <div className="flex items-center gap-2">
-                            <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/5">
+                            <button
+                              type="button"
+                              onClick={() => setScrollSpeed((current) => Math.max(0.5, Number((current - 0.25).toFixed(2))))}
+                              className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/5 transition hover:bg-white/10"
+                            >
                               <Minus className="h-4 w-4 text-white/70" />
-                            </span>
+                            </button>
                             <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/5">
                               <Gauge className="h-4 w-4 text-white/70" />
                             </span>
-                            <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/5">
+                            <button
+                              type="button"
+                              onClick={() => setScrollSpeed((current) => Math.min(3, Number((current + 0.25).toFixed(2))))}
+                              className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/5 transition hover:bg-white/10"
+                            >
                               <Plus className="h-4 w-4 text-white/70" />
-                            </span>
+                            </button>
                             <span className="ml-1 font-semibold text-white/70">Speed</span>
                           </div>
                           <div className="h-8 w-px bg-white/10" />
                           <div className="flex items-center gap-2">
-                            <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/5">
+                            <button
+                              type="button"
+                              onClick={() => setTextScale((current) => Math.max(0.75, Number((current - 0.1).toFixed(2))))}
+                              className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/5 transition hover:bg-white/10"
+                            >
                               <Minus className="h-4 w-4 text-white/70" />
-                            </span>
+                            </button>
                             <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/5">
                               <Type className="h-4 w-4 text-white/70" />
                             </span>
-                            <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/5">
+                            <button
+                              type="button"
+                              onClick={() => setTextScale((current) => Math.min(1.8, Number((current + 0.1).toFixed(2))))}
+                              className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/5 transition hover:bg-white/10"
+                            >
                               <Plus className="h-4 w-4 text-white/70" />
-                            </span>
+                            </button>
                             <span className="ml-1 font-semibold text-white/70">Text</span>
                           </div>
                         </div>
                       </div>
 
                       <div className="absolute inset-x-0 bottom-0 top-0 px-8 py-10">
-                        <div className="dt-tele-scroll space-y-6">
+                        <div className="dt-tele-scroll space-y-6" style={{ animationDuration: `${10 / Math.max(0.5, scrollSpeed)}s` }}>
                           {[
                             "Hey — quick update.",
                             "Today I’ll show you the exact setup I use…",
@@ -686,7 +707,7 @@ export default function TeleprompterFeaturePage() {
                             "Download your video immediately.",
                             "Works right in your browser.",
                           ].map((line) => (
-                            <p key={line} className="text-2xl font-semibold leading-relaxed text-white/90">
+                            <p key={line} className="font-semibold leading-relaxed text-white/90" style={{ fontSize: `${heroFontPx}px` }}>
                               {line}
                             </p>
                           ))}
@@ -699,7 +720,7 @@ export default function TeleprompterFeaturePage() {
                               "Download your video immediately.",
                               "Works right in your browser.",
                             ].map((line) => (
-                              <p key={`dup-${line}`} className="text-2xl font-semibold leading-relaxed text-white/90">
+                              <p key={`dup-${line}`} className="font-semibold leading-relaxed text-white/90" style={{ fontSize: `${heroFontPx}px` }}>
                                 {line}
                               </p>
                             ))}
@@ -879,8 +900,57 @@ export default function TeleprompterFeaturePage() {
                 </div>
 
                 <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
-                  <h3 className="text-sm font-bold">Teleprompter view</h3>
-                  <p className="mt-2 text-xs text-white/55">Your text scrolls from the top when you press Record.</p>
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-bold">Teleprompter view</h3>
+                      <p className="mt-2 text-xs text-white/55">Your text scrolls from the top when you press Record.</p>
+                    </div>
+                    <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-black/20 px-3 py-2 text-xs text-white/70">
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => setScrollSpeed((current) => Math.max(0.5, Number((current - 0.25).toFixed(2))))}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-white/10 bg-white/5 transition hover:bg-white/10"
+                          aria-label="Decrease speed"
+                        >
+                          <Minus className="h-4 w-4" />
+                        </button>
+                        <span className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-white/10 bg-white/5">
+                          <Gauge className="h-4 w-4" />
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setScrollSpeed((current) => Math.min(3, Number((current + 0.25).toFixed(2))))}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-white/10 bg-white/5 transition hover:bg-white/10"
+                          aria-label="Increase speed"
+                        >
+                          <Plus className="h-4 w-4" />
+                        </button>
+                      </div>
+                      <div className="h-7 w-px bg-white/10" />
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => setTextScale((current) => Math.max(0.75, Number((current - 0.1).toFixed(2))))}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-white/10 bg-white/5 transition hover:bg-white/10"
+                          aria-label="Decrease text size"
+                        >
+                          <Minus className="h-4 w-4" />
+                        </button>
+                        <span className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-white/10 bg-white/5">
+                          <Type className="h-4 w-4" />
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setTextScale((current) => Math.min(1.8, Number((current + 0.1).toFixed(2))))}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-white/10 bg-white/5 transition hover:bg-white/10"
+                          aria-label="Increase text size"
+                        >
+                          <Plus className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
 
                   <div className="mt-4 relative overflow-hidden rounded-2xl border border-white/10 bg-black min-h-[520px] shadow-xl shadow-black/40">
                     <video
@@ -904,7 +974,7 @@ export default function TeleprompterFeaturePage() {
                     <div ref={containerRef} className="relative z-10 h-[520px] overflow-hidden px-8 py-10">
                       <div ref={contentRef} className="space-y-7">
                         {lines.map((line, idx) => (
-                          <p key={`${idx}-${line.slice(0, 24)}`} className="text-3xl font-semibold leading-relaxed text-white/92">
+                          <p key={`${idx}-${line.slice(0, 24)}`} className="font-semibold leading-relaxed text-white/92" style={{ fontSize: `${demoFontPx}px` }}>
                             {line}
                           </p>
                         ))}
