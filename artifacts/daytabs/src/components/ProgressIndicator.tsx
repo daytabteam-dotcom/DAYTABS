@@ -52,7 +52,7 @@ export function ProgressIndicator({ currentStep, progress, mode }: ProgressIndic
         <p className="text-primary font-mono mt-3 font-semibold">{Math.round(progress)}% Complete</p>
       </div>
 
-      <div className="space-y-4 relative before:absolute before:inset-0 before:ml-5 before:-translate-x-px md:before:mx-auto md:before:translate-x-0 before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-white/10 before:to-transparent">
+      <div className="space-y-4 relative before:absolute before:inset-0 before:ml-5 before:-translate-x-px md:before:mx-auto md:before:translate-x-0 before:h-full before:w-0.5 before:bg-linear-to-b before:from-transparent before:via-white/10 before:to-transparent">
         {STEPS.map((step, index) => {
           const isCompleted = index < activeIndex;
           const isActive = index === activeIndex;

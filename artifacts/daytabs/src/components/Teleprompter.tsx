@@ -59,6 +59,7 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
   const recordingRef = useRef(false);
   const cameraOrientationRef = useRef<"portrait" | "landscape" | null>(null);
   const isPortraitRef = useRef(isPortrait);
+  const recordingPortraitRef = useRef<boolean | null>(null);
 
   useEffect(() => {
     isPortraitRef.current = isPortrait;
@@ -71,16 +72,23 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
 
     window.addEventListener("resize", update);
     window.addEventListener("orientationchange", update);
+    const screenOrientation = window.screen?.orientation;
+    if (screenOrientation && typeof screenOrientation.addEventListener === "function") {
+      screenOrientation.addEventListener("change", update);
+    }
 
     return () => {
       window.removeEventListener("resize", update);
       window.removeEventListener("orientationchange", update);
+      if (screenOrientation && typeof screenOrientation.removeEventListener === "function") {
+        screenOrientation.removeEventListener("change", update);
+      }
     };
   }, []);
 
   const drawVideoToCanvas = useCallback((video: HTMLVideoElement, canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D) => {
     function draw() {
-      const desiredPortrait = isPortraitRef.current;
+      const desiredPortrait = recordingPortraitRef.current ?? isPortraitRef.current;
 
       const outputWidth = desiredPortrait ? 1080 : 1920;
       const outputHeight = desiredPortrait ? 1920 : 1080;
@@ -188,6 +196,7 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
       cancelAnimationFrame(drawRafRef.current);
       drawRafRef.current = 0;
     }
+    recordingPortraitRef.current = null;
     if (canvasStreamRef.current) {
       for (const track of canvasStreamRef.current.getTracks()) track.stop();
       canvasStreamRef.current = null;
@@ -260,6 +269,7 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
       }
 
       if (drawRafRef.current) cancelAnimationFrame(drawRafRef.current);
+      recordingPortraitRef.current = isPortraitRef.current;
       drawVideoToCanvas(sourceVideo, canvas, ctx);
 
       const canvasStream = canvas.captureStream(30);
@@ -285,6 +295,7 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
           for (const track of canvasStreamRef.current.getTracks()) track.stop();
           canvasStreamRef.current = null;
         }
+        recordingPortraitRef.current = null;
         setRecording(false);
         if (blob.size > 0) saveBlobToDevice(blob);
         if (stopCameraAfterRecordingRef.current) {

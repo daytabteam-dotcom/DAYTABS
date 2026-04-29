@@ -94,7 +94,7 @@ export default function TeleprompterTab() {
             value={script}
             onChange={(e) => setScript(e.target.value)}
             placeholder={PLACEHOLDER}
-            className="w-full bg-transparent px-5 py-4 text-sm leading-relaxed min-h-[420px] resize-none text-white/80 placeholder:text-white/20 focus:outline-none"
+            className="w-full bg-transparent px-5 py-4 text-sm leading-relaxed min-h-105 resize-none text-white/80 placeholder:text-white/20 focus:outline-none"
             spellCheck
           />
         </PanelCard>

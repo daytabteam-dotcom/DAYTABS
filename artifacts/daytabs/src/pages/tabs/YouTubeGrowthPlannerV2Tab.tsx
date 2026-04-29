@@ -1785,7 +1785,7 @@ function CalendarPreviewCard({
           }}
           className={cn("group relative w-full overflow-hidden rounded-2xl border text-left transition-all hover:-translate-y-1 hover:bg-white/6", origin.cardClassName)}
         >
-          <div className={cn("h-2 bg-gradient-to-r", linked ? "from-emerald-300 to-emerald-500" : origin.accentClassName)} />
+          <div className={cn("h-2 bg-linear-to-r", linked ? "from-emerald-300 to-emerald-500" : origin.accentClassName)} />
           {linked ? (
             <span className="absolute right-12 top-3 flex h-6 w-6 items-center justify-center rounded-full border border-emerald-400/30 bg-emerald-500/15 text-emerald-300">
               <Check className="h-3.5 w-3.5" />
@@ -2014,7 +2014,7 @@ function CurrentWeekConsistencyChart({ rows }: { rows: Array<{ iso: string; day:
             <div
               key={day.iso}
               className={cn(
-                "min-h-[132px] bg-[#120d1f] p-4 transition-all",
+                "min-h-33 bg-[#120d1f] p-4 transition-all",
                 day.status === "posted" && "bg-emerald-500/10",
                 day.status === "missed" && "bg-red-500/10",
                 day.status === "planned" && "bg-sky-500/10",
@@ -2582,7 +2582,7 @@ function LoadingState() {
         <div className="space-y-3">
           <Skeleton className="h-6 w-40 bg-white/10" />
           <Skeleton className="h-12 w-md max-w-full bg-white/10" />
-          <Skeleton className="h-5 w-[36rem] max-w-full bg-white/10" />
+          <Skeleton className="h-5 w-xl max-w-full bg-white/10" />
         </div>
         <div className="flex gap-2">
           <Skeleton className="h-11 w-36 bg-white/10" />
@@ -3341,7 +3341,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
             const hasPublished = dateDays.some((day) => resultsByDay.has(day.day));
             const isToday = date === new Date().toISOString().slice(0, 10);
             return (
-              <div key={date} onDragOver={(event) => event.preventDefault()} onDrop={() => handleDropOnDate(date)} className={cn("min-h-65 w-[290px] shrink-0 rounded-2xl border bg-white/2.5 p-3 transition-all hover:bg-white/4 xl:w-[calc((100vw-10rem)/4)] xl:max-w-[320px]", isToday ? "border-red-300/35" : "border-white/10")}>
+              <div key={date} onDragOver={(event) => event.preventDefault()} onDrop={() => handleDropOnDate(date)} className={cn("min-h-65 w-72.5 shrink-0 rounded-2xl border bg-white/2.5 p-3 transition-all hover:bg-white/4 xl:w-[calc((100vw-10rem)/4)] xl:max-w-[320px]", isToday ? "border-red-300/35" : "border-white/10")}>
                 <div className="mb-3 flex items-start justify-between gap-2 rounded-xl border border-white/10 bg-black/10 px-3 py-2">
                   <div>
                     <p className="text-sm font-semibold text-white">{dayName(date)}</p>
@@ -3535,7 +3535,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
               type="button"
               onClick={() => setActiveSubtab(tab.id)}
               className={cn(
-                "group relative flex min-w-[128px] flex-1 items-center justify-center gap-2 overflow-hidden rounded-2xl px-3 py-3 text-center transition-all duration-200",
+                "group relative flex min-w-32 flex-1 items-center justify-center gap-2 overflow-hidden rounded-2xl px-3 py-3 text-center transition-all duration-200",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-200/50 focus-visible:ring-offset-2 focus-visible:ring-offset-black",
                 isActive
                   ? "bg-white/14 text-white shadow-[0_10px_30px_rgba(0,0,0,0.18)]"
@@ -4052,7 +4052,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
                   <h2 className="text-2xl font-semibold text-white">{ui.competitorsPanel.title}</h2>
                   <p className="mt-1 text-sm text-white/45">{ui.competitorsPanel.subtitle}</p>
                 </div>
-                <div className="flex w-full flex-col gap-3 md:w-auto md:min-w-[360px]">
+                <div className="flex w-full flex-col gap-3 md:w-auto md:min-w-90">
                   <Button variant="secondary" className="rounded-lg" onClick={discoverCompetitorsOnly} disabled={Boolean(working)}>
                     {working === "competitors" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="mr-2 h-4 w-4" />}
                     {ui.competitorsPanel.refreshCompetitors}
