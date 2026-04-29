@@ -667,47 +667,63 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
               </button>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            {startInRecordMode ? (
-              <button
-                onClick={previewing ? stopPreviewSession : beginPreviewSession}
-                disabled={recording || countdownValue !== null}
-                className={`flex min-h-16 flex-1 items-center justify-center gap-3 rounded-[22px] px-5 text-base font-semibold transition-all ${
-                  previewing
-                    ? "bg-white text-black hover:bg-white/90"
-                    : "border border-white/10 bg-white/[0.06] text-white hover:bg-white/[0.12]"
-                }`}
-              >
-                {previewing ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
-                <span>{previewing ? "Stop preview" : "Preview"}</span>
-              </button>
-            ) : null}
+          <div className="flex items-center gap-2">
             {startInRecordMode && recording ? (
-              <button
-                onClick={endRecordingSession}
-                className="flex min-h-16 flex-1 items-center justify-center gap-3 rounded-[22px] bg-red-500 px-5 text-base font-semibold text-white hover:bg-red-400"
-              >
-                <Circle className="h-5 w-5 fill-current" />
-                <span>End recording</span>
-              </button>
-            ) : null}
-            <button
-              onClick={togglePrimaryAction}
-              disabled={recording}
-              className={`flex min-h-16 flex-1 items-center justify-center gap-3 rounded-[22px] px-5 text-base font-semibold transition-all ${
-                countdownValue !== null
-                  ? "bg-white text-black hover:bg-white/90"
-                  : startInRecordMode
-                    ? "bg-red-500 text-white hover:bg-red-400"
-                    : "bg-violet-600 text-white hover:bg-violet-500"
-              }`}
-            >
-              <PrimaryActionIcon className={`h-5 w-5 ${startInRecordMode && countdownValue !== null ? "fill-current" : ""}`} />
-              <span>{primaryActionLabel}</span>
-            </button>
-            <button onClick={reset} className="flex min-h-16 min-w-16 items-center justify-center rounded-[22px] border border-white/10 bg-white/[0.06] text-white" aria-label="Restart from top">
-              <RotateCcw className="h-5 w-5" />
-            </button>
+              <>
+                <button
+                  onClick={endRecordingSession}
+                  className="flex min-h-16 flex-1 items-center justify-center gap-3 rounded-[22px] bg-red-500 px-5 text-base font-semibold text-white hover:bg-red-400"
+                >
+                  <Circle className="h-5 w-5 fill-current" />
+                  <span>End recording</span>
+                </button>
+                <button
+                  onClick={reset}
+                  className="flex h-16 w-16 shrink-0 items-center justify-center rounded-[22px] border border-white/10 bg-white/[0.06] text-white"
+                  aria-label="Restart from top"
+                >
+                  <RotateCcw className="h-5 w-5" />
+                </button>
+              </>
+            ) : (
+              <>
+                {startInRecordMode ? (
+                  <button
+                    onClick={previewing ? stopPreviewSession : beginPreviewSession}
+                    disabled={recording || countdownValue !== null}
+                    className={`flex min-h-16 flex-1 min-w-0 items-center justify-center gap-3 rounded-[22px] px-5 text-base font-semibold transition-all ${
+                      previewing
+                        ? "bg-white text-black hover:bg-white/90"
+                        : "border border-white/10 bg-white/[0.06] text-white hover:bg-white/[0.12]"
+                    }`}
+                  >
+                    {previewing ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
+                    <span className="truncate">{previewing ? "Stop preview" : "Preview"}</span>
+                  </button>
+                ) : null}
+                <button
+                  onClick={togglePrimaryAction}
+                  disabled={recording}
+                  className={`flex min-h-16 flex-1 min-w-0 items-center justify-center gap-3 rounded-[22px] px-5 text-base font-semibold transition-all ${
+                    countdownValue !== null
+                      ? "bg-white text-black hover:bg-white/90"
+                      : startInRecordMode
+                        ? "bg-red-500 text-white hover:bg-red-400"
+                        : "bg-violet-600 text-white hover:bg-violet-500"
+                  }`}
+                >
+                  <PrimaryActionIcon className={`h-5 w-5 ${startInRecordMode && countdownValue !== null ? "fill-current" : ""}`} />
+                  <span className="truncate">{primaryActionLabel}</span>
+                </button>
+                <button
+                  onClick={reset}
+                  className="flex h-16 w-16 shrink-0 items-center justify-center rounded-[22px] border border-white/10 bg-white/[0.06] text-white"
+                  aria-label="Restart from top"
+                >
+                  <RotateCcw className="h-5 w-5" />
+                </button>
+              </>
+            )}
           </div>
         </div>
       </div>

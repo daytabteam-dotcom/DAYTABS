@@ -56,9 +56,10 @@ export default function TeleprompterTab() {
               Paste your script, then choose between a clean teleprompter view or a record mode with preview controls and a 3, 2, 1 countdown before capture starts.
             </PanelSubtitle>
           </div>
-          <div className="flex gap-2">
+          <div className="flex w-full gap-2 sm:w-auto">
             <Button
               variant="secondary"
+              className="flex-1 min-w-0 justify-center"
               disabled={!hasScript}
               onClick={() => {
                 setStartInRecordMode(false);
@@ -66,9 +67,10 @@ export default function TeleprompterTab() {
               }}
             >
               <MonitorPlay className="mr-2 h-4 w-4" />
-              Use teleprompter
+              <span className="truncate">Use teleprompter</span>
             </Button>
             <Button
+              className="flex-1 min-w-0 justify-center"
               disabled={!hasScript}
               onClick={() => {
                 setStartInRecordMode(true);
@@ -76,7 +78,7 @@ export default function TeleprompterTab() {
               }}
             >
               <Camera className="mr-2 h-4 w-4" />
-              Teleprompter + record
+              <span className="truncate">Teleprompter + record</span>
             </Button>
           </div>
         </PanelHeader>
