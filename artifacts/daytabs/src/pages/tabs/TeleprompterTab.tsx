@@ -59,7 +59,7 @@ export default function TeleprompterTab() {
           <div className="flex w-full gap-2 sm:w-auto">
             <Button
               variant="secondary"
-              className="flex-1 min-w-0 justify-center"
+              className="hidden flex-1 min-w-0 justify-center sm:flex"
               disabled={!hasScript}
               onClick={() => {
                 setStartInRecordMode(false);
@@ -78,7 +78,7 @@ export default function TeleprompterTab() {
               }}
             >
               <Camera className="mr-2 h-4 w-4" />
-              <span className="truncate">Teleprompter + record</span>
+              <span className="truncate">Record</span>
             </Button>
           </div>
         </PanelHeader>
