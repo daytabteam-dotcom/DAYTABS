@@ -504,6 +504,7 @@ function Dashboard({
 
 export default function Home() {
   const { copy } = useDayTabsI18n();
+  const pageContainerClass = "mx-auto w-full max-w-[1440px] px-6 md:px-8 xl:px-12";
   const [activeTab, setActiveTab] = useState<TabId>(() => getTabFromUrl());
   const [activeTabHasData, setActiveTabHasData] = useState(false);
   const [showPlanModal, setShowPlanModal] = useState(false);
@@ -558,7 +559,7 @@ export default function Home() {
         <div className="absolute inset-0 bg-background/55" />
       </div>
       <header className="w-full border-b border-white/5 bg-background/45 backdrop-blur-xl sticky top-0 z-50">
-        <div className="panel-shell flex h-16 items-center justify-between sm:h-20">
+        <div className={`${pageContainerClass} flex h-16 items-center justify-between sm:h-20`}>
           <div
             className="flex items-center gap-3 cursor-pointer"
             onClick={() => (window.location.href = "/")}
@@ -581,7 +582,7 @@ export default function Home() {
         </div>
       </header>
       <div className="w-full border-b border-white/5 bg-background/25 backdrop-blur-md sticky top-16 z-40 sm:top-20">
-        <div className="panel-shell">
+        <div className={pageContainerClass}>
           <div className="flex items-center gap-2 overflow-x-auto scrollbar-none py-2.5 sm:py-3">
             {NAV_TABS.map((tab) => {
               const Icon = tab.icon;
@@ -610,7 +611,7 @@ export default function Home() {
           </div>
         </div>
       </div>
-      <main className="panel-shell relative z-10 py-6 sm:py-10 md:py-12">
+      <main className={`${pageContainerClass} relative z-10 py-6 sm:py-10 md:py-12`}>
         {activeTab === "dashboard" && (
           <Dashboard
             onNavigate={handleTabClick}

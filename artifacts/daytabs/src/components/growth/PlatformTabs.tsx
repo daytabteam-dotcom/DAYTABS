@@ -89,9 +89,14 @@ export function PlatformSidebar({
 }) {
   return (
     <TooltipProvider delayDuration={120}>
-      <div className="w-full rounded-[28px] bg-white/[0.045] p-4 md:h-full md:p-5">
-        <div className="flex items-center justify-center md:h-full">
-          <div className="flex w-full items-center justify-start gap-6 overflow-x-auto md:flex-col md:justify-center md:overflow-visible">
+      <div
+        className={cn(
+          "w-full rounded-[28px] bg-white/[0.045] p-4",
+          "lg:sticky lg:top-[152px] lg:h-[calc(100vh-200px)] lg:min-h-[320px] lg:max-h-[560px] lg:w-[88px] lg:p-5",
+        )}
+      >
+        <div className="flex items-center justify-center lg:h-full">
+          <div className="flex w-full items-center justify-start gap-6 overflow-x-auto lg:h-full lg:flex-col lg:items-center lg:justify-center lg:overflow-visible">
             {TABS.map((tab) => {
               const isActive = value === tab.id;
               const Icon = tab.Icon;
@@ -102,7 +107,7 @@ export function PlatformSidebar({
                       type="button"
                       onClick={() => onChange(tab.id)}
                       className={cn(
-                        "group relative grid h-[52px] w-[52px] shrink-0 place-items-center rounded-2xl transition-colors",
+                        "group relative grid h-12 w-12 shrink-0 place-items-center rounded-2xl transition-colors",
                         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300/45 focus-visible:ring-offset-2 focus-visible:ring-offset-black",
                         isActive
                           ? "bg-gradient-to-br from-violet-500/35 via-violet-500/18 to-fuchsia-500/20 text-white shadow-[0_0_0_1px_rgba(167,139,250,0.28),0_18px_46px_rgba(167,139,250,0.20)]"

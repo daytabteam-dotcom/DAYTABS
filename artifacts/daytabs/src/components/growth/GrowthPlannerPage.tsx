@@ -11,15 +11,14 @@ function tabFromStorage(): GrowthPlatformTab | null {
 
 export default function GrowthPlannerPage() {
   const [platform, setPlatform] = useState<GrowthPlatformTab>(() => tabFromStorage() ?? "youtube");
-  const wrapperClass = "max-w-[1440px] mx-auto px-8 xl:px-12";
 
   useEffect(() => {
     localStorage.setItem("daytabs_growth_platform", platform);
   }, [platform]);
 
   return (
-    <div className={`${wrapperClass} py-8`}>
-      <div className="grid grid-cols-1 gap-8 md:grid-cols-[96px_1fr] md:items-stretch">
+    <div className="mt-8">
+      <div className="grid grid-cols-1 gap-8 lg:grid-cols-[88px_minmax(0,1fr)] lg:items-start">
         <PlatformSidebar value={platform} onChange={setPlatform} />
         <main className="min-w-0">
           {platform === "youtube" ? <ExistingYoutubeGrowthPlanner /> : null}
