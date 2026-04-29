@@ -1423,14 +1423,18 @@ export default function YouTubeAuditTab() {
                         : "Captions not detected"}
                     </span>
                   </div>
-                  {(report as QuickAuditReport).auditMode === "quick" ? (
-                    <p className="mt-3 text-xs leading-5 text-white/45">
-                      Quick audit: focused on packaging decisions, not long-form niche inference.
-                    </p>
+                  {report ? (
+                    (report as QuickAuditReport).auditMode === "quick" ? (
+                      <p className="mt-3 text-xs leading-5 text-white/45">
+                        Quick audit: focused on packaging decisions, not long-form niche inference.
+                      </p>
+                    ) : (
+                      <p className="mt-3 text-xs leading-5 text-white/45">
+                        Niche confidence: {(report as DeepAuditReport).nicheInference.confidence} · {(report as DeepAuditReport).nicheInference.basis}
+                      </p>
+                    )
                   ) : (
-                    <p className="mt-3 text-xs leading-5 text-white/45">
-                      Niche confidence: {(report as DeepAuditReport).nicheInference.confidence} · {(report as DeepAuditReport).nicheInference.basis}
-                    </p>
+                    <p className="mt-3 text-xs leading-5 text-white/45">Audit report is loading…</p>
                   )}
                 </div>
               </div>
