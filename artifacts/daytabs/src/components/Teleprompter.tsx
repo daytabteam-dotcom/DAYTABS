@@ -99,6 +99,7 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
   const cameraOrientationRef = useRef<"portrait" | "landscape" | null>(null);
   const isPortraitRef = useRef(isPortrait);
   const recordingPortraitRef = useRef<boolean | null>(null);
+  const recordingOutputSizeRef = useRef<{ width: number; height: number } | null>(null);
 
   useEffect(() => {
     isPortraitRef.current = isPortrait;
@@ -133,11 +134,8 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
     function draw() {
       const desiredPortrait = recordingPortraitRef.current ?? isPortraitRef.current;
 
-      const outputWidth = desiredPortrait ? 1080 : 1920;
-      const outputHeight = desiredPortrait ? 1920 : 1080;
-
-      canvas.width = outputWidth;
-      canvas.height = outputHeight;
+      const outputWidth = recordingOutputSizeRef.current?.width ?? (desiredPortrait ? 1080 : 1920);
+      const outputHeight = recordingOutputSizeRef.current?.height ?? (desiredPortrait ? 1920 : 1080);
 
       const vw = video.videoWidth;
       const vh = video.videoHeight;
@@ -240,6 +238,7 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
       drawRafRef.current = 0;
     }
     recordingPortraitRef.current = null;
+    recordingOutputSizeRef.current = null;
     if (canvasStreamRef.current) {
       for (const track of canvasStreamRef.current.getTracks()) track.stop();
       canvasStreamRef.current = null;
@@ -257,6 +256,7 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
     if (typeof MediaRecorder === "undefined") return "";
     const candidates = [
       "video/mp4;codecs=h264,aac",
+      "video/mp4",
       "video/webm;codecs=vp9,opus",
       "video/webm;codecs=vp8,opus",
       "video/webm",
@@ -312,7 +312,14 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
       }
 
       if (drawRafRef.current) cancelAnimationFrame(drawRafRef.current);
-      recordingPortraitRef.current = getRecordingPortraitOrientation(recordingFormatSettingRef.current);
+      const desiredPortrait = getRecordingPortraitOrientation(recordingFormatSettingRef.current);
+      recordingPortraitRef.current = desiredPortrait;
+      const outputWidth = desiredPortrait ? 1080 : 1920;
+      const outputHeight = desiredPortrait ? 1920 : 1080;
+      recordingOutputSizeRef.current = { width: outputWidth, height: outputHeight };
+      // Important (especially on iOS Safari): set the canvas size BEFORE captureStream and do not change it while recording.
+      canvas.width = outputWidth;
+      canvas.height = outputHeight;
       drawVideoToCanvas(sourceVideo, canvas, ctx);
 
       const canvasStream = canvas.captureStream(30);
@@ -339,6 +346,7 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
           canvasStreamRef.current = null;
         }
         recordingPortraitRef.current = null;
+        recordingOutputSizeRef.current = null;
         setRecording(false);
         if (blob.size > 0) saveBlobToDevice(blob);
         if (stopCameraAfterRecordingRef.current) {
