@@ -754,8 +754,10 @@ router.post("/audit", requireAuth, async (req, res) => {
       res.status(400).json({ error: "A YouTube video URL is required" });
       return;
     }
+    const auditModeRaw = typeof req.body?.auditMode === "string" ? req.body.auditMode.trim().toLowerCase() : "";
+    const auditMode = auditModeRaw === "deep" ? "deep" : "quick";
     const uiLocale = getUiLocaleFromRequest(req);
-    const report = await auditYoutubeVideo(req.auth!.user_id, videoUrl, { uiLocale });
+    const report = await auditYoutubeVideo(req.auth!.user_id, videoUrl, { uiLocale, auditMode });
     res.json({ report });
   } catch (err) {
     req.log.error({ err }, "YouTube video audit error");

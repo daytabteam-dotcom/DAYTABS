@@ -351,6 +351,58 @@ export interface YoutubeVideoAuditReport {
   limitations: string[];
 }
 
+export type YoutubeAuditMode = "quick" | "deep";
+
+export interface YoutubeQuickAuditReport {
+  auditMode: "quick";
+  score: number;
+  scoreLabel: string;
+  oneSentenceDiagnosis: string;
+  doThisFirst: {
+    area: "title" | "thumbnail" | "hook" | "description" | "tags";
+    action: string;
+    why: string;
+    expectedImpact: string;
+  };
+  topFixes: Array<{
+    area: "title" | "thumbnail" | "hook" | "description" | "tags";
+    priority: 1 | 2 | 3;
+    problem: string;
+    evidence: string;
+    whyItHurts: string;
+    fix: string;
+    example: string;
+    confidence: "high" | "medium" | "low";
+  }>;
+  beforeAfter: {
+    currentTitle: string;
+    betterTitles: string[];
+    currentHook: string | null;
+    hookRewrite: string | null;
+    descriptionRewrite: string;
+  };
+  thumbnailFix: {
+    problem: string;
+    concept: string;
+    focalSubject: string;
+    textOverlay: string;
+    layout: string;
+    emotion: string;
+    designStyle: string;
+  };
+  competitorPattern: {
+    summary: string;
+    patternsToBorrow: string[];
+    patternsToAvoid: string[];
+  };
+  tags: {
+    priority: "low" | "medium" | "high";
+    recommended: string[];
+    why: string;
+  };
+  limitations: string[];
+}
+
 export interface YoutubeVideoAuditPreview {
   video: {
     id: string;
@@ -3829,7 +3881,331 @@ export async function getYoutubeVideoAuditPreview(userId: number, videoUrl: stri
   };
 }
 
-export async function auditYoutubeVideo(
+function youtubeAuditCacheKey(videoId: string, mode: YoutubeAuditMode, uiLocale?: string | null) {
+  const locale = (uiLocale || "").trim().toLowerCase() || "auto";
+  return `youtube:audit:${mode}:${videoId}:${locale}`;
+}
+
+function youtubeAuditTranscriptCacheKey(videoId: string) {
+  return `youtube:audit:transcript:${videoId}`;
+}
+
+function youtubeAuditCompetitorCacheKey(videoId: string, mode: YoutubeAuditMode) {
+  return `youtube:audit:competitors:${mode}:${videoId}`;
+}
+
+function sliceTranscriptOpening(segments: YoutubeTranscriptSegment[], maxSeconds: number) {
+  const sliced = segments
+    .filter((segment) => Number.isFinite(segment.start) && Number.isFinite(segment.end))
+    .filter((segment) => segment.end > 0 && segment.start <= maxSeconds)
+    .map((segment) => ({
+      ...segment,
+      end: Math.min(segment.end, maxSeconds),
+    }));
+  const openingText = transcriptSegmentsToText(sliced);
+  return openingText ? openingText.slice(0, 6000) : null;
+}
+
+function quickCompetitorQuery(video: YoutubeRecentVideo) {
+  const titleWords = video.title
+    .replace(/[^\w\s]/g, " ")
+    .split(/\s+/)
+    .filter((word) => word.length > 3)
+    .slice(0, 8);
+  const tagWords = (video.tags ?? [])
+    .map((tag) => tag.replace(/[^\w\s]/g, " ").trim())
+    .filter(Boolean)
+    .slice(0, 3);
+  return [...titleWords, ...tagWords].join(" ").trim() || video.title;
+}
+
+async function auditYoutubeVideoQuick(
+  userId: number,
+  videoUrl: string,
+  options?: { uiLocale?: string | null },
+): Promise<YoutubeQuickAuditReport> {
+  const videoId = extractYoutubeVideoId(videoUrl);
+  if (!videoId) throw new Error("Enter a valid YouTube video URL");
+
+  const cached = await readCache<YoutubeQuickAuditReport>(youtubeAuditCacheKey(videoId, "quick", options?.uiLocale));
+  if (cached) return cached;
+
+  const video = await fetchVideoById(userId, videoId);
+  const channelId = video.channelId ?? null;
+  const recentVideos = channelId ? await fetchRecentVideos(userId, channelId, 20) : [];
+  const channelMedianViews = median(recentVideos.map((item) => parseNumber(item.viewCount)));
+  const ageDays = daysSince(video.publishedAt);
+
+  const transcriptCached = await readCache<{ opening: string | null; source: string | null; language: string | null }>(
+    youtubeAuditTranscriptCacheKey(videoId),
+  );
+  let first90SecondsTranscript: string | null = transcriptCached?.opening ?? null;
+  let transcriptSource: string | null = transcriptCached?.source ?? null;
+  if (!transcriptCached) {
+    const transcript = await fetchPublicYoutubeTranscript(videoId, []).catch(() => null);
+    transcriptSource = transcript?.source ?? null;
+    const opening = transcript?.segments?.length ? sliceTranscriptOpening(transcript.segments, 90) : null;
+    first90SecondsTranscript = opening;
+    await writeCache(
+      youtubeAuditTranscriptCacheKey(videoId),
+      { opening, source: transcriptSource, language: transcript?.language ?? null },
+      userId,
+      0,
+      7 * 24 * 60 * 60 * 1000,
+    );
+  }
+
+  const competitorCached = await readCache<YoutubeRecentVideo[]>(youtubeAuditCompetitorCacheKey(videoId, "quick"));
+  let competitorExamples = competitorCached ?? [];
+  if (!competitorCached) {
+    const query = quickCompetitorQuery(video);
+    const results = await searchRelevantVideos(userId, query, 8).catch(() => [] as YoutubeRecentVideo[]);
+    competitorExamples = results
+      .filter((item) => item.id !== video.id && item.channelId !== video.channelId)
+      .slice(0, 3);
+    await writeCache(
+      youtubeAuditCompetitorCacheKey(videoId, "quick"),
+      competitorExamples,
+      userId,
+      0,
+      7 * 24 * 60 * 60 * 1000,
+    );
+  }
+
+  const outputLanguage = inferOutputLanguage({
+    forceLanguage: options?.uiLocale ?? null,
+    title: video.title,
+    description: video.description,
+    tags: video.tags,
+    transcriptText: first90SecondsTranscript,
+    recentVideos: recentVideos.map((item) => ({ title: item.title, description: item.description, tags: item.tags })),
+  });
+
+  const systemPrompt = `You are DayTabs, a YouTube packaging and retention strategist.
+
+Your job is to give creators the 3 most important changes that can improve a video.
+
+You are NOT writing a long report.
+You are creating a practical action dashboard.
+
+Use only the supplied evidence.
+Do not hallucinate CTR, retention, private analytics, or full video visuals.
+
+Prioritize:
+1. title
+2. thumbnail
+3. first 15 seconds / hook
+4. description
+5. tags
+
+Rules:
+- Be specific.
+- Be direct.
+- Do not use generic advice.
+- Every problem must include evidence.
+- Every fix must be immediately usable.
+- If transcript opening exists, always provide a better first 15-second hook.
+- If transcript opening is missing, hookRewrite must be null.
+- Tags are secondary. Do not make tags a top problem unless title, thumbnail, and hook are already strong.
+- Competitors should be used only to extract patterns, not to dump a list.
+- Return valid JSON only.
+
+OUTPUT LANGUAGE RULE:
+- ${outputLanguage.instruction}`;
+
+  const thumbnailEvidence = video.thumbnailUrl
+    ? `Public thumbnail URL available: ${video.thumbnailUrl}. (Quick audit: no separate visual model analysis.)`
+    : "No public thumbnail URL available.";
+
+  const userPrompt = `Create a QUICK YouTube audit.
+
+Evidence:
+Title:
+${video.title}
+
+Description:
+${video.description || ""}
+
+Tags:
+${(video.tags || []).join(", ")}
+
+Views:
+${parseNumber(video.viewCount)}
+
+Likes:
+${parseNumber(video.likeCount)}
+
+Comments:
+${parseNumber(video.commentCount)}
+
+Video age in days:
+${ageDays ?? "unknown"}
+
+Channel median views:
+${channelMedianViews ?? "unknown"}
+
+Thumbnail evidence:
+${thumbnailEvidence}
+
+Transcript opening excerpt:
+${first90SecondsTranscript ?? "null"}
+
+Competitor examples, max 3:
+${JSON.stringify(competitorExamples.map((item) => ({
+    title: item.title,
+    channelName: item.channelTitle,
+    url: item.url,
+    viewCount: parseNumber(item.viewCount),
+  })))}
+
+Return JSON in this exact shape:
+
+{
+  \"auditMode\": \"quick\",
+  \"score\": number,
+  \"scoreLabel\": string,
+  \"oneSentenceDiagnosis\": string,
+  \"doThisFirst\": {
+    \"area\": \"title\" | \"thumbnail\" | \"hook\" | \"description\" | \"tags\",
+    \"action\": string,
+    \"why\": string,
+    \"expectedImpact\": string
+  },
+  \"topFixes\": [
+    {
+      \"area\": \"title\" | \"thumbnail\" | \"hook\" | \"description\" | \"tags\",
+      \"priority\": 1 | 2 | 3,
+      \"problem\": string,
+      \"evidence\": string,
+      \"whyItHurts\": string,
+      \"fix\": string,
+      \"example\": string,
+      \"confidence\": \"high\" | \"medium\" | \"low\"
+    }
+  ],
+  \"beforeAfter\": {
+    \"currentTitle\": string,
+    \"betterTitles\": string[],
+    \"currentHook\": string | null,
+    \"hookRewrite\": string | null,
+    \"descriptionRewrite\": string
+  },
+  \"thumbnailFix\": {
+    \"problem\": string,
+    \"concept\": string,
+    \"focalSubject\": string,
+    \"textOverlay\": string,
+    \"layout\": string,
+    \"emotion\": string,
+    \"designStyle\": string
+  },
+  \"competitorPattern\": {
+    \"summary\": string,
+    \"patternsToBorrow\": string[],
+    \"patternsToAvoid\": string[]
+  },
+  \"tags\": {
+    \"priority\": \"low\" | \"medium\" | \"high\",
+    \"recommended\": string[],
+    \"why\": string
+  },
+  \"limitations\": string[]
+}
+
+Important:
+- topFixes must have maximum 3 items.
+- If hookRewrite is null, do not include hook in topFixes.
+- Do not return long paragraphs.
+- Each field should be concise and UI-friendly.
+- The output should help the user understand what to change in under 10 seconds.`;
+
+  const completion = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
+    ],
+    response_format: { type: "json_object" },
+    max_completion_tokens: 1400,
+  });
+
+  await logTokenUsage({
+    userId,
+    feature: "youtubeVideoAuditQuick",
+    model: "gpt-4o-mini",
+    ...usageTokens(completion.usage),
+  });
+
+  const parsed = asRecord(parseAiJson(completion.choices[0]?.message?.content ?? "{}"));
+  const beforeAfter = asRecord(parsed.beforeAfter);
+  const hookRewrite = asString(beforeAfter.hookRewrite);
+
+  const topFixes = asArray(parsed.topFixes)
+    .map((item) => asRecord(item))
+    .map((item, index) => ({
+      area: (asString(item.area) as YoutubeQuickAuditReport["topFixes"][number]["area"]) || "title",
+      priority: (Math.min(3, Math.max(1, parseNumber(item.priority) || (index + 1))) as 1 | 2 | 3),
+      problem: asString(item.problem) || "",
+      evidence: asString(item.evidence) || "",
+      whyItHurts: asString(item.whyItHurts) || "",
+      fix: asString(item.fix) || "",
+      example: asString(item.example) || "",
+      confidence: ((asString(item.confidence) as "high" | "medium" | "low") || "medium"),
+    }))
+    .filter((item) => item.problem);
+
+  const filteredFixes = (hookRewrite ? topFixes : topFixes.filter((item) => item.area !== "hook")).slice(0, 3);
+
+  const report: YoutubeQuickAuditReport = {
+    auditMode: "quick",
+    score: Math.min(100, Math.max(0, parseNumber(parsed.score))),
+    scoreLabel: asString(parsed.scoreLabel) || "Needs improvement",
+    oneSentenceDiagnosis: asString(parsed.oneSentenceDiagnosis) || asString(parsed.summary) || "Packaging audit generated from public YouTube metadata.",
+    doThisFirst: {
+      area: ((asString(asRecord(parsed.doThisFirst).area) as any) || "title"),
+      action: asString(asRecord(parsed.doThisFirst).action) || "Rewrite the title to make the promise clearer.",
+      why: asString(asRecord(parsed.doThisFirst).why) || "A clearer promise increases click intent and watch satisfaction.",
+      expectedImpact: asString(asRecord(parsed.doThisFirst).expectedImpact) || "Higher CTR and better early retention.",
+    },
+    topFixes: filteredFixes,
+    beforeAfter: {
+      currentTitle: asString(beforeAfter.currentTitle) || video.title,
+      betterTitles: asArray(beforeAfter.betterTitles).map((item) => String(item)).filter(Boolean).slice(0, 6),
+      currentHook: asString(beforeAfter.currentHook),
+      hookRewrite: hookRewrite && hookRewrite.trim() ? hookRewrite : null,
+      descriptionRewrite: asString(beforeAfter.descriptionRewrite) || video.description || "",
+    },
+    thumbnailFix: {
+      problem: asString(asRecord(parsed.thumbnailFix).problem) || "",
+      concept: asString(asRecord(parsed.thumbnailFix).concept) || "",
+      focalSubject: asString(asRecord(parsed.thumbnailFix).focalSubject) || "",
+      textOverlay: asString(asRecord(parsed.thumbnailFix).textOverlay) || "",
+      layout: asString(asRecord(parsed.thumbnailFix).layout) || "",
+      emotion: asString(asRecord(parsed.thumbnailFix).emotion) || "",
+      designStyle: asString(asRecord(parsed.thumbnailFix).designStyle) || "",
+    },
+    competitorPattern: {
+      summary: asString(asRecord(parsed.competitorPattern).summary) || "",
+      patternsToBorrow: asArray(asRecord(parsed.competitorPattern).patternsToBorrow).map(String).filter(Boolean).slice(0, 6),
+      patternsToAvoid: asArray(asRecord(parsed.competitorPattern).patternsToAvoid).map(String).filter(Boolean).slice(0, 6),
+    },
+    tags: {
+      priority: (asString(asRecord(parsed.tags).priority) as any) || "low",
+      recommended: asArray(asRecord(parsed.tags).recommended).map(String).filter(Boolean).slice(0, 15),
+      why: asString(asRecord(parsed.tags).why) || "",
+    },
+    limitations: asArray(parsed.limitations).map(String).filter(Boolean).slice(0, 10).concat([
+      first90SecondsTranscript ? "" : "Hook rewrite unavailable because transcript opening was not available.",
+      transcriptSource === "auto" ? "Transcript opening was sourced from auto-captions where available." : "",
+      "Quick audit uses only public metadata + transcript opening (if available).",
+    ]).filter(Boolean).filter((value, index, array) => array.indexOf(value) === index),
+  };
+
+  await writeCache(youtubeAuditCacheKey(videoId, "quick", options?.uiLocale), report, userId, 0, 7 * 24 * 60 * 60 * 1000);
+  return report;
+}
+
+async function auditYoutubeVideoDeep(
   userId: number,
   videoUrl: string,
   options?: {
@@ -4222,6 +4598,38 @@ Return JSON only:
       "Thumbnail notes are based on the public thumbnail only, not on full frame-by-frame video quality analysis.",
     ]).filter(Boolean).filter((value, index, array) => array.indexOf(value) === index),
   };
+}
+
+export async function auditYoutubeVideo(
+  userId: number,
+  videoUrl: string,
+  options?: {
+    auditMode?: YoutubeAuditMode;
+    uiLocale?: string | null;
+    transcriptOverride?: {
+      text: string;
+      source: "uploaded" | "transcribed_audio";
+      language: string | null;
+      segments?: YoutubeTranscriptSegment[];
+    } | null;
+  },
+): Promise<YoutubeQuickAuditReport | YoutubeVideoAuditReport> {
+  const mode: YoutubeAuditMode = options?.auditMode === "deep" ? "deep" : "quick";
+  const videoId = extractYoutubeVideoId(videoUrl);
+  if (!videoId) throw new Error("Enter a valid YouTube video URL");
+
+  const cached = await readCache<YoutubeQuickAuditReport | YoutubeVideoAuditReport>(
+    youtubeAuditCacheKey(videoId, mode, options?.uiLocale),
+  );
+  if (cached) return cached;
+
+  if (mode === "deep") {
+    const deep = await auditYoutubeVideoDeep(userId, videoUrl, options);
+    const withMode = { ...deep, auditMode: "deep" as const } as any;
+    await writeCache(youtubeAuditCacheKey(videoId, "deep", options?.uiLocale), withMode, userId, 0, 7 * 24 * 60 * 60 * 1000);
+    return withMode;
+  }
+  return auditYoutubeVideoQuick(userId, videoUrl, { uiLocale: options?.uiLocale ?? null });
 }
 
 export async function translateYoutubeAuditTranscript(
