@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import ExistingYoutubeGrowthPlanner from "@/components/growth/youtube/ExistingYoutubeGrowthPlanner";
 import SocialGrowthPlanner from "@/components/growth/social/SocialGrowthPlanner";
-import { PlatformMobileSwitcher, PlatformSidebar, type GrowthPlatformTab } from "@/components/growth/PlatformTabs";
+import { PlatformTabs, type GrowthPlatformTab } from "@/components/growth/PlatformTabs";
 
 function tabFromStorage(): GrowthPlatformTab | null {
   const value = localStorage.getItem("daytabs_growth_platform");
@@ -20,17 +20,16 @@ export default function GrowthPlannerPage() {
 
   return (
     <div className={pageContainerClass}>
-      <div className="flex items-start gap-6">
-        <PlatformSidebar value={platform} onChange={setPlatform} />
-        <main className="min-w-0 flex-1">
-          <PlatformMobileSwitcher value={platform} onChange={setPlatform} className="lg:hidden" />
-          <div className="mt-6 min-w-0 lg:mt-0">
-            {platform === "youtube" ? <ExistingYoutubeGrowthPlanner /> : null}
-            {platform === "linkedin" ? <SocialGrowthPlanner platform="linkedin" /> : null}
-            {platform === "tiktok" ? <SocialGrowthPlanner platform="tiktok" /> : null}
-            {platform === "instagram" ? <SocialGrowthPlanner platform="instagram" /> : null}
-          </div>
-        </main>
+      <PlatformTabs
+        value={platform}
+        onChange={setPlatform}
+        className="sticky top-[120px] z-30 border border-white/10 sm:top-[140px]"
+      />
+      <div className="mt-6 min-w-0">
+        {platform === "youtube" ? <ExistingYoutubeGrowthPlanner /> : null}
+        {platform === "linkedin" ? <SocialGrowthPlanner platform="linkedin" /> : null}
+        {platform === "tiktok" ? <SocialGrowthPlanner platform="tiktok" /> : null}
+        {platform === "instagram" ? <SocialGrowthPlanner platform="instagram" /> : null}
       </div>
     </div>
   );

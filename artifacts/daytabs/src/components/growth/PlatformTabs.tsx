@@ -40,12 +40,19 @@ const TABS: Array<{
 export function PlatformTabs({
   value,
   onChange,
+  className,
 }: {
   value: GrowthPlatformTab;
   onChange: (next: GrowthPlatformTab) => void;
+  className?: string;
 }) {
   return (
-    <div className="sticky top-4 z-20 overflow-hidden rounded-3xl bg-white/[0.055] p-1.5 shadow-xl shadow-black/10 backdrop-blur-xl">
+    <div
+      className={cn(
+        "z-20 overflow-hidden rounded-3xl bg-white/[0.055] p-1.5 shadow-xl shadow-black/10 backdrop-blur-xl",
+        className,
+      )}
+    >
       <div className="flex w-full gap-1.5 overflow-x-auto">
         {TABS.map((tab) => {
           const isActive = value === tab.id;
