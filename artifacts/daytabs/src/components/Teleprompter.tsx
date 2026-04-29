@@ -17,43 +17,6 @@ import {
   Settings,
 } from "lucide-react";
 
-type RecordingFormatSetting = "auto" | "vertical" | "horizontal";
-
-function isMobileOrTablet() {
-  if (typeof navigator === "undefined" || typeof window === "undefined") return false;
-  const ua = navigator.userAgent || (navigator as any).vendor || "";
-  const isMobileUA = /android|iphone|ipad|ipod|mobile/i.test(ua);
-  const isTouchTablet = (navigator.maxTouchPoints ?? 0) > 1 && window.innerWidth <= 1366;
-  return isMobileUA || isTouchTablet;
-}
-
-function getReliablePortraitOrientation() {
-  if (typeof window === "undefined") return false;
-  const orientationType = window.screen?.orientation?.type;
-
-  if (orientationType?.includes("portrait")) return true;
-  if (orientationType?.includes("landscape")) return false;
-
-  if (typeof window.matchMedia === "function") {
-    return window.matchMedia("(orientation: portrait)").matches;
-  }
-
-  return window.innerHeight > window.innerWidth;
-}
-
-function getRecordingPortraitOrientation(userSetting?: RecordingFormatSetting) {
-  if (userSetting === "vertical") return true;
-  if (userSetting === "horizontal") return false;
-
-  const mobileOrTablet = isMobileOrTablet();
-  if (mobileOrTablet) {
-    return getReliablePortraitOrientation();
-  }
-
-  // Desktop default: always horizontal unless user overrides.
-  return false;
-}
-
 interface TeleprompterProps {
   script: string;
   onClose: () => void;
@@ -65,11 +28,6 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
   const [previewing, setPreviewing] = useState(false);
   const [speed, setSpeed] = useState(2);
   const [fontSize, setFontSize] = useState(36);
-  const [isPortrait, setIsPortrait] = useState(
-    typeof window !== "undefined" ? getReliablePortraitOrientation() : false,
-  );
-  const [recordingFormatSetting, setRecordingFormatSetting] = useState<RecordingFormatSetting>("auto");
-  const recordingFormatSettingRef = useRef<RecordingFormatSetting>("auto");
   const [showControls, setShowControls] = useState(true);
   const [cameraRequested, setCameraRequested] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
@@ -90,116 +48,10 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const latestDownloadUrlRef = useRef<string | null>(null);
-  const canvasStreamRef = useRef<MediaStream | null>(null);
-  const drawRafRef = useRef<number>(0);
   const scrollOffsetRef = useRef(0);
   const maxScrollRef = useRef(0);
   const stopCameraAfterRecordingRef = useRef(false);
   const recordingRef = useRef(false);
-  const cameraOrientationRef = useRef<"portrait" | "landscape" | null>(null);
-  const isPortraitRef = useRef(isPortrait);
-  const recordingPortraitRef = useRef<boolean | null>(null);
-  const recordingOutputSizeRef = useRef<{ width: number; height: number } | null>(null);
-  const [debugOverlay, setDebugOverlay] = useState(false);
-  const [debugInfo, setDebugInfo] = useState<Record<string, string>>({});
-
-  useEffect(() => {
-    isPortraitRef.current = isPortrait;
-  }, [isPortrait]);
-
-  useEffect(() => {
-    recordingFormatSettingRef.current = recordingFormatSetting;
-  }, [recordingFormatSetting]);
-
-  useEffect(() => {
-    const update = () => {
-      setIsPortrait(getReliablePortraitOrientation());
-    };
-
-    window.addEventListener("resize", update);
-    window.addEventListener("orientationchange", update);
-    const screenOrientation = window.screen?.orientation;
-    if (screenOrientation && typeof screenOrientation.addEventListener === "function") {
-      screenOrientation.addEventListener("change", update);
-    }
-
-    return () => {
-      window.removeEventListener("resize", update);
-      window.removeEventListener("orientationchange", update);
-      if (screenOrientation && typeof screenOrientation.removeEventListener === "function") {
-        screenOrientation.removeEventListener("change", update);
-      }
-    };
-  }, []);
-
-  const drawVideoToCanvas = useCallback((video: HTMLVideoElement, canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D) => {
-    function draw() {
-      const desiredPortrait = recordingPortraitRef.current ?? isPortraitRef.current;
-
-      const outputWidth = recordingOutputSizeRef.current?.width ?? (desiredPortrait ? 1080 : 1920);
-      const outputHeight = recordingOutputSizeRef.current?.height ?? (desiredPortrait ? 1920 : 1080);
-
-      const vw = video.videoWidth;
-      const vh = video.videoHeight;
-
-      if (!vw || !vh) {
-        drawRafRef.current = requestAnimationFrame(draw);
-        return;
-      }
-
-      if (debugOverlay) {
-        const orientationType = window.screen?.orientation?.type ?? "";
-        setDebugInfo({
-          device: isMobileOrTablet() ? "mobile_or_tablet" : "desktop",
-          userSetting: recordingFormatSettingRef.current,
-          reliablePortrait: String(getReliablePortraitOrientation()),
-          lockedPortrait: String(recordingPortraitRef.current),
-          canvas: `${canvas.width}x${canvas.height}`,
-          video: `${vw}x${vh}`,
-          screenOrientation: orientationType || "n/a",
-        });
-      }
-
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-      const cameraIsPortrait = vh > vw;
-      const needsRotation = desiredPortrait !== cameraIsPortrait;
-
-      ctx.save();
-
-      try {
-        if (needsRotation) {
-          ctx.translate(canvas.width / 2, canvas.height / 2);
-          ctx.rotate(Math.PI / 2);
-
-          const scale = Math.min(canvas.height / vw, canvas.width / vh);
-
-          const drawW = vw * scale;
-          const drawH = vh * scale;
-
-          ctx.drawImage(video, -drawW / 2, -drawH / 2, drawW, drawH);
-        } else {
-          const scale = Math.min(canvas.width / vw, canvas.height / vh);
-
-          const drawW = vw * scale;
-          const drawH = vh * scale;
-
-          const dx = (canvas.width - drawW) / 2;
-          const dy = (canvas.height - drawH) / 2;
-
-          ctx.drawImage(video, dx, dy, drawW, drawH);
-        }
-      } catch {
-        // ignore transient draw errors
-      }
-
-      ctx.restore();
-
-      drawRafRef.current = requestAnimationFrame(draw);
-    }
-
-    draw();
-  }, [debugOverlay]);
 
   useEffect(() => {
     recordingRef.current = recording;
@@ -248,16 +100,6 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
   }, []);
 
   const stopMediaTracks = useCallback(() => {
-    if (drawRafRef.current) {
-      cancelAnimationFrame(drawRafRef.current);
-      drawRafRef.current = 0;
-    }
-    recordingPortraitRef.current = null;
-    recordingOutputSizeRef.current = null;
-    if (canvasStreamRef.current) {
-      for (const track of canvasStreamRef.current.getTracks()) track.stop();
-      canvasStreamRef.current = null;
-    }
     if (streamRef.current) {
       for (const track of streamRef.current.getTracks()) track.stop();
       streamRef.current = null;
@@ -271,7 +113,6 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
     if (typeof MediaRecorder === "undefined") return "";
     const candidates = [
       "video/mp4;codecs=h264,aac",
-      "video/mp4",
       "video/webm;codecs=vp9,opus",
       "video/webm;codecs=vp8,opus",
       "video/webm",
@@ -313,41 +154,7 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
     try {
       const mimeType = getSupportedMimeType();
       chunksRef.current = [];
-      const sourceVideo = videoRef.current;
-      if (!sourceVideo) {
-        setCameraError("Preview video unavailable.");
-        return false;
-      }
-
-      const canvas = document.createElement("canvas");
-      const ctx = canvas.getContext("2d");
-      if (!ctx) {
-        setCameraError("Canvas unavailable.");
-        return false;
-      }
-
-      if (drawRafRef.current) cancelAnimationFrame(drawRafRef.current);
-      const desiredPortrait = getRecordingPortraitOrientation(recordingFormatSettingRef.current);
-      recordingPortraitRef.current = desiredPortrait;
-      const outputWidth = desiredPortrait ? 1080 : 1920;
-      const outputHeight = desiredPortrait ? 1920 : 1080;
-      recordingOutputSizeRef.current = { width: outputWidth, height: outputHeight };
-      // Important (especially on iOS Safari): set the canvas size BEFORE captureStream and do not change it while recording.
-      canvas.width = outputWidth;
-      canvas.height = outputHeight;
-      drawVideoToCanvas(sourceVideo, canvas, ctx);
-
-      const canvasStream = canvas.captureStream(30);
-      const videoTrack = canvasStream.getVideoTracks()[0];
-      // Best-effort: some browsers may honor these constraints and fix incorrect default dimensions.
-      if (videoTrack?.applyConstraints) {
-        void videoTrack.applyConstraints({ width: outputWidth, height: outputHeight } as MediaTrackConstraints).catch(() => undefined);
-      }
-      const audioTrack = streamRef.current.getAudioTracks()[0];
-      if (audioTrack) canvasStream.addTrack(audioTrack);
-      canvasStreamRef.current = canvasStream;
-
-      const recorder = mimeType ? new MediaRecorder(canvasStream, { mimeType }) : new MediaRecorder(canvasStream);
+      const recorder = mimeType ? new MediaRecorder(streamRef.current, { mimeType }) : new MediaRecorder(streamRef.current);
       recorderRef.current = recorder;
       recorder.ondataavailable = (event) => {
         if (event.data.size > 0) chunksRef.current.push(event.data);
@@ -357,16 +164,6 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
         const blob = new Blob(chunksRef.current, { type: nextMimeType });
         chunksRef.current = [];
         recorderRef.current = null;
-        if (drawRafRef.current) {
-          cancelAnimationFrame(drawRafRef.current);
-          drawRafRef.current = 0;
-        }
-        if (canvasStreamRef.current) {
-          for (const track of canvasStreamRef.current.getTracks()) track.stop();
-          canvasStreamRef.current = null;
-        }
-        recordingPortraitRef.current = null;
-        recordingOutputSizeRef.current = null;
         setRecording(false);
         if (blob.size > 0) saveBlobToDevice(blob);
         if (stopCameraAfterRecordingRef.current) {
@@ -382,10 +179,9 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
       setCameraError(error instanceof Error ? error.message : "Could not start recording.");
       return false;
     }
-  }, [drawVideoToCanvas, getSupportedMimeType, saveBlobToDevice, stopMediaTracks]);
+  }, [getSupportedMimeType, saveBlobToDevice, stopMediaTracks]);
 
   const startCamera = useCallback(async () => {
-    stopMediaTracks();
     setCameraRequested(true);
     setCameraError(null);
     setCameraReady(false);
@@ -396,27 +192,16 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
     }
 
     try {
-      const desiredPortrait = getRecordingPortraitOrientation(recordingFormatSettingRef.current);
-      const desiredOrientation: "portrait" | "landscape" = desiredPortrait ? "portrait" : "landscape";
-
-      const supported = navigator.mediaDevices.getSupportedConstraints?.() ?? {};
-
-      const idealWidth = desiredPortrait ? 1080 : 1920;
-      const idealHeight = desiredPortrait ? 1920 : 1080;
-      const aspect = desiredPortrait ? 9 / 16 : 16 / 9;
-      const videoConstraints: MediaTrackConstraints = { facingMode: "user" };
-      if (supported.width) videoConstraints.width = { ideal: idealWidth };
-      if (supported.height) videoConstraints.height = { ideal: idealHeight };
-      if (supported.aspectRatio) videoConstraints.aspectRatio = aspect;
-      if (supported.frameRate) videoConstraints.frameRate = { ideal: 30, max: 60 };
-
+      stopMediaTracks();
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: videoConstraints,
+        video: {
+          facingMode: "user",
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
         audio: true,
       });
-
       streamRef.current = stream;
-      cameraOrientationRef.current = desiredOrientation;
       if (videoRef.current) {
         const video = videoRef.current;
         video.muted = true;
@@ -486,16 +271,9 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
     if (countdownValue !== null) return;
 
     clearCountdown();
-    setPlaying(false);
     resetScrollPosition();
     setPreviewing(false);
     setSavedMessage(null);
-
-    const desiredOrientation: "portrait" | "landscape" = getRecordingPortraitOrientation(recordingFormatSettingRef.current) ? "portrait" : "landscape";
-
-    const mustRestartCamera = !cameraReady || cameraOrientationRef.current !== desiredOrientation;
-    const ready = mustRestartCamera ? await startCamera() : true;
-    if (!ready) return;
 
     const runCountdown = (value: number) => {
       setCountdownValue(value);
@@ -508,6 +286,9 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
         countdownTimerRef.current = null;
         setCountdownValue(null);
         resetScrollPosition();
+
+        const ready = cameraReady || await startCamera();
+        if (!ready) return;
         const didStartRecording = startRecording();
         if (!didStartRecording) return;
         setPlaying(true);
@@ -680,17 +461,6 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
       </div>
       <div className="absolute inset-0 bg-black/60" />
 
-      {debugOverlay && startInRecordMode ? (
-        <div className="absolute left-4 top-20 z-40 max-w-[92vw] rounded-xl border border-white/10 bg-black/70 p-3 text-[11px] text-white/80 backdrop-blur">
-          <p className="font-semibold text-white">Recording debug</p>
-          <div className="mt-2 grid gap-1">
-            {Object.entries(debugInfo).map(([key, value]) => (
-              <p key={key}><span className="text-white/45">{key}:</span> {value}</p>
-            ))}
-          </div>
-        </div>
-      ) : null}
-
       {countdownValue !== null ? (
         <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center">
           <div className="rounded-full border border-white/15 bg-black/70 px-10 py-8 text-center shadow-2xl shadow-black/60 backdrop-blur-md">
@@ -781,47 +551,6 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
               <Download className="h-3.5 w-3.5 text-white/45" />
               <span>{savedMessage ?? (countdownValue !== null ? "Countdown running" : recording ? "Recording locally" : previewing ? "Previewing" : "Not recording")}</span>
             </div>
-
-            {startInRecordMode ? (
-              <div className="flex flex-col items-center gap-1.5">
-                <div className="flex items-center gap-1 text-white/40">
-                  <Settings className="w-3.5 h-3.5" />
-                  <span className="text-[11px] font-semibold uppercase tracking-widest">Format</span>
-                </div>
-                <div className="flex items-center gap-1 rounded-xl border border-white/10 bg-black/35 p-1 text-xs">
-                  {([
-                    { id: "auto" as const, label: "Auto" },
-                    { id: "vertical" as const, label: "Vert" },
-                    { id: "horizontal" as const, label: "Horiz" },
-                  ]).map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => setRecordingFormatSetting(item.id)}
-                      disabled={recording || countdownValue !== null}
-                      className={`rounded-lg px-2.5 py-1 font-semibold transition-colors ${
-                        recordingFormatSetting === item.id
-                          ? "border border-emerald-400/25 bg-emerald-500/15 text-emerald-50"
-                          : "text-white/60 hover:bg-white/6 hover:text-white"
-                      }`}
-                      title={item.id === "auto" ? "Auto: mobile/tablet follows device orientation; desktop horizontal." : undefined}
-                    >
-                      {item.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-
-            {startInRecordMode ? (
-              <button
-                type="button"
-                onClick={() => setDebugOverlay((v) => !v)}
-                className="hidden rounded-xl border border-white/10 bg-black/35 px-3 py-2 text-xs text-white/65 transition-colors hover:bg-white/6 xl:block"
-              >
-                {debugOverlay ? "Hide debug" : "Show debug"}
-              </button>
-            ) : null}
 
             <div className="flex flex-col items-center gap-1.5">
               <div className="flex items-center gap-1 text-white/40">
@@ -950,35 +679,6 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
                 <span className="font-semibold uppercase tracking-[0.16em]">Teleprompter settings</span>
                 <span>{savedMessage ?? (countdownValue !== null ? "Countdown running" : recording ? "Recording locally" : previewing ? "Previewing" : "Not recording")}</span>
               </div>
-              {startInRecordMode ? (
-                <div className="space-y-2">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/45">Recording format</p>
-                  <div className="grid grid-cols-3 gap-2">
-                    {([
-                      { id: "auto" as const, label: "Auto" },
-                      { id: "vertical" as const, label: "Vertical" },
-                      { id: "horizontal" as const, label: "Horizontal" },
-                    ]).map((item) => (
-                      <button
-                        key={item.id}
-                        type="button"
-                        onClick={() => setRecordingFormatSetting(item.id)}
-                        disabled={recording || countdownValue !== null}
-                        className={`rounded-2xl border px-4 py-3 text-sm font-medium transition-all ${
-                          recordingFormatSetting === item.id
-                            ? "border-emerald-400/30 bg-emerald-500/15 text-emerald-50"
-                            : "border-white/10 bg-white/[0.05] text-white"
-                        } ${recording || countdownValue !== null ? "opacity-60" : ""}`}
-                      >
-                        {item.label}
-                      </button>
-                    ))}
-                  </div>
-                  <p className="text-xs text-white/45">
-                    Auto: mobile/tablet follows device orientation; desktop records horizontal.
-                  </p>
-                </div>
-              ) : null}
               <div className="grid grid-cols-2 gap-2">
                 <button
                   onClick={() => adjustSpeed(-0.5)}
