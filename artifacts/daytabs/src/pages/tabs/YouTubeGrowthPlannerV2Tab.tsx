@@ -2629,7 +2629,7 @@ function GrowthPlannerComingSoon() {
   }
 
   return (
-    <PanelPage className="max-w-4xl py-8">
+    <PanelPage className="mx-0 max-w-none py-0">
       <PanelCard className="p-6 md:p-8">
         <div className="flex flex-col justify-between gap-6 md:flex-row md:items-start">
           <div className="max-w-xl space-y-4">
@@ -2680,7 +2680,7 @@ function GrowthPlannerComingSoon() {
 
 function LoadingState() {
   return (
-    <PanelPage className="max-w-7xl space-y-8 py-8">
+    <PanelPage className="mx-0 max-w-none space-y-8 py-0">
       <PanelHeader className="justify-between gap-6">
         <div className="space-y-3">
           <Skeleton className="h-6 w-40 bg-white/10" />
@@ -3852,7 +3852,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
   );
 
   return (
-    <PanelPage className="max-w-7xl space-y-8 py-8">
+    <PanelPage className="mx-0 max-w-none space-y-8 py-0">
       <PanelHeader className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
         <div className="space-y-3">
           <PanelEyebrow>{ui.header.eyebrow}</PanelEyebrow>
