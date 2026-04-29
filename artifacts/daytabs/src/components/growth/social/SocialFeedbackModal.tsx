@@ -28,6 +28,13 @@ const PERF_OPTIONS: Array<{ value: SocialPostPerformance; label: string }> = [
   { value: "unknown", label: "Unknown" },
 ];
 
+const FOLLOWER_RANGE_CHIPS = [
+  { label: "0–500", value: 250 },
+  { label: "500–2K", value: 1200 },
+  { label: "2K–10K", value: 5000 },
+  { label: "10K+", value: 15000 },
+] as const;
+
 export function SocialFeedbackModal({
   open,
   platform,
@@ -73,6 +80,23 @@ export function SocialFeedbackModal({
   }, [days]);
 
   const [draft, setDraft] = useState<Record<string, any>>(initial);
+  const [followersError, setFollowersError] = useState<string>("");
+  const inputBaseClass =
+    "h-11 rounded-xl border-white/10 bg-white/4 text-white placeholder:text-white/35 focus-visible:ring-2 focus-visible:ring-violet-300/35 focus-visible:ring-offset-0";
+
+  const normalizedFollowersCount = (() => {
+    const parsed = followersCount.trim() ? Number(followersCount.trim()) : NaN;
+    return Number.isFinite(parsed) && parsed >= 0 ? Math.max(0, Math.floor(parsed)) : null;
+  })();
+
+  const requireFollowers = () => {
+    if (normalizedFollowersCount == null) {
+      setFollowersError("Enter your current follower/subscriber count so DayTabs can adapt next week.");
+      return null;
+    }
+    setFollowersError("");
+    return normalizedFollowersCount;
+  };
 
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
@@ -95,15 +119,31 @@ export function SocialFeedbackModal({
 
             <div className="max-h-[calc(86vh-150px)] overflow-y-auto p-6">
               <PanelCardSoft className="mb-4 border border-white/10 bg-white/3 p-4">
-                <p className="text-xs font-semibold text-white">Current followers / subscribers (optional)</p>
+                <p className="text-xs font-semibold text-white">Current followers / subscribers *</p>
                 <p className="mt-1 text-xs text-white/50">Used to adapt next week&apos;s plan + growth tasks to your current growth stage.</p>
                 <Input
                   value={followersCount}
-                  onChange={(event) => onFollowersCountChange(event.target.value)}
+                  onChange={(event) => {
+                    onFollowersCountChange(event.target.value);
+                    if (followersError) setFollowersError("");
+                  }}
                   placeholder="Example: 1200"
                   inputMode="numeric"
-                  className="mt-3 border-white/10 bg-white/4 text-white placeholder:text-white/30"
+                  className={cn("mt-3", inputBaseClass)}
                 />
+                {followersError ? <p className="mt-2 text-sm text-red-200">{followersError}</p> : null}
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {FOLLOWER_RANGE_CHIPS.map((chip) => (
+                    <button
+                      key={chip.label}
+                      type="button"
+                      onClick={() => onFollowersCountChange(String(chip.value))}
+                      className="rounded-full border border-white/10 bg-white/4 px-3 py-1.5 text-xs text-white/70 transition-colors hover:bg-white/7 hover:text-white"
+                    >
+                      {chip.label}
+                    </button>
+                  ))}
+                </div>
               </PanelCardSoft>
               <div className="space-y-4">
           {days.map((day) => {
@@ -149,37 +189,37 @@ export function SocialFeedbackModal({
                     value={value.viewsOrImpressions}
                     onChange={(event) => setDraft((prev) => ({ ...prev, [day.id]: { ...value, viewsOrImpressions: event.target.value } }))}
                     placeholder="Views or impressions"
-                    className="border-white/10 bg-white/4 text-white placeholder:text-white/30"
+                    className={inputBaseClass}
                   />
                   <Input
                     value={value.likes}
                     onChange={(event) => setDraft((prev) => ({ ...prev, [day.id]: { ...value, likes: event.target.value } }))}
                     placeholder="Likes"
-                    className="border-white/10 bg-white/4 text-white placeholder:text-white/30"
+                    className={inputBaseClass}
                   />
                   <Input
                     value={value.comments}
                     onChange={(event) => setDraft((prev) => ({ ...prev, [day.id]: { ...value, comments: event.target.value } }))}
                     placeholder="Comments"
-                    className="border-white/10 bg-white/4 text-white placeholder:text-white/30"
+                    className={inputBaseClass}
                   />
                   <Input
                     value={value.shares}
                     onChange={(event) => setDraft((prev) => ({ ...prev, [day.id]: { ...value, shares: event.target.value } }))}
                     placeholder="Shares"
-                    className="border-white/10 bg-white/4 text-white placeholder:text-white/30"
+                    className={inputBaseClass}
                   />
                   <Input
                     value={value.saves}
                     onChange={(event) => setDraft((prev) => ({ ...prev, [day.id]: { ...value, saves: event.target.value } }))}
                     placeholder="Saves"
-                    className="border-white/10 bg-white/4 text-white placeholder:text-white/30"
+                    className={inputBaseClass}
                   />
                   <Input
                     value={value.newFollowers}
                     onChange={(event) => setDraft((prev) => ({ ...prev, [day.id]: { ...value, newFollowers: event.target.value } }))}
                     placeholder="New followers"
-                    className="border-white/10 bg-white/4 text-white placeholder:text-white/30"
+                    className={inputBaseClass}
                   />
                 </div>
 
@@ -188,19 +228,19 @@ export function SocialFeedbackModal({
                     value={value.whatWorked}
                     onChange={(event) => setDraft((prev) => ({ ...prev, [day.id]: { ...value, whatWorked: event.target.value } }))}
                     placeholder="What worked?"
-                    className="border-white/10 bg-white/4 text-white placeholder:text-white/30"
+                    className={inputBaseClass}
                   />
                   <Input
                     value={value.whatDidNotWork}
                     onChange={(event) => setDraft((prev) => ({ ...prev, [day.id]: { ...value, whatDidNotWork: event.target.value } }))}
                     placeholder="What did not work?"
-                    className="border-white/10 bg-white/4 text-white placeholder:text-white/30"
+                    className={inputBaseClass}
                   />
                   <Input
                     value={value.userNotes}
                     onChange={(event) => setDraft((prev) => ({ ...prev, [day.id]: { ...value, userNotes: event.target.value } }))}
                     placeholder="Notes"
-                    className="border-white/10 bg-white/4 text-white placeholder:text-white/30"
+                    className={inputBaseClass}
                   />
                 </div>
               </PanelCardSoft>
@@ -211,12 +251,23 @@ export function SocialFeedbackModal({
 
             <div className="sticky bottom-0 z-10 border-t border-white/10 bg-[#11111a]/95 p-6 backdrop-blur">
               <div className="flex flex-wrap justify-end gap-2">
-                <Button type="button" variant="secondary" onClick={onSkip} disabled={working}>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => {
+                    const followers = requireFollowers();
+                    if (followers == null) return;
+                    onSkip();
+                  }}
+                  disabled={working}
+                >
                   Skip Feedback
                 </Button>
                 <Button
                   type="button"
                   onClick={() => {
+                    const followers = requireFollowers();
+                    if (followers == null) return;
                     const feedback: SocialPostPerformanceFeedback[] = days.map((day) => {
                       const value = draft[day.id] ?? {};
                       const num = (v: string) => (v && Number.isFinite(Number(v)) ? Number(v) : undefined);

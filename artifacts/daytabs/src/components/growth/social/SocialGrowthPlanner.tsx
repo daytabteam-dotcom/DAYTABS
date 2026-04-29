@@ -233,12 +233,12 @@ export default function SocialGrowthPlanner({ platform }: { platform: SocialPlat
             onSkip={() => {
               const parsedFollowers = pendingFollowersCount.trim() ? Number(pendingFollowersCount.trim()) : NaN;
               const normalizedFollowersCount = Number.isFinite(parsedFollowers) ? Math.max(0, Math.floor(parsedFollowers)) : null;
-              void runGenerateNextWeek({ skippedFeedback: true, followersCount: pendingFollowersCount.trim() ? normalizedFollowersCount : undefined });
+              void runGenerateNextWeek({ skippedFeedback: true, followersCount: normalizedFollowersCount ?? undefined });
             }}
             onSubmit={(feedback) => {
               const parsedFollowers = pendingFollowersCount.trim() ? Number(pendingFollowersCount.trim()) : NaN;
               const normalizedFollowersCount = Number.isFinite(parsedFollowers) ? Math.max(0, Math.floor(parsedFollowers)) : null;
-              void runGenerateNextWeek({ skippedFeedback: false, feedback, followersCount: pendingFollowersCount.trim() ? normalizedFollowersCount : undefined });
+              void runGenerateNextWeek({ skippedFeedback: false, feedback, followersCount: normalizedFollowersCount ?? undefined });
             }}
           />
         </>

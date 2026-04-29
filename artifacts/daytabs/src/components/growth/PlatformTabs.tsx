@@ -1,6 +1,7 @@
 import type { LucideIcon } from "lucide-react";
 import { Instagram, Linkedin, Music2, Youtube } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 export type GrowthPlatformTab = "youtube" | "linkedin" | "tiktok" | "instagram";
 
@@ -76,5 +77,94 @@ export function PlatformTabs({
         })}
       </div>
     </div>
+  );
+}
+
+export function PlatformSidebar({
+  value,
+  onChange,
+}: {
+  value: GrowthPlatformTab;
+  onChange: (next: GrowthPlatformTab) => void;
+}) {
+  return (
+    <TooltipProvider delayDuration={120}>
+      <div className="sticky top-6 z-20 w-16 rounded-3xl border border-white/10 bg-white/[0.055] p-2 shadow-xl shadow-black/10 backdrop-blur-xl">
+        <div className="flex flex-col gap-2">
+          {TABS.map((tab) => {
+            const isActive = value === tab.id;
+            const Icon = tab.Icon;
+            return (
+              <Tooltip key={tab.id}>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={() => onChange(tab.id)}
+                    className={cn(
+                      "group relative grid h-12 w-12 place-items-center rounded-2xl border transition-all",
+                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300/40 focus-visible:ring-offset-2 focus-visible:ring-offset-black",
+                      isActive
+                        ? "border-violet-300/35 bg-violet-500/15 text-white shadow-[0_0_0_1px_rgba(167,139,250,0.25),0_18px_40px_rgba(167,139,250,0.12)]"
+                        : "border-white/10 bg-white/[0.03] text-white/60 hover:bg-white/[0.06] hover:text-white",
+                    )}
+                    aria-current={isActive ? "page" : undefined}
+                  >
+                    <Icon className={cn("h-5 w-5", isActive ? "text-violet-100" : "text-white/60 group-hover:text-white")} />
+                    {isActive ? <span className="pointer-events-none absolute inset-x-2 -bottom-0.5 h-0.5 rounded-full bg-violet-200/70" /> : null}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="right" className="border-white/10 bg-black/80 text-white">
+                  <div className="text-xs font-semibold">{tab.label}</div>
+                </TooltipContent>
+              </Tooltip>
+            );
+          })}
+        </div>
+      </div>
+    </TooltipProvider>
+  );
+}
+
+export function PlatformIconTabs({
+  value,
+  onChange,
+}: {
+  value: GrowthPlatformTab;
+  onChange: (next: GrowthPlatformTab) => void;
+}) {
+  return (
+    <TooltipProvider delayDuration={120}>
+      <div className="overflow-hidden rounded-3xl border border-white/10 bg-white/[0.055] p-1.5 shadow-xl shadow-black/10 backdrop-blur-xl">
+        <div className="flex w-full gap-1.5 overflow-x-auto">
+          {TABS.map((tab) => {
+            const isActive = value === tab.id;
+            const Icon = tab.Icon;
+            return (
+              <Tooltip key={tab.id}>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={() => onChange(tab.id)}
+                    className={cn(
+                      "group relative grid h-12 min-w-12 place-items-center rounded-2xl border px-2 transition-all",
+                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300/40 focus-visible:ring-offset-2 focus-visible:ring-offset-black",
+                      isActive
+                        ? "border-violet-300/35 bg-violet-500/15 text-white shadow-[0_10px_30px_rgba(0,0,0,0.18)]"
+                        : "border-white/10 bg-white/[0.03] text-white/60 hover:bg-white/[0.06] hover:text-white",
+                    )}
+                    aria-current={isActive ? "page" : undefined}
+                  >
+                    <Icon className={cn("h-5 w-5", isActive ? "text-violet-100" : "text-white/60 group-hover:text-white")} />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent className="border-white/10 bg-black/80 text-white">
+                  <div className="text-xs font-semibold">{tab.label}</div>
+                </TooltipContent>
+              </Tooltip>
+            );
+          })}
+        </div>
+      </div>
+    </TooltipProvider>
   );
 }
