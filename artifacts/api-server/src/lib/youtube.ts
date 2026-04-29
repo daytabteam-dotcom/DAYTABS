@@ -774,6 +774,79 @@ function asString(value: unknown): string | null {
   return typeof value === "string" ? value : value == null ? null : String(value);
 }
 
+function compactText(value: unknown, max = 240) {
+  return String(value ?? "").replace(/\s+/g, " ").trim().slice(0, max);
+}
+
+function compactTags(tags: unknown, max = 8) {
+  return asArray(tags).map(String).filter(Boolean).slice(0, max);
+}
+
+function summarizeLastPlanBehavior(lastPlan: unknown, linkedResults: unknown[] = []) {
+  const days = asArray(asRecord(lastPlan).days).map((item) => asRecord(item));
+  const linkedByDayIndex = new Set(
+    linkedResults
+      .map((result) => Number(asRecord(result).dayIndex))
+      .filter((value) => Number.isFinite(value)),
+  );
+
+  const wasLinked = (day: JsonRecord) => linkedByDayIndex.has(Number(day.day));
+
+  return {
+    usedOrLinked: days
+      .filter((day) => wasLinked(day))
+      .slice(0, 10)
+      .map((day) => ({
+        day: day.day,
+        idea: compactText(day.contentIdea || day.title, 120),
+        format: compactText(day.format, 60),
+        origin: asString(day.ideaOrigin) || "ai",
+        feedback: asString(day.aiFeedback),
+      })),
+
+    manualIdeas: days
+      .filter((day) => day.ideaOrigin === "manual")
+      .slice(0, 10)
+      .map((day) => ({
+        idea: compactText(day.contentIdea || day.title, 120),
+        hook: compactText(day.hook, 120),
+        format: compactText(day.format, 60),
+      })),
+
+    likedAiIdeas: days
+      .filter((day) => day.ideaOrigin === "ai" && day.aiFeedback === "liked")
+      .slice(0, 10)
+      .map((day) => ({
+        idea: compactText(day.contentIdea || day.title, 120),
+        format: compactText(day.format, 60),
+      })),
+
+    dislikedAiIdeas: days
+      .filter((day) => day.ideaOrigin === "ai" && day.aiFeedback === "disliked")
+      .slice(0, 10)
+      .map((day) => ({
+        idea: compactText(day.contentIdea || day.title, 120),
+        format: compactText(day.format, 60),
+      })),
+
+    deletedAiIdeas: days
+      .filter((day) => day.ideaOrigin === "ai" && Boolean(day.isDeleted))
+      .slice(0, 10)
+      .map((day) => ({
+        idea: compactText(day.contentIdea || day.title, 120),
+        format: compactText(day.format, 60),
+      })),
+
+    unusedAiIdeas: days
+      .filter((day) => day.ideaOrigin === "ai" && !wasLinked(day) && !Boolean(day.isDeleted))
+      .slice(0, 10)
+      .map((day) => ({
+        idea: compactText(day.contentIdea || day.title, 120),
+        format: compactText(day.format, 60),
+      })),
+  };
+}
+
 function readCompetitorMeta(value: unknown): StoredCompetitorMeta {
   const raw = asString(value);
   if (!raw) return { source: "discovered" };
@@ -4780,23 +4853,30 @@ export async function generateYoutubeWeeklyPlan(userId: number, options?: { uiLo
   const plans = await db.select().from(youtubeWeeklyPlansTable).where(eq(youtubeWeeklyPlansTable.userId, userId)).orderBy(desc(youtubeWeeklyPlansTable.weekNumber));
   const nicheProfile = asRecord(profile.nicheProfile) as unknown as YoutubeNicheProfile;
   const preferredPostsPerWeek = Math.max(1, parseNumber(connection?.preferredPostsPerWeek) || 3);
+  const shouldRegenerateCompetitors = false;
   const [
     trendsResult,
-    competitorsResult,
     analyticsResult,
     analyticsTimelineResult,
     hydratedResultsResult,
     pastPerformanceResult,
   ] = await Promise.allSettled([
     fetchTrendingVideos(userId, nicheProfile),
-    discoverCompetitors(userId, profile),
     analyticsSummary(userId),
     channelAnalyticsTimeline(userId),
     hydrateStoredResultMetrics(userId),
     previousPerformanceSummary(userId),
   ]);
   const trends = trendsResult.status === "fulfilled" ? trendsResult.value : [];
-  const competitors = competitorsResult.status === "fulfilled" ? competitorsResult.value : [];
+  const competitors = shouldRegenerateCompetitors
+    ? await discoverCompetitors(userId, profile).catch(() => [])
+    : await db
+      .select()
+      .from(youtubeCompetitorsTable)
+      .where(eq(youtubeCompetitorsTable.userId, userId))
+      .orderBy(desc(youtubeCompetitorsTable.fetchedAt))
+      .limit(8)
+      .catch(() => []);
   const analytics = analyticsResult.status === "fulfilled" ? analyticsResult.value : {};
   const analyticsTimeline = analyticsTimelineResult.status === "fulfilled"
     ? analyticsTimelineResult.value
@@ -4812,7 +4892,7 @@ export async function generateYoutubeWeeklyPlan(userId: number, options?: { uiLo
       };
   const [lastPlan] = plans;
   const lastPlanResults = lastPlan
-    ? await db.select().from(youtubePlanResultsTable).where(eq(youtubePlanResultsTable.planId, lastPlan.id)).limit(1)
+    ? await db.select().from(youtubePlanResultsTable).where(eq(youtubePlanResultsTable.planId, lastPlan.id))
     : [];
   const shouldReplaceDraftPlan = Boolean(lastPlan && lastPlanResults.length === 0);
   const weekNumber = shouldReplaceDraftPlan ? lastPlan!.weekNumber : (lastPlan?.weekNumber ?? 0) + 1;
@@ -4834,19 +4914,8 @@ export async function generateYoutubeWeeklyPlan(userId: number, options?: { uiLo
   const ideaFeedbackSummary = await getPersistedIdeaFeedbackSummary(userId, profile, plans);
   const topVideos = [...recentVideos]
     .sort((a, b) => parseNumber(asRecord(b).viewCount) - parseNumber(asRecord(a).viewCount))
-    .slice(0, 10)
-    .map((video) => {
-      const item = asRecord(video);
-      return {
-        id: asString(item.id),
-        title: asString(item.title),
-        description: asString(item.description)?.slice(0, 900),
-        publishedAt: asString(item.publishedAt),
-        viewCount: parseNumber(item.viewCount),
-        tags: asArray(item.tags).map((tag) => String(tag)).filter(Boolean),
-        duration: asString(item.duration),
-      };
-    });
+    .slice(0, 12)
+    .map((video) => asRecord(video));
   const analyticsRows = asArray(asRecord(analytics).rows)
     .map((row) => Array.isArray(row) ? row : [])
     .filter((row) => row.length >= 4);
@@ -4859,7 +4928,6 @@ export async function generateYoutubeWeeklyPlan(userId: number, options?: { uiLo
     .sort((a, b) => b.averageViews - a.averageViews)
     .slice(0, Math.max(1, preferredPostsPerWeek))
     .map((item) => item.day);
-  const tagEvidence = buildYoutubeTagEvidenceSummary(recentVideos, competitors, performanceSignals);
   const outputLanguage = inferOutputLanguage({
     forceLanguage: options?.uiLocale ?? null,
     title: asString(profile.channelName),
@@ -4870,32 +4938,71 @@ export async function generateYoutubeWeeklyPlan(userId: number, options?: { uiLo
       tags: asArray(video.tags).map((tag) => String(tag)).filter(Boolean),
     })),
   });
-  const context = {
-    profile,
-    channelProfile: profile,
-    nicheProfile,
-    recentVideos,
-    trends,
-    competitors,
-    analytics: {
-      ...asRecord(analytics),
-      topVideos,
-      avgCTR,
-      avgViewDuration,
-      bestPostingDays,
+  const compactContext = {
+    channel: {
+      name: asString(profile.channelName),
+      niche: asString(nicheProfile.niche),
+      contentStyle: asString(nicheProfile.contentStyle),
+      tone: asString(nicheProfile.tone),
+      targetAudience: asString(nicheProfile.targetAudience),
+      keywords: asArray(nicheProfile.keywords).map(String).slice(0, 12),
     },
-    analyticsTimeline,
-    performanceSignals,
-    tagEvidence,
-    performanceSummary: pastPerformance,
-    ideaFeedbackSummary,
-    pastPerformance,
-    lastWeekPlan: lastPlan?.plan ?? null,
-    weekNumber,
-    startDate,
-    endDate,
-    preferredPostsPerWeek,
-    outputLanguage: outputLanguage.label,
+    nextWeek: {
+      weekNumber,
+      startDate,
+      endDate,
+      preferredPostsPerWeek,
+      outputLanguage: outputLanguage.label,
+    },
+    regeneratedInsights: {
+      pastPerformanceSummary: {
+        summary: compactText(asRecord(pastPerformance).shortSummary || asRecord(pastPerformance).summary, 500),
+        topPerformingTopics: asArray(asRecord(pastPerformance).topPerformingTopics).map(String).slice(0, 8),
+        topPerformingFormats: asArray(asRecord(pastPerformance).topPerformingFormats).map(String).slice(0, 8),
+        flops: asArray(asRecord(pastPerformance).flops).map(String).slice(0, 8),
+        flopReasons: compactText(asRecord(pastPerformance).flopReasons, 500),
+        bestPostingDays: asArray(asRecord(pastPerformance).bestPostingDays).map(String).slice(0, 7),
+        lowConfidenceNote: asString(asRecord(pastPerformance).lowConfidenceNote),
+      },
+      performanceSignals: {
+        bestPostingTime: performanceSignals.bestPostingTime,
+        bestPostingTimeByDay: (performanceSignals.bestPostingTimeByDay ?? []).slice(0, 7),
+        hookInsight: performanceSignals.hookInsight,
+        titleLengthInsight: performanceSignals.titleLengthInsight,
+        tagInsight: {
+          topPerformingTags: (performanceSignals.tagInsight?.topPerformingTags ?? []).slice(0, 12),
+          trendingTags: (performanceSignals.tagInsight?.trendingTags ?? []).slice(0, 12),
+        },
+        subscriberSpike: performanceSignals.subscriberSpike,
+        competitorGap: performanceSignals.competitorGap,
+      },
+      userBehavior: {
+        ideaFeedbackSummary: {
+          liked: ideaFeedbackSummary.liked.slice(0, 12),
+          disliked: ideaFeedbackSummary.disliked.slice(0, 12),
+          deleted: ideaFeedbackSummary.deleted.slice(0, 12),
+        },
+        lastWeekBehavior: summarizeLastPlanBehavior(lastPlan?.plan, lastPlanResults),
+      },
+    },
+    existingCompetitorContext: {
+      competitorGap: performanceSignals.competitorGap,
+      tier1CompetitorPatterns: (performanceSignals.tier1CompetitorPatterns ?? []).slice(0, 5),
+    },
+    evidenceSamples: {
+      topRecentVideos: topVideos.slice(0, 8).map((video) => ({
+        title: compactText(video.title, 120),
+        views: video.viewCount,
+        publishedAt: video.publishedAt,
+        duration: video.duration,
+        tags: compactTags(video.tags, 6),
+      })),
+      summarySignals: {
+        avgCTR,
+        avgViewDuration,
+        bestPostingDays: bestPostingDays.slice(0, 7),
+      },
+    },
   };
 
   const completion = await openai.chat.completions.create({
@@ -4907,11 +5014,9 @@ export async function generateYoutubeWeeklyPlan(userId: number, options?: { uiLo
 Your job is to generate a weekly content plan for one specific creator based on their real channel data, past performance, competitor landscape, current trends, and their feedback on previous AI suggestions.
 HOW TO REASON (follow this order before writing anything):
 
-Read the performanceSummary. What actually worked last week? Start from there.
-Check ideaFeedbackSummary. What did the user explicitly like, dislike, or delete? Never repeat a deleted idea concept. Avoid patterns from disliked ideas. Build on patterns from liked ideas.
-Look at the analytics. What topics have the highest CTR? What watch time signals exist? What is the best posting day pattern?
-Check competitors. What are they covering that this channel hasn't? What formats are performing for them?
-Check trends. Which of the trending topics are actually relevant to this channel's niche? Ignore trends that are a stretch.
+Read regeneratedInsights.userBehavior.lastWeekBehavior. What did the creator actually use, link, like, dislike, or delete last week? Start from there.
+Read regeneratedInsights.pastPerformanceSummary and regeneratedInsights.performanceSignals. What objectively worked, what flopped, and what timing/packaging patterns are emerging?
+Use competitor/trend signals ONLY when they fit the creator's past behavior. Ignore anything that feels like a stretch.
 Now generate. Every idea must trace to at least one of the above signals. If you can't justify an idea with data, don't include it.
 
 IDEA QUALITY RULES:
@@ -4951,8 +5056,30 @@ Return JSON only. No explanation, no preamble, no markdown fences.
 Every day object must match the exact shape below.
 Generate exactly as many day objects as the channel's upload cadence calls for this week — do not pad with filler days.
 
+STRONGEST SIGNAL RULE (CRITICAL):
+Use regeneratedInsights.userBehavior as the strongest signal.
+
+Priority order:
+1) User behavior from last week:
+   - manual ideas = strong positive preference
+   - linked/used ideas = strong positive preference
+   - liked AI ideas = positive preference
+   - deleted/disliked AI ideas = negative preference
+   - unused AI ideas = weak negative signal unless there was no result data
+2) Real YouTube performance: repeat above-average patterns, avoid below-average patterns
+3) Analytics: best posting days/times + hook/title/tag patterns
+4) Competitor/trend signals only when they fit creator behavior
+
 Return this exact shape:
 {
+"insights": {
+"summary": string,
+"whatWorkedLastWeek": string[],
+"whatDidNotWork": string[],
+"userBehaviorLearning": string[],
+"nextWeekStrategy": string[],
+"confidence": "high" | "medium" | "low"
+},
 "weekSummary": string,
 "performanceInsight": string,
 "competitorInsight": string,
@@ -4976,7 +5103,7 @@ Return this exact shape:
 ]
 }`,
       },
-      { role: "user", content: JSON.stringify(context) },
+      { role: "user", content: JSON.stringify(compactContext) },
     ],
     response_format: { type: "json_object" },
     max_completion_tokens: 5000,
@@ -4988,14 +5115,15 @@ Return this exact shape:
     ...usageTokens(completion.usage),
   });
 
-  const plan = normalizeGeneratedYoutubePlan(asRecord(parseAiJson(completion.choices[0]?.message?.content ?? "{}")), startDate, performanceSignals, preferredPostsPerWeek);
+  const aiPayload = asRecord(parseAiJson(completion.choices[0]?.message?.content ?? "{}"));
+  const plan = normalizeGeneratedYoutubePlan(aiPayload, startDate, performanceSignals, preferredPostsPerWeek);
   if (shouldReplaceDraftPlan && lastPlan) {
     const [saved] = await db.update(youtubeWeeklyPlansTable)
       .set({
         startDate,
         endDate,
         plan,
-        contextSnapshot: context,
+        contextSnapshot: compactContext,
         updatedAt: new Date(),
       })
       .where(eq(youtubeWeeklyPlansTable.id, lastPlan.id))
@@ -5009,7 +5137,7 @@ Return this exact shape:
     startDate,
     endDate,
     plan,
-    contextSnapshot: context,
+    contextSnapshot: compactContext,
     updatedAt: new Date(),
   }).returning();
   return saved;
@@ -5379,7 +5507,13 @@ export async function regenerateYoutubePlanIdea(userId: number, planId: number, 
 
   const plans = await db.select().from(youtubeWeeklyPlansTable).where(eq(youtubeWeeklyPlansTable.userId, userId)).orderBy(desc(youtubeWeeklyPlansTable.weekNumber));
   const { plan, day } = await updatePlanDay(userId, planId, dayIndex, (existingDay) => existingDay);
-  const latestSignals = normalizePerformanceSignalSummary(asRecord(asRecord(plan.contextSnapshot).performanceSignals));
+  const snapshot = asRecord(plan.contextSnapshot);
+  const latestSignals = normalizePerformanceSignalSummary(
+    asRecord(
+      snapshot.performanceSignals
+        ?? asRecord(asRecord(snapshot.regeneratedInsights).performanceSignals),
+    ),
+  );
   const ideaFeedbackSummary = await getPersistedIdeaFeedbackSummary(userId, profile, plans);
   const siblingIdeas = asPlanDays(asArray(asRecord(plan.plan).days))
     .filter((item) => parsePlanDayIndex(item.day, -1) !== dayIndex)
