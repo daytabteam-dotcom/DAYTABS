@@ -69,6 +69,7 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
     typeof window !== "undefined" ? getReliablePortraitOrientation() : false,
   );
   const [recordingFormatSetting, setRecordingFormatSetting] = useState<RecordingFormatSetting>("auto");
+  const recordingFormatSettingRef = useRef<RecordingFormatSetting>("auto");
   const [showControls, setShowControls] = useState(true);
   const [cameraRequested, setCameraRequested] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
@@ -102,6 +103,10 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
   useEffect(() => {
     isPortraitRef.current = isPortrait;
   }, [isPortrait]);
+
+  useEffect(() => {
+    recordingFormatSettingRef.current = recordingFormatSetting;
+  }, [recordingFormatSetting]);
 
   useEffect(() => {
     const update = () => {
@@ -307,7 +312,7 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
       }
 
       if (drawRafRef.current) cancelAnimationFrame(drawRafRef.current);
-      recordingPortraitRef.current = getRecordingPortraitOrientation(recordingFormatSetting);
+      recordingPortraitRef.current = getRecordingPortraitOrientation(recordingFormatSettingRef.current);
       drawVideoToCanvas(sourceVideo, canvas, ctx);
 
       const canvasStream = canvas.captureStream(30);
@@ -349,7 +354,7 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
       setCameraError(error instanceof Error ? error.message : "Could not start recording.");
       return false;
     }
-  }, [drawVideoToCanvas, getSupportedMimeType, recordingFormatSetting, saveBlobToDevice, stopMediaTracks]);
+  }, [drawVideoToCanvas, getSupportedMimeType, saveBlobToDevice, stopMediaTracks]);
 
   const startCamera = useCallback(async () => {
     stopMediaTracks();
@@ -363,7 +368,7 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
     }
 
     try {
-      const desiredPortrait = getRecordingPortraitOrientation(recordingFormatSetting);
+      const desiredPortrait = getRecordingPortraitOrientation(recordingFormatSettingRef.current);
       const desiredOrientation: "portrait" | "landscape" = desiredPortrait ? "portrait" : "landscape";
 
       const supported = navigator.mediaDevices.getSupportedConstraints?.() ?? {};
@@ -405,7 +410,7 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
       setCameraError(error instanceof Error ? error.message : "Could not access the front camera.");
       return false;
     }
-  }, [recordingFormatSetting, stopMediaTracks]);
+  }, [stopMediaTracks]);
 
   const stopRecordingSession = useCallback(() => {
     clearCountdown();
@@ -458,7 +463,7 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
     setPreviewing(false);
     setSavedMessage(null);
 
-    const desiredOrientation: "portrait" | "landscape" = getRecordingPortraitOrientation(recordingFormatSetting) ? "portrait" : "landscape";
+    const desiredOrientation: "portrait" | "landscape" = getRecordingPortraitOrientation(recordingFormatSettingRef.current) ? "portrait" : "landscape";
 
     const mustRestartCamera = !cameraReady || cameraOrientationRef.current !== desiredOrientation;
     const ready = mustRestartCamera ? await startCamera() : true;
@@ -483,7 +488,7 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
     };
 
     runCountdown(3);
-  }, [cameraReady, clearCountdown, countdownValue, recordingFormatSetting, resetScrollPosition, revealControls, startCamera, startRecording]);
+  }, [cameraReady, clearCountdown, countdownValue, resetScrollPosition, revealControls, startCamera, startRecording]);
 
   const reset = useCallback(() => {
     clearCountdown();
