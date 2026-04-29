@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { Camera, MonitorPlay, Trash2, Type } from "lucide-react";
 import { Teleprompter } from "@/components/Teleprompter";
@@ -27,6 +27,13 @@ export default function TeleprompterTab() {
   const hasScript = Boolean(script.trim());
 
   const displayScript = script.trim();
+  const hideShortcuts = useMemo(() => {
+    if (typeof navigator === "undefined" || typeof window === "undefined") return false;
+    const ua = navigator.userAgent || (navigator as any).vendor || "";
+    const isMobileUA = /android|iphone|ipad|ipod|mobile/i.test(ua);
+    const isTouchTablet = (navigator.maxTouchPoints ?? 0) > 1 && window.innerWidth <= 1366;
+    return isMobileUA || isTouchTablet;
+  }, []);
 
   return (
     <>
@@ -49,7 +56,7 @@ export default function TeleprompterTab() {
               Paste your script, then choose between a clean teleprompter view or a record mode with preview controls and a 3, 2, 1 countdown before capture starts.
             </PanelSubtitle>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex gap-2">
             <Button
               variant="secondary"
               disabled={!hasScript}
@@ -108,30 +115,34 @@ export default function TeleprompterTab() {
           <p className="text-white/55">
             Use teleprompter keeps the camera off. Teleprompter + record lets you preview the scroll first, then starts camera access and local recording only after you press Record.
           </p>
-          <p className="font-semibold text-white/55 mb-2">Keyboard shortcuts</p>
-          <div className="grid gap-x-6 gap-y-1 sm:grid-cols-2">
-            <span>
-              <kbd className="bg-white/10 px-1.5 py-0.5 rounded font-mono">
-                Space
-              </kbd>{" "}
-              Play / Pause
-            </span>
-            <span>
-              <kbd className="bg-white/10 px-1.5 py-0.5 rounded font-mono">
-                ↑
-              </kbd>{" "}
-              <kbd className="bg-white/10 px-1.5 py-0.5 rounded font-mono">
-                ↓
-              </kbd>{" "}
-              Adjust speed
-            </span>
-            <span>
-              <kbd className="bg-white/10 px-1.5 py-0.5 rounded font-mono">
-                Esc
-              </kbd>{" "}
-              Close
-            </span>
-          </div>
+          {!hideShortcuts ? (
+            <>
+              <p className="font-semibold text-white/55 mb-2">Keyboard shortcuts</p>
+              <div className="grid gap-x-6 gap-y-1 sm:grid-cols-2">
+                <span>
+                  <kbd className="bg-white/10 px-1.5 py-0.5 rounded font-mono">
+                    Space
+                  </kbd>{" "}
+                  Play / Pause
+                </span>
+                <span>
+                  <kbd className="bg-white/10 px-1.5 py-0.5 rounded font-mono">
+                    ↑
+                  </kbd>{" "}
+                  <kbd className="bg-white/10 px-1.5 py-0.5 rounded font-mono">
+                    ↓
+                  </kbd>{" "}
+                  Adjust speed
+                </span>
+                <span>
+                  <kbd className="bg-white/10 px-1.5 py-0.5 rounded font-mono">
+                    Esc
+                  </kbd>{" "}
+                  Close
+                </span>
+              </div>
+            </>
+          ) : null}
         </PanelCardSoft>
       </motion.div>
     </>

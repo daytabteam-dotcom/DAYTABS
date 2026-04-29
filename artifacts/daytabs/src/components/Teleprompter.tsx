@@ -14,7 +14,6 @@ import {
   CameraOff,
   Circle,
   Download,
-  Settings,
 } from "lucide-react";
 
 interface TeleprompterProps {
@@ -35,7 +34,6 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
   const [recording, setRecording] = useState(false);
   const [countdownValue, setCountdownValue] = useState<number | null>(null);
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -271,9 +269,13 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
     if (countdownValue !== null) return;
 
     clearCountdown();
+    setPlaying(false);
     resetScrollPosition();
     setPreviewing(false);
     setSavedMessage(null);
+
+    const ready = cameraReady || await startCamera();
+    if (!ready) return;
 
     const runCountdown = (value: number) => {
       setCountdownValue(value);
@@ -286,9 +288,6 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
         countdownTimerRef.current = null;
         setCountdownValue(null);
         resetScrollPosition();
-
-        const ready = cameraReady || await startCamera();
-        if (!ready) return;
         const didStartRecording = startRecording();
         if (!didStartRecording) return;
         setPlaying(true);
@@ -552,62 +551,31 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
               <span>{savedMessage ?? (countdownValue !== null ? "Countdown running" : recording ? "Recording locally" : previewing ? "Previewing" : "Not recording")}</span>
             </div>
 
-            <div className="flex flex-col items-center gap-1.5">
-              <div className="flex items-center gap-1 text-white/40">
-                <Gauge className="w-3.5 h-3.5" />
-                <span className="text-[11px] font-semibold uppercase tracking-widest">Speed</span>
-              </div>
+            <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-black/35 p-2">
               <div className="flex items-center gap-2">
-                <button
-                  onClick={() => adjustSpeed(-0.5)}
-                  className="w-7 h-7 rounded-lg bg-white/8 hover:bg-white/18 text-white/60 hover:text-white flex items-center justify-center transition-all border border-white/10"
-                >
-                  <ChevronLeft className="w-4 h-4" />
+                <button type="button" onClick={() => adjustSpeed(-0.5)} className="h-9 w-9 rounded-xl border border-white/10 bg-white/6 text-white/70 hover:bg-white/12 hover:text-white">
+                  <Minus className="mx-auto h-4 w-4" />
                 </button>
-                <div className="w-14 text-center">
-                  <span className="text-white font-mono font-bold text-lg tabular-nums">{speed.toFixed(1)}</span>
-                  <span className="text-white/30 text-xs">x</span>
-                </div>
-                <button
-                  onClick={() => adjustSpeed(0.5)}
-                  className="w-7 h-7 rounded-lg bg-white/8 hover:bg-white/18 text-white/60 hover:text-white flex items-center justify-center transition-all border border-white/10"
-                >
-                  <ChevronRight className="w-4 h-4" />
+                <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/6 text-white/80">
+                  <Gauge className="h-4 w-4" />
+                </span>
+                <button type="button" onClick={() => adjustSpeed(0.5)} className="h-9 w-9 rounded-xl border border-white/10 bg-white/6 text-white/70 hover:bg-white/12 hover:text-white">
+                  <Plus className="mx-auto h-4 w-4" />
                 </button>
+                <span className="ml-1 w-14 text-center text-sm font-bold text-white tabular-nums">{speed.toFixed(1)}x</span>
               </div>
-              <div className="w-24 h-1 bg-white/10 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-violet-500 rounded-full transition-all"
-                  style={{ width: `${speedPercent}%` }}
-                />
-              </div>
-            </div>
-
-            <div className="flex flex-col items-center gap-1.5">
-              <div className="flex items-center gap-1 text-white/40">
-                <Type className="w-3.5 h-3.5" />
-                <span className="text-[11px] font-semibold uppercase tracking-widest">Size</span>
-              </div>
+              <div className="h-8 w-px bg-white/10" />
               <div className="flex items-center gap-2">
-                <button
-                  onClick={() => adjustFont(-4)}
-                  className="w-7 h-7 rounded-lg bg-white/8 hover:bg-white/18 text-white/60 hover:text-white flex items-center justify-center transition-all border border-white/10"
-                >
-                  <Minus className="w-4 h-4" />
+                <button type="button" onClick={() => adjustFont(-4)} className="h-9 w-9 rounded-xl border border-white/10 bg-white/6 text-white/70 hover:bg-white/12 hover:text-white">
+                  <Minus className="mx-auto h-4 w-4" />
                 </button>
-                <span className="text-white font-mono font-bold text-lg tabular-nums w-10 text-center">{fontSize}</span>
-                <button
-                  onClick={() => adjustFont(4)}
-                  className="w-7 h-7 rounded-lg bg-white/8 hover:bg-white/18 text-white/60 hover:text-white flex items-center justify-center transition-all border border-white/10"
-                >
-                  <Plus className="w-4 h-4" />
+                <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/6 text-white/80">
+                  <Type className="h-4 w-4" />
+                </span>
+                <button type="button" onClick={() => adjustFont(4)} className="h-9 w-9 rounded-xl border border-white/10 bg-white/6 text-white/70 hover:bg-white/12 hover:text-white">
+                  <Plus className="mx-auto h-4 w-4" />
                 </button>
-              </div>
-              <div className="w-24 h-1 bg-white/10 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-blue-500 rounded-full transition-all"
-                  style={{ width: `${Math.round(((fontSize - 20) / 60) * 100)}%` }}
-                />
+                <span className="ml-1 w-12 text-center text-sm font-bold text-white tabular-nums">{fontSize}</span>
               </div>
             </div>
           </div>
@@ -673,56 +641,32 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
 
       <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] md:hidden">
         <div className="pointer-events-auto rounded-[28px] border border-white/10 bg-black/85 p-3 shadow-2xl shadow-black/60 backdrop-blur-xl">
-          {settingsOpen ? (
-            <div className="mb-3 space-y-3 rounded-2xl border border-white/10 bg-white/[0.04] p-3">
-              <div className="flex items-center justify-between gap-3 text-xs text-white/55">
-                <span className="font-semibold uppercase tracking-[0.16em]">Teleprompter settings</span>
-                <span>{savedMessage ?? (countdownValue !== null ? "Countdown running" : recording ? "Recording locally" : previewing ? "Previewing" : "Not recording")}</span>
+          <div className="mb-3 grid grid-cols-2 gap-2">
+            <div className="flex items-center justify-between rounded-[22px] border border-white/10 bg-white/[0.06] px-3 py-2">
+              <button type="button" onClick={() => adjustSpeed(-0.5)} className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-white/75">
+                <Minus className="h-4 w-4" />
+              </button>
+              <div className="flex flex-col items-center">
+                <Gauge className="h-4 w-4 text-white/70" />
+                <span className="mt-1 text-xs font-semibold text-white/80 tabular-nums">{speed.toFixed(1)}x</span>
               </div>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  onClick={() => adjustSpeed(-0.5)}
-                  className="rounded-2xl border border-white/10 bg-white/[0.05] px-4 py-3 text-sm font-medium text-white"
-                >
-                  Slower
-                </button>
-                <button
-                  onClick={() => adjustSpeed(0.5)}
-                  className="rounded-2xl border border-white/10 bg-white/[0.05] px-4 py-3 text-sm font-medium text-white"
-                >
-                  Faster
-                </button>
-                <button
-                  onClick={() => adjustFont(-4)}
-                  className="rounded-2xl border border-white/10 bg-white/[0.05] px-4 py-3 text-sm font-medium text-white"
-                >
-                  Smaller text
-                </button>
-                <button
-                  onClick={() => adjustFont(4)}
-                  className="rounded-2xl border border-white/10 bg-white/[0.05] px-4 py-3 text-sm font-medium text-white"
-                >
-                  Bigger text
-                </button>
-                <button
-                  onClick={reset}
-                  className="rounded-2xl border border-white/10 bg-white/[0.05] px-4 py-3 text-sm font-medium text-white"
-                >
-                  Restart
-                </button>
-                <button
-                  onClick={onClose}
-                  className="rounded-2xl border border-white/10 bg-white/[0.05] px-4 py-3 text-sm font-medium text-white"
-                >
-                  Close teleprompter
-                </button>
-              </div>
-              <div className="flex items-center justify-between text-xs text-white/45">
-                <span>Speed {speed.toFixed(1)}x</span>
-                <span>Text {fontSize}px</span>
-              </div>
+              <button type="button" onClick={() => adjustSpeed(0.5)} className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-white/75">
+                <Plus className="h-4 w-4" />
+              </button>
             </div>
-          ) : null}
+            <div className="flex items-center justify-between rounded-[22px] border border-white/10 bg-white/[0.06] px-3 py-2">
+              <button type="button" onClick={() => adjustFont(-4)} className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-white/75">
+                <Minus className="h-4 w-4" />
+              </button>
+              <div className="flex flex-col items-center">
+                <Type className="h-4 w-4 text-white/70" />
+                <span className="mt-1 text-xs font-semibold text-white/80 tabular-nums">{fontSize}px</span>
+              </div>
+              <button type="button" onClick={() => adjustFont(4)} className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-white/75">
+                <Plus className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
           <div className="flex items-center gap-3">
             {startInRecordMode ? (
               <button
@@ -761,12 +705,8 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
               <PrimaryActionIcon className={`h-5 w-5 ${startInRecordMode && countdownValue !== null ? "fill-current" : ""}`} />
               <span>{primaryActionLabel}</span>
             </button>
-            <button
-              onClick={() => setSettingsOpen((current) => !current)}
-              className="flex min-h-16 min-w-16 items-center justify-center rounded-[22px] border border-white/10 bg-white/[0.06] text-white"
-              aria-label="Open teleprompter settings"
-            >
-              <Settings className="h-5 w-5" />
+            <button onClick={reset} className="flex min-h-16 min-w-16 items-center justify-center rounded-[22px] border border-white/10 bg-white/[0.06] text-white" aria-label="Restart from top">
+              <RotateCcw className="h-5 w-5" />
             </button>
           </div>
         </div>
