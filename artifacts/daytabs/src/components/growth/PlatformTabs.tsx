@@ -89,10 +89,10 @@ export function PlatformSidebar({
 }) {
   return (
     <TooltipProvider delayDuration={120}>
-      <div
+      <aside
         className={cn(
           "w-full rounded-[28px] bg-white/[0.045] p-4",
-          "lg:sticky lg:top-[152px] lg:h-[calc(100vh-200px)] lg:min-h-[320px] lg:max-h-[560px] lg:w-[88px] lg:p-5",
+          "lg:sticky lg:top-[260px] lg:h-[calc(100vh-300px)] lg:min-h-[320px] lg:w-[88px] lg:rounded-[32px] lg:bg-white/[0.04] lg:p-5",
         )}
       >
         <div className="flex items-center justify-center lg:h-full">
@@ -126,7 +126,7 @@ export function PlatformSidebar({
             })}
           </div>
         </div>
-      </div>
+      </aside>
     </TooltipProvider>
   );
 }
