@@ -13,6 +13,7 @@ import {
   ChevronDown,
   ChevronUp,
   Clock,
+  Copy,
   Download,
   ExternalLink,
   Flame,
@@ -85,7 +86,7 @@ type ViewMode = "calendar" | "planner";
 type InsightConfidence = "high" | "medium" | "low";
 type IdeaOrigin = "ai" | "manual";
 type IdeaFeedback = "liked" | "disliked" | null;
-type GrowthSubtab = "overview" | "plan" | "competitors" | "insights" | "tasks";
+type GrowthSubtab = "overview" | "plan" | "competitors" | "insights" | "tasks" | "thumbnails";
 type DetailTab = "create" | "visuals" | "growth" | "strategy";
 type InsightsRange = "all_time" | "last_week" | "last_month" | "last_season" | "last_year";
 
@@ -186,6 +187,80 @@ interface PlanDay {
 interface ThumbnailSourceImage {
   name: string;
   dataUrl: string;
+}
+
+interface ThumbnailComposerBlueprint {
+  canvas: {
+    width: number;
+    height: number;
+    background: {
+      type: "image_blur" | "solid" | "gradient";
+      sourceImageIndex: number;
+      blur: number;
+      brightness: number;
+      overlayGradient: {
+        direction: "left-right" | "right-left" | "top-bottom" | "bottom-top";
+        colors: string[];
+      } | null;
+    };
+  };
+  cropPlan: {
+    sourceImageIndex: number;
+    mode: "cover" | "contain" | "manual";
+    focusArea: { x: number; y: number; width: number; height: number };
+    reason: string;
+  };
+  subjects: Array<{
+    id: string;
+    type: "person" | "product" | "artwork" | "screenshot" | "object";
+    sourceImageIndex: number;
+    preserveExactly: boolean;
+    position: { x: number; y: number; width: number; height: number };
+    edits: {
+      brightness: number;
+      contrast: number;
+      saturation: number;
+      sharpen: boolean;
+      backgroundBlur: boolean;
+    };
+    reason: string;
+  }>;
+  textLayers: Array<{
+    id: string;
+    text: string;
+    fontFamily: string;
+    fontWeight: number;
+    fontSize: number;
+    color: string;
+    strokeColor: string | null;
+    strokeWidth: number;
+    shadow: boolean;
+    position: { x: number; y: number; width: number; height: number };
+    alignment: "left" | "center" | "right";
+    reason: string;
+  }>;
+  shapeLayers: Array<{
+    id: string;
+    type: "arrow" | "circle" | "rectangle" | "highlight" | "line";
+    color: string;
+    opacity: number;
+    position: { x: number; y: number; width: number; height: number };
+    rotation: number;
+    reason: string;
+  }>;
+  layerOrder: string[];
+  safeZoneNotes: string[];
+  thumbnailReasoning: string;
+  requiredAssets: Array<{
+    type: "face" | "product" | "artwork" | "screenshot" | "object";
+    label: string;
+    required: boolean;
+    helperText: string;
+    alternativeIfMissing: string;
+  }>;
+  overlayTextOptions: string[];
+  selectedOverlayText: string;
+  fontRecommendations: string[];
 }
 
 interface CustomIdeaDraft {
@@ -541,6 +616,207 @@ async function resizeImageFileToDataUrl(file: File) {
     };
     reader.readAsDataURL(file);
   });
+}
+
+async function resizeAnyImageFileToJpegDataUrl(file: File, options?: { maxBytes?: number; maxDimension?: number }) {
+  const maxBytes = options?.maxBytes ?? YOUTUBE_THUMBNAIL_MAX_BYTES;
+  const maxDimension = options?.maxDimension ?? 1600;
+  if (!["image/jpeg", "image/jpg", "image/png", "image/webp"].includes(file.type.toLowerCase())) {
+    throw new Error(`${file.name} must be a JPG, PNG, or WEBP image.`);
+  }
+  if (file.size > maxBytes * 6) {
+    throw new Error(`${file.name} is too large. Use an image under ${(maxBytes * 6 / (1024 * 1024)).toFixed(0)} MB.`);
+  }
+
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error(`Could not read ${file.name}`));
+    reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
+    reader.readAsDataURL(file);
+  });
+  if (!dataUrl) throw new Error(`Could not read ${file.name}`);
+
+  const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const img = new window.Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error(`Could not process ${file.name}`));
+    img.src = dataUrl;
+  });
+
+  const scale = Math.min(1, maxDimension / Math.max(image.width || 1, image.height || 1));
+  const targetWidth = Math.max(1, Math.round((image.width || 1) * scale));
+  const targetHeight = Math.max(1, Math.round((image.height || 1) * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = targetWidth;
+  canvas.height = targetHeight;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error(`Could not process ${file.name}`);
+  context.drawImage(image, 0, 0, targetWidth, targetHeight);
+  const jpegDataUrl = canvas.toDataURL("image/jpeg", 0.86);
+
+  const base64 = jpegDataUrl.split(",", 2)[1] || "";
+  const sizeBytes = Math.floor((base64.length * 3) / 4);
+  if (sizeBytes > maxBytes) {
+    throw new Error(`${file.name} is too detailed to fit under 2 MB after conversion. Try a smaller crop.`);
+  }
+  return jpegDataUrl;
+}
+
+function drawCover(ctx: CanvasRenderingContext2D, image: HTMLImageElement, x: number, y: number, width: number, height: number) {
+  const scale = Math.max(width / (image.width || 1), height / (image.height || 1));
+  const drawWidth = (image.width || 1) * scale;
+  const drawHeight = (image.height || 1) * scale;
+  const left = x + (width - drawWidth) / 2;
+  const top = y + (height - drawHeight) / 2;
+  ctx.drawImage(image, left, top, drawWidth, drawHeight);
+}
+
+function gradientStops(ctx: CanvasRenderingContext2D, width: number, height: number, direction: string, colors: string[]) {
+  const safeColors = colors.length ? colors : ["rgba(0,0,0,0)", "rgba(0,0,0,0.55)"];
+  const g = (() => {
+    if (direction === "right-left") return ctx.createLinearGradient(width, 0, 0, 0);
+    if (direction === "top-bottom") return ctx.createLinearGradient(0, 0, 0, height);
+    if (direction === "bottom-top") return ctx.createLinearGradient(0, height, 0, 0);
+    return ctx.createLinearGradient(0, 0, width, 0);
+  })();
+  const denom = Math.max(1, safeColors.length - 1);
+  safeColors.forEach((color, index) => g.addColorStop(index / denom, color));
+  return g;
+}
+
+function layerOrderFromBlueprint(blueprint: ThumbnailComposerBlueprint) {
+  const all = new Set<string>([
+    ...blueprint.subjects.map((item) => item.id),
+    ...blueprint.shapeLayers.map((item) => item.id),
+    ...blueprint.textLayers.map((item) => item.id),
+  ]);
+  const ordered = (blueprint.layerOrder || []).filter((id) => all.has(id));
+  const missing = [...all].filter((id) => !ordered.includes(id));
+  return ordered.concat(missing);
+}
+
+function renderComposerPreview(blueprint: ThumbnailComposerBlueprint, sourceImages: string[], canvas: HTMLCanvasElement | null) {
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  const width = 1280;
+  const height = 720;
+  canvas.width = width;
+  canvas.height = height;
+
+  const images = sourceImages.map((src) => {
+    const img = new window.Image();
+    img.src = src;
+    return img;
+  });
+
+  const background = blueprint.canvas.background;
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, width, height);
+
+  const bgSource = images[background.sourceImageIndex] ?? images[0];
+  if (bgSource?.complete && bgSource.naturalWidth) {
+    ctx.save();
+    const blur = Math.max(0, background.blur || 0);
+    const brightness = Math.max(0.2, Math.min(1.5, background.brightness || 1));
+    ctx.filter = background.type === "image_blur" ? `blur(${blur}px) brightness(${brightness})` : `brightness(${brightness})`;
+    drawCover(ctx, bgSource, 0, 0, width, height);
+    ctx.restore();
+  }
+  if (background.overlayGradient?.colors?.length) {
+    ctx.save();
+    ctx.fillStyle = gradientStops(ctx, width, height, background.overlayGradient.direction, background.overlayGradient.colors);
+    ctx.fillRect(0, 0, width, height);
+    ctx.restore();
+  }
+
+  const idToSubject = new Map(blueprint.subjects.map((s) => [s.id, s] as const));
+  const idToShape = new Map(blueprint.shapeLayers.map((s) => [s.id, s] as const));
+  const idToText = new Map(blueprint.textLayers.map((t) => [t.id, t] as const));
+  const order = layerOrderFromBlueprint(blueprint);
+
+  for (const id of order) {
+    const subject = idToSubject.get(id);
+    if (subject) {
+      const img = images[subject.sourceImageIndex] ?? images[0];
+      if (!img?.complete || !img.naturalWidth) continue;
+      ctx.save();
+      ctx.filter = `brightness(${subject.edits.brightness || 1}) contrast(${subject.edits.contrast || 1}) saturate(${subject.edits.saturation || 1})`;
+      drawCover(ctx, img, subject.position.x, subject.position.y, subject.position.width, subject.position.height);
+      ctx.restore();
+      continue;
+    }
+
+    const shape = idToShape.get(id);
+    if (shape) {
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, Math.min(1, shape.opacity ?? 1));
+      ctx.translate(shape.position.x + shape.position.width / 2, shape.position.y + shape.position.height / 2);
+      ctx.rotate(((shape.rotation || 0) * Math.PI) / 180);
+      ctx.translate(-shape.position.width / 2, -shape.position.height / 2);
+      ctx.fillStyle = shape.color || "rgba(255,255,255,0.9)";
+      if (shape.type === "circle") {
+        const r = Math.min(shape.position.width, shape.position.height) / 2;
+        ctx.beginPath();
+        ctx.arc(shape.position.width / 2, shape.position.height / 2, r, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (shape.type === "line") {
+        ctx.strokeStyle = shape.color || "#fff";
+        ctx.lineWidth = Math.max(2, Math.min(shape.position.width, shape.position.height) / 10);
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(0, shape.position.height / 2);
+        ctx.lineTo(shape.position.width, shape.position.height / 2);
+        ctx.stroke();
+      } else if (shape.type === "arrow") {
+        ctx.strokeStyle = shape.color || "#fff";
+        ctx.lineWidth = Math.max(10, Math.min(shape.position.width, shape.position.height) / 8);
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(ctx.lineWidth / 2, shape.position.height / 2);
+        ctx.lineTo(shape.position.width - ctx.lineWidth, shape.position.height / 2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(shape.position.width - ctx.lineWidth, shape.position.height * 0.2);
+        ctx.lineTo(shape.position.width, shape.position.height / 2);
+        ctx.lineTo(shape.position.width - ctx.lineWidth, shape.position.height * 0.8);
+        ctx.closePath();
+        ctx.fill();
+      } else {
+        ctx.fillRect(0, 0, shape.position.width, shape.position.height);
+      }
+      ctx.restore();
+      continue;
+    }
+
+    const text = idToText.get(id);
+    if (text && (text.text || "").trim()) {
+      ctx.save();
+      const weight = text.fontWeight || 800;
+      const size = text.fontSize || 88;
+      ctx.font = `${weight} ${size}px ${text.fontFamily || "Inter"}`;
+      ctx.fillStyle = text.color || "#fff";
+      if (text.shadow) {
+        ctx.shadowColor = "rgba(0,0,0,0.55)";
+        ctx.shadowBlur = 16;
+        ctx.shadowOffsetY = 10;
+      }
+      ctx.textBaseline = "top";
+      ctx.textAlign = text.alignment === "center" ? "center" : text.alignment === "right" ? "right" : "left";
+      const x = text.alignment === "center" ? text.position.x + text.position.width / 2 : text.alignment === "right" ? text.position.x + text.position.width : text.position.x;
+      const y = text.position.y;
+      if (text.strokeColor && text.strokeWidth > 0) {
+        ctx.lineJoin = "round";
+        ctx.miterLimit = 2;
+        ctx.strokeStyle = text.strokeColor;
+        ctx.lineWidth = text.strokeWidth;
+        ctx.strokeText(text.text, x, y);
+      }
+      ctx.fillText(text.text, x, y);
+      ctx.restore();
+    }
+  }
 }
 
 function dataUrlBytes(dataUrl: string) {
@@ -2758,6 +3034,17 @@ export default function YouTubeGrowthPlannerV2Tab() {
   const [thumbnailTextPreference, setThumbnailTextPreference] = useState("");
   const [thumbnailSourceImages, setThumbnailSourceImages] = useState<ThumbnailSourceImage[]>([]);
   const [preserveThumbnailSourceImage, setPreserveThumbnailSourceImage] = useState(true);
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [composerSelectedDay, setComposerSelectedDay] = useState<number>(1);
+  const [composerIdea, setComposerIdea] = useState("");
+  const [composerPreferredText, setComposerPreferredText] = useState("");
+  const [composerStylePreference, setComposerStylePreference] = useState("");
+  const [composerThingsToAvoid, setComposerThingsToAvoid] = useState("");
+  const [composerSourceImages, setComposerSourceImages] = useState<ThumbnailSourceImage[]>([]);
+  const [composerBlueprint, setComposerBlueprint] = useState<ThumbnailComposerBlueprint | null>(null);
+  const [composerWorking, setComposerWorking] = useState<"blueprint" | "export" | null>(null);
+  const [composerExportedImage, setComposerExportedImage] = useState<string | null>(null);
+  const composerCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [refreshingInsights, setRefreshingInsights] = useState(false);
   const lastStatusRefreshRef = useRef(0);
 
@@ -3046,6 +3333,119 @@ export default function YouTubeGrowthPlannerV2Tab() {
     setThumbnailTextPreference("");
     setThumbnailSourceImages([]);
     setPreserveThumbnailSourceImage(true);
+  }
+
+  useEffect(() => {
+    if (!days.length) return;
+    setComposerSelectedDay((current) => (days.some((day) => day.day === current) ? current : days[0]!.day));
+  }, [days]);
+
+  useEffect(() => {
+    if (!composerOpen || !composerBlueprint) return;
+    const canvas = composerCanvasRef.current;
+    const sources = composerSourceImages.map((item) => item.dataUrl);
+    const id = window.requestAnimationFrame(() => renderComposerPreview(composerBlueprint, sources, canvas));
+    return () => window.cancelAnimationFrame(id);
+  }, [composerBlueprint, composerOpen, composerSourceImages]);
+
+  function openThumbnailComposer() {
+    setComposerOpen(true);
+    setComposerBlueprint(null);
+    setComposerExportedImage(null);
+    setComposerSourceImages([]);
+    setComposerIdea("");
+    setComposerPreferredText("");
+    setComposerStylePreference("");
+    setComposerThingsToAvoid("");
+  }
+
+  function closeThumbnailComposer() {
+    setComposerOpen(false);
+    setComposerWorking(null);
+    setComposerBlueprint(null);
+    setComposerExportedImage(null);
+    setComposerSourceImages([]);
+  }
+
+  async function handleComposerSourceFiles(files: FileList | null) {
+    if (!files?.length) return;
+    try {
+      const processed: ThumbnailSourceImage[] = [];
+      for (const file of Array.from(files).slice(0, 6)) {
+        processed.push({
+          name: file.name,
+          dataUrl: await resizeAnyImageFileToJpegDataUrl(file),
+        });
+      }
+      setComposerSourceImages((current) => [...current, ...processed].slice(0, 6));
+    } catch (err) {
+      toast({ title: "Image upload failed", description: err instanceof Error ? err.message : "Could not process image", variant: "destructive" });
+    }
+  }
+
+  async function createComposerBlueprint() {
+    if (composerWorking) return;
+    if (!composerSourceImages.length) {
+      toast({ title: "Upload at least one image", description: "Add source images to create an editable draft.", variant: "destructive" });
+      return;
+    }
+    const day = days.find((item) => item.day === composerSelectedDay) ?? null;
+    setComposerWorking("blueprint");
+    setError(null);
+    try {
+      const data = await jsonFetch<{ blueprint: ThumbnailComposerBlueprint }>("/api/youtube/thumbnail-composer/blueprint", {
+        method: "POST",
+        body: JSON.stringify({
+          sourceImages: composerSourceImages.map((item) => item.dataUrl),
+          thumbnailIdea: composerIdea.trim() || null,
+          preferredOverlayText: composerPreferredText.trim() || null,
+          stylePreference: composerStylePreference.trim() || null,
+          thingsToAvoid: composerThingsToAvoid.trim() || null,
+          videoTitle: day?.contentIdea ?? null,
+          videoDescription: day?.descriptionSuggestion ?? null,
+          transcriptOpening: null,
+          currentThumbnailDataUrl: day?.generatedThumbnail?.imageDataUrl ?? null,
+          auditInsights: null,
+        }),
+      });
+      setComposerBlueprint(data.blueprint);
+      setComposerExportedImage(null);
+      window.requestAnimationFrame(() => {
+        try {
+          renderComposerPreview(data.blueprint, composerSourceImages.map((item) => item.dataUrl), composerCanvasRef.current);
+        } catch {
+          // Preview rendering is best-effort; export is server-side.
+        }
+      });
+    } catch (err) {
+      toast({ title: "Blueprint failed", description: err instanceof Error ? err.message : "Could not generate blueprint", variant: "destructive" });
+    } finally {
+      setComposerWorking(null);
+    }
+  }
+
+  async function exportComposerThumbnail() {
+    if (composerWorking) return;
+    if (!composerBlueprint) {
+      toast({ title: "Create a draft first", description: "Generate a blueprint before exporting.", variant: "destructive" });
+      return;
+    }
+    setComposerWorking("export");
+    setError(null);
+    try {
+      const data = await jsonFetch<{ imageDataUrl: string }>("/api/youtube/thumbnail-composer/export", {
+        method: "POST",
+        body: JSON.stringify({
+          blueprint: composerBlueprint,
+          sourceImages: composerSourceImages.map((item) => item.dataUrl),
+        }),
+      });
+      setComposerExportedImage(data.imageDataUrl);
+    } catch (err) {
+      toast({ title: "Export failed", description: err instanceof Error ? err.message : "Could not export thumbnail", variant: "destructive" });
+    } finally {
+      setComposerWorking(null);
+    }
   }
 
   async function deleteDay(day: PlanDay) {
@@ -3694,6 +4094,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
   }> = [
     { id: "overview", label: ui.subtabs.overview, Icon: LayoutGrid, accent: "from-sky-300/20 to-cyan-300/8" },
     { id: "plan", label: ui.subtabs.plan, Icon: CalendarDays, accent: "from-red-300/24 to-orange-300/8" },
+    { id: "thumbnails", label: "Thumbnails", Icon: ImagePlus, accent: "from-violet-300/22 to-fuchsia-300/10" },
     { id: "competitors", label: ui.subtabs.competitors, Icon: Youtube, accent: "from-rose-300/24 to-red-300/8" },
     { id: "insights", label: ui.subtabs.insights, Icon: BarChart3, accent: "from-emerald-300/20 to-lime-300/8" },
     { id: "tasks", label: ui.subtabs.tasks, Icon: ListChecks, accent: "from-amber-300/24 to-yellow-300/8", badge: unlinkedWeekVideos.length ? String(unlinkedWeekVideos.length) : undefined },
@@ -3969,6 +4370,43 @@ export default function YouTubeGrowthPlannerV2Tab() {
           {activeSubtab === "tasks" ? uploadReviewSection : null}
 
           {activeSubtab === "plan" ? planCalendarSection : null}
+
+          {activeSubtab === "thumbnails" ? (
+            <section id="thumbnail-composer" className="scroll-mt-24">
+              <PanelCard className="p-6 transition-all hover:-translate-y-1 hover:bg-white/4">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div>
+                    <div className="flex items-center gap-3">
+                      <ImagePlus className="h-5 w-5 text-violet-200" />
+                      <h2 className="text-2xl font-semibold text-white">Thumbnail Composer</h2>
+                    </div>
+                    <p className="mt-2 text-sm text-white/45">AI directs the layout, you edit the canvas, and export is rendered server-side. No AI image generation by default.</p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button className="rounded-lg bg-white text-black hover:bg-white/90" onClick={openThumbnailComposer}>
+                      <Paintbrush className="mr-2 h-4 w-4" />
+                      Create editable draft
+                    </Button>
+                  </div>
+                </div>
+                <div className="mt-5 grid gap-4 md:grid-cols-2">
+                  <PanelCardSoft className="border border-white/10 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-white/40">How it works</p>
+                    <div className="mt-3 space-y-2 text-sm text-white/65">
+                      <p>1) Upload image(s) + describe the thumbnail goal.</p>
+                      <p>2) DayTabs returns a blueprint JSON (layers + layout).</p>
+                      <p>3) You tweak text, positions, and styling.</p>
+                      <p>4) Export generates a 1280×720 JPG under 2 MB.</p>
+                    </div>
+                  </PanelCardSoft>
+                  <PanelCardSoft className="border border-white/10 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-white/40">Tip</p>
+                    <p className="mt-3 text-sm leading-6 text-white/65">Use 1 strong subject and 1 short text line. If you upload a face, DayTabs will preserve it exactly (no identity changes).</p>
+                  </PanelCardSoft>
+                </div>
+              </PanelCard>
+            </section>
+          ) : null}
 
           {activeSubtab === "insights" ? (
             <>
@@ -4766,6 +5204,286 @@ export default function YouTubeGrowthPlannerV2Tab() {
                 </div>
               </div>
             ) : null}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={composerOpen} onOpenChange={(open) => !open && closeThumbnailComposer()}>
+        <DialogContent className="w-[min(92vw,1100px)] max-h-[85vh] overflow-hidden p-0">
+          <div className="flex max-h-[85vh] flex-col">
+            <div className="sticky top-0 z-10 border-b border-white/10 bg-[#0b0714]/90 px-6 pb-4 pt-5 backdrop-blur-xl">
+              <DialogHeader className="space-y-1 pr-10">
+                <DialogTitle className="text-xl text-white">Thumbnail Composer</DialogTitle>
+                <DialogDescription className="text-white/55">Create a blueprint, edit the draft, and export a real 1280×720 JPG. No AI image generation by default.</DialogDescription>
+              </DialogHeader>
+            </div>
+            <div className="flex-1 overflow-y-auto px-6 pb-6 pt-5">
+              <div className="grid gap-5 lg:grid-cols-2">
+                <PanelCardSoft className="p-4">
+                  <p className="text-xs uppercase tracking-[0.16em] text-white/40">Context</p>
+                  <div className="mt-3 grid gap-3">
+                    <label className="text-sm text-white/70">
+                      <span className="mb-1 block text-xs text-white/40">Plan day</span>
+                      <select
+                        value={composerSelectedDay}
+                        onChange={(event) => setComposerSelectedDay(Number(event.target.value))}
+                        className="w-full rounded-lg border border-white/10 bg-white/4 px-3 py-2 text-sm text-white"
+                      >
+                        {calendarDays.map((day) => (
+                          <option key={`composer-day-${day.day}`} value={day.day}>
+                            Day {day.day}: {day.contentIdea.slice(0, 60)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                </PanelCardSoft>
+
+                <PanelCardSoft className="p-4">
+                  <p className="text-xs uppercase tracking-[0.16em] text-white/40">Source image(s)</p>
+                  <p className="mt-2 text-sm text-white/55">Upload 1–4 images. If there’s a face, it will be preserved exactly.</p>
+                  <div className="mt-3 flex flex-wrap gap-3">
+                    {composerSourceImages.map((image, index) => (
+                      <div key={`${image.name}-${index}`} className="relative overflow-hidden rounded-xl border border-white/10 bg-black/20">
+                        <img src={image.dataUrl} alt={image.name} className="h-24 w-36 object-cover" />
+                        <button
+                          type="button"
+                          onClick={() => setComposerSourceImages((current) => current.filter((_, itemIndex) => itemIndex !== index))}
+                          className="absolute right-2 top-2 rounded-full border border-white/10 bg-black/50 p-1 text-white/70 hover:text-white"
+                          aria-label={`Remove ${image.name}`}
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                    {composerSourceImages.length < 4 ? (
+                      <label className="flex h-24 w-36 cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-white/10 bg-white/3 text-center text-sm text-white/45 hover:border-white/20 hover:text-white/70">
+                        <ImagePlus className="mb-2 h-5 w-5" />
+                        Add images
+                        <input
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+                          multiple
+                          className="hidden"
+                          onChange={(event) => {
+                            void handleComposerSourceFiles(event.currentTarget.files);
+                            event.currentTarget.value = "";
+                          }}
+                        />
+                      </label>
+                    ) : null}
+                  </div>
+                </PanelCardSoft>
+
+                <PanelCardSoft className="p-4 lg:col-span-2">
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <p className="text-xs uppercase tracking-[0.16em] text-white/40">Thumbnail idea / goal</p>
+                      <p className="mt-2 text-sm text-white/55">Tell DayTabs what you want the thumbnail to communicate.</p>
+                      <Textarea
+                        value={composerIdea}
+                        onChange={(event) => setComposerIdea(event.target.value)}
+                        placeholder="Example: show the before/after result and make it feel shocking but believable."
+                        className="mt-3 min-h-24"
+                      />
+                    </div>
+                    <div className="space-y-4">
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.16em] text-white/40">Preferred overlay text</p>
+                        <p className="mt-2 text-sm text-white/55">Leave empty and DayTabs will suggest the strongest short text.</p>
+                        <Input
+                          value={composerPreferredText}
+                          onChange={(event) => setComposerPreferredText(event.target.value)}
+                          placeholder="Example: STOP DOING THIS"
+                          className="mt-3 border-white/10 bg-white/4 text-white placeholder:text-white/30"
+                        />
+                      </div>
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.16em] text-white/40">Style preference</p>
+                        <Input
+                          value={composerStylePreference}
+                          onChange={(event) => setComposerStylePreference(event.target.value)}
+                          placeholder="Example: minimal, high-contrast, clean background"
+                          className="mt-3 border-white/10 bg-white/4 text-white placeholder:text-white/30"
+                        />
+                      </div>
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.16em] text-white/40">Things to avoid</p>
+                        <p className="mt-2 text-sm text-white/55">Example: don’t show my face, don’t use red, don’t make it look too AI-generated.</p>
+                        <Textarea
+                          value={composerThingsToAvoid}
+                          onChange={(event) => setComposerThingsToAvoid(event.target.value)}
+                          placeholder="Example: no red, no arrows, don’t crop out the product"
+                          className="mt-3 min-h-20"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-4 flex flex-wrap justify-end gap-2">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="rounded-lg"
+                      onClick={() => {
+                        const day = days.find((item) => item.day === composerSelectedDay) ?? null;
+                        if (!day) return;
+                        closeThumbnailComposer();
+                        openThumbnailDialog(day);
+                      }}
+                    >
+                      <Sparkles className="mr-2 h-4 w-4" />
+                      Generate with AI (optional)
+                    </Button>
+                    <Button
+                      type="button"
+                      className="rounded-lg"
+                      disabled={composerWorking === "blueprint"}
+                      onClick={() => void createComposerBlueprint()}
+                    >
+                      {composerWorking === "blueprint" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Paintbrush className="mr-2 h-4 w-4" />}
+                      Create editable draft
+                    </Button>
+                  </div>
+                </PanelCardSoft>
+
+                <PanelCardSoft className="p-4 lg:col-span-2">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs uppercase tracking-[0.16em] text-white/40">Canvas draft</p>
+                      <p className="mt-2 text-sm text-white/55">Preview is best-effort. Export uses server-side rendering.</p>
+                    </div>
+                    {composerBlueprint ? (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        className="rounded-lg"
+                        onClick={() => void navigator.clipboard.writeText(JSON.stringify(composerBlueprint, null, 2))}
+                      >
+                        <Copy className="mr-2 h-4 w-4" />
+                        Copy design blueprint
+                      </Button>
+                    ) : null}
+                  </div>
+                  <div className="mt-4 grid gap-4 lg:grid-cols-[1fr,340px]">
+                    <div className="overflow-hidden rounded-2xl border border-white/10 bg-black/20 p-3">
+                      <canvas ref={composerCanvasRef} className="h-auto w-full rounded-xl" />
+                    </div>
+                    <div className="space-y-3">
+                      {composerBlueprint ? (
+                        <>
+                          <PanelCardSoft className="border border-white/10 p-3">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/35">Overlay text</p>
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              {(composerBlueprint.overlayTextOptions?.length ? composerBlueprint.overlayTextOptions : [composerBlueprint.selectedOverlayText]).filter(Boolean).slice(0, 6).map((option) => (
+                                <button
+                                  key={option}
+                                  type="button"
+                                  onClick={() => setComposerBlueprint((current) => {
+                                    if (!current) return current;
+                                    const next = { ...current, selectedOverlayText: option, textLayers: [...current.textLayers] };
+                                    if (next.textLayers[0]) next.textLayers[0] = { ...next.textLayers[0], text: option };
+                                    return next;
+                                  })}
+                                  className={cn(
+                                    "rounded-full border px-3 py-1 text-xs font-semibold transition-colors",
+                                    composerBlueprint.selectedOverlayText === option
+                                      ? "border-violet-300/35 bg-violet-500/15 text-white"
+                                      : "border-white/10 bg-white/3 text-white/60 hover:bg-white/6 hover:text-white",
+                                  )}
+                                >
+                                  {option}
+                                </button>
+                              ))}
+                            </div>
+                          </PanelCardSoft>
+                          {composerBlueprint.textLayers.slice(0, 2).map((layer, index) => (
+                            <PanelCardSoft key={layer.id} className="border border-white/10 p-3">
+                              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/35">Text layer {index + 1}</p>
+                              <div className="mt-3 space-y-2">
+                                <Input
+                                  value={layer.text}
+                                  onChange={(event) => setComposerBlueprint((current) => {
+                                    if (!current) return current;
+                                    const next = { ...current, textLayers: [...current.textLayers] };
+                                    next.textLayers[index] = { ...next.textLayers[index]!, text: event.target.value };
+                                    return next;
+                                  })}
+                                  className="border-white/10 bg-white/4 text-white placeholder:text-white/30"
+                                />
+                                <div className="grid grid-cols-3 gap-2">
+                                  <Input
+                                    value={String(layer.fontSize)}
+                                    onChange={(event) => setComposerBlueprint((current) => {
+                                      if (!current) return current;
+                                      const next = { ...current, textLayers: [...current.textLayers] };
+                                      next.textLayers[index] = { ...next.textLayers[index]!, fontSize: Math.max(10, Number(event.target.value) || 10) };
+                                      return next;
+                                    })}
+                                    className="border-white/10 bg-white/4 text-white"
+                                  />
+                                  <Input
+                                    value={String(Math.round(layer.position.x))}
+                                    onChange={(event) => setComposerBlueprint((current) => {
+                                      if (!current) return current;
+                                      const next = { ...current, textLayers: [...current.textLayers] };
+                                      next.textLayers[index] = { ...next.textLayers[index]!, position: { ...next.textLayers[index]!.position, x: Number(event.target.value) || 0 } };
+                                      return next;
+                                    })}
+                                    className="border-white/10 bg-white/4 text-white"
+                                  />
+                                  <Input
+                                    value={String(Math.round(layer.position.y))}
+                                    onChange={(event) => setComposerBlueprint((current) => {
+                                      if (!current) return current;
+                                      const next = { ...current, textLayers: [...current.textLayers] };
+                                      next.textLayers[index] = { ...next.textLayers[index]!, position: { ...next.textLayers[index]!.position, y: Number(event.target.value) || 0 } };
+                                      return next;
+                                    })}
+                                    className="border-white/10 bg-white/4 text-white"
+                                  />
+                                </div>
+                              </div>
+                            </PanelCardSoft>
+                          ))}
+                        </>
+                      ) : (
+                        <PanelCardSoft className="border border-white/10 p-3 text-sm text-white/55">
+                          Create a draft to see editable layers here.
+                        </PanelCardSoft>
+                      )}
+                    </div>
+                  </div>
+                  {composerExportedImage ? (
+                    <div className="mt-5 overflow-hidden rounded-2xl border border-white/10 bg-black/20">
+                      <img src={composerExportedImage} alt="Exported thumbnail" className="w-full object-cover" />
+                    </div>
+                  ) : null}
+                </PanelCardSoft>
+              </div>
+            </div>
+            <div className="sticky bottom-0 z-10 border-t border-white/10 bg-[#0b0714]/90 px-6 py-4 backdrop-blur-xl">
+              <div className="flex flex-wrap justify-between gap-2">
+                <Button type="button" variant="secondary" className="rounded-lg" onClick={closeThumbnailComposer}>
+                  Close
+                </Button>
+                <div className="flex flex-wrap justify-end gap-2">
+                  {composerExportedImage ? (
+                    <a
+                      href={composerExportedImage}
+                      download={`thumbnail-day-${composerSelectedDay}.jpg`}
+                      className="inline-flex items-center rounded-lg border border-white/10 px-3 py-2 text-sm text-white/75 transition-colors hover:bg-white/6 hover:text-white"
+                    >
+                      <Download className="mr-2 h-4 w-4" />
+                      Download JPG
+                    </a>
+                  ) : null}
+                  <Button type="button" className="rounded-lg" onClick={() => void exportComposerThumbnail()} disabled={composerWorking === "export" || !composerBlueprint}>
+                    {composerWorking === "export" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+                    Export thumbnail
+                  </Button>
+                </div>
+              </div>
+            </div>
           </div>
         </DialogContent>
       </Dialog>

@@ -37,8 +37,10 @@ minimumReleaseAgeExclude:
 
 onlyBuiltDependencies:
   - '@swc/core'
+  - core-js
   - esbuild
   - msw
+  - sharp
   - unrs-resolver
 
 overrides:
