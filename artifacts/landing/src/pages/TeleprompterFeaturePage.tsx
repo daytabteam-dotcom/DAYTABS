@@ -6,6 +6,7 @@ import {
   BadgeCheck,
   Camera,
   Circle,
+  Gauge,
   Clock,
   Download,
   EyeOff,
@@ -14,10 +15,13 @@ import {
   Lock,
   LogIn,
   MonitorSmartphone,
+  Minus,
   Pause,
   Play,
+  Plus,
   RotateCcw,
   Sparkles,
+  Type,
   UserPlus,
   Users,
   Video,
@@ -640,6 +644,35 @@ export default function TeleprompterFeaturePage() {
                       <div className="absolute right-5 top-5 z-10">
                         <div className="dt-record-pulse inline-flex items-center justify-center rounded-full bg-red-500/90 p-3 shadow-lg shadow-red-500/20">
                           <Camera className="h-4 w-4 text-white" />
+                        </div>
+                      </div>
+                      <div className="pointer-events-none absolute inset-x-0 bottom-4 z-10 px-5">
+                        <div className="mx-auto flex max-w-[520px] items-center justify-between gap-3 rounded-2xl border border-white/10 bg-black/55 p-2 text-xs text-white/80 backdrop-blur">
+                          <div className="flex items-center gap-2">
+                            <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/5">
+                              <Minus className="h-4 w-4 text-white/70" />
+                            </span>
+                            <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/5">
+                              <Gauge className="h-4 w-4 text-white/70" />
+                            </span>
+                            <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/5">
+                              <Plus className="h-4 w-4 text-white/70" />
+                            </span>
+                            <span className="ml-1 font-semibold text-white/70">Speed</span>
+                          </div>
+                          <div className="h-8 w-px bg-white/10" />
+                          <div className="flex items-center gap-2">
+                            <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/5">
+                              <Minus className="h-4 w-4 text-white/70" />
+                            </span>
+                            <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/5">
+                              <Type className="h-4 w-4 text-white/70" />
+                            </span>
+                            <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/5">
+                              <Plus className="h-4 w-4 text-white/70" />
+                            </span>
+                            <span className="ml-1 font-semibold text-white/70">Text</span>
+                          </div>
                         </div>
                       </div>
 
