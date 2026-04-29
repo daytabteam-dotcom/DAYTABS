@@ -82,6 +82,8 @@ Do not generate generic ideas.
 Do not only provide topics.
 For every idea, provide enough detail so the user can create the content immediately.
 
+Core rule: the strongest signal is user behavior. When a user behavior summary is provided, prioritize it over generic best practices.
+
 You must consider:
 - selected platform
 - weekly topic
@@ -198,8 +200,7 @@ export async function generateSocialWeeklyPlanAi(params: {
   goal?: string;
   tone?: string;
   formatPreference?: string;
-  previousPlan?: PlanPayload | null;
-  previousFeedback?: SocialPostPerformanceFeedback[] | null;
+  previousWeekBehaviorSummary?: unknown;
   skippedFeedback?: boolean;
 }) {
   const scheduledDates = params.postingMode === "manual"
@@ -246,14 +247,11 @@ ${params.tone || ""}
 Format preference:
 ${params.formatPreference || ""}
 
-Previous week plan:
-${params.previousPlan ? JSON.stringify(params.previousPlan) : "null"}
-
-Previous week manual performance feedback:
-${params.skippedFeedback ? "User skipped feedback. Use prior plan context and topic only." : params.previousFeedback ? JSON.stringify(params.previousFeedback) : "null"}
+Previous week user behavior summary (highest priority signal; do NOT request raw data):
+${params.previousWeekBehaviorSummary ? JSON.stringify(params.previousWeekBehaviorSummary) : "null"}
 
 Rules:
-- Use the feedback to improve next week's ideas.
+- User behavior is the strongest signal. Follow the behavior summary above.
 - If a post performed great or good, create a fresh related angle, not a duplicate.
 - If a post performed poorly, avoid repeating the same hook, format, or angle.
 - If the user skipped or did not finish a post, do not assume it failed.

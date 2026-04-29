@@ -151,7 +151,10 @@ export function SocialPlanBoard({
   const [draggingDayId, setDraggingDayId] = useState<string | null>(null);
   const [draggingOverDate, setDraggingOverDate] = useState<string | null>(null);
   const label = platformLabel(plan.platform);
-  const days = useMemo(() => (plan.plan.days ?? []).slice().sort((a, b) => a.date.localeCompare(b.date) || a.day - b.day), [plan.plan.days]);
+  const days = useMemo(() => (plan.plan.days ?? [])
+    .filter((day) => !day.isDeleted)
+    .slice()
+    .sort((a, b) => a.date.localeCompare(b.date) || a.day - b.day), [plan.plan.days]);
   const Icon = platformIcon(plan.platform);
 
   const byDate = useMemo(() => {

@@ -9,6 +9,7 @@ import type {
   SocialPostingMode,
   SocialWeekday,
 } from "../../models/socialGrowthPlan";
+import { buildSocialGrowthBehaviorSummary } from "../../lib/socialGrowthBehaviorSummary";
 import { generateSocialWeeklyPlanAi, regenerateSocialPlanDayAi } from "../../services/socialGrowthAiService";
 import {
   createSocialWeeklyPlan,
@@ -210,8 +211,7 @@ router.post("/plans/generate", async (req, res) => {
     goal: typeof goal === "string" ? goal : undefined,
     tone: typeof tone === "string" ? tone : undefined,
     formatPreference: typeof formatPreference === "string" ? formatPreference : undefined,
-    previousPlan: null,
-    previousFeedback: null,
+    previousWeekBehaviorSummary: null,
     skippedFeedback: false,
   });
 
@@ -321,6 +321,14 @@ router.post("/plans/:id/generate-next-week", async (req, res) => {
   }
 
   const model = PLAN_LIMITS[normalizePlan(req.auth!.plan ?? "free")].script_planner_model;
+  const priorFeedback = wantsSkip
+    ? null
+    : normalizedFeedback ?? ((await getLatestFeedbackForPlan(planId))?.feedback as any ?? null);
+  const behaviorSummary = buildSocialGrowthBehaviorSummary({
+    previousPlan: currentPlan.plan as any,
+    previousFeedback: priorFeedback,
+    skippedFeedback: wantsSkip,
+  });
 
   const aiResult = await generateSocialWeeklyPlanAi({
     userId: req.auth!.user_id,
@@ -336,8 +344,7 @@ router.post("/plans/:id/generate-next-week", async (req, res) => {
     goal: typeof goal === "string" ? goal : (currentPlan.goal ?? undefined),
     tone: typeof tone === "string" ? tone : (currentPlan.tone ?? undefined),
     formatPreference: typeof formatPreference === "string" ? formatPreference : (currentPlan.formatPreference ?? undefined),
-    previousPlan: currentPlan.plan as any,
-    previousFeedback: wantsSkip ? null : normalizedFeedback ?? ((await getLatestFeedbackForPlan(planId))?.feedback as any ?? null),
+    previousWeekBehaviorSummary: behaviorSummary,
     skippedFeedback: wantsSkip,
   });
 

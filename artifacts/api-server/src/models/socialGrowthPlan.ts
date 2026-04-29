@@ -53,6 +53,8 @@ export interface SocialPlanDay {
   contentType?: string;
   ideaOrigin?: "ai" | "manual";
   aiImproved?: boolean;
+  isDeleted?: boolean;
+  deletedAt?: string;
   hook: string;
   outline: string[];
   postContext?: string;

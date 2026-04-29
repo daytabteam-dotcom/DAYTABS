@@ -28,6 +28,9 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
   const [previewing, setPreviewing] = useState(false);
   const [speed, setSpeed] = useState(2);
   const [fontSize, setFontSize] = useState(36);
+  const [isPortrait, setIsPortrait] = useState(
+    typeof window !== "undefined" ? window.innerHeight > window.innerWidth : false,
+  );
   const [showControls, setShowControls] = useState(true);
   const [cameraRequested, setCameraRequested] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
@@ -55,58 +58,72 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
   const stopCameraAfterRecordingRef = useRef(false);
   const recordingRef = useRef(false);
   const cameraOrientationRef = useRef<"portrait" | "landscape" | null>(null);
+  const isPortraitRef = useRef(isPortrait);
 
-  const getDesiredPortrait = useCallback(() => {
-    if (typeof window === "undefined") return false;
-    if (typeof window.matchMedia === "function" && window.matchMedia("(orientation: portrait)").matches) return true;
-    return window.innerHeight > window.innerWidth;
+  useEffect(() => {
+    isPortraitRef.current = isPortrait;
+  }, [isPortrait]);
+
+  useEffect(() => {
+    const update = () => {
+      setIsPortrait(window.innerHeight > window.innerWidth);
+    };
+
+    window.addEventListener("resize", update);
+    window.addEventListener("orientationchange", update);
+
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("orientationchange", update);
+    };
   }, []);
 
-  const drawVideoToCanvas = useCallback(
-    (
-      video: HTMLVideoElement,
-      canvas: HTMLCanvasElement,
-      ctx: CanvasRenderingContext2D,
-      desiredPortrait: boolean,
-    ) => {
+  const drawVideoToCanvas = useCallback((video: HTMLVideoElement, canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D) => {
+    function draw() {
+      const desiredPortrait = isPortraitRef.current;
+
       const outputWidth = desiredPortrait ? 1080 : 1920;
       const outputHeight = desiredPortrait ? 1920 : 1080;
 
-      if (canvas.width !== outputWidth) canvas.width = outputWidth;
-      if (canvas.height !== outputHeight) canvas.height = outputHeight;
+      canvas.width = outputWidth;
+      canvas.height = outputHeight;
 
       const vw = video.videoWidth;
       const vh = video.videoHeight;
 
       if (!vw || !vh) {
-        drawRafRef.current = requestAnimationFrame(() => drawVideoToCanvas(video, canvas, ctx, desiredPortrait));
+        drawRafRef.current = requestAnimationFrame(draw);
         return;
       }
 
-      ctx.clearRect(0, 0, outputWidth, outputHeight);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      const cameraPortrait = vh > vw;
-      const needsRotation = desiredPortrait !== cameraPortrait;
+      const cameraIsPortrait = vh > vw;
+      const needsRotation = desiredPortrait !== cameraIsPortrait;
 
       ctx.save();
 
       try {
         if (needsRotation) {
-          ctx.translate(outputWidth / 2, outputHeight / 2);
-          ctx.rotate(desiredPortrait ? Math.PI / 2 : -Math.PI / 2);
+          ctx.translate(canvas.width / 2, canvas.height / 2);
+          ctx.rotate(Math.PI / 2);
 
-          const scale = Math.min(outputHeight / vw, outputWidth / vh);
-          const drawWidth = vw * scale;
-          const drawHeight = vh * scale;
+          const scale = Math.min(canvas.height / vw, canvas.width / vh);
 
-          ctx.drawImage(video, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
+          const drawW = vw * scale;
+          const drawH = vh * scale;
+
+          ctx.drawImage(video, -drawW / 2, -drawH / 2, drawW, drawH);
         } else {
-          const scale = Math.min(outputWidth / vw, outputHeight / vh);
-          const drawWidth = vw * scale;
-          const drawHeight = vh * scale;
-          const dx = (outputWidth - drawWidth) / 2;
-          const dy = (outputHeight - drawHeight) / 2;
-          ctx.drawImage(video, dx, dy, drawWidth, drawHeight);
+          const scale = Math.min(canvas.width / vw, canvas.height / vh);
+
+          const drawW = vw * scale;
+          const drawH = vh * scale;
+
+          const dx = (canvas.width - drawW) / 2;
+          const dy = (canvas.height - drawH) / 2;
+
+          ctx.drawImage(video, dx, dy, drawW, drawH);
         }
       } catch {
         // ignore transient draw errors
@@ -114,10 +131,11 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
 
       ctx.restore();
 
-      drawRafRef.current = requestAnimationFrame(() => drawVideoToCanvas(video, canvas, ctx, desiredPortrait));
-    },
-    [],
-  );
+      drawRafRef.current = requestAnimationFrame(draw);
+    }
+
+    draw();
+  }, []);
 
   useEffect(() => {
     recordingRef.current = recording;
@@ -234,8 +252,6 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
         return false;
       }
 
-      const desiredPortrait = getDesiredPortrait();
-
       const canvas = document.createElement("canvas");
       const ctx = canvas.getContext("2d");
       if (!ctx) {
@@ -244,7 +260,7 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
       }
 
       if (drawRafRef.current) cancelAnimationFrame(drawRafRef.current);
-      drawVideoToCanvas(sourceVideo, canvas, ctx, desiredPortrait);
+      drawVideoToCanvas(sourceVideo, canvas, ctx);
 
       const canvasStream = canvas.captureStream(30);
       const audioTrack = streamRef.current.getAudioTracks()[0];
@@ -284,7 +300,7 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
       setCameraError(error instanceof Error ? error.message : "Could not start recording.");
       return false;
     }
-  }, [drawVideoToCanvas, getDesiredPortrait, getSupportedMimeType, saveBlobToDevice, stopMediaTracks]);
+  }, [drawVideoToCanvas, getSupportedMimeType, saveBlobToDevice, stopMediaTracks]);
 
   const startCamera = useCallback(async () => {
     stopMediaTracks();
@@ -298,7 +314,7 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
     }
 
     try {
-      const desiredPortrait = getDesiredPortrait();
+      const desiredPortrait = isPortraitRef.current;
       const desiredOrientation: "portrait" | "landscape" = desiredPortrait ? "portrait" : "landscape";
 
       const supported = navigator.mediaDevices.getSupportedConstraints?.() ?? {};
@@ -340,7 +356,7 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
       setCameraError(error instanceof Error ? error.message : "Could not access the front camera.");
       return false;
     }
-  }, [getDesiredPortrait, stopMediaTracks]);
+  }, [stopMediaTracks]);
 
   const stopRecordingSession = useCallback(() => {
     clearCountdown();
@@ -393,7 +409,7 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
     setPreviewing(false);
     setSavedMessage(null);
 
-    const desiredOrientation: "portrait" | "landscape" = getDesiredPortrait() ? "portrait" : "landscape";
+    const desiredOrientation: "portrait" | "landscape" = isPortraitRef.current ? "portrait" : "landscape";
 
     const mustRestartCamera = !cameraReady || cameraOrientationRef.current !== desiredOrientation;
     const ready = mustRestartCamera ? await startCamera() : true;
@@ -418,7 +434,7 @@ export function Teleprompter({ script, onClose, startInRecordMode = false }: Tel
     };
 
     runCountdown(3);
-  }, [cameraReady, clearCountdown, countdownValue, getDesiredPortrait, resetScrollPosition, revealControls, startCamera, startRecording]);
+  }, [cameraReady, clearCountdown, countdownValue, resetScrollPosition, revealControls, startCamera, startRecording]);
 
   const reset = useCallback(() => {
     clearCountdown();

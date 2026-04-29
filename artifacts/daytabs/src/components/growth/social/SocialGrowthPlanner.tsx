@@ -34,7 +34,7 @@ export default function SocialGrowthPlanner({ platform }: { platform: SocialPlat
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [pendingNextWeekTopic, setPendingNextWeekTopic] = useState<string>("");
 
-  const days = useMemo(() => plan?.plan?.days ?? [], [plan?.plan?.days]);
+  const days = useMemo(() => (plan?.plan?.days ?? []).filter((day) => !day.isDeleted), [plan?.plan?.days]);
 
   const loadLatest = useCallback(async () => {
     setLoading(true);

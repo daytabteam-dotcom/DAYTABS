@@ -135,7 +135,8 @@ export async function deleteSocialPlanDay(userId: number, planId: number, dayId:
 
   const payload = (plan.plan ?? {}) as PlanPayload;
   const days = Array.isArray(payload.days) ? payload.days : [];
-  const nextDays = days.filter((day) => day.id !== dayId);
+  const now = new Date().toISOString();
+  const nextDays = days.map((day) => day.id === dayId ? ({ ...day, isDeleted: true, deletedAt: now } as typeof day) : day);
   const nextPlan: PlanPayload = { ...payload, days: nextDays };
 
   const [updated] = await db

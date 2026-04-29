@@ -686,14 +686,18 @@ router.get("/callback", async (req, res) => {
   }
 });
 
-router.get("/status", requireAuth, async (req, res) => {
-  try {
-    res.json(await getYoutubeStatus(req.auth!.user_id));
-  } catch (err) {
-    req.log.error({ err }, "YouTube status error");
-    res.status(500).json({ error: "Failed to load YouTube status" });
-  }
-});
+	router.get("/status", requireAuth, async (req, res) => {
+	  try {
+	    const skipAi =
+	      req.query?.skipAi === "1"
+	      || req.query?.skipAi === "true"
+	      || req.query?.skipAi === "yes";
+	    res.json(await getYoutubeStatus(req.auth!.user_id, { skipAi }));
+	  } catch (err) {
+	    req.log.error({ err }, "YouTube status error");
+	    res.status(500).json({ error: "Failed to load YouTube status" });
+	  }
+	});
 
 router.post("/sync", requireAuth, async (req, res) => {
   try {

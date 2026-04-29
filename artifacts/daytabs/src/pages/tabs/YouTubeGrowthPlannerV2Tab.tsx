@@ -76,6 +76,8 @@ import { usePlan } from "@/hooks/use-plan";
 import { PanelPage, PanelHeader, PanelTitle, PanelSubtitle, PanelCard, PanelCardSoft, PanelCardStrong, PanelEyebrow } from "@/components/panel-system";
 import { DAYTABS_LOCALE_STORAGE_KEY, useDayTabsI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { useToast } from "@/hooks/use-toast";
+import { deriveYoutubeDataInsights } from "@/lib/youtube-data-insights";
 
 type Stage = "idea" | "recording" | "editing" | "published" | "draft";
 type ViewMode = "calendar" | "planner";
@@ -2615,6 +2617,7 @@ function LoadingState() {
 export default function YouTubeGrowthPlannerV2Tab() {
   const { plan, loading: planLoading } = usePlan();
   const { copy, locale } = useDayTabsI18n();
+  const { toast } = useToast();
   const ui = copy.growthPlanner;
   const stages = useMemo(() => ([
     { id: "idea" as const, label: ui.stages.idea },
@@ -2651,6 +2654,8 @@ export default function YouTubeGrowthPlannerV2Tab() {
   const [thumbnailTextPreference, setThumbnailTextPreference] = useState("");
   const [thumbnailSourceImages, setThumbnailSourceImages] = useState<ThumbnailSourceImage[]>([]);
   const [preserveThumbnailSourceImage, setPreserveThumbnailSourceImage] = useState(true);
+  const [refreshingInsights, setRefreshingInsights] = useState(false);
+  const lastStatusRefreshRef = useRef(0);
 
   const latestPlan = status?.latestPlan ?? null;
   const planPayload = latestPlan?.plan ?? {};
@@ -2676,15 +2681,32 @@ export default function YouTubeGrowthPlannerV2Tab() {
     setPostingFrequencyInput(String(preferredPostsPerWeek));
   }, [preferredPostsPerWeek]);
 
-  async function loadStatus() {
-    setLoading(true);
+  async function loadStatus(options?: { silent?: boolean; throwOnError?: boolean }) {
+    if (!options?.silent) setLoading(true);
     setError(null);
     try {
-      setStatus(await jsonFetch<YoutubeStatus>("/api/youtube/status"));
+      setStatus(await jsonFetch<YoutubeStatus>("/api/youtube/status?skipAi=1"));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load YouTube status");
+      if (options?.throwOnError) throw err;
     } finally {
-      setLoading(false);
+      if (!options?.silent) setLoading(false);
+    }
+  }
+
+  async function refreshYoutubeInsights() {
+    if (refreshingInsights) return;
+    setRefreshingInsights(true);
+    try {
+      await loadStatus({ silent: true, throwOnError: true });
+      toast({ title: "YouTube insights updated" });
+    } catch {
+      toast({
+        title: "Could not refresh YouTube data. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setRefreshingInsights(false);
     }
   }
 
@@ -2722,6 +2744,26 @@ export default function YouTubeGrowthPlannerV2Tab() {
     }
   }, [plan.isStudio, planLoading]);
 
+  useEffect(() => {
+    if (planLoading) return;
+    if (!plan.isStudio) return;
+
+    const maybeRefresh = () => {
+      if (document.visibilityState && document.visibilityState !== "visible") return;
+      const now = Date.now();
+      if (now - lastStatusRefreshRef.current < 10_000) return;
+      lastStatusRefreshRef.current = now;
+      void loadStatus({ silent: true });
+    };
+
+    window.addEventListener("focus", maybeRefresh);
+    document.addEventListener("visibilitychange", maybeRefresh);
+    return () => {
+      window.removeEventListener("focus", maybeRefresh);
+      document.removeEventListener("visibilitychange", maybeRefresh);
+    };
+  }, [plan.isStudio, planLoading]);
+
   const calendarDays = useMemo(() => [...days].sort((a, b) => a.date.localeCompare(b.date) || a.day - b.day), [days]);
   const weekCalendarDates = useMemo(() => {
     if (!latestPlan?.startDate || !latestPlan?.endDate) return [];
@@ -2743,18 +2785,26 @@ export default function YouTubeGrowthPlannerV2Tab() {
   const plannedDateSet = useMemo(() => new Set(calendarDays.map((day) => day.date)), [calendarDays]);
   const progressState = weekProgress(days, status?.latestResults ?? []);
   const overview = useMemo(() => buildOverviewSections(recentVideos), [recentVideos]);
-  const bestTime = useMemo(() => deriveBestTimeSummary(contextSnapshot?.recentVideos ?? recentVideos), [contextSnapshot?.recentVideos, recentVideos]);
-  const bestPostingSlotByDay = useMemo(() => deriveBestPostingSlotByDay(bestTime.cells), [bestTime.cells]);
+	  const dataInsights = useMemo(() => deriveYoutubeDataInsights({
+	    recentVideos,
+	    analyticsDaily: analyticsPoints,
+	    latestPlan,
+	    latestResults,
+	  }), [analyticsPoints, latestPlan, latestResults, recentVideos]);
+	  const bestTime = useMemo(() => deriveBestTimeSummary(recentVideos), [recentVideos]);
+	  const bestPostingSlotByDay = useMemo(() => deriveBestPostingSlotByDay(bestTime.cells), [bestTime.cells]);
   const hookRows = useMemo(() => deriveHookRows(recentVideos), [recentVideos]);
   const hookInsight = useMemo(() => deriveHookInsight(recentVideos), [recentVideos]);
   const titleLengthSummary = useMemo(() => deriveTitleLengthSummary(recentVideos), [recentVideos]);
   const subscriberGrowth = useMemo(() => deriveSubscriberGrowth(analyticsPoints, recentVideos), [analyticsPoints, recentVideos]);
-  const tagPerformance = useMemo(() => deriveTagPerformance(recentVideos), [recentVideos]);
-  const existingTags = useMemo(() => new Set(tagPerformance.map((item) => item.tag)), [tagPerformance]);
-  const trendingTagSuggestions = useMemo(
-    () => deriveTrendingTagSuggestions(planPayload.viralTags, contextSnapshot?.trends ?? [], existingTags),
-    [planPayload.viralTags, contextSnapshot?.trends, existingTags],
-  );
+	  const tagPerformance = useMemo(() => deriveTagPerformance(recentVideos), [recentVideos]);
+	  const existingTags = useMemo(() => new Set(tagPerformance.map((item) => item.tag)), [tagPerformance]);
+	  const trendingTagSuggestions = useMemo(() => dataInsights.tagsToTest.chartData.map((item) => ({
+	    tag: item.tag,
+	    signal: 1,
+	    why: item.reason,
+	    bestUse: item.relatedTopVideo ? `Related: "${item.relatedTopVideo}"` : "",
+	  })), [dataInsights.tagsToTest.chartData]);
   const competitorRows = useMemo(() => deriveCompetitorRows(ownSubscribers, recentVideos, status?.competitors ?? []), [ownSubscribers, recentVideos, status?.competitors]);
   const recentVideoById = useMemo(() => new Map(recentVideos.map((video) => [video.id, video])), [recentVideos]);
   const resultsByDay = useMemo(() => new Map(latestResults.map((result) => [result.dayIndex, result])), [latestResults]);
@@ -3787,16 +3837,25 @@ export default function YouTubeGrowthPlannerV2Tab() {
 
           {consistencySection}
 
-          <PanelCard id="performance-signals" className="scroll-mt-24 p-6 transition-all hover:-translate-y-1 hover:bg-white/4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <div className="flex items-center gap-3">
-                  <BarChart3 className="h-5 w-5 text-emerald-300" />
-                  <h2 className="text-2xl font-semibold text-white">{ui.performanceSignals.title}</h2>
-                </div>
-                <p className="mt-2 text-sm text-white/45">{ui.performanceSignals.subtitle}</p>
-              </div>
-            </div>
+	          <PanelCard id="performance-signals" className="scroll-mt-24 p-6 transition-all hover:-translate-y-1 hover:bg-white/4">
+	            <div className="flex flex-wrap items-center justify-between gap-3">
+	              <div>
+	                <div className="flex items-center gap-3">
+	                  <BarChart3 className="h-5 w-5 text-emerald-300" />
+	                  <h2 className="text-2xl font-semibold text-white">{ui.performanceSignals.title}</h2>
+	                </div>
+	                <p className="mt-2 text-sm text-white/45">{ui.performanceSignals.subtitle}</p>
+	              </div>
+	              <Button
+	                variant="secondary"
+	                className="rounded-lg"
+	                onClick={refreshYoutubeInsights}
+	                disabled={refreshingInsights || Boolean(working)}
+	              >
+	                {refreshingInsights ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="mr-2 h-4 w-4" />}
+	                Refresh insights
+	              </Button>
+	            </div>
             <div className="sticky top-4 z-10 mt-5 flex flex-wrap gap-2 rounded-xl border border-white/10 bg-[#120d1f]/90 p-3 backdrop-blur">
               {[
                 ["optimal-posting-schedule", "Best Times"],
@@ -3959,12 +4018,12 @@ export default function YouTubeGrowthPlannerV2Tab() {
               {trendingTagSuggestions.length ? (
                 <PanelCardSoft id="trending-tags" className="border border-white/10 p-5 transition-all hover:-translate-y-1 hover:bg-white/5">
                   <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <h3 className="text-xl font-semibold text-white">{ui.performanceSignals.nicheTagsTitle}</h3>
-                      <p className="mt-2 text-sm text-white/45">{ui.performanceSignals.nicheTagsSubtitle}</p>
-                    </div>
-                    <Badge className={`${confidenceClass("medium")} hover:brightness-100`}>medium</Badge>
-                  </div>
+	                    <div>
+	                      <h3 className="text-xl font-semibold text-white">{ui.performanceSignals.nicheTagsTitle}</h3>
+	                      <p className="mt-2 text-sm text-white/45">{ui.performanceSignals.nicheTagsSubtitle}</p>
+	                    </div>
+	                    <Badge className={`${confidenceClass(dataInsights.tagsToTest.confidence)} hover:brightness-100`}>{dataInsights.tagsToTest.confidence}</Badge>
+	                  </div>
                   <div className="mt-4 flex flex-wrap gap-2">
                     {trendingTagSuggestions.map((tag) => (
                       <span key={tag.tag} className="inline-flex items-center gap-2 rounded-full border border-amber-300/20 bg-amber-400/10 px-3 py-1.5 text-sm text-amber-50">

@@ -2587,7 +2587,16 @@ Return shape:
   } as YoutubeNicheProfile;
 }
 
-export async function syncYoutubeChannel(userId: number) {
+export async function syncYoutubeChannel(
+  userId: number,
+  options?: { includeAiNicheAnalysis?: boolean },
+) {
+  const includeAiNicheAnalysis = options?.includeAiNicheAnalysis !== false;
+  const [existingProfile] = await db
+    .select()
+    .from(youtubeChannelProfilesTable)
+    .where(eq(youtubeChannelProfilesTable.userId, userId))
+    .limit(1);
   const channels = await youtubeJson<{ items?: unknown[] }>(userId, dataApiUrl("channels", {
     part: "snippet,statistics,contentDetails",
     mine: "true",
@@ -2604,18 +2613,32 @@ export async function syncYoutubeChannel(userId: number) {
   const thumbnails = asRecord(snippet.thumbnails);
   const channelThumbnailUrl = asString(asRecord(thumbnails.high).url) || asString(asRecord(thumbnails.medium).url) || asString(asRecord(thumbnails.default).url);
   const recentVideos = await fetchRecentVideos(userId, channelId, 20);
-  const analyzedNicheProfile = await analyzeNiche(userId, {
-    id: channelId,
-    title: asString(snippet.title),
-    description: asString(snippet.description),
-    subscriberCount: asString(statistics.subscriberCount),
-    totalViewCount: asString(statistics.viewCount),
-    videoCount: asString(statistics.videoCount),
-  }, recentVideos);
-  const nicheProfile = {
-    ...analyzedNicheProfile,
-    channelDescription: asString(snippet.description),
-  };
+  const analyzedNicheProfile = includeAiNicheAnalysis
+    ? await analyzeNiche(userId, {
+      id: channelId,
+      title: asString(snippet.title),
+      description: asString(snippet.description),
+      subscriberCount: asString(statistics.subscriberCount),
+      totalViewCount: asString(statistics.viewCount),
+      videoCount: asString(statistics.videoCount),
+    }, recentVideos)
+    : null;
+
+  const previousNiche = asRecord(existingProfile?.nicheProfile);
+  const nicheProfile = analyzedNicheProfile
+    ? { ...analyzedNicheProfile, channelDescription: asString(snippet.description) }
+    : {
+      niche: asString(previousNiche.niche) || "creator education",
+      contentStyle: asString(previousNiche.contentStyle) || "educational",
+      tone: asString(previousNiche.tone) || "clear and helpful",
+      targetAudience: asString(previousNiche.targetAudience) || "YouTube viewers interested in this topic",
+      keywords: asArray(previousNiche.keywords).map((item) => String(item)).filter(Boolean).slice(0, 8),
+      summary: asString(previousNiche.summary) || "Niche profile based on your saved channel snapshot.",
+      topFormats: asArray(previousNiche.topFormats).map((item) => String(item)).filter(Boolean).slice(0, 5),
+      uploadCadence: previousNiche.uploadCadence == null ? null : parseNumber(previousNiche.uploadCadence),
+      dataConfidence: asString(previousNiche.dataConfidence) || "low",
+      channelDescription: asString(snippet.description),
+    };
   const now = new Date();
 
   await db.update(youtubeConnectionsTable)
@@ -2661,7 +2684,7 @@ export async function syncYoutubeChannel(userId: number) {
   return profile;
 }
 
-export async function getYoutubeStatus(userId: number) {
+export async function getYoutubeStatus(userId: number, options?: { skipAi?: boolean }) {
   let [connection] = await db.select().from(youtubeConnectionsTable).where(eq(youtubeConnectionsTable.userId, userId)).limit(1);
   let [profile] = await db.select().from(youtubeChannelProfilesTable).where(eq(youtubeChannelProfilesTable.userId, userId)).limit(1);
   const plans = await db.select().from(youtubeWeeklyPlansTable).where(eq(youtubeWeeklyPlansTable.userId, userId)).orderBy(desc(youtubeWeeklyPlansTable.weekNumber));
@@ -2683,7 +2706,7 @@ export async function getYoutubeStatus(userId: number) {
 
   if (shouldAutoSync) {
     try {
-      profile = await syncYoutubeChannel(userId);
+      profile = await syncYoutubeChannel(userId, { includeAiNicheAnalysis: options?.skipAi ? false : true });
       [connection] = await db.select().from(youtubeConnectionsTable).where(eq(youtubeConnectionsTable.userId, userId)).limit(1);
     } catch {
       // Fall back to the last saved channel snapshot if live sync fails.
@@ -2692,7 +2715,7 @@ export async function getYoutubeStatus(userId: number) {
 
   if (connection && profile && !profile.channelThumbnailUrl) {
     try {
-      profile = await syncYoutubeChannel(userId);
+      profile = await syncYoutubeChannel(userId, { includeAiNicheAnalysis: options?.skipAi ? false : true });
     } catch {
       // Keep returning the saved profile even if YouTube refresh fails.
     }
