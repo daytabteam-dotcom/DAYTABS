@@ -84,13 +84,6 @@ For every idea, provide enough detail so the user can create the content immedia
 
 Core rule: the strongest signal is user behavior. When a user behavior summary is provided, prioritize it over generic best practices.
 
-Platform-native planning:
-- LinkedIn: prioritize authority, lessons learned, founder/building-in-public stories, practical frameworks, honest opinions, soft CTAs, and conversation-driven posts.
-- TikTok: prioritize fast hooks, visual movement, curiosity gaps, repeatable series, trends only when relevant, and simple execution.
-- Instagram: prioritize strong visual concepts, carousels, reels, saveable posts, personal storytelling, and shareable insights.
-
-Never use the same idea across platforms without adapting the format, hook, and CTA.
-
 You must consider:
 - selected platform
 - weekly topic
@@ -101,17 +94,113 @@ You must consider:
 - platform-native formats
 - viral content patterns
 - previous week feedback when available
+- follower/subscriber count (CRITICAL)
 
-Growth tasks must be ethical, practical, and related to the selected platform.
-Never suggest spam, fake engagement, bots, buying followers, or mass copy-paste commenting.
+--------------------------------------------------
+CREATOR GROWTH STAGE LOGIC (MANDATORY)
+--------------------------------------------------
 
-Anti-generic rule:
-Bad: "Share tips about productivity."
-Good: "Post a 7-slide carousel: 'I stopped planning my day around tasks and started planning around energy.' Slide 1 hooks the pain, slides 2-5 show the old vs new method, slide 6 gives a mini framework, slide 7 CTA asks: 'Do you plan by time or energy?'"
+If followersCount is provided, classify the creator:
+
+- 0–1,000 → Early stage (visibility problem)
+- 1,000–10,000 → Growth stage (consistency + positioning)
+- 10,000–100,000 → Scaling stage (optimization)
+- 100,000+ → Authority stage (leverage + brand)
+
+You MUST adapt BOTH:
+- content plan
+- growthTasks
+
+based on this stage.
+
+EARLY STAGE:
+- Focus on visibility over perfection
+- Simple, fast content
+- Heavy engagement strategy
+- growthTasks MUST include:
+  - commenting on other creators’ posts
+  - replying fast to comments
+  - joining conversations
+  - engaging before/after posting
+
+GROWTH STAGE:
+- Focus on consistency + repeatable formats
+- Some engagement + some optimization
+- Start building identity
+
+SCALING STAGE:
+- Focus on high-performing formats
+- Improve hooks, retention, structure
+- Reduce random experimentation
+
+AUTHORITY STAGE:
+- Focus on authority, leverage, collaborations
+- Fewer but higher-quality posts
+- Audience conversion
+
+IMPORTANT:
+- Low followers → more execution + engagement tasks
+- High followers → more strategy + optimization tasks
+
+--------------------------------------------------
+BEHAVIOR-DRIVEN PLANNING (MANDATORY)
+--------------------------------------------------
+
+User behavior is the strongest signal:
+
+- Manual ideas = strongest preference signal
+- Completed/published ideas = execution preference
+- Liked AI ideas = positive signal
+- Disliked/deleted ideas = negative signal (avoid)
+- Skipped ideas = neutral
+
+You MUST:
+- Generate ideas similar to what user LIKED or CREATED
+- Avoid patterns from DISLIKED or DELETED ideas
+- Do NOT blindly repeat unfinished ideas
+
+--------------------------------------------------
+PLATFORM RULES
+--------------------------------------------------
+
+LinkedIn:
+- Authority, insights, lessons, storytelling, frameworks
+- Conversation-driven, soft CTA
+
+TikTok:
+- Fast hooks, curiosity, movement, repeatable formats
+- Simple execution
+
+Instagram:
+- Visual-first, reels, carousels, shareable content
+- Emotional + aesthetic storytelling
+
+Never use the same idea across platforms without adapting the format, hook, and CTA.
+
+--------------------------------------------------
+OUTPUT RULES
+--------------------------------------------------
 
 Return valid JSON only.
-Do not include markdown.
-Do not include explanations outside JSON.`;
+No markdown.
+No explanations outside JSON.
+
+Each content day MUST include:
+- behaviorSignalUsed
+- whyThisFitsUser
+- avoidBecause
+- growthStageReasoning
+
+Growth tasks MUST:
+- be specific
+- be actionable
+- match creator stage
+- NOT be generic (no "engage more")
+- NOT include spam, bots, fake engagement
+
+Anti-generic rule:
+Bad output example: "Share tips about productivity."
+Good output example: "Post a 7-slide carousel: 'I stopped planning my day around tasks and started planning around energy.' Slide 1 hooks the pain, slides 2-5 show the old vs new method, slide 6 gives a mini framework, slide 7 CTA asks: 'Do you plan by time or energy?'"`;
 }
 
 function platformPrompt(platform: SocialPlatform) {
@@ -196,7 +285,8 @@ function jsonShape() {
       "status": "not_finished",
       "behaviorSignalUsed": "string",
       "whyThisFitsUser": "string",
-      "avoidBecause": "string"
+      "avoidBecause": "string",
+      "growthStageReasoning": "string"
     }
   ]
 }`;
@@ -210,6 +300,7 @@ export async function generateSocialWeeklyPlanAi(params: {
   endDate: string;
   topic: string;
   postsPerWeek: number;
+  followersCount?: number | null;
   postingMode: SocialPostingMode;
   preferredWeekdays?: SocialWeekday[];
   audience?: string;
@@ -263,11 +354,17 @@ ${params.tone || ""}
 Format preference:
 ${params.formatPreference || ""}
 
+Current followers/subscribers:
+${params.followersCount ?? "unknown"}
+
 Previous week user behavior summary (highest priority signal; do NOT request raw data):
 ${params.previousWeekBehaviorSummary ? JSON.stringify(params.previousWeekBehaviorSummary) : "null"}
 
 Rules:
 - User behavior is the strongest signal. Use it before generic platform advice.
+- Followers count MUST influence strategy and tasks.
+- If followers are low → include visibility & engagement-heavy tasks.
+- If followers are high → focus on optimization & authority.
 - Manual posts/ideas created by the user are the strongest preference signal.
 - Completed or published posts show what the user is willing to execute.
 - Great/good performing posts should inspire fresh related angles, not duplicates.
@@ -278,6 +375,7 @@ Rules:
 - Each idea must include a clear behaviorSignalUsed.
 - Each idea must explain whyThisFitsUser.
 - Each idea must mention avoidBecause.
+- Each idea must include growthStageReasoning.
 - Follow native content criteria of ${params.platform}.
 - Do not generate generic content.
 - Include ethical, non-spammy growthTasks for each day.
@@ -392,6 +490,7 @@ ${jsonShape()}
       behaviorSignalUsed: typeof (day as any).behaviorSignalUsed === "string" ? (day as any).behaviorSignalUsed.trim() : undefined,
       whyThisFitsUser: typeof (day as any).whyThisFitsUser === "string" ? (day as any).whyThisFitsUser.trim() : undefined,
       avoidBecause: typeof (day as any).avoidBecause === "string" ? (day as any).avoidBecause.trim() : undefined,
+      growthStageReasoning: typeof (day as any).growthStageReasoning === "string" ? (day as any).growthStageReasoning.trim() : undefined,
     }));
 
   const finalDays = (params.postingMode === "manual"
@@ -461,7 +560,8 @@ Return JSON with:
   "soundSuggestion": "string | null",
   "behaviorSignalUsed": "string",
   "whyThisFitsUser": "string",
-  "avoidBecause": "string"
+  "avoidBecause": "string",
+  "growthStageReasoning": "string"
 }`;
 
   const completion = await openai.chat.completions.create({
@@ -510,5 +610,6 @@ Return JSON with:
     behaviorSignalUsed: typeof (parsed as any).behaviorSignalUsed === "string" ? (parsed as any).behaviorSignalUsed.trim() : undefined,
     whyThisFitsUser: typeof (parsed as any).whyThisFitsUser === "string" ? (parsed as any).whyThisFitsUser.trim() : undefined,
     avoidBecause: typeof (parsed as any).avoidBecause === "string" ? (parsed as any).avoidBecause.trim() : undefined,
+    growthStageReasoning: typeof (parsed as any).growthStageReasoning === "string" ? (parsed as any).growthStageReasoning.trim() : undefined,
   } satisfies Partial<SocialPlanDay>;
 }

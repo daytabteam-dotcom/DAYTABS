@@ -10,6 +10,7 @@ export const socialGrowthWeeklyPlansTable = pgTable("social_growth_weekly_plans"
   endDate: text("end_date").notNull(),
   topic: text("topic").notNull(),
   postsPerWeek: integer("posts_per_week").notNull(),
+  followersCount: integer("followers_count"),
   postingMode: text("posting_mode").notNull().default("manual"),
   preferredWeekdays: jsonb("preferred_weekdays").notNull().default([]),
   audience: text("audience"),

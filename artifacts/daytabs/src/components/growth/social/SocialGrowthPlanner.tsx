@@ -33,6 +33,7 @@ export default function SocialGrowthPlanner({ platform }: { platform: SocialPlat
 
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [pendingNextWeekTopic, setPendingNextWeekTopic] = useState<string>("");
+  const [pendingFollowersCount, setPendingFollowersCount] = useState<string>("");
 
   const days = useMemo(() => (plan?.plan?.days ?? []).filter((day) => !day.isDeleted), [plan?.plan?.days]);
 
@@ -54,7 +55,7 @@ export default function SocialGrowthPlanner({ platform }: { platform: SocialPlat
     void loadLatest();
   }, [loadLatest]);
 
-  const handleGenerate = useCallback(async (input: { topic: string; postsPerWeek: number; postingMode: SocialPostingMode; preferredWeekdays?: SocialWeekday[]; audience?: string; goal?: string; tone?: string; formatPreference?: string }) => {
+  const handleGenerate = useCallback(async (input: { topic: string; postsPerWeek: number; postingMode: SocialPostingMode; preferredWeekdays?: SocialWeekday[]; audience?: string; followersCount?: number | null; goal?: string; tone?: string; formatPreference?: string }) => {
     setWorking("generate");
     setError(null);
     setLimitError(null);
@@ -148,10 +149,11 @@ export default function SocialGrowthPlanner({ platform }: { platform: SocialPlat
       return;
     }
     setPendingNextWeekTopic(plan.topic);
+    setPendingFollowersCount(plan.followersCount != null ? String(plan.followersCount) : "");
     setFeedbackOpen(true);
   }, [plan, toast]);
 
-  const runGenerateNextWeek = useCallback(async (options: { skippedFeedback: boolean; feedback?: SocialPostPerformanceFeedback[] }) => {
+  const runGenerateNextWeek = useCallback(async (options: { skippedFeedback: boolean; feedback?: SocialPostPerformanceFeedback[]; followersCount?: number | null }) => {
     if (!plan) return;
     setWorking("next-week");
     setError(null);
@@ -162,6 +164,7 @@ export default function SocialGrowthPlanner({ platform }: { platform: SocialPlat
         platform,
         topic: pendingNextWeekTopic.trim() || plan.topic,
         postsPerWeek: plan.postsPerWeek,
+        followersCount: options.followersCount,
         postingMode: plan.postingMode,
         preferredWeekdays: plan.preferredWeekdays,
         audience: plan.audience ?? undefined,
@@ -223,10 +226,20 @@ export default function SocialGrowthPlanner({ platform }: { platform: SocialPlat
             open={feedbackOpen}
             platform={platform}
             days={days}
+            followersCount={pendingFollowersCount}
+            onFollowersCountChange={setPendingFollowersCount}
             working={working === "next-week"}
             onClose={() => setFeedbackOpen(false)}
-            onSkip={() => void runGenerateNextWeek({ skippedFeedback: true })}
-            onSubmit={(feedback) => void runGenerateNextWeek({ skippedFeedback: false, feedback })}
+            onSkip={() => {
+              const parsedFollowers = pendingFollowersCount.trim() ? Number(pendingFollowersCount.trim()) : NaN;
+              const normalizedFollowersCount = Number.isFinite(parsedFollowers) ? Math.max(0, Math.floor(parsedFollowers)) : null;
+              void runGenerateNextWeek({ skippedFeedback: true, followersCount: pendingFollowersCount.trim() ? normalizedFollowersCount : undefined });
+            }}
+            onSubmit={(feedback) => {
+              const parsedFollowers = pendingFollowersCount.trim() ? Number(pendingFollowersCount.trim()) : NaN;
+              const normalizedFollowersCount = Number.isFinite(parsedFollowers) ? Math.max(0, Math.floor(parsedFollowers)) : null;
+              void runGenerateNextWeek({ skippedFeedback: false, feedback, followersCount: pendingFollowersCount.trim() ? normalizedFollowersCount : undefined });
+            }}
           />
         </>
       )}

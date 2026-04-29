@@ -152,6 +152,7 @@ router.post("/plans/generate", async (req, res) => {
     platform,
     topic,
     postsPerWeek,
+    followersCount,
     postingMode,
     preferredWeekdays,
     audience,
@@ -196,6 +197,9 @@ router.post("/plans/generate", async (req, res) => {
   const { endDate } = weekRangeForStart(computedStart);
 
   const model = PLAN_LIMITS[normalizePlan(rawPlan)].script_planner_model;
+  const normalizedFollowersCount = Number.isFinite(Number(followersCount))
+    ? Math.max(0, Math.floor(Number(followersCount)))
+    : null;
 
   const aiResult = await generateSocialWeeklyPlanAi({
     userId: req.auth!.user_id,
@@ -211,6 +215,7 @@ router.post("/plans/generate", async (req, res) => {
     goal: typeof goal === "string" ? goal : undefined,
     tone: typeof tone === "string" ? tone : undefined,
     formatPreference: typeof formatPreference === "string" ? formatPreference : undefined,
+    followersCount: normalizedFollowersCount,
     previousWeekBehaviorSummary: null,
     skippedFeedback: false,
   });
@@ -221,6 +226,7 @@ router.post("/plans/generate", async (req, res) => {
     endDate,
     topic: trimmedTopic,
     postsPerWeek: aiResult.postsPerWeek,
+    followersCount: normalizedFollowersCount,
     postingMode: mode,
     preferredWeekdays: weekdays.length ? weekdays : undefined,
     audience: typeof audience === "string" ? audience : undefined,
@@ -264,6 +270,7 @@ router.post("/plans/:id/generate-next-week", async (req, res) => {
     platform,
     topic,
     postsPerWeek,
+    followersCount,
     postingMode,
     preferredWeekdays,
     audience,
@@ -321,6 +328,9 @@ router.post("/plans/:id/generate-next-week", async (req, res) => {
   }
 
   const model = PLAN_LIMITS[normalizePlan(req.auth!.plan ?? "free")].script_planner_model;
+  const normalizedFollowersCount = Number.isFinite(Number(followersCount))
+    ? Math.max(0, Math.floor(Number(followersCount)))
+    : (Number.isFinite(Number(currentPlan.followersCount)) ? Number(currentPlan.followersCount) : null);
   const priorFeedback = wantsSkip
     ? null
     : normalizedFeedback ?? ((await getLatestFeedbackForPlan(planId))?.feedback as any ?? null);
@@ -344,6 +354,7 @@ router.post("/plans/:id/generate-next-week", async (req, res) => {
     goal: typeof goal === "string" ? goal : (currentPlan.goal ?? undefined),
     tone: typeof tone === "string" ? tone : (currentPlan.tone ?? undefined),
     formatPreference: typeof formatPreference === "string" ? formatPreference : (currentPlan.formatPreference ?? undefined),
+    followersCount: normalizedFollowersCount,
     previousWeekBehaviorSummary: behaviorSummary,
     skippedFeedback: wantsSkip,
   });
@@ -354,6 +365,7 @@ router.post("/plans/:id/generate-next-week", async (req, res) => {
     endDate,
     topic: trimmedTopic,
     postsPerWeek: aiResult.postsPerWeek,
+    followersCount: normalizedFollowersCount,
     postingMode: mode,
     preferredWeekdays: weekdays.length ? weekdays : undefined,
     audience: typeof audience === "string" ? audience : (currentPlan.audience ?? undefined),

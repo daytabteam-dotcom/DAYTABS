@@ -81,6 +81,7 @@ export interface SocialPlanDay {
   behaviorSignalUsed?: string;
   whyThisFitsUser?: string;
   avoidBecause?: string;
+  growthStageReasoning?: string;
 }
 
 export interface PlanPayload {
@@ -97,6 +98,7 @@ export interface SocialWeeklyPlan {
   endDate: string;
   topic: string;
   postsPerWeek: number;
+  followersCount?: number | null;
   postingMode?: SocialPostingMode;
   preferredWeekdays?: SocialWeekday[];
   audience?: string | null;

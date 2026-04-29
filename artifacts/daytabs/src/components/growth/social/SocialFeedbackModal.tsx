@@ -32,6 +32,8 @@ export function SocialFeedbackModal({
   open,
   platform,
   days,
+  followersCount,
+  onFollowersCountChange,
   onClose,
   onSkip,
   onSubmit,
@@ -40,6 +42,8 @@ export function SocialFeedbackModal({
   open: boolean;
   platform: SocialPlatform;
   days: SocialPlanDay[];
+  followersCount: string;
+  onFollowersCountChange: (value: string) => void;
   working: boolean;
   onClose: () => void;
   onSkip: () => void;
@@ -90,6 +94,17 @@ export function SocialFeedbackModal({
             </div>
 
             <div className="max-h-[calc(86vh-150px)] overflow-y-auto p-6">
+              <PanelCardSoft className="mb-4 border border-white/10 bg-white/3 p-4">
+                <p className="text-xs font-semibold text-white">Current followers / subscribers (optional)</p>
+                <p className="mt-1 text-xs text-white/50">Used to adapt next week&apos;s plan + growth tasks to your current growth stage.</p>
+                <Input
+                  value={followersCount}
+                  onChange={(event) => onFollowersCountChange(event.target.value)}
+                  placeholder="Example: 1200"
+                  inputMode="numeric"
+                  className="mt-3 border-white/10 bg-white/4 text-white placeholder:text-white/30"
+                />
+              </PanelCardSoft>
               <div className="space-y-4">
           {days.map((day) => {
             const value = draft[day.id] ?? {};

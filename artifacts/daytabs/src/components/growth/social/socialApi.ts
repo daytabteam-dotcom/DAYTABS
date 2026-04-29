@@ -32,6 +32,7 @@ export async function generateSocialPlan(input: {
   platform: SocialPlatform;
   topic: string;
   postsPerWeek: number;
+  followersCount?: number | null;
   postingMode?: SocialPostingMode;
   preferredWeekdays?: SocialWeekday[];
   audience?: string;
@@ -91,6 +92,7 @@ export async function generateNextWeekSocialPlan(input: {
   platform: SocialPlatform;
   topic?: string;
   postsPerWeek?: number;
+  followersCount?: number | null;
   postingMode?: SocialPostingMode;
   preferredWeekdays?: SocialWeekday[];
   audience?: string;

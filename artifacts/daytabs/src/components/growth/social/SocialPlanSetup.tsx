@@ -72,6 +72,7 @@ export function SocialPlanSetup({
     postingMode: SocialPostingMode;
     preferredWeekdays?: SocialWeekday[];
     audience?: string;
+    followersCount?: number | null;
     goal?: string;
     tone?: string;
     formatPreference?: string;
@@ -84,6 +85,7 @@ export function SocialPlanSetup({
   const [postingMode, setPostingMode] = useState<SocialPostingMode>(platform === "linkedin" ? "manual" : "ai_optimized");
   const [preferredWeekdays, setPreferredWeekdays] = useState<SocialWeekday[]>([]);
   const [audience, setAudience] = useState("");
+  const [followersCount, setFollowersCount] = useState("");
   const [goal, setGoal] = useState<(typeof GOAL_OPTIONS)[number] | "">("");
   const [tone, setTone] = useState<(typeof TONE_OPTIONS)[number] | "">("");
   const [formatPreference, setFormatPreference] = useState("");
@@ -259,6 +261,18 @@ export function SocialPlanSetup({
             </div>
 
             <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-white/35">Followers / subscribers (optional)</p>
+              <Input
+                value={followersCount}
+                onChange={(event) => setFollowersCount(event.target.value)}
+                placeholder="Example: 1200"
+                inputMode="numeric"
+                className="mt-2 border-white/10 bg-white/4 text-white placeholder:text-white/30"
+              />
+              <p className="mt-2 text-xs text-white/45">Used to adapt your plan + growth tasks to your current growth stage.</p>
+            </div>
+
+            <div>
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-white/35">Content style preference (optional)</p>
               <Input
                 value={formatPreference}
@@ -293,12 +307,15 @@ export function SocialPlanSetup({
                     setError("Add a topic to generate a plan.");
                     return;
                   }
+                  const parsedFollowers = followersCount.trim() ? Number(followersCount.trim()) : NaN;
+                  const normalizedFollowersCount = Number.isFinite(parsedFollowers) ? Math.max(0, Math.floor(parsedFollowers)) : null;
                   onGenerate({
                     topic: trimmed,
                     postsPerWeek,
                     postingMode: platform === "linkedin" ? "manual" : postingMode,
                     preferredWeekdays: platform === "linkedin" || postingMode === "ai_optimized" ? undefined : preferredWeekdays,
                     audience: audience.trim() || undefined,
+                    followersCount: followersCount.trim() ? normalizedFollowersCount : undefined,
                     goal: goal || undefined,
                     tone: tone || undefined,
                     formatPreference: formatPreference.trim() || undefined,

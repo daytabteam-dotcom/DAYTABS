@@ -33,6 +33,7 @@ export async function createSocialWeeklyPlan(userId: number, input: SocialWeekly
       endDate: input.endDate,
       topic: input.topic,
       postsPerWeek: input.postsPerWeek,
+      followersCount: input.followersCount ?? null,
       postingMode: input.postingMode ?? "manual",
       preferredWeekdays: (input.preferredWeekdays ?? []) as unknown as object,
       audience: input.audience ?? null,
