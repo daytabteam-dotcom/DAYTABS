@@ -611,7 +611,7 @@ export default function Home() {
           </div>
         </div>
       </div>
-      <main className={`${pageContainerClass} relative z-10 py-6 sm:py-10 md:py-12`}>
+      <main className={`${pageContainerClass} relative z-10 py-6 sm:py-8 md:py-10`}>
         {activeTab === "dashboard" && (
           <Dashboard
             onNavigate={handleTabClick}

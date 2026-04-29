@@ -17,7 +17,7 @@ export default function GrowthPlannerPage() {
   }, [platform]);
 
   return (
-    <div className="mt-8">
+    <div>
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-[88px_minmax(0,1fr)] lg:items-start">
         <PlatformSidebar value={platform} onChange={setPlatform} />
         <main className="min-w-0">
