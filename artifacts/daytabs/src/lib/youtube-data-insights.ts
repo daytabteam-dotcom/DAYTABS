@@ -64,6 +64,14 @@ function bucketLabelFromHour(hour: number) {
   return bucket?.label ?? "18:00-24:00";
 }
 
+function toLocalWeekdayAndHourBucket(publishedAt: string) {
+  const date = new Date(publishedAt);
+  if (Number.isNaN(date.getTime())) return null;
+  const weekday = DAYS_OF_WEEK[date.getDay()] ?? "Mon";
+  const hourBucket = bucketLabelFromHour(date.getHours());
+  return { weekday, hourBucket };
+}
+
 function hookType(title: string) {
   const trimmed = title.trim();
   const lower = trimmed.toLowerCase();
@@ -79,9 +87,24 @@ function isoFromPublishedAt(value?: string | null) {
   return /^\d{4}-\d{2}-\d{2}$/.test(iso) ? iso : null;
 }
 
+function addDaysIso(isoDate: string, days: number) {
+  const date = new Date(`${isoDate}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return isoDate;
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
 function inPlanWindow(iso: string, plan: YoutubeWeeklyPlanLite | null) {
   if (!plan?.startDate || !plan?.endDate) return false;
   return iso >= plan.startDate && iso <= plan.endDate;
+}
+
+function titleLengthBucketLabel(length: number) {
+  if (length < 20) return "Under 20";
+  if (length <= 35) return "20-35";
+  if (length <= 50) return "35-50";
+  if (length <= 70) return "50-70";
+  return "Over 70";
 }
 
 export function deriveYoutubeDataInsights(input: {
@@ -113,11 +136,9 @@ export function deriveYoutubeDataInsights(input: {
     for (const video of visibleVideos) {
       const publishedAt = video.publishedAt;
       if (!publishedAt) continue;
-      const date = new Date(publishedAt);
-      if (Number.isNaN(date.getTime())) continue;
-      const day = DAYS_OF_WEEK[date.getUTCDay()] ?? "Mon";
-      const hourBucket = bucketLabelFromHour(date.getUTCHours());
-      const key = `${day}|${hourBucket}`;
+      const local = toLocalWeekdayAndHourBucket(publishedAt);
+      if (!local) continue;
+      const key = `${local.weekday}|${local.hourBucket}`;
       const cell = cellsMap.get(key);
       if (!cell) continue;
       cell.total += parseNumber(video.viewCount);
@@ -141,11 +162,9 @@ export function deriveYoutubeDataInsights(input: {
       const matches = visibleVideos
         .filter((video) => {
           if (!video.publishedAt) return false;
-          const date = new Date(video.publishedAt);
-          if (Number.isNaN(date.getTime())) return false;
-          const day = DAYS_OF_WEEK[date.getUTCDay()] ?? "Mon";
-          const hourBucket = bucketLabelFromHour(date.getUTCHours());
-          return day === highest.day && hourBucket === highest.hour;
+          const local = toLocalWeekdayAndHourBucket(video.publishedAt);
+          if (!local) return false;
+          return local.weekday === highest.day && local.hourBucket === highest.hour;
         })
         .sort((a, b) => parseNumber(b.viewCount) - parseNumber(a.viewCount))
         .slice(0, 2);
@@ -195,9 +214,14 @@ export function deriveYoutubeDataInsights(input: {
     ];
 
     const stats = buckets.map((bucket) => {
-      const items = visibleVideos.filter((video) => video.title.length >= bucket.min && video.title.length <= bucket.max);
-      const averageViews = items.length ? Math.round(items.reduce((sum, video) => sum + parseNumber(video.viewCount), 0) / items.length) : 0;
-      return { ...bucket, averageViews, count: items.length };
+      const items = visibleVideos
+        .filter((video) => video.title.length >= bucket.min && video.title.length <= bucket.max)
+        .map((video) => ({ title: video.title, views: parseNumber(video.viewCount), titleLength: video.title.length }))
+        .sort((a, b) => b.views - a.views);
+      const averageViews = items.length ? Math.round(items.reduce((sum, video) => sum + video.views, 0) / items.length) : 0;
+      const topTitles = items.slice(0, 5);
+      const bottomTitles = items.slice().reverse().slice(0, 5);
+      return { ...bucket, averageViews, count: items.length, topTitles, bottomTitles };
     });
 
     const winner = [...stats].sort((a, b) => b.averageViews - a.averageViews)[0] ?? null;
@@ -212,8 +236,17 @@ export function deriveYoutubeDataInsights(input: {
     return {
       confidence: baseConfidence,
       chartData: {
-        buckets: stats.map((item) => ({ ...item })),
+        buckets: stats.map((item) => ({
+          label: item.label,
+          min: item.min,
+          max: item.max,
+          averageViews: item.averageViews,
+          count: item.count,
+          topTitles: item.topTitles,
+          bottomTitles: item.bottomTitles,
+        })),
         winningBucket: winner ? { label: winner.label, min: winner.min, max: winner.max, averageViews: winner.averageViews, count: winner.count } : null,
+        channelAverageViews,
       },
       summary,
       evidence: [],
@@ -235,6 +268,22 @@ export function deriveYoutubeDataInsights(input: {
         })
       : null;
 
+    const markerByDate = new Map<string, Array<{ title: string; views: number }>>();
+    for (const video of visibleVideos) {
+      const iso = isoFromPublishedAt(video.publishedAt);
+      if (!iso) continue;
+      const items = markerByDate.get(iso) ?? [];
+      items.push({ title: video.title, views: parseNumber(video.viewCount) });
+      markerByDate.set(iso, items);
+    }
+
+    const timeline = points.map((point) => ({
+      date: point.date.slice(5),
+      rawDate: point.date,
+      subscribersNet: point.subscribersNet,
+      markerVideos: (markerByDate.get(point.date) ?? []).sort((a, b) => b.views - a.views).slice(0, 2),
+    }));
+
     const summary = spike && spikeIso
       ? `Your biggest subscriber spike was on ${spikeIso} with ${spike.subscribersNet} net subscribers.${spikeVideo ? ` The closest upload was "${spikeVideo.title}".` : ""}`
       : "Subscriber growth is still limited in the selected period. Keep testing topics and formats that increase comments, saves, and watch time.";
@@ -245,7 +294,7 @@ export function deriveYoutubeDataInsights(input: {
 
     return {
       confidence: confidenceFromSamples({ videoCount: visibleVideos.length, analyticsDayCount: points.length }),
-      chartData: { points },
+      chartData: { timeline, spike: spike && spikeIso ? { date: spikeIso.slice(5), rawDate: spikeIso, subscribersNet: spike.subscribersNet } : null, spikeVideo: spikeVideo ? { title: spikeVideo.title } : null },
       summary,
       evidence: spikeVideo ? [`Closest upload: "${spikeVideo.title}" (${parseNumber(spikeVideo.viewCount).toLocaleString()} views)`] : [],
       recommendation,
@@ -330,6 +379,15 @@ export function deriveYoutubeDataInsights(input: {
       ? Number((publishedDates.length / Math.max(1, (publishedDates[publishedDates.length - 1]! - publishedDates[0]!) / (7 * 86400000))).toFixed(1))
       : publishedDates.length;
 
+    const weekdayCounts = new Map<string, number>();
+    for (const video of visibleVideos) {
+      if (!video.publishedAt) continue;
+      const local = toLocalWeekdayAndHourBucket(video.publishedAt);
+      if (!local) continue;
+      weekdayCounts.set(local.weekday, (weekdayCounts.get(local.weekday) ?? 0) + 1);
+    }
+    const mostCommonUploadWeekday = [...weekdayCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+
     const latestPlanDays = (latestPlan?.plan?.days ?? []).filter((day) => day && typeof day === "object");
     const plannedCount = latestPlanDays.length;
     const postedCount = latestPlan && plannedCount
@@ -348,7 +406,7 @@ export function deriveYoutubeDataInsights(input: {
 
     return {
       confidence: baseConfidence,
-      chartData: { uploadsPerWeek, avgGapDays: avgGap, longestGapDays: longestGap, plannedCount, postedCount },
+      chartData: { uploadsPerWeek, avgGapDays: avgGap, longestGapDays: longestGap, mostCommonUploadWeekday, plannedCount, postedCount },
       summary,
       evidence: [],
       recommendation,
@@ -372,35 +430,85 @@ export function deriveYoutubeDataInsights(input: {
         url: video.url,
       }));
 
+    const hookCounts = new Map<string, number>();
+    const bucketCounts = new Map<string, number>();
+    const timeCounts = new Map<string, number>();
+    for (const video of top) {
+      hookCounts.set(video.hookType, (hookCounts.get(video.hookType) ?? 0) + 1);
+      bucketCounts.set(titleLengthBucketLabel(video.titleLength), (bucketCounts.get(titleLengthBucketLabel(video.titleLength)) ?? 0) + 1);
+      const publishedAt = visibleVideos.find((v) => v.id === video.id)?.publishedAt;
+      if (publishedAt) {
+        const local = toLocalWeekdayAndHourBucket(publishedAt);
+        if (local) timeCounts.set(`${local.weekday} ${local.hourBucket}`, (timeCounts.get(`${local.weekday} ${local.hourBucket}`) ?? 0) + 1);
+      }
+    }
+    const topHook = [...hookCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "descriptive";
+    const topBucket = [...bucketCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "20-35";
+    const topTime = [...timeCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "varied times";
+
     return {
       confidence: baseConfidence,
       chartData: top,
-      summary: top.length ? "Your top videos give the clearest signal for what to repeat next week." : "No published videos found yet.",
+      summary: top.length ? `Your top videos are mostly driven by ${topHook} hooks and ${topBucket} title lengths, often posted around ${topTime}.` : "No published videos found yet.",
       evidence: [],
       recommendation: top.length ? "Look for repeatable patterns in your top videos: topic lane, hook type, and title structure." : "Publish a few videos to unlock top-performer patterns.",
     };
   })();
 
   const underperformingVideos = (() => {
-    const sorted = [...visibleVideos].sort((a, b) => parseNumber(a.viewCount) - parseNumber(b.viewCount));
-    const bottom = sorted.slice(0, 5).map((video) => ({
-      id: video.id,
-      title: video.title,
-      views: parseNumber(video.viewCount),
-      likes: parseNumber(video.likeCount),
-      comments: parseNumber(video.commentCount),
-      publishedAt: video.publishedAt ?? null,
-      tags: (video.tags ?? []).slice(0, 8),
-      hookType: hookType(video.title),
-      titleLength: video.title.length,
-      url: video.url,
-      reason: "Use this as a test signal, not a final judgment.",
-    }));
+    const now = Date.now();
+    const sorted = [...visibleVideos]
+      .filter((video) => {
+        const publishedAt = video.publishedAt ? new Date(video.publishedAt).getTime() : 0;
+        if (!publishedAt) return false;
+        // exclude extremely new uploads (first 24h) when possible
+        return (now - publishedAt) > 24 * 60 * 60 * 1000;
+      })
+      .sort((a, b) => parseNumber(a.viewCount) - parseNumber(b.viewCount));
+
+    const bestSlot = bestTimesToPost.chartData.highest
+      ? { weekday: bestTimesToPost.chartData.highest.day, hourBucket: bestTimesToPost.chartData.highest.hour === "00:00" ? "00:00-06:00" : bestTimesToPost.chartData.highest.hour === "06:00" ? "06:00-12:00" : bestTimesToPost.chartData.highest.hour === "12:00" ? "12:00-18:00" : "18:00-24:00" }
+      : null;
+    const bestTitleBucket = optimalTitleLength.chartData.winningBucket?.label ?? null;
+
+    const bottom = sorted.slice(0, 5).map((video) => {
+      const reasons: string[] = [];
+      const ht = hookType(video.title);
+      if (ht === "descriptive") reasons.push("weak hook pattern (descriptive title)");
+
+      if (bestTitleBucket && titleLengthBucketLabel(video.title.length) !== bestTitleBucket) {
+        reasons.push(`title outside best range (${bestTitleBucket})`);
+      }
+
+      const publishedAt = video.publishedAt ?? null;
+      if (publishedAt && bestSlot) {
+        const local = toLocalWeekdayAndHourBucket(publishedAt);
+        if (local && `${local.weekday} ${local.hourBucket}` !== `${bestSlot.weekday} ${bestSlot.hourBucket}`) {
+          reasons.push(`posted outside strongest slot (${bestSlot.weekday} ${bestSlot.hourBucket})`);
+        }
+      }
+
+      if (!reasons.length) reasons.push("too early to judge or needs a new packaging test");
+
+      return {
+        id: video.id,
+        title: video.title,
+        views: parseNumber(video.viewCount),
+        likes: parseNumber(video.likeCount),
+        comments: parseNumber(video.commentCount),
+        publishedAt: video.publishedAt ?? null,
+        tags: (video.tags ?? []).slice(0, 8),
+        hookType: ht,
+        titleLength: video.title.length,
+        url: video.url,
+        reason: reasons.join("; "),
+      };
+    });
 
     return {
       confidence: baseConfidence,
       chartData: bottom,
-      summary: bottom.length ? "Your lowest-performing videos tend to share patterns you can avoid or reframe." : "No published videos found yet.",
+      summary: bottom.length ? "Your lowest-performing videos tend to share repeatable packaging or timing patterns. Use this as a test signal, not a final judgment." : "No published videos found yet.",
       evidence: [],
       recommendation: bottom.length ? "When you revisit these topics, test a stronger hook type and a clearer title promise." : "Publish a few videos to unlock underperformer patterns.",
     };
@@ -438,6 +546,7 @@ export function deriveYoutubeDataInsights(input: {
         tag: row.tag,
         reason: `Used ${row.count} time(s) but averages ${row.averageViews.toLocaleString()} views.`,
         relatedTopVideo: row.relatedTopVideo,
+        confidence: baseConfidence,
       }));
 
     const summary = picks.length

@@ -2785,31 +2785,51 @@ export default function YouTubeGrowthPlannerV2Tab() {
   const plannedDateSet = useMemo(() => new Set(calendarDays.map((day) => day.date)), [calendarDays]);
   const progressState = weekProgress(days, status?.latestResults ?? []);
   const overview = useMemo(() => buildOverviewSections(recentVideos), [recentVideos]);
-	  const dataInsights = useMemo(() => deriveYoutubeDataInsights({
-	    recentVideos,
-	    analyticsDaily: analyticsPoints,
-	    latestPlan,
-	    latestResults,
-	  }), [analyticsPoints, latestPlan, latestResults, recentVideos]);
-	  const bestTime = useMemo(() => deriveBestTimeSummary(recentVideos), [recentVideos]);
-	  const bestPostingSlotByDay = useMemo(() => deriveBestPostingSlotByDay(bestTime.cells), [bestTime.cells]);
+  const dataInsights = useMemo(() => deriveYoutubeDataInsights({
+    recentVideos,
+    analyticsDaily: analyticsPoints,
+    latestPlan,
+    latestResults,
+  }), [analyticsPoints, latestPlan, latestResults, recentVideos]);
+  const bestTimeInsight = dataInsights.bestTimesToPost;
+  const bestTime = bestTimeInsight.chartData;
+  const bestTimeSummary = useMemo(() => deriveBestTimeSummary(recentVideos), [recentVideos]);
+  const bestPostingSlotByDay = useMemo(() => deriveBestPostingSlotByDay(bestTime.cells), [bestTime.cells]);
+  const hooksChartRows = useMemo(() => dataInsights.hookPatterns.chartData.rows.map((row) => ({
+    type: row.type.charAt(0).toUpperCase() + row.type.slice(1),
+    averageViews: row.averageViews,
+    count: row.count,
+    sample: row.evidenceVideos?.[0]?.title,
+  })), [dataInsights.hookPatterns.chartData.rows]);
   const hookRows = useMemo(() => deriveHookRows(recentVideos), [recentVideos]);
   const hookInsight = useMemo(() => deriveHookInsight(recentVideos), [recentVideos]);
+  const titleLengthBuckets = dataInsights.optimalTitleLength.chartData.buckets;
+  const winningTitleBucket = dataInsights.optimalTitleLength.chartData.winningBucket?.label ?? null;
+  const winningTitleBucketDetail = useMemo(
+    () => winningTitleBucket ? titleLengthBuckets.find((bucket) => bucket.label === winningTitleBucket) ?? null : null,
+    [titleLengthBuckets, winningTitleBucket],
+  );
   const titleLengthSummary = useMemo(() => deriveTitleLengthSummary(recentVideos), [recentVideos]);
-  const subscriberGrowth = useMemo(() => deriveSubscriberGrowth(analyticsPoints, recentVideos), [analyticsPoints, recentVideos]);
-	  const tagPerformance = useMemo(() => deriveTagPerformance(recentVideos), [recentVideos]);
-	  const existingTags = useMemo(() => new Set(tagPerformance.map((item) => item.tag)), [tagPerformance]);
-	  const trendingTagSuggestions = useMemo(() => dataInsights.tagsToTest.chartData.map((item) => ({
-	    tag: item.tag,
-	    signal: 1,
-	    why: item.reason,
-	    bestUse: item.relatedTopVideo ? `Related: "${item.relatedTopVideo}"` : "",
-	  })), [dataInsights.tagsToTest.chartData]);
+  const subscriberGrowth = dataInsights.subscriberGrowth.chartData;
+  const tagPerformance = useMemo(() => dataInsights.tagsPerformance.chartData.map((row) => ({
+    tag: row.tag,
+    averageViews: row.averageViews,
+    count: row.count,
+    tone: row.classification === "helpful" ? "positive" : row.classification === "hurt" ? "negative" : "neutral",
+    deltaPercent: row.deltaPercent,
+  })), [dataInsights.tagsPerformance.chartData]);
+  const existingTags = useMemo(() => new Set(tagPerformance.map((item) => item.tag)), [tagPerformance]);
+  const trendingTagSuggestions = useMemo(() => dataInsights.tagsToTest.chartData.map((item) => ({
+    tag: item.tag,
+    signal: 1,
+    why: item.reason,
+    bestUse: item.relatedTopVideo ? `Related: "${item.relatedTopVideo}"` : "",
+  })), [dataInsights.tagsToTest.chartData]);
   const competitorRows = useMemo(() => deriveCompetitorRows(ownSubscribers, recentVideos, status?.competitors ?? []), [ownSubscribers, recentVideos, status?.competitors]);
   const recentVideoById = useMemo(() => new Map(recentVideos.map((video) => [video.id, video])), [recentVideos]);
   const resultsByDay = useMemo(() => new Map(latestResults.map((result) => [result.dayIndex, result])), [latestResults]);
-  const topDiagnostics = useMemo(() => buildVideoDiagnostics(overview.whatWorkedVideos ?? [], recentVideos, titleLengthSummary, bestTime, "top"), [overview, recentVideos, titleLengthSummary, bestTime]);
-  const underperformerDiagnostics = useMemo(() => buildVideoDiagnostics(overview.underperformerVideos ?? [], recentVideos, titleLengthSummary, bestTime, "bottom"), [overview, recentVideos, titleLengthSummary, bestTime]);
+  const topDiagnostics = useMemo(() => buildVideoDiagnostics(overview.whatWorkedVideos ?? [], recentVideos, titleLengthSummary, bestTimeSummary, "top"), [overview, recentVideos, titleLengthSummary, bestTimeSummary]);
+  const underperformerDiagnostics = useMemo(() => buildVideoDiagnostics(overview.underperformerVideos ?? [], recentVideos, titleLengthSummary, bestTimeSummary, "bottom"), [overview, recentVideos, titleLengthSummary, bestTimeSummary]);
   const reachableCompetitors = useMemo(() => filterReachableCompetitors(ownSubscribers, competitorRows), [ownSubscribers, competitorRows]);
   const weeklyComparison = useMemo(() => deriveWeeklyComparisonData(reachableCompetitors, latestPlan, recentVideos, status?.channel?.channelName), [reachableCompetitors, latestPlan, recentVideos, status?.channel?.channelName]);
   const publishableVideos = useMemo(
@@ -3424,9 +3444,13 @@ export default function YouTubeGrowthPlannerV2Tab() {
           </div>
           <p className="mt-2 text-sm text-white/45">{ui.consistencyTracker.subtitle}</p>
         </div>
-        <Badge className={`${confidenceClass(recentVideos.length >= 4 ? "high" : "medium")} hover:brightness-100`}>{recentVideos.length >= 4 ? ui.consistencyTracker.confidenceHigh : ui.consistencyTracker.confidenceMedium}</Badge>
+        <Badge className={`${confidenceClass(dataInsights.uploadConsistency.confidence)} hover:brightness-100`}>{dataInsights.uploadConsistency.confidence}</Badge>
       </div>
       <CurrentWeekConsistencyChart rows={currentWeekConsistency} />
+      <div className="mt-4 space-y-2 text-sm text-white/65">
+        <p>{dataInsights.uploadConsistency.summary}</p>
+        <p className="text-white/55">{dataInsights.uploadConsistency.recommendation}</p>
+      </div>
     </PanelCard>
   );
 
@@ -3864,6 +3888,8 @@ export default function YouTubeGrowthPlannerV2Tab() {
                 ["subscriber-growth-chart", "Subscriber Growth"],
                 ["your-tag-performance", "Tags"],
                 ["trending-tags", "Tags to Test"],
+                ["top-performing-videos", "Top Videos"],
+                ["underperforming-videos", "Underperforming"],
               ].map(([id, label]) => (
                 <a key={id} href={`#${id}`} className="rounded-full border border-white/10 px-3 py-1 text-xs text-white/55 transition-colors hover:bg-white/6 hover:text-white">{label}</a>
               ))}
@@ -3876,44 +3902,44 @@ export default function YouTubeGrowthPlannerV2Tab() {
                     <h3 className="text-xl font-semibold text-white">{ui.performanceSignals.bestTimesTitle}</h3>
                     <p className="mt-2 text-sm text-white/45">{ui.performanceSignals.bestTimesSubtitle}</p>
                   </div>
-                  <Badge className={`${confidenceClass(bestTime.highest ? "high" : "low")} hover:brightness-100`}>{bestTime.highest ? "high" : "low"}</Badge>
+                  <Badge className={`${confidenceClass(bestTimeInsight.confidence)} hover:brightness-100`}>{bestTimeInsight.confidence}</Badge>
                 </div>
                 <BestTimeHeatmap cells={bestTime.cells} ui={ui} locale={locale} />
-                {bestTime.highest ? (
-                  <p className="mt-4 text-sm text-white/65">
-                    Your strongest slot is {bestTime.highest.day} {bestTime.highest.hour === "00:00" ? "00:00-06:00" : bestTime.highest.hour === "06:00" ? "06:00-12:00" : bestTime.highest.hour === "12:00" ? "12:00-18:00" : "18:00-24:00"} at {formatNumber(bestTime.highest.value)} average views, {formatPercent(bestTime.average ? ((bestTime.highest.value - bestTime.average) / bestTime.average) * 100 : 0)} above your channel average. Evidence: {bestTime.sampleVideos.map((video) => `"${video.title}" (${formatNumber(video.viewCount)} views)`).join(" and ")}.
-                  </p>
-                ) : null}
+                <div className="mt-4 space-y-2 text-sm text-white/65">
+                  <p>{dataInsights.bestTimesToPost.summary}</p>
+                  {dataInsights.bestTimesToPost.evidence.map((line) => <p key={line} className="text-white/55">{line}</p>)}
+                  <p className="text-white/55">{dataInsights.bestTimesToPost.recommendation}</p>
+                </div>
               </PanelCardSoft>
 
-              {hookRows.length ? (
+              {hooksChartRows.length ? (
                 <PanelCardSoft id="hook-efficacy-analysis" className="border border-white/10 p-5 transition-all hover:-translate-y-1 hover:bg-white/5">
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <h3 className="text-xl font-semibold text-white">{ui.performanceSignals.hooksTitle}</h3>
                       <p className="mt-2 text-sm text-white/45">{ui.performanceSignals.hooksSubtitle}</p>
                     </div>
-                    <Badge className={`${confidenceClass(hookRows.length >= 3 ? "high" : "medium")} hover:brightness-100`}>{hookRows.length >= 3 ? "high" : "medium"}</Badge>
+                    <Badge className={`${confidenceClass(dataInsights.hookPatterns.confidence)} hover:brightness-100`}>{dataInsights.hookPatterns.confidence}</Badge>
                   </div>
-                  <HookComparisonChart rows={hookRows} />
-                  {hookInsight ? (
-                    <p className="mt-4 text-sm text-white/65">
-                      Your {hookInsight.winner.type.toLowerCase()} hooks average {formatNumber(hookInsight.winner.averageViews)} views because {hookInsight.why} Evidence: {hookInsight.evidenceVideos.map((video) => `"${video.title}" (${formatNumber(video.viewCount)} views)`).join(" · ")}. Next hooks should: {hookInsight.suggestions.join(" ")}
-                    </p>
-                  ) : null}
+                  <HookComparisonChart rows={hooksChartRows} />
+                  <div className="mt-4 space-y-2 text-sm text-white/65">
+                    <p>{dataInsights.hookPatterns.summary}</p>
+                    {dataInsights.hookPatterns.evidence.map((line) => <p key={line} className="text-white/55">{line}</p>)}
+                    <p className="text-white/55">{dataInsights.hookPatterns.recommendation}</p>
+                  </div>
                 </PanelCardSoft>
               ) : null}
 
-              {titleLengthSummary.points.length ? (
+              {titleLengthBuckets.some((bucket) => bucket.count > 0) ? (
                 <PanelCardSoft id="optimal-title-length" className="border border-white/10 p-5 transition-all hover:-translate-y-1 hover:bg-white/5">
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <h3 className="text-xl font-semibold text-white">{ui.performanceSignals.optimalTitleLengthTitle}</h3>
                       <p className="mt-2 text-sm text-white/45">{ui.performanceSignals.optimalTitleLengthSubtitle}</p>
                     </div>
-                    <Badge className={`${confidenceClass(titleLengthSummary.points.length >= 8 ? "high" : "medium")} hover:brightness-100`}>{titleLengthSummary.points.length >= 8 ? "high" : "medium"}</Badge>
+                    <Badge className={`${confidenceClass(dataInsights.optimalTitleLength.confidence)} hover:brightness-100`}>{dataInsights.optimalTitleLength.confidence}</Badge>
                   </div>
-                  <TitleLengthBarChart buckets={titleLengthSummary.buckets} winnerLabel={titleLengthSummary.winningBucket?.label} />
+                  <TitleLengthBarChart buckets={titleLengthBuckets} winnerLabel={winningTitleBucket ?? undefined} />
                   <div className="mt-4 overflow-x-auto rounded-lg border border-white/10">
                     <table className="min-w-full text-sm">
                       <thead className="bg-white/3 text-left text-white/45">
@@ -3926,8 +3952,8 @@ export default function YouTubeGrowthPlannerV2Tab() {
                       </thead>
                       <tbody>
                         {Array.from({ length: 5 }).map((_, index) => {
-                          const top = titleLengthSummary.top[index];
-                          const bottom = titleLengthSummary.bottom[index];
+                          const top = winningTitleBucketDetail?.topTitles?.[index];
+                          const bottom = winningTitleBucketDetail?.bottomTitles?.[index];
                           return (
                             <tr key={`title-row-${index}`} className="border-t border-white/10">
                               <td className="px-4 py-3 text-white">{top?.title ?? "No data"}</td>
@@ -3940,11 +3966,10 @@ export default function YouTubeGrowthPlannerV2Tab() {
                       </tbody>
                     </table>
                   </div>
-                  {titleLengthSummary.winningBucket ? (
-                    <p className="mt-4 text-sm text-white/65">
-                      Videos with titles between {titleLengthSummary.winningBucket.min} and {Number.isFinite(titleLengthSummary.winningBucket.max) ? titleLengthSummary.winningBucket.max : "70+"} characters average {formatNumber(titleLengthSummary.winningBucket.averageViews)} views on your channel, which is {formatPercent(titleLengthSummary.percentAboveAverage)} above your overall average.
-                    </p>
-                  ) : null}
+                  <div className="mt-4 space-y-2 text-sm text-white/65">
+                    <p>{dataInsights.optimalTitleLength.summary}</p>
+                    <p className="text-white/55">{dataInsights.optimalTitleLength.recommendation}</p>
+                  </div>
                 </PanelCardSoft>
               ) : null}
 
@@ -3955,7 +3980,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
                       <h3 className="text-xl font-semibold text-white">{ui.performanceSignals.subscriberGrowthTitle}</h3>
                       <p className="mt-2 text-sm text-white/45">{ui.performanceSignals.subscriberGrowthSubtitle}</p>
                     </div>
-                    <Badge className={`${confidenceClass(subscriberGrowth.timeline.length >= 14 ? "high" : "medium")} hover:brightness-100`}>{subscriberGrowth.timeline.length >= 14 ? "high" : "medium"}</Badge>
+                    <Badge className={`${confidenceClass(dataInsights.subscriberGrowth.confidence)} hover:brightness-100`}>{dataInsights.subscriberGrowth.confidence}</Badge>
                   </div>
                   <div className="mt-4 h-64">
                     <ChartContainer config={{ subscribersNet: { label: "Subscribers", color: "#34d399" } }} className="h-full w-full">
@@ -3985,7 +4010,11 @@ export default function YouTubeGrowthPlannerV2Tab() {
                       </LineChart>
                     </ChartContainer>
                   </div>
-                  {subscriberGrowth.spike ? <p className="mt-4 text-sm text-white/65">Your biggest subscriber spike came from "{subscriberGrowth.spikeVideo?.title ?? "a recent upload"}" on {formatIsoDate(subscriberGrowth.spike.rawDate)}. It drove an estimated {formatNumber(subscriberGrowth.spike.subscribersNet)} net subscribers, used a {contentTypeMeta(subscriberGrowth.spikeVideo ? { day: 0, date: "", contentIdea: subscriberGrowth.spikeVideo.title, hook: subscriberGrowth.spikeVideo.title, outline: [], bestPostingTime: "", rationale: "" } as PlanDay : { day: 0, date: "", contentIdea: "", hook: "", outline: [], bestPostingTime: "", rationale: "" } as PlanDay).label.toLowerCase()} format, and leaned on a {hookType(subscriberGrowth.spikeVideo?.title ?? "").toLowerCase()} hook. Future ideas should replicate that combination.</p> : null}
+                  <div className="mt-4 space-y-2 text-sm text-white/65">
+                    <p>{dataInsights.subscriberGrowth.summary}</p>
+                    {dataInsights.subscriberGrowth.evidence.map((line) => <p key={line} className="text-white/55">{line}</p>)}
+                    <p className="text-white/55">{dataInsights.subscriberGrowth.recommendation}</p>
+                  </div>
                 </PanelCardSoft>
               ) : null}
 
@@ -3996,7 +4025,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
                       <h3 className="text-xl font-semibold text-white">{ui.performanceSignals.tagsTitle}</h3>
                       <p className="mt-2 text-sm text-white/45">{ui.performanceSignals.tagsSubtitle}</p>
                     </div>
-                    <Badge className={`${confidenceClass(tagPerformance.length >= 6 ? "high" : "medium")} hover:brightness-100`}>{tagPerformance.length >= 6 ? "high" : "medium"}</Badge>
+                    <Badge className={`${confidenceClass(dataInsights.tagsPerformance.confidence)} hover:brightness-100`}>{dataInsights.tagsPerformance.confidence}</Badge>
                   </div>
                   <p className="mt-4 text-sm text-white/55">{ui.performanceSignals.tagsLegend}</p>
                   <div className="mt-4 flex flex-wrap gap-2">
@@ -4012,6 +4041,10 @@ export default function YouTubeGrowthPlannerV2Tab() {
                       {tagExpanded ? "Show fewer tags" : "Show all tags"}
                     </button>
                   ) : null}
+                  <div className="mt-4 space-y-2 text-sm text-white/65">
+                    <p>{dataInsights.tagsPerformance.summary}</p>
+                    <p className="text-white/55">{dataInsights.tagsPerformance.recommendation}</p>
+                  </div>
                 </PanelCardSoft>
               ) : null}
 
@@ -4035,6 +4068,66 @@ export default function YouTubeGrowthPlannerV2Tab() {
                   </div>
                   <div className="mt-4 space-y-2 text-sm text-white/65">
                     {trendingTagSuggestions.map((tag) => <p key={`${tag.tag}-why`}><span className="text-white">#{tag.tag}</span>: {tag.why}</p>)}
+                  </div>
+                </PanelCardSoft>
+              ) : null}
+
+              {dataInsights.topVideos.chartData.length ? (
+                <PanelCardSoft id="top-performing-videos" className="border border-white/10 p-5 transition-all hover:-translate-y-1 hover:bg-white/5">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-xl font-semibold text-white">Top Performing Videos</h3>
+                      <p className="mt-2 text-sm text-white/45">Based on view count from your recent uploads.</p>
+                    </div>
+                    <Badge className={`${confidenceClass(dataInsights.topVideos.confidence)} hover:brightness-100`}>{dataInsights.topVideos.confidence}</Badge>
+                  </div>
+                  <div className="mt-4 space-y-3">
+                    {dataInsights.topVideos.chartData.map((video) => (
+                      <a key={video.id} href={video.url} target="_blank" rel="noreferrer" className="block rounded-xl border border-white/10 bg-white/3 p-4 transition-all hover:bg-white/5">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="line-clamp-2 font-semibold text-white">{video.title}</p>
+                            <p className="mt-1 text-xs text-white/45">{formatIsoDate(video.publishedAt)} · {formatNumber(video.views)} views · {video.hookType} hook · {video.titleLength} chars</p>
+                            {video.tags?.length ? <p className="mt-2 text-xs text-white/55">{video.tags.map((tag) => `#${tag}`).join(" ")}</p> : null}
+                          </div>
+                          <span className="rounded-full border border-emerald-400/25 bg-emerald-500/10 px-3 py-1 text-xs text-emerald-100">{formatNumber(video.views)}</span>
+                        </div>
+                      </a>
+                    ))}
+                  </div>
+                  <div className="mt-4 space-y-2 text-sm text-white/65">
+                    <p>{dataInsights.topVideos.summary}</p>
+                    <p className="text-white/55">{dataInsights.topVideos.recommendation}</p>
+                  </div>
+                </PanelCardSoft>
+              ) : null}
+
+              {dataInsights.underperformingVideos.chartData.length ? (
+                <PanelCardSoft id="underperforming-videos" className="border border-white/10 p-5 transition-all hover:-translate-y-1 hover:bg-white/5">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-xl font-semibold text-white">Underperforming Videos</h3>
+                      <p className="mt-2 text-sm text-white/45">Lowest view counts (excluding uploads from the last 24 hours).</p>
+                    </div>
+                    <Badge className={`${confidenceClass(dataInsights.underperformingVideos.confidence)} hover:brightness-100`}>{dataInsights.underperformingVideos.confidence}</Badge>
+                  </div>
+                  <div className="mt-4 space-y-3">
+                    {dataInsights.underperformingVideos.chartData.map((video) => (
+                      <a key={video.id} href={video.url} target="_blank" rel="noreferrer" className="block rounded-xl border border-white/10 bg-white/3 p-4 transition-all hover:bg-white/5">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="line-clamp-2 font-semibold text-white">{video.title}</p>
+                            <p className="mt-1 text-xs text-white/45">{formatIsoDate(video.publishedAt)} · {formatNumber(video.views)} views · {video.hookType} hook · {video.titleLength} chars</p>
+                            <p className="mt-2 text-xs text-white/55">Why: {video.reason}</p>
+                          </div>
+                          <span className="rounded-full border border-red-400/25 bg-red-500/10 px-3 py-1 text-xs text-red-100">{formatNumber(video.views)}</span>
+                        </div>
+                      </a>
+                    ))}
+                  </div>
+                  <div className="mt-4 space-y-2 text-sm text-white/65">
+                    <p>{dataInsights.underperformingVideos.summary}</p>
+                    <p className="text-white/55">{dataInsights.underperformingVideos.recommendation}</p>
                   </div>
                 </PanelCardSoft>
               ) : null}
