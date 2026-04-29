@@ -327,6 +327,9 @@ export type DayTabsCopy = {
       ideaLabel: string;
       sourceImagesLabel: string;
       sourceImagesHelp: string;
+      styleReferenceLabel: string;
+      styleReferenceHelp: string;
+      styleReferenceAddButton: string;
       requirementsLabel: string;
       addImageButton: string;
       preserveMyImageTitle: string;
@@ -659,6 +662,9 @@ const baseCopy: DayTabsCopy = {
       ideaLabel: "Idea",
       sourceImagesLabel: "Source images",
       sourceImagesHelp: "Add up to 4 images. Preserve mode uses your upload as the base image and only edits lighting, clarity, text, overlays, and focus.",
+      styleReferenceLabel: "Source thumbnail style reference",
+      styleReferenceHelp: "Optional. Upload 1 thumbnail that represents the style you want (colors, contrast, font mood, composition). We will not copy faces/logos/text—only the style language.",
+      styleReferenceAddButton: "Add style reference",
       requirementsLabel: "Requirements: JPG, 16:9 thumbnail output, 1280 x 720px, minimum source width 640px, max 2 MB.",
       addImageButton: "Add image",
       preserveMyImageTitle: "Preserve my image",
@@ -961,6 +967,9 @@ const localeOverrides: Partial<Record<DayTabsLocale, DeepPartial<DayTabsCopy>>> 
         ideaLabel: "Fikir",
         sourceImagesLabel: "Kaynak gorseller",
         sourceImagesHelp: "En fazla 4 gorsel ekle. Koruma modu yuklemeni temel alir ve sadece isik, netlik, metin, overlay ve odagi duzenler.",
+        styleReferenceLabel: "Stil referans thumbnail",
+        styleReferenceHelp: "Istege bagli. Istegin stili (renk, kontrast, font hissi, kompozisyon) gosteren 1 thumbnail yukle. Yuz/logo/metin kopyalamayiz; sadece stil dilini izleriz.",
+        styleReferenceAddButton: "Stil referansi ekle",
         requirementsLabel: "Gereksinimler: JPG, 16:9, 1280 x 720px, minimum kaynak genisligi 640px, max 2 MB.",
         addImageButton: "Gorsel ekle",
         preserveMyImageTitle: "Gorselimi koru",

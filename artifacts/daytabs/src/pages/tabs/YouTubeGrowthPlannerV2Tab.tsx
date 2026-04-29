@@ -2757,6 +2757,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
   const [thumbnailDay, setThumbnailDay] = useState<PlanDay | null>(null);
   const [thumbnailTextPreference, setThumbnailTextPreference] = useState("");
   const [thumbnailSourceImages, setThumbnailSourceImages] = useState<ThumbnailSourceImage[]>([]);
+  const [thumbnailStyleReferenceImages, setThumbnailStyleReferenceImages] = useState<ThumbnailSourceImage[]>([]);
   const [preserveThumbnailSourceImage, setPreserveThumbnailSourceImage] = useState(true);
   const [refreshingInsights, setRefreshingInsights] = useState(false);
   const lastStatusRefreshRef = useRef(0);
@@ -3039,12 +3040,14 @@ export default function YouTubeGrowthPlannerV2Tab() {
     setThumbnailTextPreference(day.generatedThumbnail?.requestedText || "");
     setPreserveThumbnailSourceImage(day.generatedThumbnail?.preserveUploadedImage ?? true);
     setThumbnailSourceImages([]);
+    setThumbnailStyleReferenceImages([]);
   }
 
   function closeThumbnailDialog() {
     setThumbnailDay(null);
     setThumbnailTextPreference("");
     setThumbnailSourceImages([]);
+    setThumbnailStyleReferenceImages([]);
     setPreserveThumbnailSourceImage(true);
   }
 
@@ -3242,6 +3245,20 @@ export default function YouTubeGrowthPlannerV2Tab() {
     }
   }
 
+  async function handleThumbnailStyleReferenceFiles(files: FileList | null) {
+    const nextFile = Array.from(files ?? []).slice(0, 1)[0] ?? null;
+    if (!nextFile) return;
+    setError(null);
+    try {
+      setThumbnailStyleReferenceImages([{
+        name: nextFile.name,
+        dataUrl: await resizeImageFileToDataUrl(nextFile),
+      }]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not read style reference thumbnail");
+    }
+  }
+
   async function generateThumbnailForDay() {
     if (!latestPlan || !thumbnailDay) return;
     setWorking("thumbnail");
@@ -3252,6 +3269,7 @@ export default function YouTubeGrowthPlannerV2Tab() {
         body: JSON.stringify({
           textPreference: thumbnailTextPreference.trim() || null,
           sourceImages: thumbnailSourceImages.map((image) => image.dataUrl),
+          styleReferenceImages: thumbnailStyleReferenceImages.map((image) => image.dataUrl),
           preserveUploadedImage: preserveThumbnailSourceImage,
         }),
       });
@@ -4717,6 +4735,42 @@ export default function YouTubeGrowthPlannerV2Tab() {
                     </button>
                   </div>
                 ) : null}
+              </PanelCardSoft>
+
+              <PanelCardSoft className="p-4">
+                <p className="text-xs uppercase tracking-[0.16em] text-white/40">{ui.thumbnailDialog.styleReferenceLabel}</p>
+                <p className="mt-2 text-sm text-white/55">{ui.thumbnailDialog.styleReferenceHelp}</p>
+                <p className="mt-2 text-xs text-white/40">{ui.thumbnailDialog.requirementsLabel}</p>
+                <div className="mt-3 flex flex-wrap gap-3">
+                  {thumbnailStyleReferenceImages.map((image, index) => (
+                    <div key={`${image.name}-${index}`} className="relative overflow-hidden rounded-xl border border-white/10 bg-black/20">
+                      <img src={image.dataUrl} alt={image.name} className="h-28 w-40 object-cover" />
+                      <button
+                        type="button"
+                        onClick={() => setThumbnailStyleReferenceImages([])}
+                        className="absolute right-2 top-2 rounded-full border border-white/10 bg-black/50 p-1 text-white/70 hover:text-white"
+                        aria-label={`Remove ${image.name}`}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                  {thumbnailStyleReferenceImages.length < 1 ? (
+                    <label className="flex h-28 w-40 cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-white/10 bg-white/3 text-center text-sm text-white/45 hover:border-white/20 hover:text-white/70">
+                      <ImagePlus className="mb-2 h-5 w-5" />
+                      {ui.thumbnailDialog.styleReferenceAddButton}
+                      <input
+                        type="file"
+                        accept="image/jpeg,.jpg,.jpeg"
+                        className="hidden"
+                        onChange={(event) => {
+                          void handleThumbnailStyleReferenceFiles(event.currentTarget.files);
+                          event.currentTarget.value = "";
+                        }}
+                      />
+                    </label>
+                  ) : null}
+                </div>
               </PanelCardSoft>
 
               <PanelCardSoft className="p-4">

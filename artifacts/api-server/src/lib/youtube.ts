@@ -1137,6 +1137,10 @@ function sanitizeSourceImageDataUrls(value: unknown) {
     .slice(0, 4);
 }
 
+function sanitizeStyleReferenceImageDataUrls(value: unknown) {
+  return sanitizeSourceImageDataUrls(value).slice(0, 1);
+}
+
 function dataUrlToImageFile(dataUrl: string, index: number) {
   const match = dataUrl.match(/^data:(image\/(?:jpeg|jpg|png|webp));base64,(.+)$/i);
   if (!match) throw new Error("Source images must be JPG, PNG, or WEBP thumbnails under 2 MB");
@@ -1154,23 +1158,23 @@ async function buildYoutubeThumbnailPrompt(
     title: string;
     description: string;
     tags: string[];
+    notes?: string | null;
+    thumbnailIdea?: string | null;
     textPreference: string | null;
     sourceImages: string[];
+    styleReferenceImages?: string[];
     preserveUploadedImage: boolean;
     sourceImageKind?: "user_uploaded" | "current_thumbnail" | null;
-    stylePreference?: string | null;
     analysisNotes?: string | null;
     outputLanguage?: string | null;
     mode?: "plan" | "audit";
   },
 ) {
   const hasSourceImages = payload.sourceImages.length > 0;
-  const shouldPreserveImage = hasSourceImages && payload.preserveUploadedImage;
+  const styleReferenceImages = Array.isArray(payload.styleReferenceImages) ? payload.styleReferenceImages : [];
+  const hasStyleReference = styleReferenceImages.length > 0;
   const mode = payload.mode ?? "plan";
   const isAuditMode = mode === "audit";
-  const sourceImageKind = payload.sourceImageKind ?? null;
-  const isCurrentThumbnail = sourceImageKind === "current_thumbnail";
-  const isUserProvidedImage = sourceImageKind === "user_uploaded";
   const inferredThumbnailOutputLanguage = inferOutputLanguage({
     title: payload.title,
     description: payload.description,
@@ -1181,233 +1185,105 @@ async function buildYoutubeThumbnailPrompt(
     (inferredThumbnailOutputLanguage === "same-as-source"
       ? "the same language as the source video metadata and transcript evidence"
       : inferredThumbnailOutputLanguage);
-  const thumbnailStrategyRules = `You are a professional YouTube thumbnail designer, not an AI artist.
-Your goal is to create a HIGH-CTR thumbnail that looks REAL, not AI-generated.
+  const systemPrompt = `You are a YouTube thumbnail strategist.
+You will:
+1) Understand the video idea from title/description/tags/notes/thumbnail idea/user text
+2) Analyze the source subject image (if provided) for what must be preserved + best crop + text safe zones
+3) Analyze the optional style reference thumbnail (if provided) for style-only rules (do not copy content)
+4) Write thumbnail text (short, mobile-readable; use user-provided text if provided and not too long)
+5) Build a composition plan (crop, focus, text placement, background, color grading)
+6) Produce ONE final image editing/generation prompt that an image model can execute
+7) Quality-check mentally before finalizing (preserve subject, readable text, one clear idea, not AI-looking)
 
-Strict realism + editing rules:
-- Prefer editing over generating. If unsure, do less.
-- Avoid AI-looking results: no "AI glow", no overly smooth/plastic textures, no fake HDR lighting, no unnatural shadows.
-- If the output looks AI-generated, you have failed. Regenerate with more realism.
+You MUST follow the user's provided inputs and image(s). Do not hallucinate missing inputs.
 
-Thumbnail strategy rules:
-- CORE THUMBNAIL RULE: the thumbnail must communicate exactly ONE idea, through ONE focal subject, triggering ONE clear emotion, and be understandable in under 1 second on mobile.
-- THE ONE RULE: a thumbnail must communicate ONE clear idea in under 1 second.
-- Viewer test: the viewer should instantly understand what this is about and why they should care. If they need to think, it is weak. If they get it instantly, it is strong.
-- Validation step: if the thumbnail communicates more than one idea, simplify it. If the idea is not understandable in under 1 second, redesign it.
-- Clarity score: score the concept from 0-10 using these checks: can it be understood in under 1 second, is there only one focal point, and is the message obvious without reading the title. If the score would be below 7, simplify or regenerate the concept instead of returning it.
-- One subject: only ONE focal point is allowed, such as one face, one object, or one action. If multiple people, UI elements, arrows, props, or competing objects split attention, simplify.
-- One emotion/tension: choose exactly ONE emotional driver for the thumbnail, such as curiosity, surprise, problem, transformation, or authority.
-- One message: the visual and text together must express one short idea only. If the concept is trying to communicate multiple messages, remove the weaker ones.
-- Treat the thumbnail as visual packaging, not decoration: it must make one accurate promise the video immediately honors.
-- Optimize for the right click plus watch time/retention, not clickbait CTR alone.
-- Build around one focal subject, one idea, and one payoff; remove visual noise.
-- Design for phone-size legibility: large subject, strong subject/background separation, high contrast, and text that reads instantly.
-- Use thumbnail text only when it adds value beyond the title; keep it bold, non-redundant, and 1–4 words max.
-- Match the title, description, hook, and first 30 seconds so the thumbnail promise fits the actual video.
-- For YouTube long-form, create a true 16:9 custom thumbnail concept that is accurate, uncluttered, high-resolution, and testable.
-- For YouTube Shorts or vertical concepts, think in poster-frame terms: the first frame or selected frame should be a strong cover with centered subject, readable text, and no important detail near crop/UI edges.
-- For TikTok-style covers, favor vertical-safe composition, UI safe-zone awareness, high resolution, and readable text for profile/search previews.
-- Faces help only when the expression carries the idea; if a source image has a face, preserve identity, facial structure, expression, age, gaze direction, hair, and skin texture exactly.
-- FACE PRESERVATION RULE: if a human face exists in the provided image(s), it MUST remain identical in the final output.
-- Strict face requirements: do not change identity, facial structure, proportions, age, gender presentation, skin tone, or facial features; do not replace the face or generate a new person; do not stylize, cartoonize, beautify, or alter realism; do not rotate or re-angle the face in a way that changes the original pose; do not modify expression beyond natural enhancement.
-- Allowed face-safe adjustments: color correction, exposure, contrast, sharpness, subtle lighting enhancements, background blur/separation, and cropping or zooming that keeps the face intact.
-- If the system cannot preserve the face exactly, it must keep the original image unchanged or redesign the thumbnail without modifying the face.
-- Any output that alters, replaces, or reinterprets a real face is invalid.
-- Category defaults: podcasts/talks use expressive face plus quote/thesis; ads use product/result plus one benefit; demos use before/after or UI/result proof; art uses finished piece plus tool/process cue; cooking uses finished dish plus texture cue; gaming uses character/item/map/stat plus one performance claim; entertainment uses reaction or mystery object plus unresolved question.`;
-  const userContent: Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }> = [
+Return JSON only (no markdown) with this exact shape:
+{
+  "videoIdeaStrategy": {
+    "emotion": string,
+    "visualFocus": string,
+    "clickTrigger": string,
+    "angle": string
+  },
+  "sourceImageAnalysis": {
+    "mainSubject": string,
+    "mustPreserve": string[],
+    "bestCrop": string,
+    "textSafeZones": string,
+    "improvementsNeeded": string[]
+  } | null,
+  "styleReferenceAnalysis": {
+    "hasStyleReference": boolean,
+    "compositionStyle": string,
+    "textStyle": string,
+    "colorPalette": string,
+    "lighting": string,
+    "backgroundTreatment": string,
+    "decorationStyle": string,
+    "mood": string,
+    "styleRulesToFollow": string[]
+  },
+  "thumbnailText": {
+    "mainText": string,
+    "secondaryText": string,
+    "smallTag": string
+  },
+  "compositionPlan": {
+    "crop": string,
+    "mainFocus": string,
+    "textPlacement": string,
+    "backgroundTreatment": string,
+    "subjectEnhancement": string,
+    "colorGrading": string,
+    "decorativeElements": string,
+    "finalMood": string
+  },
+  "finalImagePrompt": string
+}
+
+GLOBAL RULES:
+- Prefer realistic, professional thumbnail aesthetics (not AI-art).
+- Keep ONE clear idea and ONE focal point.
+- Text must be mobile-readable.
+- Do NOT invent a new person/pet/product when a source subject image is provided.
+- Never change identity/face/pet/product in the source subject image (only enhance lighting/color/sharpness/background/layout).
+- If a style reference thumbnail is provided, use it ONLY for style (composition vibe, typography mood, palette, contrast), and do NOT copy its exact text/logos/faces/characters or recreate it pixel-for-pixel.
+
+OUTPUT LANGUAGE RULE:
+- Write all strings in ${thumbnailOutputLanguage}. Do not translate to English.`;
+
+  const userContent: Array<
+    { type: "text"; text: string }
+    | { type: "image_url"; image_url: { url: string } }
+  > = [
     {
       type: "text",
-      text: `Title: ${payload.title}
-Description: ${payload.description}
-Tags: ${payload.tags.join(", ")}
-User Text Preference: ${payload.textPreference?.trim() || "auto-generate"}
-Style Preference: ${payload.stylePreference?.trim() || "auto-detect the best thumbnail style"}
-${isAuditMode ? `Thumbnail + Video Improvement Notes: ${payload.analysisNotes?.trim() || "none"}` : `Notes: ${payload.analysisNotes?.trim() || "none"}`}
-Image Inputs: ${hasSourceImages ? `The attached ${payload.sourceImages.length} source image(s) are ${payload.sourceImageKind === "current_thumbnail" ? "the video's current public thumbnail" : "provided by the user"}.` : "No source images provided."}
+      text: `MODE: ${isAuditMode ? "audit" : "plan"}
 
-${thumbnailStrategyRules}`,
+VIDEO DATA (use these as primary intent inputs):
+- Title: ${payload.title}
+- Description: ${payload.description}
+- Tags: ${payload.tags.join(", ")}
+- Notes: ${(payload.notes ?? payload.analysisNotes)?.trim() || "none"}
+- Thumbnail idea: ${(payload.thumbnailIdea ?? "").trim() || "none"}
+- Optional user text for thumbnail: ${payload.textPreference?.trim() || "none (auto)"}
+
+IMAGES:
+- Source subject image provided: ${hasSourceImages ? "yes" : "no"}
+- Style reference thumbnail provided: ${hasStyleReference ? "yes" : "no"}
+
+IMPORTANT:
+- If a source subject image is provided, that image contains the real subject that MUST be preserved.
+- If a style reference thumbnail is provided, analyze its style ONLY (do not copy its content).`,
     },
   ];
 
-  for (const sourceImage of payload.sourceImages) {
-    userContent.push({
-      type: "image_url",
-      image_url: { url: sourceImage },
-    });
+  for (const sourceImage of payload.sourceImages.slice(0, 1)) {
+    userContent.push({ type: "image_url", image_url: { url: sourceImage } });
   }
-
-  const systemPrompt = hasSourceImages
-    ? isAuditMode
-      ? `You are an expert YouTube thumbnail designer and creative director.
-
-${isCurrentThumbnail
-  ? "Your job is NOT to recreate the current thumbnail."
-  : "Your job is NOT to produce a cheap copy of the provided image(s)."}
-Your job is to extract the core idea, then repackage it into a higher-performing thumbnail.
-
-${thumbnailStrategyRules}
-
-CORE DECISION LOGIC:
-1) If the user provided images: you MUST use them as the base visual. Do not change identity, face, pose, or subject.
-2) If no user images and this is the current thumbnail: if a face exists, reuse the EXACT same face/identity. Do NOT generate a new person. You are rebuilding a better thumbnail using the same person.
-3) If no face exists: you are free to redesign more aggressively.
-
-CREATIVE TRANSFORMATION RULE (KEY):
-- Do NOT do a small tweak/copy. You MUST redesign the layout and visual storytelling.
-- Use different composition, different framing, cleaner hierarchy, and stronger one-idea focus.
-
-💣 CRITICAL LINE (MUST FOLLOW):
-"Do NOT reuse the original thumbnail composition. You must redesign the layout and visual storytelling while preserving only necessary elements (like the face)."
-
-STRICT FACE HANDLING:
-- If a face exists, identity must remain EXACT (no swapping, no beautifying, no stylizing).
-- Allowed: color correction, lighting enhancement, sharpening, slight crop/zoom.
-
-TEXT RULES:
-- If user provides text: refine it (shorter/stronger).
-- If not: generate 2–3 options and pick the strongest.
-- Max 3–5 words; must add curiosity (not repeat the title).
-
-INTERNAL CHECK (DO NOT OUTPUT):
-- Is this visually different from the original? YES required.
-- Is the idea clearer in under 1 second? YES required.
-- Is there only one focal point? YES required.
-- If any answer is no, redesign before finalizing.
-
-OUTPUT:
-Return ONLY the final image editing prompt.
-
-OUTPUT LANGUAGE RULE:
-- Write the final image editing prompt in ${thumbnailOutputLanguage}.
-- If the thumbnail includes text, write that thumbnail text in ${thumbnailOutputLanguage} unless the user explicitly requested another language.`
-      : `You are an expert YouTube thumbnail designer focused on maximizing CTR.
-
-IMPORTANT: ${payload.sourceImageKind === "current_thumbnail" ? "The provided image is the video's current thumbnail. Improve it." : "The user has provided an image."}
-
-${thumbnailStrategyRules}
-
-STRICT RULES (MUST FOLLOW):
-- If a source image is provided, you MUST use it exactly as the base visual
-- DO NOT recreate, redraw, or reinterpret the subject
-- DO NOT change the face, hands, or main objects
-- DO NOT replace the person or objects
-- If there are any faces, preserve identity, facial structure, expression, skin texture, hair, age, gaze direction, and pose exactly
-- Do not beautify, age, de-age, stylize, cartoon, or alter any face
-- You may ONLY:
-  - enhance colors, contrast, exposure, and local lighting
-  - improve sharpness and clarity without changing facial features
-  - add subtle depth/background separation (blur/simplify) without changing the subject
-  - slightly blur, darken, or simplify the background for focus without changing the subject
-  - add bold readable text, arrows, outlines, highlights, or graphic accents in empty/non-face areas
-- The final result must look like a real photo edited by a human designer (Photoshop), not a new AI image
-- Avoid overly smooth textures, artificial lighting, "AI glow", and unrealistic shadows
-
-OUTPUT:
-Return ONLY the final image editing prompt.
-
-OUTPUT LANGUAGE RULE:
-- Write the final image editing prompt in ${thumbnailOutputLanguage}.
-- If the thumbnail includes text, write that thumbnail text in ${thumbnailOutputLanguage} unless the user explicitly requested another language.`
-    : isAuditMode
-      ? `You are an expert YouTube thumbnail designer and creative director.
-
-Your job is NOT to recreate any existing thumbnail.
-Your job is to extract the core idea, then repackage it into a higher-performing thumbnail concept.
-
-${thumbnailStrategyRules}
-
-CREATIVE TRANSFORMATION RULE (KEY):
-- Do NOT be generic. Pick one strong visual promise and build the whole thumbnail around it.
-- Different composition, different framing, stronger focus, cleaner hierarchy.
-
-TEXT RULES:
-- If user provides text: refine it (shorter/stronger).
-- If not: generate 2–3 options and pick the strongest.
-- Max 3–5 words; must add curiosity (not repeat the title).
-
-INTERNAL CHECK (DO NOT OUTPUT):
-- Is the idea understandable in under 1 second? YES required.
-- Is there only one focal point and one emotion? YES required.
-- If not, simplify and redesign.
-
-OUTPUT:
-Return ONLY the final image generation prompt.
-
-OUTPUT LANGUAGE RULE:
-- Write the final image generation prompt in ${thumbnailOutputLanguage}.
-- If the thumbnail includes text, write that thumbnail text in ${thumbnailOutputLanguage} unless the user explicitly requested another language.`
-      : `You are an expert YouTube thumbnail designer and viral content strategist.
-
-Your goal is NOT just to create a beautiful image, but to maximize click-through-rate (CTR).
-However, do not chase misleading CTR: the thumbnail must attract the right viewer and preserve watch time/retention.
-
-${thumbnailStrategyRules}
-
-Analyze the provided YouTube metadata and design a thumbnail that:
-- Creates curiosity or emotional tension
-- Is instantly understandable in less than 1 second
-- Uses strong visual hierarchy (clear subject, background, contrast)
-- Works well on mobile (small size clarity)
-- Avoids clutter and unnecessary elements
-- Matches this preferred style when provided: ${payload.stylePreference?.trim() || "best fit for the video"}
-- Uses these audit notes when relevant: ${payload.analysisNotes?.trim() || "none"}
-
-Thumbnail style should match top-performing YouTube thumbnails:
-- Bold composition
-- High contrast lighting
-- Clean background (or intentionally blurred)
-- Expressive subject (if applicable)
-- Minimal but powerful text (3-5 words max)
-
-STEP 1: Analyze intent
-- What is the core idea of the video?
-- What emotion should the viewer feel? (curiosity, shock, urgency, excitement)
-- What is the single focal subject?
-- What is the one message the viewer should understand in under 1 second?
-
-STEP 2: Thumbnail concept
-Generate 3 different thumbnail concepts:
-Each should include:
-- Scene description
-- Subject placement
-- Background style
-- Emotion conveyed
-- Suggested text (if needed)
-- Clarity score out of 10 based on one-second understanding, single focal point, and obvious message without title
-
-STEP 3: Select best concept
-Pick the strongest concept based on CTR potential and clarity.
-Reject any concept with a clarity score below 7.
-Reject any concept with multiple focal points, multiple messages, or no clear emotional trigger.
-
-STEP 4: Final image generation instructions
-Create a highly detailed image prompt with:
-- YouTube thumbnail canvas: ${YOUTUBE_THUMBNAIL_WIDTH} x ${YOUTUBE_THUMBNAIL_HEIGHT}px, 16:9 aspect ratio, JPG format, suitable for YouTube's 2 MB thumbnail limit
-- Composition (foreground/background)
-- Lighting (dramatic, soft, high contrast, etc.)
-- Colors (vibrant, contrasting palette)
-- Camera framing (close-up, medium, zoomed face, etc.)
-- Style (photorealistic, cinematic, YouTube style)
-- Text placement (if any)
-- Facial expression (if human present)
-- Depth of field
-
-IMPORTANT RULES:
-- Do NOT overcrowd the image
-- Focus on ONE clear idea
-- Ensure subject stands out strongly from background
-- Use visual contrast to guide attention
-- Keep text readable on small screens
-- The final image must be a 16:9 YouTube thumbnail composition, optimized for ${YOUTUBE_THUMBNAIL_WIDTH} x ${YOUTUBE_THUMBNAIL_HEIGHT}px
-- If the user gave source images, use them as visual references for subject, style, or assets when helpful
-- If the user did not specify text, generate the strongest 3-5 word text yourself
-- The final concept must pass the one-second clarity test: one idea, one focal subject, one emotion, one message
-- If those rules are violated, simplify or redesign before returning the final prompt
-- Return ONLY the final image generation prompt
-
-OUTPUT LANGUAGE RULE:
-- Write the final image generation prompt in ${thumbnailOutputLanguage}.
-- If the thumbnail includes text, write that thumbnail text in ${thumbnailOutputLanguage} unless the user explicitly requested another language.`;
+  for (const styleImage of styleReferenceImages.slice(0, 1)) {
+    userContent.push({ type: "image_url", image_url: { url: styleImage } });
+  }
 
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
@@ -1421,7 +1297,8 @@ OUTPUT LANGUAGE RULE:
         content: userContent,
       },
     ],
-    max_completion_tokens: 900,
+    response_format: { type: "json_object" },
+    max_completion_tokens: 1600,
   });
 
   await logTokenUsage({
@@ -1431,7 +1308,9 @@ OUTPUT LANGUAGE RULE:
     ...usageTokens(completion.usage),
   });
 
-  return (completion.choices[0]?.message?.content || "").trim();
+  const raw = completion.choices[0]?.message?.content ?? "{}";
+  const parsed = asRecord(parseAiJson(raw));
+  return (asString(parsed.finalImagePrompt) || "").trim();
 }
 
 async function runYoutubeThumbnailImageRequest(
@@ -5804,7 +5683,7 @@ export async function generateYoutubeIdeaThumbnail(
   userId: number,
   planId: number,
   dayIndex: number,
-  input: { textPreference?: string | null; sourceImages?: unknown; preserveUploadedImage?: unknown },
+  input: { textPreference?: string | null; sourceImages?: unknown; styleReferenceImages?: unknown; preserveUploadedImage?: unknown },
 ) {
   const plan = await loadPlanForUpdate(userId, planId);
   const rawDays = asPlanDays(asArray(asRecord(plan.plan).days));
@@ -5813,6 +5692,7 @@ export async function generateYoutubeIdeaThumbnail(
 
   const normalizedDay = normalizePlanDayRecord(existingDay, dayIndex);
   const sourceImages = sanitizeSourceImageDataUrls(input.sourceImages);
+  const styleReferenceImages = sanitizeStyleReferenceImageDataUrls(input.styleReferenceImages);
   const preserveUploadedImage = sourceImages.length > 0 && input.preserveUploadedImage !== false;
   const growthThumbnailNotes = [
     normalizedDay.thumbnailConcept ? `Planned thumbnail concept: ${normalizedDay.thumbnailConcept}` : "",
@@ -5824,8 +5704,11 @@ export async function generateYoutubeIdeaThumbnail(
     title: normalizedDay.contentIdea,
     description: normalizedDay.descriptionSuggestion,
     tags: asArray(normalizedDay.tags).map((item) => String(item)).filter(Boolean),
+    notes: growthThumbnailNotes,
+    thumbnailIdea: normalizedDay.thumbnailConcept,
     textPreference: asString(input.textPreference)?.trim() || null,
     sourceImages,
+    styleReferenceImages,
     preserveUploadedImage,
     sourceImageKind: sourceImages.length ? "user_uploaded" : null,
     analysisNotes: growthThumbnailNotes,
@@ -5892,11 +5775,12 @@ export async function generateYoutubeAuditThumbnail(
     title: input.title,
     description: input.description,
     tags: Array.isArray(input.tags) ? input.tags.map((item) => String(item)).filter(Boolean).slice(0, 12) : [],
+    notes: asString(input.analysisNotes)?.trim() || null,
+    thumbnailIdea: null,
     textPreference: asString(input.textPreference)?.trim() || null,
     sourceImages,
     preserveUploadedImage,
     sourceImageKind,
-    stylePreference: asString(input.stylePreference)?.trim() || null,
     analysisNotes: asString(input.analysisNotes)?.trim() || null,
     outputLanguage: inferOutputLanguage({
       title: input.title,
