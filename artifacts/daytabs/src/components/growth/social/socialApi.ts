@@ -23,13 +23,23 @@ function authHeaders(): HeadersInit {
 }
 
 async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
+  const controller = new AbortController();
+  const timeoutMs = 15_000;
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+  const upstreamSignal = init?.signal;
+  const abortUpstream = () => controller.abort();
+  upstreamSignal?.addEventListener("abort", abortUpstream);
   const res = await fetch(url, {
     ...init,
+    signal: controller.signal,
     headers: {
       ...(init?.body ? { "Content-Type": "application/json" } : {}),
       ...authHeaders(),
       ...(init?.headers ?? {}),
     },
+  }).finally(() => {
+    window.clearTimeout(timeoutId);
+    upstreamSignal?.removeEventListener("abort", abortUpstream);
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {

@@ -21,6 +21,7 @@ import YouTubeGrowthPlannerV2Tab, {
   getGrowthPlannerNotifications,
 } from "./tabs/YouTubeGrowthPlannerV2Tab";
 import GrowthPlannerPage from "@/components/growth/GrowthPlannerPage";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { PlanPickerModal } from "@/components/PlanPickerModal";
 import {
   usePlan,
@@ -621,7 +622,11 @@ export default function Home() {
         {activeTab === "video-analyzer" && (
           <VideoAnalyzerTab {...tabCallbacks} />
         )}
-        {activeTab === "growth-planner" && <GrowthPlannerPage />}
+        {activeTab === "growth-planner" && (
+          <ErrorBoundary name="GrowthPlanner">
+            <GrowthPlannerPage />
+          </ErrorBoundary>
+        )}
         {activeTab === "youtube-audit" && <YouTubeAuditTab />}
         {activeTab === "teleprompter" && <TeleprompterTab />}
       </main>

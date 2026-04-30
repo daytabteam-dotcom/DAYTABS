@@ -465,13 +465,23 @@ function authHeaders(): HeadersInit {
 }
 
 async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
+  const controller = new AbortController();
+  const timeoutMs = 15_000;
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+  const upstreamSignal = init?.signal;
+  const abortUpstream = () => controller.abort();
+  upstreamSignal?.addEventListener("abort", abortUpstream);
   const res = await fetch(url, {
     ...init,
+    signal: controller.signal,
     headers: {
       ...(init?.body ? { "Content-Type": "application/json" } : {}),
       ...authHeaders(),
       ...(init?.headers ?? {}),
     },
+  }).finally(() => {
+    window.clearTimeout(timeoutId);
+    upstreamSignal?.removeEventListener("abort", abortUpstream);
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((data as { error?: string }).error || "Request failed");
@@ -2646,6 +2656,16 @@ function GrowthPlannerComingSoon() {
 function LoadingState() {
   return (
     <PanelPage className="mx-0 max-w-none space-y-8 py-0">
+      <PanelCard className="flex items-center justify-between gap-4 p-5">
+        <div className="space-y-1">
+          <PanelEyebrow>Loading</PanelEyebrow>
+          <PanelTitle className="text-2xl">Preparing your Growth Planner…</PanelTitle>
+        </div>
+        <div className="flex items-center gap-2 text-sm text-white/55">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Fetching channel data
+        </div>
+      </PanelCard>
       <PanelHeader className="justify-between gap-6">
         <div className="space-y-3">
           <Skeleton className="h-6 w-40 bg-white/10" />
