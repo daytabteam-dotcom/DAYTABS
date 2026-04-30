@@ -15,6 +15,15 @@ export const userUsageTable = pgTable("user_usage", {
   contentPlannerTokensUsed: integer("content_planner_tokens_used").notNull().default(0),
   youtubeGrowthTokensUsed: integer("youtube_growth_tokens_used").notNull().default(0),
   socialGrowthPlansUsed: integer("social_growth_plans_used").notNull().default(0),
+  socialGrowthManualIdeasUsedLinkedin: integer("social_growth_manual_ideas_used_linkedin").notNull().default(0),
+  socialGrowthManualIdeasUsedInstagram: integer("social_growth_manual_ideas_used_instagram").notNull().default(0),
+  socialGrowthManualIdeasUsedTiktok: integer("social_growth_manual_ideas_used_tiktok").notNull().default(0),
+  socialGrowthImprovementsUsedLinkedin: integer("social_growth_improvements_used_linkedin").notNull().default(0),
+  socialGrowthImprovementsUsedInstagram: integer("social_growth_improvements_used_instagram").notNull().default(0),
+  socialGrowthImprovementsUsedTiktok: integer("social_growth_improvements_used_tiktok").notNull().default(0),
+  socialGrowthAdditionalIdeasUsedLinkedin: integer("social_growth_additional_ideas_used_linkedin").notNull().default(0),
+  socialGrowthAdditionalIdeasUsedInstagram: integer("social_growth_additional_ideas_used_instagram").notNull().default(0),
+  socialGrowthAdditionalIdeasUsedTiktok: integer("social_growth_additional_ideas_used_tiktok").notNull().default(0),
   lastUpdated: timestamp("last_updated").defaultNow().notNull(),
 });
 

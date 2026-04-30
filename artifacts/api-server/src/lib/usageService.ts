@@ -9,6 +9,7 @@ import {
   getVideoUsageCost,
 } from "./planLimits";
 import { getTokenProductArea } from "./tokenUsageProducts";
+import type { SocialPlatform } from "../models/socialGrowthPlan";
 
 // ─── Per-user billing cycle helpers ────────────────────────────────────────────
 
@@ -340,11 +341,15 @@ export async function checkAndIncrementScriptGeneration(userId: number, rawPlan:
 // ─── Social Growth Planner limit check + increment ───────────────────────────
 
 function socialGrowthPlanLimit(plan: ReturnType<typeof normalizePlan>) {
-  // Keep this simple and aligned with existing plan tiers.
+  // Weekly plan generations per billing cycle.
+  // Free: trial is handled separately (1 week lifetime) in the social-growth routes.
   if (plan === "free") return 1;
-  if (plan === "creator") return 10;
-  if (plan === "pro") return 25;
-  return 80;
+  // Creator: up to a month across two platforms (4 weeks each) = 8 plans.
+  if (plan === "creator") return 8;
+  // Pro: generous cap (weekly across 3 platforms).
+  if (plan === "pro") return 60;
+  // Studio: very high cap.
+  return 200;
 }
 
 export async function checkAndIncrementSocialGrowthPlan(userId: number, rawPlan: string): Promise<{
@@ -405,4 +410,105 @@ export async function checkSocialGrowthPlanLimit(userId: number, rawPlan: string
   }
 
   return { allowed: true, used, limit };
+}
+
+function socialGrowthManualIdeaLimit(plan: ReturnType<typeof normalizePlan>) {
+  if (plan === "pro" || plan === "studio") return 30;
+  return Infinity;
+}
+
+function socialGrowthImprovementLimit(plan: ReturnType<typeof normalizePlan>) {
+  if (plan === "free") return 3;
+  if (plan === "creator") return 15;
+  if (plan === "pro") return 15;
+  return Infinity;
+}
+
+function socialGrowthAdditionalIdeaLimit(plan: ReturnType<typeof normalizePlan>) {
+  if (plan === "free") return 0;
+  if (plan === "creator") return 8;
+  if (plan === "pro") return 20;
+  return Infinity;
+}
+
+function socialGrowthCounterKey(platform: SocialPlatform, kind: "manual" | "improvement" | "additional") {
+  if (kind === "manual") {
+    if (platform === "linkedin") return "socialGrowthManualIdeasUsedLinkedin" as const;
+    if (platform === "instagram") return "socialGrowthManualIdeasUsedInstagram" as const;
+    return "socialGrowthManualIdeasUsedTiktok" as const;
+  }
+  if (kind === "improvement") {
+    if (platform === "linkedin") return "socialGrowthImprovementsUsedLinkedin" as const;
+    if (platform === "instagram") return "socialGrowthImprovementsUsedInstagram" as const;
+    return "socialGrowthImprovementsUsedTiktok" as const;
+  }
+  if (platform === "linkedin") return "socialGrowthAdditionalIdeasUsedLinkedin" as const;
+  if (platform === "instagram") return "socialGrowthAdditionalIdeasUsedInstagram" as const;
+  return "socialGrowthAdditionalIdeasUsedTiktok" as const;
+}
+
+export async function checkAndIncrementSocialGrowthManualIdea(
+  userId: number,
+  rawPlan: string,
+  platform: SocialPlatform,
+): Promise<{ allowed: boolean; used: number; limit: number; error?: { error: string } }> {
+  const plan = normalizePlan(rawPlan);
+  const limit = socialGrowthManualIdeaLimit(plan);
+  const usage = await getOrCreateUsage(userId);
+  const key = socialGrowthCounterKey(platform, "manual");
+  const used = Number((usage as any)[key] ?? 0);
+  if (used >= limit) {
+    return {
+      allowed: false,
+      used,
+      limit: Number.isFinite(limit) ? limit : used,
+      error: { error: "You have reached the manual-idea limit for this platform on your current plan. Upgrade to create more ideas." },
+    };
+  }
+  await db.update(userUsageTable).set({ [key]: used + 1, lastUpdated: new Date() } as any).where(eq(userUsageTable.userId, userId));
+  return { allowed: true, used: used + 1, limit: Number.isFinite(limit) ? limit : used + 1 };
+}
+
+export async function checkAndIncrementSocialGrowthImprovement(
+  userId: number,
+  rawPlan: string,
+  platform: SocialPlatform,
+): Promise<{ allowed: boolean; used: number; limit: number; error?: { error: string } }> {
+  const plan = normalizePlan(rawPlan);
+  const limit = socialGrowthImprovementLimit(plan);
+  const usage = await getOrCreateUsage(userId);
+  const key = socialGrowthCounterKey(platform, "improvement");
+  const used = Number((usage as any)[key] ?? 0);
+  if (used >= limit) {
+    return {
+      allowed: false,
+      used,
+      limit: Number.isFinite(limit) ? limit : used,
+      error: { error: "You have reached your AI improvement limit for this platform. Upgrade to improve more manual ideas." },
+    };
+  }
+  await db.update(userUsageTable).set({ [key]: used + 1, lastUpdated: new Date() } as any).where(eq(userUsageTable.userId, userId));
+  return { allowed: true, used: used + 1, limit: Number.isFinite(limit) ? limit : used + 1 };
+}
+
+export async function checkAndIncrementSocialGrowthAdditionalIdea(
+  userId: number,
+  rawPlan: string,
+  platform: SocialPlatform,
+): Promise<{ allowed: boolean; used: number; limit: number; error?: { error: string } }> {
+  const plan = normalizePlan(rawPlan);
+  const limit = socialGrowthAdditionalIdeaLimit(plan);
+  const usage = await getOrCreateUsage(userId);
+  const key = socialGrowthCounterKey(platform, "additional");
+  const used = Number((usage as any)[key] ?? 0);
+  if (used >= limit) {
+    return {
+      allowed: false,
+      used,
+      limit: Number.isFinite(limit) ? limit : used,
+      error: { error: "You have reached your additional AI idea limit for this platform. Upgrade to generate more AI ideas." },
+    };
+  }
+  await db.update(userUsageTable).set({ [key]: used + 1, lastUpdated: new Date() } as any).where(eq(userUsageTable.userId, userId));
+  return { allowed: true, used: used + 1, limit: Number.isFinite(limit) ? limit : used + 1 };
 }

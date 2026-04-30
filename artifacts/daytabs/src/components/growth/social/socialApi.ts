@@ -1,5 +1,17 @@
 import { DAYTABS_LOCALE_STORAGE_KEY } from "@/lib/i18n";
-import type { SocialPlatform, SocialPostPerformanceFeedback, SocialPostingMode, SocialWeekday, SocialWeeklyPlan } from "./types";
+import type { SocialGrowthAccess, SocialPlatform, SocialPostPerformanceFeedback, SocialPostingMode, SocialWeekday, SocialWeeklyPlan } from "./types";
+
+export class ApiError extends Error {
+  status: number;
+  payload: unknown;
+
+  constructor(message: string, status: number, payload: unknown) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.payload = payload;
+  }
+}
 
 function authHeaders(): HeadersInit {
   const token = localStorage.getItem("daytabs_token");
@@ -20,8 +32,15 @@ async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
     },
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error((data as { error?: string }).error || "Request failed");
+  if (!res.ok) {
+    const message = (data as { error?: string }).error || "Request failed";
+    throw new ApiError(message, res.status, data);
+  }
   return data as T;
+}
+
+export async function fetchSocialGrowthAccess() {
+  return await jsonFetch<SocialGrowthAccess>(`/api/social-growth/access`);
 }
 
 export async function fetchLatestSocialPlan(platform: SocialPlatform) {

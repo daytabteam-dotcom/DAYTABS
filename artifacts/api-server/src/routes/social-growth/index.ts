@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { requireAuth } from "../../middlewares/auth";
 import { normalizePlan, PLAN_LIMITS } from "../../lib/planLimits";
-import { checkAndIncrementSocialGrowthPlan, checkSocialGrowthPlanLimit } from "../../lib/usageService";
+import { checkAndIncrementSocialGrowthAdditionalIdea, checkAndIncrementSocialGrowthImprovement, checkAndIncrementSocialGrowthManualIdea, checkAndIncrementSocialGrowthPlan, checkSocialGrowthPlanLimit } from "../../lib/usageService";
 import type {
   SocialPlatform,
   SocialPostPerformanceFeedback,
@@ -21,6 +21,8 @@ import {
   saveSocialWeeklyPlanFeedback,
   updateSocialPlanDay,
 } from "../../services/socialGrowthPlanService";
+import { db, socialGrowthWeeklyPlansTable, usersTable } from "@workspace/db";
+import { and, eq } from "drizzle-orm";
 
 const router = Router();
 router.use(requireAuth);
@@ -62,6 +64,95 @@ function weekRangeForStart(startDate: string) {
 function normalizeString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
+
+function platformLimitForPlan(plan: ReturnType<typeof normalizePlan>) {
+  if (plan === "free") return 1;
+  if (plan === "creator") return 2;
+  return 3;
+}
+
+function parseUserPlatforms(raw: string | null | undefined) {
+  return (raw ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value): value is SocialPlatform => value === "linkedin" || value === "instagram" || value === "tiktok");
+}
+
+async function enforcePlatformAccess(userId: number, rawPlan: string, platform: SocialPlatform) {
+  const plan = normalizePlan(rawPlan);
+  const limit = platformLimitForPlan(plan);
+  if (limit >= 3) return;
+
+  const [user] = await db.select({ socialGrowthPlatforms: usersTable.socialGrowthPlatforms }).from(usersTable).where(eq(usersTable.id, userId)).limit(1);
+  const existing = parseUserPlatforms(user?.socialGrowthPlatforms ?? "");
+  if (existing.includes(platform)) return;
+  if (existing.length >= limit) {
+    throw new Error("Your plan only includes access to a limited number of platforms. Upgrade to unlock more platforms.");
+  }
+  const next = [...new Set([...existing, platform])].join(",");
+  await db.update(usersTable).set({ socialGrowthPlatforms: next } as never).where(eq(usersTable.id, userId));
+}
+
+async function enforceFreeTrialGeneration(userId: number, rawPlan: string) {
+  if (normalizePlan(rawPlan) !== "free") return;
+  const [row] = await db.select({ id: socialGrowthWeeklyPlansTable.id }).from(socialGrowthWeeklyPlansTable).where(eq(socialGrowthWeeklyPlansTable.userId, userId)).limit(1);
+  if (row) {
+    throw new Error("Free plan includes 1 weekly plan total. Upgrade to Creator to generate more weeks and unlock more platforms.");
+  }
+}
+
+function limitsForPlan(plan: ReturnType<typeof normalizePlan>) {
+  if (plan === "free") {
+    return {
+      platformLimit: 1,
+      totalWeeklyPlans: 1,
+      improvementsPerPlatform: 3,
+      additionalIdeasPerPlatform: 0,
+      manualIdeasPerPlatform: null as number | null,
+      nextWeekMode: "blocked" as const,
+    };
+  }
+  if (plan === "creator") {
+    return {
+      platformLimit: 2,
+      totalWeeklyPlans: null as number | null,
+      improvementsPerPlatform: 15,
+      additionalIdeasPerPlatform: 8,
+      manualIdeasPerPlatform: null as number | null,
+      nextWeekMode: "form_based" as const,
+    };
+  }
+  if (plan === "pro") {
+    return {
+      platformLimit: 3,
+      totalWeeklyPlans: null as number | null,
+      improvementsPerPlatform: 15,
+      additionalIdeasPerPlatform: 20,
+      manualIdeasPerPlatform: 30,
+      nextWeekMode: "behavior_based" as const,
+    };
+  }
+  return {
+    platformLimit: 3,
+    totalWeeklyPlans: null as number | null,
+    improvementsPerPlatform: null as number | null,
+    additionalIdeasPerPlatform: null as number | null,
+    manualIdeasPerPlatform: 30,
+    nextWeekMode: "behavior_based" as const,
+  };
+}
+
+router.get("/access", async (req, res) => {
+  const plan = normalizePlan(req.auth!.plan ?? "free");
+  const [user] = await db.select({ socialGrowthPlatforms: usersTable.socialGrowthPlatforms }).from(usersTable).where(eq(usersTable.id, req.auth!.user_id)).limit(1);
+  const usedPlatforms = parseUserPlatforms(user?.socialGrowthPlatforms ?? "");
+  const limits = limitsForPlan(plan);
+  res.json({
+    plan,
+    usedPlatforms,
+    ...limits,
+  });
+});
 
 router.get("/plans", async (req, res) => {
   const platform = req.query.platform;
@@ -122,6 +213,13 @@ router.post("/plans/:id/days", async (req, res) => {
     ? tags.map((item) => normalizeString(item)).filter(Boolean).slice(0, 18)
     : normalizeString(tags).split(",").map((item) => item.trim()).filter(Boolean).slice(0, 18);
 
+  const rawPlan = req.auth!.plan ?? "free";
+  const manualLimitCheck = await checkAndIncrementSocialGrowthManualIdea(req.auth!.user_id, rawPlan, platform);
+  if (!manualLimitCheck.allowed) {
+    res.status(429).json({ ...manualLimitCheck.error, limitReached: true, type: "social_growth_manual_limit" });
+    return;
+  }
+
   const created = await addSocialPlanDay(req.auth!.user_id, planId, {
     date,
     patch: {
@@ -167,6 +265,15 @@ router.post("/plans/generate", async (req, res) => {
     return;
   }
 
+  const rawPlan = req.auth!.plan ?? "free";
+  try {
+    await enforceFreeTrialGeneration(req.auth!.user_id, rawPlan);
+    await enforcePlatformAccess(req.auth!.user_id, rawPlan, platform);
+  } catch (err) {
+    res.status(403).json({ error: err instanceof Error ? err.message : "Upgrade required" });
+    return;
+  }
+
   const trimmedTopic = String(topic ?? "").trim();
   if (!trimmedTopic) {
     res.status(400).json({ error: "Topic is required." });
@@ -184,7 +291,6 @@ router.post("/plans/generate", async (req, res) => {
     return;
   }
 
-  const rawPlan = req.auth!.plan ?? "free";
   const usageCheck = await checkAndIncrementSocialGrowthPlan(req.auth!.user_id, rawPlan);
   if (!usageCheck.allowed) {
     res.status(429).json({ ...usageCheck.error, limitReached: true, type: "growth_planner_limit" });
@@ -200,11 +306,13 @@ router.post("/plans/generate", async (req, res) => {
   const normalizedFollowersCount = Number.isFinite(Number(followersCount))
     ? Math.max(0, Math.floor(Number(followersCount)))
     : null;
+  const behaviorMode = normalizePlan(rawPlan) === "creator" ? "goal_based" : "behavior_based";
 
   const aiResult = await generateSocialWeeklyPlanAi({
     userId: req.auth!.user_id,
     model,
     platform,
+    behaviorMode,
     startDate: computedStart,
     endDate,
     topic: trimmedTopic,
@@ -289,6 +397,16 @@ router.post("/plans/:id/generate-next-week", async (req, res) => {
   const mode: SocialPostingMode = isPostingMode(postingMode) ? postingMode : "manual";
   const weekdays = Array.isArray(preferredWeekdays) ? preferredWeekdays.filter(isWeekday) : [];
 
+  const normalizedPlan = normalizePlan(req.auth!.plan ?? "free");
+  if (normalizedPlan === "free") {
+    res.status(403).json({ error: "Free plan includes only 1 week generation. Upgrade to generate next week." });
+    return;
+  }
+  if (normalizedPlan === "creator") {
+    res.status(410).json({ error: "Creator plan next-week generation is form-based (goal + followers), not behavior-based. Start a new week from the setup form." });
+    return;
+  }
+
   const currentPlan = await getLatestSocialWeeklyPlan(req.auth!.user_id, platform);
   if (!currentPlan || currentPlan.id !== planId) {
     res.status(404).json({ error: "Plan not found" });
@@ -344,6 +462,7 @@ router.post("/plans/:id/generate-next-week", async (req, res) => {
     userId: req.auth!.user_id,
     model,
     platform,
+    behaviorMode: "behavior_based",
     startDate: nextStart,
     endDate,
     topic: trimmedTopic,
@@ -448,6 +567,19 @@ router.post("/plans/:id/days/:dayId/regenerate", async (req, res) => {
   const day = (payload.days ?? []).find((item) => item.id === dayId);
   if (!day) {
     res.status(404).json({ error: "Day not found" });
+    return;
+  }
+
+  const rawPlan = req.auth!.plan ?? "free";
+  const intentText = typeof intent === "string" ? intent.trim() : "";
+  const isManual = (day as any).ideaOrigin === "manual";
+  const wantsImprove = isManual && Boolean(intentText);
+
+  const aiLimit = wantsImprove
+    ? await checkAndIncrementSocialGrowthImprovement(req.auth!.user_id, rawPlan, platform)
+    : await checkAndIncrementSocialGrowthAdditionalIdea(req.auth!.user_id, rawPlan, platform);
+  if (!aiLimit.allowed) {
+    res.status(429).json({ ...aiLimit.error, limitReached: true, type: wantsImprove ? "social_growth_improvement_limit" : "social_growth_additional_limit" });
     return;
   }
 

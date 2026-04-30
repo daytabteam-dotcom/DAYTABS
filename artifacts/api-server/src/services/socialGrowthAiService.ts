@@ -74,6 +74,50 @@ function datesForCadence(startDate: string, postsPerWeek: number, preferredWeekd
 }
 
 function socialGrowthSystemPrompt() {
+  return socialGrowthSystemPromptByMode("behavior_based");
+}
+
+type SocialGrowthBehaviorMode = "behavior_based" | "goal_based";
+
+function socialGrowthSystemPromptByMode(mode: SocialGrowthBehaviorMode) {
+  const behaviorBlock = mode === "behavior_based"
+    ? `
+--------------------------------------------------
+BEHAVIOR-DRIVEN PLANNING (MANDATORY)
+--------------------------------------------------
+
+User behavior is the strongest signal:
+
+- Manual ideas = strongest preference signal
+- Completed/published ideas = execution preference
+- Liked AI ideas = positive signal
+- Disliked/deleted ideas = negative signal (avoid)
+- Skipped ideas = neutral
+
+You MUST:
+- Generate ideas similar to what user LIKED or CREATED
+- Avoid patterns from DISLIKED or DELETED ideas
+- Do NOT blindly repeat unfinished ideas
+`
+    : `
+--------------------------------------------------
+GOAL-BASED PLANNING (MANDATORY)
+--------------------------------------------------
+
+This plan MUST be generated from:
+- selected platform
+- weekly topic
+- user goal
+- target audience
+- tone
+- posting mode (manual vs AI-optimized cadence)
+- format preference
+- follower/subscriber count (CRITICAL)
+
+Do NOT ask for or depend on previous-week performance feedback.
+Do NOT mention that behavior is the strongest signal.
+`;
+
   return `You are DayTabs, an expert content growth strategist and execution planner.
 
 Your job is to create weekly content plans that are specific, practical, and platform-native.
@@ -82,7 +126,7 @@ Do not generate generic ideas.
 Do not only provide topics.
 For every idea, provide enough detail so the user can create the content immediately.
 
-Core rule: the strongest signal is user behavior. When a user behavior summary is provided, prioritize it over generic best practices.
+Core rule: prioritize the user's goals, constraints, and creator growth stage. When a user behavior summary is provided, use it as an additional signal (if and only if behavior-driven planning is enabled).
 
 You must consider:
 - selected platform
@@ -142,22 +186,7 @@ IMPORTANT:
 - Low followers → more execution + engagement tasks
 - High followers → more strategy + optimization tasks
 
---------------------------------------------------
-BEHAVIOR-DRIVEN PLANNING (MANDATORY)
---------------------------------------------------
-
-User behavior is the strongest signal:
-
-- Manual ideas = strongest preference signal
-- Completed/published ideas = execution preference
-- Liked AI ideas = positive signal
-- Disliked/deleted ideas = negative signal (avoid)
-- Skipped ideas = neutral
-
-You MUST:
-- Generate ideas similar to what user LIKED or CREATED
-- Avoid patterns from DISLIKED or DELETED ideas
-- Do NOT blindly repeat unfinished ideas
+${behaviorBlock}
 
 --------------------------------------------------
 PLATFORM RULES
@@ -296,6 +325,7 @@ export async function generateSocialWeeklyPlanAi(params: {
   userId: number;
   model: string;
   platform: SocialPlatform;
+  behaviorMode?: SocialGrowthBehaviorMode;
   startDate: string;
   endDate: string;
   topic: string;
@@ -313,7 +343,8 @@ export async function generateSocialWeeklyPlanAi(params: {
   const scheduledDates = params.postingMode === "manual"
     ? datesForCadence(params.startDate, params.postsPerWeek, params.preferredWeekdays)
     : dateWindow(params.startDate);
-  const sys = `${socialGrowthSystemPrompt()}
+  const behaviorMode: SocialGrowthBehaviorMode = params.behaviorMode ?? "behavior_based";
+  const sys = `${socialGrowthSystemPromptByMode(behaviorMode)}
 
 Platform rules:
 ${platformPrompt(params.platform)}
@@ -361,17 +392,16 @@ Previous week user behavior summary (highest priority signal; do NOT request raw
 ${params.previousWeekBehaviorSummary ? JSON.stringify(params.previousWeekBehaviorSummary) : "null"}
 
 Rules:
-- User behavior is the strongest signal. Use it before generic platform advice.
+- If behavior-driven planning is enabled and a behavior summary is provided, use it before generic platform advice.
 - Followers count MUST influence strategy and tasks.
 - If followers are low → include visibility & engagement-heavy tasks.
 - If followers are high → focus on optimization & authority.
-- Manual posts/ideas created by the user are the strongest preference signal.
-- Completed or published posts show what the user is willing to execute.
-- Great/good performing posts should inspire fresh related angles, not duplicates.
-- Poor performing posts should not be repeated with the same hook, format, angle, or CTA.
-- Skipped/incomplete posts are neutral signals, not failures.
-- Deleted/disliked AI ideas are negative signals. Avoid similar concepts unless there is a clear reason.
-- If the user ignored AI-generated ideas but added manual ones, adapt toward the manual style.
+- If a behavior summary is provided, manual posts/ideas are a strong preference signal.
+- If a behavior summary is provided, completed/published posts show what the user will execute.
+- If a behavior summary is provided, great/good posts should inspire fresh related angles (not duplicates).
+- If a behavior summary is provided, poor posts should not be repeated with the same hook/format/angle/CTA.
+- If a behavior summary is provided, skipped/incomplete posts are neutral signals.
+- If a behavior summary is provided, deleted/disliked AI ideas are negative signals; avoid similar concepts.
 - Each idea must include a clear behaviorSignalUsed.
 - Each idea must explain whyThisFitsUser.
 - Each idea must mention avoidBecause.

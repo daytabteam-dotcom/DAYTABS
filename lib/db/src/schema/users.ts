@@ -23,6 +23,7 @@ export const usersTable = pgTable("users", {
   // Does NOT downgrade the plan — Paddle retries automatically.
   // Cleared when subscription.resumed or subscription.activated fires.
   subscriptionPastDue: boolean("subscription_past_due").default(false),
+  socialGrowthPlatforms: text("social_growth_platforms").notNull().default(""),
 });
 
 export type User = typeof usersTable.$inferSelect;

@@ -41,10 +41,12 @@ export function PlatformTabs({
   value,
   onChange,
   className,
+  disabledTabs,
 }: {
   value: GrowthPlatformTab;
   onChange: (next: GrowthPlatformTab) => void;
   className?: string;
+  disabledTabs?: Partial<Record<GrowthPlatformTab, string>>;
 }) {
   return (
     <div
@@ -57,19 +59,27 @@ export function PlatformTabs({
         {TABS.map((tab) => {
           const isActive = value === tab.id;
           const Icon = tab.Icon;
-          return (
+          const disabledReason = disabledTabs?.[tab.id];
+          const isDisabled = Boolean(disabledReason);
+          const button = (
             <button
               key={tab.id}
               type="button"
-              onClick={() => onChange(tab.id)}
+              onClick={() => {
+                if (isDisabled) return;
+                onChange(tab.id);
+              }}
               className={cn(
                 "group relative flex min-w-[170px] flex-1 items-center justify-center gap-2 overflow-hidden rounded-2xl px-3 py-3 text-center transition-all duration-200",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-200/50 focus-visible:ring-offset-2 focus-visible:ring-offset-black",
                 isActive
                   ? "bg-white/[0.14] text-white shadow-[0_10px_30px_rgba(0,0,0,0.18)]"
-                  : "text-white/58 hover:bg-white/[0.075] hover:text-white",
+                  : isDisabled
+                    ? "cursor-not-allowed text-white/30 opacity-70"
+                    : "text-white/58 hover:bg-white/[0.075] hover:text-white",
               )}
               aria-current={isActive ? "page" : undefined}
+              aria-disabled={isDisabled ? true : undefined}
               title={tab.description}
             >
               {isActive ? <span className="pointer-events-none absolute inset-x-6 bottom-0 h-0.5 rounded-full bg-white/65" /> : null}
@@ -81,6 +91,18 @@ export function PlatformTabs({
               </span>
             </button>
           );
+          return isDisabled ? (
+            <TooltipProvider key={tab.id} delayDuration={120}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span>{button}</span>
+                </TooltipTrigger>
+                <TooltipContent className="border-white/10 bg-black/80 text-white">
+                  <div className="text-xs font-semibold">{disabledReason}</div>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          ) : button;
         })}
       </div>
     </div>
