@@ -41,12 +41,10 @@ export function PlatformTabs({
   value,
   onChange,
   className,
-  disabledTabs,
 }: {
   value: GrowthPlatformTab;
   onChange: (next: GrowthPlatformTab) => void;
   className?: string;
-  disabledTabs?: Partial<Record<GrowthPlatformTab, string>>;
 }) {
   return (
     <div
@@ -55,64 +53,36 @@ export function PlatformTabs({
         className,
       )}
     >
-      <TooltipProvider delayDuration={120}>
-        <div className="flex w-full gap-1.5 overflow-x-auto">
-          {TABS.map((tab) => {
-            const isActive = value === tab.id;
-            const Icon = tab.Icon;
-            const disabledReason = disabledTabs?.[tab.id];
-            const isDisabled = Boolean(disabledReason);
-
-            const button = (
-              <button
-                type="button"
-                onClick={() => {
-                  if (isDisabled) return;
-                  onChange(tab.id);
-                }}
-                className={cn(
-                  "group relative flex min-w-[170px] flex-1 items-center justify-center gap-2 overflow-hidden rounded-2xl px-3 py-3 text-center transition-all duration-200",
-                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-200/50 focus-visible:ring-offset-2 focus-visible:ring-offset-black",
-                  isActive
-                    ? "bg-white/[0.14] text-white shadow-[0_10px_30px_rgba(0,0,0,0.18)]"
-                    : isDisabled
-                      ? "cursor-not-allowed text-white/30 opacity-70"
-                      : "text-white/58 hover:bg-white/[0.075] hover:text-white",
-                )}
-                aria-current={isActive ? "page" : undefined}
-                aria-disabled={isDisabled ? true : undefined}
-                title={tab.description}
-              >
-                {isActive ? <span className="pointer-events-none absolute inset-x-6 bottom-0 h-0.5 rounded-full bg-white/65" /> : null}
-                <span className="relative flex min-w-0 items-center justify-center gap-2.5">
-                  <span
-                    className={cn(
-                      "flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition-all",
-                      isActive ? "bg-white/16 text-white" : "bg-white/[0.045] text-white/50 group-hover:text-white",
-                    )}
-                  >
-                    <Icon className="h-4 w-4" />
-                  </span>
-                  <span className="truncate text-sm font-semibold">{tab.label}</span>
+      <div className="flex w-full gap-1.5 overflow-x-auto">
+        {TABS.map((tab) => {
+          const isActive = value === tab.id;
+          const Icon = tab.Icon;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => onChange(tab.id)}
+              className={cn(
+                "group relative flex min-w-[170px] flex-1 items-center justify-center gap-2 overflow-hidden rounded-2xl px-3 py-3 text-center transition-all duration-200",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-200/50 focus-visible:ring-offset-2 focus-visible:ring-offset-black",
+                isActive
+                  ? "bg-white/[0.14] text-white shadow-[0_10px_30px_rgba(0,0,0,0.18)]"
+                  : "text-white/58 hover:bg-white/[0.075] hover:text-white",
+              )}
+              aria-current={isActive ? "page" : undefined}
+              title={tab.description}
+            >
+              {isActive ? <span className="pointer-events-none absolute inset-x-6 bottom-0 h-0.5 rounded-full bg-white/65" /> : null}
+              <span className="relative flex min-w-0 items-center justify-center gap-2.5">
+                <span className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition-all", isActive ? "bg-white/16 text-white" : "bg-white/[0.045] text-white/50 group-hover:text-white")}>
+                  <Icon className="h-4 w-4" />
                 </span>
-              </button>
-            );
-
-            return (
-              <Tooltip key={tab.id}>
-                <TooltipTrigger asChild>
-                  <span>{button}</span>
-                </TooltipTrigger>
-                {isDisabled ? (
-                  <TooltipContent className="border-white/10 bg-black/80 text-white">
-                    <div className="text-xs font-semibold">{disabledReason}</div>
-                  </TooltipContent>
-                ) : null}
-              </Tooltip>
-            );
-          })}
-        </div>
-      </TooltipProvider>
+                <span className="truncate text-sm font-semibold">{tab.label}</span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }

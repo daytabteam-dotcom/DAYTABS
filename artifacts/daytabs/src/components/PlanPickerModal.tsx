@@ -27,8 +27,6 @@ const PLAN_META = [
       "Basic report with limited insights",
       "Teleprompter",
       "1 script generation",
-      "Content Growth: 1 week plan + 1 platform (LinkedIn/Instagram/TikTok)",
-      "Content Growth: 3 AI improvements on manual ideas",
     ],
     ctaClass:
       "bg-white/10 hover:bg-white/10 shadow-none",
@@ -51,9 +49,6 @@ const PLAN_META = [
       "Teleprompter",
       "20 script generations",
       "YouTube Growth tools (Coming Soon)",
-      "Content Growth: 2 platforms (LinkedIn/Instagram/TikTok)",
-      "Content Growth: month planning + goal-based next week",
-      "Content Growth: 15 AI improvements + 8 extra AI ideas per platform",
     ],
     ctaClass:
       "bg-linear-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 shadow-lg shadow-amber-500/20",
@@ -75,9 +70,6 @@ const PLAN_META = [
       "Subtitle export",
       "Higher priority processing for less waiting",
       "60 script generations",
-      "Content Growth: 3 platforms (LinkedIn/Instagram/TikTok)",
-      "Content Growth: behavior-based weekly planning",
-      "Content Growth: 30 manual ideas + 20 extra AI ideas per platform",
     ],
     ctaClass:
       "bg-linear-to-r from-violet-600 to-purple-500 hover:from-violet-500 hover:to-purple-400 shadow-lg shadow-violet-500/20",
@@ -99,7 +91,6 @@ const PLAN_META = [
       "200 script generations",
       "Highest queue priority",
       "Priority support",
-      "Content Growth: unlimited AI improvements + extra AI ideas",
     ],
     ctaClass:
       "bg-linear-to-r from-pink-600 to-rose-500 hover:from-pink-500 hover:to-rose-400 shadow-lg shadow-pink-500/20",

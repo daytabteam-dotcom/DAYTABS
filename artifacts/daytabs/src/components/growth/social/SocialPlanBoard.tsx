@@ -9,15 +9,6 @@ import { PanelCard, PanelCardSoft, PanelHeader, PanelSubtitle, PanelTitle } from
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import type { GrowthTask, SocialPlanDay, SocialPlatform, SocialPostStatus, SocialWeeklyPlan } from "./types";
-import { ApiError } from "./socialApi";
-
-function apiErrorMessage(err: unknown, fallback: string) {
-  if (err instanceof ApiError) {
-    const payload = err.payload as { error?: string; type?: string } | null;
-    return payload?.error || err.message || fallback;
-  }
-  return err instanceof Error ? err.message : fallback;
-}
 
 function platformLabel(platform: SocialPlatform) {
   if (platform === "linkedin") return "LinkedIn";
@@ -384,7 +375,7 @@ export function SocialPlanBoard({
                                           await onPatchDay(day, { status: "posted" });
                                           toast({ title: "Marked as posted", description: "Updated this post to Posted." });
                                         } catch (err) {
-                                          toast({ variant: "destructive", title: "Could not update status", description: apiErrorMessage(err, "Please try again.") });
+                                          toast({ variant: "destructive", title: "Could not update status", description: err instanceof Error ? err.message : "Please try again." });
                                         }
                                       }}
                                       disabled={working}
@@ -424,7 +415,7 @@ export function SocialPlanBoard({
                                         try {
                                           await onPatchDay(day, { growthTasks: next });
                                         } catch (err) {
-                                          toast({ variant: "destructive", title: "Could not update task", description: apiErrorMessage(err, "Please try again.") });
+                                          toast({ variant: "destructive", title: "Could not update task", description: err instanceof Error ? err.message : "Please try again." });
                                         }
                                       }}
                                       className={cn(
@@ -493,7 +484,7 @@ export function SocialPlanBoard({
                       delete next[day.id];
                       return next;
                     });
-                    toast({ variant: "destructive", title: "Could not move post", description: apiErrorMessage(err, "Please try again.") });
+                    toast({ variant: "destructive", title: "Could not move post", description: err instanceof Error ? err.message : "Please try again." });
                   }
                 }}
                 className={cn(
@@ -710,7 +701,7 @@ export function SocialPlanBoard({
                                         await onRegenerateDay(day);
                                         toast({ title: "Regenerated", description: "Generated a new version of this idea." });
                                       } catch (err) {
-                                        toast({ variant: "destructive", title: "Could not regenerate", description: apiErrorMessage(err, "Please try again.") });
+                                        toast({ variant: "destructive", title: "Could not regenerate", description: err instanceof Error ? err.message : "Please try again." });
                                       }
                                     }}
                                     disabled={working}
@@ -730,7 +721,7 @@ export function SocialPlanBoard({
                                           await onPatchDay(day, { aiImproved: true });
                                           toast({ title: "Improved", description: "Updated this idea with AI." });
                                         } catch (err) {
-                                          toast({ variant: "destructive", title: "Could not improve idea", description: apiErrorMessage(err, "Please try again.") });
+                                          toast({ variant: "destructive", title: "Could not improve idea", description: err instanceof Error ? err.message : "Please try again." });
                                         }
                                       }}
                                       disabled={working}
@@ -748,7 +739,7 @@ export function SocialPlanBoard({
                                         await onPatchDay(day, { status: "posted" });
                                         toast({ title: "Marked as posted", description: "Updated this post to Posted." });
                                       } catch (err) {
-                                        toast({ variant: "destructive", title: "Could not update status", description: apiErrorMessage(err, "Please try again.") });
+                                        toast({ variant: "destructive", title: "Could not update status", description: err instanceof Error ? err.message : "Please try again." });
                                       }
                                     }}
                                     disabled={working || status === "posted"}
@@ -828,7 +819,7 @@ export function SocialPlanBoard({
                             try {
                               await onPatchDay(day, { growthTasks: next });
                             } catch (err) {
-                              toast({ variant: "destructive", title: "Could not update task", description: apiErrorMessage(err, "Please try again.") });
+                              toast({ variant: "destructive", title: "Could not update task", description: err instanceof Error ? err.message : "Please try again." });
                             }
                           }}
                           className={cn(
@@ -973,7 +964,7 @@ export function SocialPlanBoard({
                                       try {
                                         await onPatchDay(day, { growthTasks: next });
                                       } catch (err) {
-                                        toast({ variant: "destructive", title: "Could not update task", description: apiErrorMessage(err, "Please try again.") });
+                                        toast({ variant: "destructive", title: "Could not update task", description: err instanceof Error ? err.message : "Please try again." });
                                       }
                                     }}
                                     className={cn(
@@ -1202,7 +1193,7 @@ export function SocialPlanBoard({
                           await onRegenerateDay(placeholderDay, intent);
                           await onPatchDay(placeholderDay, { ideaOrigin: "manual", aiImproved: true });
                         } catch (err) {
-                          toast({ variant: "destructive", title: "Could not improve idea", description: apiErrorMessage(err, "Please try again.") });
+                          toast({ variant: "destructive", title: "Could not improve idea", description: err instanceof Error ? err.message : "Please try again." });
                         }
                       }
                       setManualOpen(false);
@@ -1482,7 +1473,7 @@ export function SocialPlanBoard({
                             await onRegenerateDay(activeDay);
                             toast({ title: "Regenerated", description: "Generated a new version of this idea." });
                           } catch (err) {
-                            toast({ variant: "destructive", title: "Could not regenerate", description: apiErrorMessage(err, "Please try again.") });
+                            toast({ variant: "destructive", title: "Could not regenerate", description: err instanceof Error ? err.message : "Please try again." });
                           }
                         }}
                         disabled={working}
@@ -1502,7 +1493,7 @@ export function SocialPlanBoard({
                               await onPatchDay(activeDay, { aiImproved: true });
                               toast({ title: "Improved", description: "Updated this idea with AI." });
                             } catch (err) {
-                              toast({ variant: "destructive", title: "Could not improve idea", description: apiErrorMessage(err, "Please try again.") });
+                              toast({ variant: "destructive", title: "Could not improve idea", description: err instanceof Error ? err.message : "Please try again." });
                             }
                           }}
                           disabled={working}
@@ -1520,7 +1511,7 @@ export function SocialPlanBoard({
                             await onPatchDay(activeDay, { status: "posted" });
                             toast({ title: "Marked as posted", description: "Updated this post to Posted." });
                           } catch (err) {
-                            toast({ variant: "destructive", title: "Could not update status", description: apiErrorMessage(err, "Please try again.") });
+                            toast({ variant: "destructive", title: "Could not update status", description: err instanceof Error ? err.message : "Please try again." });
                           }
                         }}
                         disabled={working || status === "posted"}
@@ -1537,7 +1528,7 @@ export function SocialPlanBoard({
                             await onDeleteDay(activeDay);
                             setActiveDayId(null);
                           } catch (err) {
-                            toast({ variant: "destructive", title: "Could not delete idea", description: apiErrorMessage(err, "Please try again.") });
+                            toast({ variant: "destructive", title: "Could not delete idea", description: err instanceof Error ? err.message : "Please try again." });
                           }
                         }}
                         disabled={working}

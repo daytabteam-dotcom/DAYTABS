@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Info, Sparkles, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PanelCard, PanelCardSoft, PanelHeader, PanelSubtitle, PanelTitle } from "@/components/panel-system";
 import { cn } from "@/lib/utils";
-import type { SocialGrowthAccess, SocialPlatform, SocialPostingMode, SocialWeekday } from "./types";
+import type { SocialPlatform, SocialPostingMode, SocialWeekday } from "./types";
 
 const GOAL_OPTIONS = [
   "Grow audience",
@@ -121,8 +121,6 @@ export function SocialPlanSetup({
   platform,
   onGenerate,
   generating,
-  initialValues,
-  nextWeekMode,
 }: {
   platform: SocialPlatform;
   generating: boolean;
@@ -137,45 +135,20 @@ export function SocialPlanSetup({
     tone?: string;
     formatPreference?: string;
   }) => void;
-  initialValues?: Partial<{
-    topic: string;
-    postsPerWeek: number;
-    postingMode: SocialPostingMode;
-    preferredWeekdays: SocialWeekday[];
-    audience: string;
-    followersCount: number | null;
-    goal: string;
-    tone: string;
-    formatPreference: string;
-  }>;
-  nextWeekMode?: SocialGrowthAccess["nextWeekMode"];
 }) {
   const label = platformLabel(platform);
   const copy = platformCopy(platform);
-  const [topic, setTopic] = useState(initialValues?.topic ?? "");
-  const [postsPerWeek, setPostsPerWeek] = useState(initialValues?.postsPerWeek ?? 3);
-  const [postingMode, setPostingMode] = useState<SocialPostingMode>(initialValues?.postingMode ?? (platform === "linkedin" ? "manual" : "ai_optimized"));
-  const [preferredWeekdays, setPreferredWeekdays] = useState<SocialWeekday[]>(initialValues?.preferredWeekdays ?? []);
-  const [audience, setAudience] = useState(initialValues?.audience ?? "");
-  const [followersCount, setFollowersCount] = useState(initialValues?.followersCount != null ? String(initialValues.followersCount) : "");
-  const [goal, setGoal] = useState<(typeof GOAL_OPTIONS)[number] | "">(initialValues?.goal ? (initialValues.goal as any) : "");
-  const [tone, setTone] = useState<(typeof TONE_OPTIONS)[number] | "">(initialValues?.tone ? (initialValues.tone as any) : "");
-  const [formatPreference, setFormatPreference] = useState(initialValues?.formatPreference ?? "");
+  const [topic, setTopic] = useState("");
+  const [postsPerWeek, setPostsPerWeek] = useState(3);
+  const [postingMode, setPostingMode] = useState<SocialPostingMode>(platform === "linkedin" ? "manual" : "ai_optimized");
+  const [preferredWeekdays, setPreferredWeekdays] = useState<SocialWeekday[]>([]);
+  const [audience, setAudience] = useState("");
+  const [followersCount, setFollowersCount] = useState("");
+  const [goal, setGoal] = useState<(typeof GOAL_OPTIONS)[number] | "">("");
+  const [tone, setTone] = useState<(typeof TONE_OPTIONS)[number] | "">("");
+  const [formatPreference, setFormatPreference] = useState("");
   const [topicError, setTopicError] = useState("");
   const [followersError, setFollowersError] = useState("");
-
-  useEffect(() => {
-    if (!initialValues) return;
-    if (typeof initialValues.topic === "string") setTopic(initialValues.topic);
-    if (typeof initialValues.postsPerWeek === "number") setPostsPerWeek(initialValues.postsPerWeek);
-    if (initialValues.postingMode === "manual" || initialValues.postingMode === "ai_optimized") setPostingMode(initialValues.postingMode);
-    if (Array.isArray(initialValues.preferredWeekdays)) setPreferredWeekdays(initialValues.preferredWeekdays);
-    if (typeof initialValues.audience === "string") setAudience(initialValues.audience);
-    if (initialValues.followersCount != null) setFollowersCount(String(initialValues.followersCount));
-    if (typeof initialValues.goal === "string") setGoal(initialValues.goal as any);
-    if (typeof initialValues.tone === "string") setTone(initialValues.tone as any);
-    if (typeof initialValues.formatPreference === "string") setFormatPreference(initialValues.formatPreference);
-  }, [initialValues]);
 
   const subtitle = useMemo(
     () => `Choose a topic for the week and DayTabs will generate an execution-ready plan built for how ${label} actually works.`,
@@ -206,9 +179,7 @@ export function SocialPlanSetup({
               "Platform-specific ideas, not generic suggestions",
               "Hooks, scripts, captions, and visuals included",
               "Growth tasks to help your posts get seen",
-              nextWeekMode === "behavior_based"
-                ? "Next week improves based on your feedback"
-                : "Generate next week from your goals",
+              "Next week improves based on your feedback",
             ].map((item) => (
               <PanelCardSoft key={item} className="border border-white/10 p-3 text-sm text-white/70">
                 <Sparkles className="mb-2 h-4 w-4 text-violet-200" />

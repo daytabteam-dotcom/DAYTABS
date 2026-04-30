@@ -128,16 +128,3 @@ export interface SocialPostPerformanceFeedback {
   whatDidNotWork?: string;
   userNotes?: string;
 }
-
-export type SocialGrowthPlanTier = "free" | "creator" | "pro" | "studio";
-
-export interface SocialGrowthAccess {
-  plan: SocialGrowthPlanTier;
-  usedPlatforms: SocialPlatform[];
-  platformLimit: number;
-  totalWeeklyPlans: number | null;
-  improvementsPerPlatform: number | null;
-  additionalIdeasPerPlatform: number | null;
-  manualIdeasPerPlatform: number | null;
-  nextWeekMode: "blocked" | "form_based" | "behavior_based";
-}
