@@ -16,7 +16,49 @@ function parseAiJson(raw: string) {
     .replace(/^```json\s*/i, "")
     .replace(/^```\s*/i, "")
     .replace(/\s*```$/i, "");
-  return JSON.parse(withoutFence);
+  return JSON.parse(extractJsonObject(withoutFence));
+}
+
+function extractJsonObject(raw: string) {
+  const text = raw.trim();
+  const start = text.indexOf("{");
+  if (start < 0) return text;
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  let end = -1;
+  for (let i = start; i < text.length; i += 1) {
+    const c = text[i]!;
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (c === "\\") {
+        escaped = true;
+        continue;
+      }
+      if (c === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+    if (c === "\"") {
+      inString = true;
+      continue;
+    }
+    if (c === "{") depth += 1;
+    if (c === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        end = i + 1;
+        break;
+      }
+    }
+  }
+  if (end > start) return text.slice(start, end);
+  return text.slice(start);
 }
 
 function isIsoDate(value: unknown): value is string {
@@ -407,7 +449,29 @@ ${jsonShape()}
   });
 
   const raw = completion.choices[0]?.message?.content ?? "{}";
-  const parsed = parseAiJson(raw) as PlanPayload;
+  let parsed: PlanPayload;
+  try {
+    parsed = parseAiJson(raw) as PlanPayload;
+  } catch (err) {
+    const fixer = await openai.chat.completions.create({
+      model: params.model,
+      messages: [
+        { role: "system", content: "You fix invalid JSON. Return valid JSON only (no markdown, no commentary)." },
+        {
+          role: "user",
+          content: `The following text was intended to be valid JSON for a Social Growth weekly plan, but it is invalid JSON.\n\nReturn a corrected JSON object only.\n\nText:\n${raw}\n\nRequired JSON shape:\n${jsonShape()}`,
+        },
+      ],
+      response_format: { type: "json_object" },
+      max_completion_tokens: 2600,
+    });
+    const fixedRaw = fixer.choices[0]?.message?.content ?? "{}";
+    try {
+      parsed = parseAiJson(fixedRaw) as PlanPayload;
+    } catch {
+      throw new Error(err instanceof Error ? err.message : "Could not parse AI response JSON");
+    }
+  }
   const days = Array.isArray(parsed.days) ? parsed.days : [];
 
   const withinWindow = (iso: string) => iso >= params.startDate && iso <= params.endDate;
