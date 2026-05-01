@@ -12,8 +12,14 @@ function authHeaders(): HeadersInit {
 
 async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
   const controller = new AbortController();
-  const timeoutMs = 15_000;
-  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+  const timeoutMs = url.startsWith("/api/social-growth/") ? 75_000 : 15_000;
+  const timeoutId = window.setTimeout(() => {
+    try {
+      controller.abort("Request timed out");
+    } catch {
+      controller.abort();
+    }
+  }, timeoutMs);
   const upstreamSignal = init?.signal;
   const abortUpstream = () => controller.abort();
   upstreamSignal?.addEventListener("abort", abortUpstream);
