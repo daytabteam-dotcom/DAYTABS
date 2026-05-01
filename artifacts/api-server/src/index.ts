@@ -27,6 +27,24 @@ async function runStartupMigrations() {
       sql`ALTER TABLE user_usage ADD COLUMN IF NOT EXISTS script_generations_used INTEGER NOT NULL DEFAULT 0`
     );
     await db.execute(
+      sql`ALTER TABLE user_usage ADD COLUMN IF NOT EXISTS social_growth_ai_improvements_linkedin INTEGER NOT NULL DEFAULT 0`
+    );
+    await db.execute(
+      sql`ALTER TABLE user_usage ADD COLUMN IF NOT EXISTS social_growth_ai_improvements_tiktok INTEGER NOT NULL DEFAULT 0`
+    );
+    await db.execute(
+      sql`ALTER TABLE user_usage ADD COLUMN IF NOT EXISTS social_growth_ai_improvements_instagram INTEGER NOT NULL DEFAULT 0`
+    );
+    await db.execute(
+      sql`ALTER TABLE user_usage ADD COLUMN IF NOT EXISTS social_growth_additional_ai_ideas_linkedin INTEGER NOT NULL DEFAULT 0`
+    );
+    await db.execute(
+      sql`ALTER TABLE user_usage ADD COLUMN IF NOT EXISTS social_growth_additional_ai_ideas_tiktok INTEGER NOT NULL DEFAULT 0`
+    );
+    await db.execute(
+      sql`ALTER TABLE user_usage ADD COLUMN IF NOT EXISTS social_growth_additional_ai_ideas_instagram INTEGER NOT NULL DEFAULT 0`
+    );
+    await db.execute(
       sql`UPDATE user_usage SET video_analysis_runs_used = COALESCE(video_analysis_runs_used, video_analyses_used, 0)`
     );
     await db.execute(
