@@ -309,6 +309,7 @@ export async function generateSocialWeeklyPlanAi(params: {
   formatPreference?: string;
   previousWeekBehaviorSummary?: unknown;
   skippedFeedback?: boolean;
+  nextWeekMode?: "goal_based" | "behavior_based";
 }) {
   const scheduledDates = params.postingMode === "manual"
     ? datesForCadence(params.startDate, params.postsPerWeek, params.preferredWeekdays)
@@ -318,6 +319,9 @@ export async function generateSocialWeeklyPlanAi(params: {
 Platform rules:
 ${platformPrompt(params.platform)}
 `;
+
+  const nextWeekMode = params.nextWeekMode ?? (params.previousWeekBehaviorSummary ? "behavior_based" : "goal_based");
+  const isGoalBasedNextWeek = nextWeekMode === "goal_based" && Boolean(params.skippedFeedback);
 
   const userPrompt = `Generate a weekly content plan for ${params.platform}.
 
@@ -357,21 +361,21 @@ ${params.formatPreference || ""}
 Current followers/subscribers:
 ${params.followersCount ?? "unknown"}
 
-Previous week user behavior summary (highest priority signal; do NOT request raw data):
-${params.previousWeekBehaviorSummary ? JSON.stringify(params.previousWeekBehaviorSummary) : "null"}
+Previous week user behavior summary:
+${isGoalBasedNextWeek ? "DO NOT USE. This plan must be generated only from the form inputs below." : (params.previousWeekBehaviorSummary ? JSON.stringify(params.previousWeekBehaviorSummary) : "null")}
 
 Rules:
-- User behavior is the strongest signal. Use it before generic platform advice.
 - Followers count MUST influence strategy and tasks.
 - If followers are low → include visibility & engagement-heavy tasks.
 - If followers are high → focus on optimization & authority.
-- Manual posts/ideas created by the user are the strongest preference signal.
+${isGoalBasedNextWeek ? `- This user is on Creator plan. Generate next week’s content plan only from the provided goal, audience, followers, topic, tone, posting mode, and content style preference. Do not reference previous week behavior, deleted ideas, completed tasks, or performance feedback.` : "- User behavior is the strongest signal. Use it before generic platform advice."}
+${isGoalBasedNextWeek ? "" : `- Manual posts/ideas created by the user are the strongest preference signal.
 - Completed or published posts show what the user is willing to execute.
 - Great/good performing posts should inspire fresh related angles, not duplicates.
 - Poor performing posts should not be repeated with the same hook, format, angle, or CTA.
 - Skipped/incomplete posts are neutral signals, not failures.
 - Deleted/disliked AI ideas are negative signals. Avoid similar concepts unless there is a clear reason.
-- If the user ignored AI-generated ideas but added manual ones, adapt toward the manual style.
+- If the user ignored AI-generated ideas but added manual ones, adapt toward the manual style.`}
 - Each idea must include a clear behaviorSignalUsed.
 - Each idea must explain whyThisFitsUser.
 - Each idea must mention avoidBecause.

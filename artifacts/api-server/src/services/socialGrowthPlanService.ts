@@ -12,6 +12,14 @@ export async function listSocialWeeklyPlans(userId: number, platform: SocialPlat
     .limit(12);
 }
 
+export async function listUsedSocialGrowthPlatforms(userId: number): Promise<SocialPlatform[]> {
+  const rows = await db
+    .selectDistinct({ platform: socialGrowthWeeklyPlansTable.platform })
+    .from(socialGrowthWeeklyPlansTable)
+    .where(eq(socialGrowthWeeklyPlansTable.userId, userId));
+  return rows.map((row) => row.platform).filter(Boolean) as SocialPlatform[];
+}
+
 export async function getLatestSocialWeeklyPlan(userId: number, platform: SocialPlatform) {
   const [row] = await db
     .select()

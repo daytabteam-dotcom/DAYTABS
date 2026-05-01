@@ -701,7 +701,13 @@ export function SocialPlanBoard({
                                         await onRegenerateDay(day);
                                         toast({ title: "Regenerated", description: "Generated a new version of this idea." });
                                       } catch (err) {
-                                        toast({ variant: "destructive", title: "Could not regenerate", description: err instanceof Error ? err.message : "Please try again." });
+                                        const message = err instanceof Error ? err.message : "Please try again.";
+                                        const isLimit = message.includes("AI improvements") || message.includes("Additional AI-generated ideas");
+                                        toast({
+                                          variant: isLimit ? "default" : "destructive",
+                                          title: isLimit ? "Upgrade required" : "Could not regenerate",
+                                          description: message,
+                                        });
                                       }
                                     }}
                                     disabled={working}
@@ -721,7 +727,13 @@ export function SocialPlanBoard({
                                           await onPatchDay(day, { aiImproved: true });
                                           toast({ title: "Improved", description: "Updated this idea with AI." });
                                         } catch (err) {
-                                          toast({ variant: "destructive", title: "Could not improve idea", description: err instanceof Error ? err.message : "Please try again." });
+                                          const message = err instanceof Error ? err.message : "Please try again.";
+                                          const isLimit = message.includes("AI improvements") || message.includes("Additional AI-generated ideas");
+                                          toast({
+                                            variant: isLimit ? "default" : "destructive",
+                                            title: isLimit ? "Upgrade required" : "Could not improve idea",
+                                            description: message,
+                                          });
                                         }
                                       }}
                                       disabled={working}
@@ -1193,7 +1205,13 @@ export function SocialPlanBoard({
                           await onRegenerateDay(placeholderDay, intent);
                           await onPatchDay(placeholderDay, { ideaOrigin: "manual", aiImproved: true });
                         } catch (err) {
-                          toast({ variant: "destructive", title: "Could not improve idea", description: err instanceof Error ? err.message : "Please try again." });
+                          const message = err instanceof Error ? err.message : "Please try again.";
+                          const isLimit = message.includes("AI improvements") || message.includes("Additional AI-generated ideas");
+                          toast({
+                            variant: isLimit ? "default" : "destructive",
+                            title: isLimit ? "Upgrade required" : "Could not improve idea",
+                            description: message,
+                          });
                         }
                       }
                       setManualOpen(false);
@@ -1473,7 +1491,13 @@ export function SocialPlanBoard({
                             await onRegenerateDay(activeDay);
                             toast({ title: "Regenerated", description: "Generated a new version of this idea." });
                           } catch (err) {
-                            toast({ variant: "destructive", title: "Could not regenerate", description: err instanceof Error ? err.message : "Please try again." });
+                            const message = err instanceof Error ? err.message : "Please try again.";
+                            const isLimit = message.includes("AI improvements") || message.includes("Additional AI-generated ideas");
+                            toast({
+                              variant: isLimit ? "default" : "destructive",
+                              title: isLimit ? "Upgrade required" : "Could not regenerate",
+                              description: message,
+                            });
                           }
                         }}
                         disabled={working}
@@ -1493,7 +1517,13 @@ export function SocialPlanBoard({
                               await onPatchDay(activeDay, { aiImproved: true });
                               toast({ title: "Improved", description: "Updated this idea with AI." });
                             } catch (err) {
-                              toast({ variant: "destructive", title: "Could not improve idea", description: err instanceof Error ? err.message : "Please try again." });
+                              const message = err instanceof Error ? err.message : "Please try again.";
+                              const isLimit = message.includes("AI improvements") || message.includes("Additional AI-generated ideas");
+                              toast({
+                                variant: isLimit ? "default" : "destructive",
+                                title: isLimit ? "Upgrade required" : "Could not improve idea",
+                                description: message,
+                              });
                             }
                           }}
                           disabled={working}

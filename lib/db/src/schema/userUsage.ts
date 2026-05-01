@@ -15,6 +15,12 @@ export const userUsageTable = pgTable("user_usage", {
   contentPlannerTokensUsed: integer("content_planner_tokens_used").notNull().default(0),
   youtubeGrowthTokensUsed: integer("youtube_growth_tokens_used").notNull().default(0),
   socialGrowthPlansUsed: integer("social_growth_plans_used").notNull().default(0),
+  socialGrowthAiImprovementsLinkedin: integer("social_growth_ai_improvements_linkedin").notNull().default(0),
+  socialGrowthAiImprovementsTiktok: integer("social_growth_ai_improvements_tiktok").notNull().default(0),
+  socialGrowthAiImprovementsInstagram: integer("social_growth_ai_improvements_instagram").notNull().default(0),
+  socialGrowthAdditionalAiIdeasLinkedin: integer("social_growth_additional_ai_ideas_linkedin").notNull().default(0),
+  socialGrowthAdditionalAiIdeasTiktok: integer("social_growth_additional_ai_ideas_tiktok").notNull().default(0),
+  socialGrowthAdditionalAiIdeasInstagram: integer("social_growth_additional_ai_ideas_instagram").notNull().default(0),
   lastUpdated: timestamp("last_updated").defaultNow().notNull(),
 });
 

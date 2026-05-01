@@ -121,6 +121,8 @@ export function SocialPlanSetup({
   platform,
   onGenerate,
   generating,
+  initialValues,
+  submitLabel,
 }: {
   platform: SocialPlatform;
   generating: boolean;
@@ -135,18 +137,30 @@ export function SocialPlanSetup({
     tone?: string;
     formatPreference?: string;
   }) => void;
+  initialValues?: Partial<{
+    topic: string;
+    postsPerWeek: number;
+    postingMode: SocialPostingMode;
+    preferredWeekdays: SocialWeekday[];
+    audience: string;
+    followersCount: number | null;
+    goal: string;
+    tone: string;
+    formatPreference: string;
+  }>;
+  submitLabel?: string;
 }) {
   const label = platformLabel(platform);
   const copy = platformCopy(platform);
-  const [topic, setTopic] = useState("");
-  const [postsPerWeek, setPostsPerWeek] = useState(3);
-  const [postingMode, setPostingMode] = useState<SocialPostingMode>(platform === "linkedin" ? "manual" : "ai_optimized");
-  const [preferredWeekdays, setPreferredWeekdays] = useState<SocialWeekday[]>([]);
-  const [audience, setAudience] = useState("");
-  const [followersCount, setFollowersCount] = useState("");
-  const [goal, setGoal] = useState<(typeof GOAL_OPTIONS)[number] | "">("");
-  const [tone, setTone] = useState<(typeof TONE_OPTIONS)[number] | "">("");
-  const [formatPreference, setFormatPreference] = useState("");
+  const [topic, setTopic] = useState(initialValues?.topic ?? "");
+  const [postsPerWeek, setPostsPerWeek] = useState(initialValues?.postsPerWeek ?? 3);
+  const [postingMode, setPostingMode] = useState<SocialPostingMode>(initialValues?.postingMode ?? (platform === "linkedin" ? "manual" : "ai_optimized"));
+  const [preferredWeekdays, setPreferredWeekdays] = useState<SocialWeekday[]>(initialValues?.preferredWeekdays ?? []);
+  const [audience, setAudience] = useState(initialValues?.audience ?? "");
+  const [followersCount, setFollowersCount] = useState(initialValues?.followersCount != null ? String(initialValues.followersCount) : "");
+  const [goal, setGoal] = useState<(typeof GOAL_OPTIONS)[number] | "">(initialValues?.goal ? (initialValues.goal as any) : "");
+  const [tone, setTone] = useState<(typeof TONE_OPTIONS)[number] | "">(initialValues?.tone ? (initialValues.tone as any) : "");
+  const [formatPreference, setFormatPreference] = useState(initialValues?.formatPreference ?? "");
   const [topicError, setTopicError] = useState("");
   const [followersError, setFollowersError] = useState("");
 
@@ -418,7 +432,7 @@ export function SocialPlanSetup({
                 className="rounded-lg bg-linear-to-r from-violet-500 to-fuchsia-500 text-white hover:from-violet-400 hover:to-fuchsia-400"
               >
                 <Wand2 className="mr-2 h-4 w-4" />
-                {generating ? "Generating..." : "Generate My Weekly Plan"}
+                {generating ? "Generating..." : (submitLabel ?? "Generate My Weekly Plan")}
               </Button>
             </div>
           </div>

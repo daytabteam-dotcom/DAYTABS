@@ -7,6 +7,9 @@ import { createSocialDay, fetchLatestSocialPlan, generateNextWeekSocialPlan, gen
 import { SocialPlanSetup } from "./SocialPlanSetup";
 import { SocialPlanBoard } from "./SocialPlanBoard";
 import { SocialFeedbackModal } from "./SocialFeedbackModal";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { getNextWeekGenerationMode } from "@/lib/contentGrowthLimits";
+import { usePlan } from "@/hooks/use-plan";
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
@@ -22,9 +25,10 @@ function platformLabel(platform: SocialPlatform) {
   return "Instagram";
 }
 
-export default function SocialGrowthPlanner({ platform }: { platform: SocialPlatform }) {
+export default function SocialGrowthPlanner({ platform, onUsageChanged }: { platform: SocialPlatform; onUsageChanged?: () => void }) {
   const label = platformLabel(platform);
   const { toast } = useToast();
+  const { plan: planInfo } = usePlan();
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -32,6 +36,7 @@ export default function SocialGrowthPlanner({ platform }: { platform: SocialPlat
   const [plan, setPlan] = useState<SocialWeeklyPlan | null>(null);
 
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [nextWeekSetupOpen, setNextWeekSetupOpen] = useState(false);
   const [pendingNextWeekTopic, setPendingNextWeekTopic] = useState<string>("");
   const [pendingFollowersCount, setPendingFollowersCount] = useState<string>("");
 
@@ -62,6 +67,7 @@ export default function SocialGrowthPlanner({ platform }: { platform: SocialPlat
     try {
       const data = await generateSocialPlan({ platform, ...input });
       setPlan(data.plan);
+      onUsageChanged?.();
     } catch (err) {
       const message = err instanceof Error ? err.message : "Could not generate plan";
       if (message.toLowerCase().includes("limit")) setLimitError(message);
@@ -69,7 +75,7 @@ export default function SocialGrowthPlanner({ platform }: { platform: SocialPlat
     } finally {
       setWorking(null);
     }
-  }, [platform]);
+  }, [onUsageChanged, platform]);
 
   const handlePatchDay = useCallback(async (day: SocialPlanDay, patch: Partial<SocialPlanDay>) => {
     if (!plan) return;
@@ -112,6 +118,7 @@ export default function SocialGrowthPlanner({ platform }: { platform: SocialPlat
     try {
       const data = await regenerateSocialDay({ planId: plan.id, dayId: day.id, platform, intent });
       setPlan(data.plan);
+      onUsageChanged?.();
     } catch (err) {
       const message = err instanceof Error ? err.message : "Could not regenerate idea";
       setError(message);
@@ -119,7 +126,7 @@ export default function SocialGrowthPlanner({ platform }: { platform: SocialPlat
     } finally {
       setWorking(null);
     }
-  }, [plan, platform]);
+  }, [onUsageChanged, plan, platform]);
 
   const handleCreateDay = useCallback(async (input: { date: string; contentIdea: string; contentType?: string; hook?: string; notes?: string; tags?: string[]; bestPostingTime?: string }) => {
     if (!plan) return null;
@@ -148,10 +155,15 @@ export default function SocialGrowthPlanner({ platform }: { platform: SocialPlat
       });
       return;
     }
+    const nextWeekMode = getNextWeekGenerationMode(planInfo.plan);
     setPendingNextWeekTopic(plan.topic);
     setPendingFollowersCount(plan.followersCount != null ? String(plan.followersCount) : "");
-    setFeedbackOpen(true);
-  }, [plan, toast]);
+    if (nextWeekMode === "goal_based") {
+      setNextWeekSetupOpen(true);
+    } else {
+      setFeedbackOpen(true);
+    }
+  }, [plan, planInfo.plan, toast]);
 
   const runGenerateNextWeek = useCallback(async (options: { skippedFeedback: boolean; feedback?: SocialPostPerformanceFeedback[]; followersCount?: number | null }) => {
     if (!plan) return;
@@ -176,6 +188,7 @@ export default function SocialGrowthPlanner({ platform }: { platform: SocialPlat
       });
       setPlan(data.plan);
       setFeedbackOpen(false);
+      onUsageChanged?.();
     } catch (err) {
       const message = err instanceof Error ? err.message : "We could not generate the next plan. Your feedback is saved, so you can try again.";
       if (message.toLowerCase().includes("limit")) setLimitError(message);
@@ -183,7 +196,39 @@ export default function SocialGrowthPlanner({ platform }: { platform: SocialPlat
     } finally {
       setWorking(null);
     }
-  }, [pendingNextWeekTopic, plan, platform]);
+  }, [onUsageChanged, pendingNextWeekTopic, plan, platform]);
+
+  const runGenerateNextWeekGoalBased = useCallback(async (input: { topic: string; postsPerWeek: number; postingMode: SocialPostingMode; preferredWeekdays?: SocialWeekday[]; audience?: string; followersCount?: number | null; goal?: string; tone?: string; formatPreference?: string }) => {
+    if (!plan) return;
+    setWorking("next-week");
+    setError(null);
+    setLimitError(null);
+    try {
+      const data = await generateNextWeekSocialPlan({
+        planId: plan.id,
+        platform,
+        topic: input.topic,
+        postsPerWeek: input.postsPerWeek,
+        followersCount: input.followersCount,
+        postingMode: input.postingMode,
+        preferredWeekdays: input.preferredWeekdays,
+        audience: input.audience,
+        goal: input.goal,
+        tone: input.tone,
+        formatPreference: input.formatPreference,
+        skippedFeedback: true,
+      });
+      setPlan(data.plan);
+      setNextWeekSetupOpen(false);
+      onUsageChanged?.();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "We could not generate the next plan. Please try again.";
+      if (message.toLowerCase().includes("limit")) setLimitError(message);
+      else setError(message);
+    } finally {
+      setWorking(null);
+    }
+  }, [onUsageChanged, plan, platform]);
 
   if (loading) {
     return (
@@ -241,6 +286,36 @@ export default function SocialGrowthPlanner({ platform }: { platform: SocialPlat
               void runGenerateNextWeek({ skippedFeedback: false, feedback, followersCount: normalizedFollowersCount ?? undefined });
             }}
           />
+
+          <Dialog open={nextWeekSetupOpen} onOpenChange={(open) => setNextWeekSetupOpen(open)}>
+            <DialogContent className="max-w-[920px] border-white/10 bg-[#0b0a12] text-white">
+              <DialogHeader>
+                <DialogTitle>Plan next week</DialogTitle>
+                <DialogDescription className="text-white/55">
+                  Creator plan uses goal-based planning for next week (no performance feedback required).
+                </DialogDescription>
+              </DialogHeader>
+              {plan ? (
+                <SocialPlanSetup
+                  platform={platform}
+                  generating={working === "next-week"}
+                  submitLabel="Generate Next Week Plan"
+                  initialValues={{
+                    topic: pendingNextWeekTopic.trim() || plan.topic,
+                    postsPerWeek: plan.postsPerWeek,
+                    postingMode: plan.postingMode,
+                    preferredWeekdays: plan.preferredWeekdays ?? [],
+                    audience: plan.audience ?? "",
+                    followersCount: plan.followersCount ?? null,
+                    goal: plan.goal ?? "",
+                    tone: plan.tone ?? "",
+                    formatPreference: plan.formatPreference ?? "",
+                  }}
+                  onGenerate={runGenerateNextWeekGoalBased}
+                />
+              ) : null}
+            </DialogContent>
+          </Dialog>
         </>
       )}
     </div>

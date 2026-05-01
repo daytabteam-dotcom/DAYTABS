@@ -38,6 +38,15 @@ export async function fetchLatestSocialPlan(platform: SocialPlatform) {
   return await jsonFetch<{ plan: SocialWeeklyPlan | null }>(`/api/social-growth/plans/latest?platform=${platform}`);
 }
 
+export async function fetchSocialGrowthUsage() {
+  return await jsonFetch<{
+    weeksGeneratedTotal: number;
+    usedPlatforms: SocialPlatform[];
+    aiImprovementsByPlatform: Record<SocialPlatform, number>;
+    additionalIdeasByPlatform: Record<SocialPlatform, number>;
+  }>(`/api/social-growth/usage`);
+}
+
 export async function generateSocialPlan(input: {
   platform: SocialPlatform;
   topic: string;

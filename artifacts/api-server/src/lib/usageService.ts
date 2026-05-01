@@ -196,6 +196,12 @@ export async function getOrCreateUsage(userId: number) {
         contentPlannerTokensUsed: productTokens.contentPlanner,
         youtubeGrowthTokensUsed: productTokens.youtubeGrowth,
         socialGrowthPlansUsed: 0,
+        socialGrowthAiImprovementsLinkedin: 0,
+        socialGrowthAiImprovementsTiktok: 0,
+        socialGrowthAiImprovementsInstagram: 0,
+        socialGrowthAdditionalAiIdeasLinkedin: 0,
+        socialGrowthAdditionalAiIdeasTiktok: 0,
+        socialGrowthAdditionalAiIdeasInstagram: 0,
         lastUpdated: new Date(),
       })
       .returning();
@@ -219,6 +225,12 @@ export async function getOrCreateUsage(userId: number) {
         contentPlannerTokensUsed: productTokens.contentPlanner,
         youtubeGrowthTokensUsed: productTokens.youtubeGrowth,
         socialGrowthPlansUsed: 0,
+        socialGrowthAiImprovementsLinkedin: 0,
+        socialGrowthAiImprovementsTiktok: 0,
+        socialGrowthAiImprovementsInstagram: 0,
+        socialGrowthAdditionalAiIdeasLinkedin: 0,
+        socialGrowthAdditionalAiIdeasTiktok: 0,
+        socialGrowthAdditionalAiIdeasInstagram: 0,
         lastUpdated: new Date(),
       })
       .where(eq(userUsageTable.userId, userId))
@@ -365,7 +377,9 @@ export async function checkAndIncrementSocialGrowthPlan(userId: number, rawPlan:
       used,
       limit,
       error: {
-        error: "You have reached your Growth Planner limit on your current plan. Upgrade your plan to create more weekly plans.",
+        error: plan === "free"
+          ? "Free plan includes one Content Growth week. Upgrade to generate more plans."
+          : "You have reached your Growth Planner limit on your current plan. Upgrade your plan to create more weekly plans.",
       },
     };
   }
@@ -399,10 +413,99 @@ export async function checkSocialGrowthPlanLimit(userId: number, rawPlan: string
       used,
       limit,
       error: {
-        error: "You have reached your Growth Planner limit on your current plan. Upgrade your plan to create more weekly plans.",
+        error: plan === "free"
+          ? "Free plan includes one Content Growth week. Upgrade to generate more plans."
+          : "You have reached your Growth Planner limit on your current plan. Upgrade your plan to create more weekly plans.",
       },
     };
   }
 
   return { allowed: true, used, limit };
+}
+
+// ─── Social Growth AI limits (manual improvements + additional ideas) ─────────
+
+function socialGrowthManualImprovementLimit(plan: ReturnType<typeof normalizePlan>) {
+  if (plan === "free") return 3;
+  if (plan === "creator") return 15;
+  if (plan === "pro") return 30;
+  return Infinity;
+}
+
+function socialGrowthAdditionalIdeaLimit(plan: ReturnType<typeof normalizePlan>) {
+  if (plan === "free") return 0;
+  if (plan === "creator") return 8;
+  if (plan === "pro") return 20;
+  return Infinity;
+}
+
+export async function checkAndIncrementSocialGrowthManualIdeaImprovement(
+  userId: number,
+  rawPlan: string,
+  platform: "linkedin" | "tiktok" | "instagram",
+): Promise<{ allowed: boolean; used: number; limit: number; error?: { error: string } }> {
+  const plan = normalizePlan(rawPlan);
+  const limit = socialGrowthManualImprovementLimit(plan);
+  const usage = await getOrCreateUsage(userId);
+
+  const usedTotal = (usage.socialGrowthAiImprovementsLinkedin ?? 0)
+    + (usage.socialGrowthAiImprovementsTiktok ?? 0)
+    + (usage.socialGrowthAiImprovementsInstagram ?? 0);
+  const usedPlatform = platform === "linkedin"
+    ? (usage.socialGrowthAiImprovementsLinkedin ?? 0)
+    : platform === "tiktok"
+      ? (usage.socialGrowthAiImprovementsTiktok ?? 0)
+      : (usage.socialGrowthAiImprovementsInstagram ?? 0);
+  const used = plan === "free" ? usedTotal : usedPlatform;
+
+  if (used >= limit) {
+    return {
+      allowed: false,
+      used,
+      limit: Number.isFinite(limit) ? Number(limit) : used,
+      error: { error: "You’ve used all AI improvements included in your plan." },
+    };
+  }
+
+  await db.update(userUsageTable).set({
+    socialGrowthAiImprovementsLinkedin: platform === "linkedin" ? usedPlatform + 1 : (usage.socialGrowthAiImprovementsLinkedin ?? 0),
+    socialGrowthAiImprovementsTiktok: platform === "tiktok" ? usedPlatform + 1 : (usage.socialGrowthAiImprovementsTiktok ?? 0),
+    socialGrowthAiImprovementsInstagram: platform === "instagram" ? usedPlatform + 1 : (usage.socialGrowthAiImprovementsInstagram ?? 0),
+    lastUpdated: new Date(),
+  }).where(eq(userUsageTable.userId, userId));
+
+  return { allowed: true, used: used + 1, limit: Number.isFinite(limit) ? Number(limit) : used + 1 };
+}
+
+export async function checkAndIncrementSocialGrowthAdditionalIdea(
+  userId: number,
+  rawPlan: string,
+  platform: "linkedin" | "tiktok" | "instagram",
+): Promise<{ allowed: boolean; used: number; limit: number; error?: { error: string } }> {
+  const plan = normalizePlan(rawPlan);
+  const limit = socialGrowthAdditionalIdeaLimit(plan);
+  const usage = await getOrCreateUsage(userId);
+  const used = platform === "linkedin"
+    ? (usage.socialGrowthAdditionalAiIdeasLinkedin ?? 0)
+    : platform === "tiktok"
+      ? (usage.socialGrowthAdditionalAiIdeasTiktok ?? 0)
+      : (usage.socialGrowthAdditionalAiIdeasInstagram ?? 0);
+
+  if (used >= limit) {
+    return {
+      allowed: false,
+      used,
+      limit: Number.isFinite(limit) ? Number(limit) : used,
+      error: { error: "Additional AI-generated ideas are not included in your current plan." },
+    };
+  }
+
+  await db.update(userUsageTable).set({
+    socialGrowthAdditionalAiIdeasLinkedin: platform === "linkedin" ? used + 1 : (usage.socialGrowthAdditionalAiIdeasLinkedin ?? 0),
+    socialGrowthAdditionalAiIdeasTiktok: platform === "tiktok" ? used + 1 : (usage.socialGrowthAdditionalAiIdeasTiktok ?? 0),
+    socialGrowthAdditionalAiIdeasInstagram: platform === "instagram" ? used + 1 : (usage.socialGrowthAdditionalAiIdeasInstagram ?? 0),
+    lastUpdated: new Date(),
+  }).where(eq(userUsageTable.userId, userId));
+
+  return { allowed: true, used: used + 1, limit: Number.isFinite(limit) ? Number(limit) : used + 1 };
 }

@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { requireAuth } from "../../middlewares/auth";
 import { normalizePlan, PLAN_LIMITS } from "../../lib/planLimits";
-import { checkAndIncrementSocialGrowthPlan, checkSocialGrowthPlanLimit } from "../../lib/usageService";
+import { checkAndIncrementSocialGrowthAdditionalIdea, checkAndIncrementSocialGrowthManualIdeaImprovement, checkAndIncrementSocialGrowthPlan, getOrCreateUsage } from "../../lib/usageService";
 import type {
   SocialPlatform,
   SocialPostPerformanceFeedback,
@@ -10,6 +10,7 @@ import type {
   SocialWeekday,
 } from "../../models/socialGrowthPlan";
 import { buildSocialGrowthBehaviorSummary } from "../../lib/socialGrowthBehaviorSummary";
+import { canGenerateAdditionalIdea, canImproveManualIdea, canUsePlatform, getNextWeekGenerationMode } from "../../lib/contentGrowthLimits";
 import { generateSocialWeeklyPlanAi, regenerateSocialPlanDayAi } from "../../services/socialGrowthAiService";
 import {
   createSocialWeeklyPlan,
@@ -18,6 +19,7 @@ import {
   getLatestFeedbackForPlan,
   getLatestSocialWeeklyPlan,
   listSocialWeeklyPlans,
+  listUsedSocialGrowthPlatforms,
   saveSocialWeeklyPlanFeedback,
   updateSocialPlanDay,
 } from "../../services/socialGrowthPlanService";
@@ -81,6 +83,25 @@ router.get("/plans/latest", async (req, res) => {
   }
   const plan = await getLatestSocialWeeklyPlan(req.auth!.user_id, platform);
   res.json({ plan });
+});
+
+router.get("/usage", async (req, res) => {
+  const usage = await getOrCreateUsage(req.auth!.user_id);
+  const usedPlatforms = await listUsedSocialGrowthPlatforms(req.auth!.user_id);
+  res.json({
+    weeksGeneratedTotal: usage.socialGrowthPlansUsed ?? 0,
+    usedPlatforms,
+    aiImprovementsByPlatform: {
+      linkedin: usage.socialGrowthAiImprovementsLinkedin ?? 0,
+      tiktok: usage.socialGrowthAiImprovementsTiktok ?? 0,
+      instagram: usage.socialGrowthAiImprovementsInstagram ?? 0,
+    },
+    additionalIdeasByPlatform: {
+      linkedin: usage.socialGrowthAdditionalAiIdeasLinkedin ?? 0,
+      tiktok: usage.socialGrowthAdditionalAiIdeasTiktok ?? 0,
+      instagram: usage.socialGrowthAdditionalAiIdeasInstagram ?? 0,
+    },
+  });
 });
 
 router.post("/plans/:id/days", async (req, res) => {
@@ -167,6 +188,14 @@ router.post("/plans/generate", async (req, res) => {
     return;
   }
 
+  const rawPlan = req.auth!.plan ?? "free";
+  const usedPlatforms = await listUsedSocialGrowthPlatforms(req.auth!.user_id);
+  const platformDecision = canUsePlatform(rawPlan, platform, usedPlatforms);
+  if (!platformDecision.allowed) {
+    res.status(403).json({ error: platformDecision.message, code: platformDecision.code });
+    return;
+  }
+
   const trimmedTopic = String(topic ?? "").trim();
   if (!trimmedTopic) {
     res.status(400).json({ error: "Topic is required." });
@@ -184,7 +213,6 @@ router.post("/plans/generate", async (req, res) => {
     return;
   }
 
-  const rawPlan = req.auth!.plan ?? "free";
   const usageCheck = await checkAndIncrementSocialGrowthPlan(req.auth!.user_id, rawPlan);
   if (!usageCheck.allowed) {
     res.status(429).json({ ...usageCheck.error, limitReached: true, type: "growth_planner_limit" });
@@ -295,6 +323,14 @@ router.post("/plans/:id/generate-next-week", async (req, res) => {
     return;
   }
 
+  const rawPlan = req.auth!.plan ?? "free";
+  const usedPlatforms = await listUsedSocialGrowthPlatforms(req.auth!.user_id);
+  const platformDecision = canUsePlatform(rawPlan, platform, usedPlatforms);
+  if (!platformDecision.allowed) {
+    res.status(403).json({ error: platformDecision.message, code: platformDecision.code });
+    return;
+  }
+
   const todayIso = new Date().toISOString().slice(0, 10);
   if (todayIso <= currentPlan.endDate) {
     res.status(400).json({ error: "This week is still active. You can generate next week after this plan ends." });
@@ -313,14 +349,15 @@ router.post("/plans/:id/generate-next-week", async (req, res) => {
   const nextStart = addDaysIso(currentPlan.endDate, 1);
   const { endDate } = weekRangeForStart(nextStart);
 
+  const nextWeekMode = getNextWeekGenerationMode(rawPlan);
+  const allowBehavior = nextWeekMode === "behavior_based";
   let normalizedFeedback: SocialPostPerformanceFeedback[] | null = null;
-  const wantsSkip = Boolean(skippedFeedback);
-  if (!wantsSkip && Array.isArray(feedback)) {
+  const wantsSkip = nextWeekMode === "goal_based" ? true : Boolean(skippedFeedback);
+  if (allowBehavior && !wantsSkip && Array.isArray(feedback)) {
     normalizedFeedback = feedback as SocialPostPerformanceFeedback[];
     await saveSocialWeeklyPlanFeedback(req.auth!.user_id, planId, platform, normalizedFeedback);
   }
 
-  const rawPlan = req.auth!.plan ?? "free";
   const usageCheck = await checkAndIncrementSocialGrowthPlan(req.auth!.user_id, rawPlan);
   if (!usageCheck.allowed) {
     res.status(429).json({ ...usageCheck.error, limitReached: true, type: "growth_planner_limit" });
@@ -331,14 +368,16 @@ router.post("/plans/:id/generate-next-week", async (req, res) => {
   const normalizedFollowersCount = Number.isFinite(Number(followersCount))
     ? Math.max(0, Math.floor(Number(followersCount)))
     : (Number.isFinite(Number(currentPlan.followersCount)) ? Number(currentPlan.followersCount) : null);
-  const priorFeedback = wantsSkip
+  const priorFeedback = wantsSkip || !allowBehavior
     ? null
     : normalizedFeedback ?? ((await getLatestFeedbackForPlan(planId))?.feedback as any ?? null);
-  const behaviorSummary = buildSocialGrowthBehaviorSummary({
-    previousPlan: currentPlan.plan as any,
-    previousFeedback: priorFeedback,
-    skippedFeedback: wantsSkip,
-  });
+  const behaviorSummary = allowBehavior
+    ? buildSocialGrowthBehaviorSummary({
+      previousPlan: currentPlan.plan as any,
+      previousFeedback: priorFeedback,
+      skippedFeedback: wantsSkip,
+    })
+    : null;
 
   const aiResult = await generateSocialWeeklyPlanAi({
     userId: req.auth!.user_id,
@@ -357,6 +396,7 @@ router.post("/plans/:id/generate-next-week", async (req, res) => {
     followersCount: normalizedFollowersCount,
     previousWeekBehaviorSummary: behaviorSummary,
     skippedFeedback: wantsSkip,
+    nextWeekMode,
   });
 
   const row = await createSocialWeeklyPlan(req.auth!.user_id, {
@@ -375,7 +415,7 @@ router.post("/plans/:id/generate-next-week", async (req, res) => {
     plan: aiResult.plan,
   });
 
-  res.json({ plan: row, message: "Your feedback was saved. Creating next week's plan now." });
+  res.json({ plan: row, message: allowBehavior ? "Your feedback was saved. Creating next week's plan now." : "Creating next week's plan now." });
 });
 
 router.patch("/plans/:id/days/:dayId", async (req, res) => {
@@ -438,16 +478,41 @@ router.post("/plans/:id/days/:dayId/regenerate", async (req, res) => {
     return;
   }
 
-  const limitCheck = await checkSocialGrowthPlanLimit(req.auth!.user_id, req.auth!.plan ?? "free");
-  if (!limitCheck.allowed) {
-    res.status(429).json({ ...limitCheck.error, limitReached: true, type: "growth_planner_limit" });
-    return;
-  }
-
   const payload = currentPlan.plan as { days?: SocialPlanDay[] };
   const day = (payload.days ?? []).find((item) => item.id === dayId);
   if (!day) {
     res.status(404).json({ error: "Day not found" });
+    return;
+  }
+
+  const rawPlan = req.auth!.plan ?? "free";
+  const usage = await getOrCreateUsage(req.auth!.user_id);
+  const isManualImprovement = (day.ideaOrigin ?? "ai") === "manual" && typeof intent === "string" && intent.trim().length > 0;
+  const aiDecision = isManualImprovement
+    ? canImproveManualIdea(rawPlan, platform, {
+      aiImprovementsByPlatform: {
+        linkedin: usage.socialGrowthAiImprovementsLinkedin ?? 0,
+        tiktok: usage.socialGrowthAiImprovementsTiktok ?? 0,
+        instagram: usage.socialGrowthAiImprovementsInstagram ?? 0,
+      },
+    })
+    : canGenerateAdditionalIdea(rawPlan, platform, {
+      additionalIdeasByPlatform: {
+        linkedin: usage.socialGrowthAdditionalAiIdeasLinkedin ?? 0,
+        tiktok: usage.socialGrowthAdditionalAiIdeasTiktok ?? 0,
+        instagram: usage.socialGrowthAdditionalAiIdeasInstagram ?? 0,
+      },
+    });
+  if (!aiDecision.allowed) {
+    res.status(403).json({ error: aiDecision.message, code: aiDecision.code, limitReached: true });
+    return;
+  }
+
+  const usageCheck = isManualImprovement
+    ? await checkAndIncrementSocialGrowthManualIdeaImprovement(req.auth!.user_id, rawPlan, platform)
+    : await checkAndIncrementSocialGrowthAdditionalIdea(req.auth!.user_id, rawPlan, platform);
+  if (!usageCheck.allowed) {
+    res.status(403).json({ ...usageCheck.error, code: isManualImprovement ? "AI_IMPROVEMENT_LIMIT" : "ADDITIONAL_IDEA_LIMIT", limitReached: true });
     return;
   }
 
