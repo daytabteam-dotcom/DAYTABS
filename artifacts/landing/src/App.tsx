@@ -47,6 +47,9 @@ function Router() {
       <Route path="/features/tiktok-content-planner" component={TiktokContentPlannerFeaturePage} />
       <Route path="/features/instagram-content-planner" component={InstagramContentPlannerFeaturePage} />
       <Route path="/features/video-analysis" component={VideoAnalysisFeaturePage} />
+      <Route path="/features/video-analysis/" component={VideoAnalysisFeaturePage} />
+      <Route path="/features/video-analyzer" component={VideoAnalysisFeaturePage} />
+      <Route path="/features/video-analyzer/" component={VideoAnalysisFeaturePage} />
       <Route path="/features/:slug" component={FeaturesSlugPage} />
       <Route path="/blog" component={BlogIndexPage} />
       <Route path="/blog/:slug" component={BlogPostPage} />

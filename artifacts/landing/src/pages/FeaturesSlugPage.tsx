@@ -35,6 +35,11 @@ export default function FeaturesSlugPage() {
   const [, params] = useRoute("/features/:slug");
   const [, navigate] = useLocation();
   const slug = params?.slug ?? "";
+  const normalizedSlug = slug
+    .trim()
+    .toLowerCase()
+    .replace(/[_\s]+/g, "-")
+    .replace(/-+/g, "-");
 
   const feature = FEATURE_COPY[slug];
   if (slug === "teleprompter") {
@@ -43,6 +48,10 @@ export default function FeaturesSlugPage() {
   }
   if (slug === "content-planner") {
     navigate("/features/content-planner");
+    return null;
+  }
+  if (slug === "video-analyzer" || normalizedSlug === "video-analysis" || normalizedSlug === "video-analyzer") {
+    navigate("/features/video-analysis");
     return null;
   }
 

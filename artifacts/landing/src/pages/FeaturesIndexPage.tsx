@@ -19,11 +19,11 @@ const FEATURES = [
     comingSoon: false,
   },
   {
-    slug: "video-analyzer",
+    slug: "video-analysis",
     title: "Video Analyzer",
-    desc: "Upload a video and get actionable hook, pacing, and retention feedback.",
+    desc: "Upload a video and preview what DayTabs can analyze before you publish.",
     icon: Video,
-    comingSoon: true,
+    comingSoon: false,
   },
   {
     slug: "script-planner",
