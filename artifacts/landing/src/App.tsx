@@ -42,10 +42,15 @@ function Router() {
       <Route path="/refund-policy" component={RefundPolicyPage} />
       <Route path="/features" component={FeaturesIndexPage} />
       <Route path="/features/teleprompter" component={TeleprompterFeaturePage} />
+      <Route path="/features/teleprompter/" component={TeleprompterFeaturePage} />
       <Route path="/features/content-planner" component={ContentPlannerFeaturePage} />
+      <Route path="/features/content-planner/" component={ContentPlannerFeaturePage} />
       <Route path="/features/linkedin-content-planner" component={LinkedinContentPlannerFeaturePage} />
+      <Route path="/features/linkedin-content-planner/" component={LinkedinContentPlannerFeaturePage} />
       <Route path="/features/tiktok-content-planner" component={TiktokContentPlannerFeaturePage} />
+      <Route path="/features/tiktok-content-planner/" component={TiktokContentPlannerFeaturePage} />
       <Route path="/features/instagram-content-planner" component={InstagramContentPlannerFeaturePage} />
+      <Route path="/features/instagram-content-planner/" component={InstagramContentPlannerFeaturePage} />
       <Route path="/features/video-analysis" component={VideoAnalysisFeaturePage} />
       <Route path="/features/video-analysis/" component={VideoAnalysisFeaturePage} />
       <Route path="/features/video-analyzer" component={VideoAnalysisFeaturePage} />

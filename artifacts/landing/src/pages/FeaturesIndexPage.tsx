@@ -1,6 +1,6 @@
 import { Link } from "wouter";
 import { motion } from "framer-motion";
-import { ChevronRight, Mic2, Video, Wand2, LayoutDashboard, CalendarDays } from "lucide-react";
+import { ChevronRight, Mic2, Video, Wand2, LayoutDashboard, CalendarDays, Linkedin, Instagram, Music2 } from "lucide-react";
 import Navbar from "@/components/Navbar";
 
 const FEATURES = [
@@ -19,25 +19,32 @@ const FEATURES = [
     comingSoon: false,
   },
   {
+    slug: "linkedin-content-planner",
+    title: "LinkedIn Content Planner",
+    desc: "Plan posts, hooks, and weekly content for LinkedIn with clear angles and structure.",
+    icon: Linkedin,
+    comingSoon: false,
+  },
+  {
+    slug: "tiktok-content-planner",
+    title: "TikTok Content Planner",
+    desc: "Generate short-form ideas, hooks, and posting plans built for TikTok.",
+    icon: Music2,
+    comingSoon: false,
+  },
+  {
+    slug: "instagram-content-planner",
+    title: "Instagram Content Planner",
+    desc: "Plan Reels and posts with angles, hooks, and packaging ideas for Instagram.",
+    icon: Instagram,
+    comingSoon: false,
+  },
+  {
     slug: "video-analysis",
     title: "Video Analyzer",
     desc: "Upload a video and preview what DayTabs can analyze before you publish.",
     icon: Video,
     comingSoon: false,
-  },
-  {
-    slug: "script-planner",
-    title: "Script Planner",
-    desc: "Turn an idea into a structured script with clear beats and CTA.",
-    icon: Wand2,
-    comingSoon: true,
-  },
-  {
-    slug: "dashboard",
-    title: "Workspace",
-    desc: "Keep drafts, experiments, and iterations in one place.",
-    icon: LayoutDashboard,
-    comingSoon: true,
   },
 ] as const;
 

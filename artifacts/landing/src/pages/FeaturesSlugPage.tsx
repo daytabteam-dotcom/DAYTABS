@@ -42,11 +42,11 @@ export default function FeaturesSlugPage() {
     .replace(/-+/g, "-");
 
   const feature = FEATURE_COPY[slug];
-  if (slug === "teleprompter") {
+  if (slug === "teleprompter" || normalizedSlug === "teleprompter") {
     navigate("/features/teleprompter");
     return null;
   }
-  if (slug === "content-planner") {
+  if (slug === "content-planner" || normalizedSlug === "content-planner") {
     navigate("/features/content-planner");
     return null;
   }
