@@ -25,7 +25,17 @@ function platformLabel(platform: SocialPlatform) {
   return "Instagram";
 }
 
-export default function SocialGrowthPlanner({ platform, onUsageChanged }: { platform: SocialPlatform; onUsageChanged?: () => void }) {
+export default function SocialGrowthPlanner({
+  platform,
+  onUsageChanged,
+  autoGenerateWeeklyPlan,
+  onAutoGenerateComplete,
+}: {
+  platform: SocialPlatform;
+  onUsageChanged?: () => void;
+  autoGenerateWeeklyPlan?: null | { platform: SocialPlatform; goal: string; followersCount: number; contentFocus: string };
+  onAutoGenerateComplete?: () => void;
+}) {
   const label = platformLabel(platform);
   const { toast } = useToast();
   const { plan: planInfo } = usePlan();
@@ -83,6 +93,41 @@ export default function SocialGrowthPlanner({ platform, onUsageChanged }: { plat
       setWorking(null);
     }
   }, [onUsageChanged, platform, showErrorToast]);
+
+  const [autoGenerateRan, setAutoGenerateRan] = useState(false);
+  useEffect(() => {
+    if (autoGenerateRan) return;
+    if (!autoGenerateWeeklyPlan) return;
+    if (autoGenerateWeeklyPlan.platform !== platform) return;
+    if (loading) return;
+    if (plan) return;
+    const topic = autoGenerateWeeklyPlan.contentFocus
+      ? `${autoGenerateWeeklyPlan.goal} (${autoGenerateWeeklyPlan.contentFocus})`
+      : autoGenerateWeeklyPlan.goal;
+    setAutoGenerateRan(true);
+    void (async () => {
+      setWorking("generate");
+      try {
+        const data = await generateSocialPlan({
+          platform,
+          topic,
+          postsPerWeek: 5,
+          postingMode: platform === "linkedin" ? "manual" : "ai_optimized",
+          followersCount: autoGenerateWeeklyPlan.followersCount,
+          goal: autoGenerateWeeklyPlan.goal,
+          formatPreference: autoGenerateWeeklyPlan.contentFocus || undefined,
+        });
+        setPlan(data.plan);
+        onUsageChanged?.();
+        onAutoGenerateComplete?.();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Could not generate plan";
+        showErrorToast(message, "Could not generate plan");
+      } finally {
+        setWorking(null);
+      }
+    })();
+  }, [autoGenerateRan, autoGenerateWeeklyPlan, loading, onAutoGenerateComplete, onUsageChanged, plan, platform, showErrorToast]);
 
   const handlePatchDay = useCallback(async (day: SocialPlanDay, patch: Partial<SocialPlanDay>) => {
     if (!plan) return;
