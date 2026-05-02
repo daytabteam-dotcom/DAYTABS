@@ -31,8 +31,6 @@ export default function SocialGrowthPlanner({ platform, onUsageChanged }: { plat
   const { plan: planInfo } = usePlan();
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [limitError, setLimitError] = useState<string | null>(null);
   const [plan, setPlan] = useState<SocialWeeklyPlan | null>(null);
 
   const [feedbackOpen, setFeedbackOpen] = useState(false);
@@ -42,19 +40,31 @@ export default function SocialGrowthPlanner({ platform, onUsageChanged }: { plat
 
   const days = useMemo(() => (plan?.plan?.days ?? []).filter((day) => !day.isDeleted), [plan?.plan?.days]);
 
+  const showErrorToast = useCallback((message: string, fallbackTitle?: string) => {
+    const normalized = (message || "").trim() || "Something went wrong. Please try again.";
+    const isLimit = normalized.includes("Upgrade")
+      || normalized.includes("not included")
+      || normalized.includes("platform only")
+      || normalized.includes("AI improvements")
+      || normalized.includes("Additional AI-generated ideas");
+    toast({
+      variant: isLimit ? "default" : "destructive",
+      title: fallbackTitle ?? (isLimit ? "Upgrade required" : "Error"),
+      description: normalized,
+    });
+  }, [toast]);
+
   const loadLatest = useCallback(async () => {
     setLoading(true);
-    setError(null);
-    setLimitError(null);
     try {
       const data = await fetchLatestSocialPlan(platform);
       setPlan(data.plan ?? null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not load plan");
+      showErrorToast(err instanceof Error ? err.message : "Could not load plan", "Could not load plan");
     } finally {
       setLoading(false);
     }
-  }, [platform]);
+  }, [platform, showErrorToast]);
 
   useEffect(() => {
     void loadLatest();
@@ -62,92 +72,83 @@ export default function SocialGrowthPlanner({ platform, onUsageChanged }: { plat
 
   const handleGenerate = useCallback(async (input: { topic: string; postsPerWeek: number; postingMode: SocialPostingMode; preferredWeekdays?: SocialWeekday[]; audience?: string; followersCount?: number | null; goal?: string; tone?: string; formatPreference?: string }) => {
     setWorking("generate");
-    setError(null);
-    setLimitError(null);
     try {
       const data = await generateSocialPlan({ platform, ...input });
       setPlan(data.plan);
       onUsageChanged?.();
     } catch (err) {
       const message = err instanceof Error ? err.message : "Could not generate plan";
-      if (message.toLowerCase().includes("limit")) setLimitError(message);
-      else setError(message);
+      showErrorToast(message, "Could not generate plan");
     } finally {
       setWorking(null);
     }
-  }, [onUsageChanged, platform]);
+  }, [onUsageChanged, platform, showErrorToast]);
 
   const handlePatchDay = useCallback(async (day: SocialPlanDay, patch: Partial<SocialPlanDay>) => {
     if (!plan) return;
     setWorking(`patch:${day.id}`);
-    setError(null);
     try {
       const data = await patchSocialDay({ planId: plan.id, dayId: day.id, patch });
       setPlan(data.plan);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Could not save changes";
-      setError(message);
+      showErrorToast(message, "Could not save changes");
       throw new Error(message);
     } finally {
       setWorking(null);
     }
-  }, [plan]);
+  }, [plan, showErrorToast]);
 
   const handleDeleteDay = useCallback(async (day: SocialPlanDay) => {
     if (!plan) return;
     const confirmed = window.confirm(`Delete "${day.contentIdea}" from this plan?`);
     if (!confirmed) return;
     setWorking(`delete:${day.id}`);
-    setError(null);
     try {
       const data = await deleteSocialDay({ planId: plan.id, dayId: day.id });
       setPlan(data.plan);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Could not delete idea";
-      setError(message);
+      showErrorToast(message, "Could not delete idea");
       throw new Error(message);
     } finally {
       setWorking(null);
     }
-  }, [plan]);
+  }, [plan, showErrorToast]);
 
   const handleRegenerateDay = useCallback(async (day: SocialPlanDay, intent?: string) => {
     if (!plan) return;
     setWorking(`regen:${day.id}`);
-    setError(null);
     try {
       const data = await regenerateSocialDay({ planId: plan.id, dayId: day.id, platform, intent });
       setPlan(data.plan);
       onUsageChanged?.();
     } catch (err) {
       const message = err instanceof Error ? err.message : "Could not regenerate idea";
-      setError(message);
+      showErrorToast(message, "Could not regenerate idea");
       throw new Error(message);
     } finally {
       setWorking(null);
     }
-  }, [onUsageChanged, plan, platform]);
+  }, [onUsageChanged, plan, platform, showErrorToast]);
 
   const handleCreateDay = useCallback(async (input: { date: string; contentIdea: string; contentType?: string; hook?: string; notes?: string; tags?: string[]; bestPostingTime?: string }) => {
     if (!plan) return null;
     setWorking("create-day");
-    setError(null);
     try {
       const data = await createSocialDay({ planId: plan.id, platform, ...input });
       setPlan(data.plan);
       return data.day?.id ?? null;
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not add idea");
+      showErrorToast(err instanceof Error ? err.message : "Could not add idea", "Could not add idea");
       return null;
     } finally {
       setWorking(null);
     }
-  }, [plan, platform]);
+  }, [plan, platform, showErrorToast]);
 
   const handleGenerateNextWeek = useCallback(() => {
     if (!plan) return;
-    setError(null);
-    setLimitError(null);
     if (!weekEnded(plan)) {
       toast({
         title: "This week is still active",
@@ -168,8 +169,6 @@ export default function SocialGrowthPlanner({ platform, onUsageChanged }: { plat
   const runGenerateNextWeek = useCallback(async (options: { skippedFeedback: boolean; feedback?: SocialPostPerformanceFeedback[]; followersCount?: number | null }) => {
     if (!plan) return;
     setWorking("next-week");
-    setError(null);
-    setLimitError(null);
     try {
       const data = await generateNextWeekSocialPlan({
         planId: plan.id,
@@ -191,18 +190,15 @@ export default function SocialGrowthPlanner({ platform, onUsageChanged }: { plat
       onUsageChanged?.();
     } catch (err) {
       const message = err instanceof Error ? err.message : "We could not generate the next plan. Your feedback is saved, so you can try again.";
-      if (message.toLowerCase().includes("limit")) setLimitError(message);
-      else setError(message);
+      showErrorToast(message, "Could not generate next week");
     } finally {
       setWorking(null);
     }
-  }, [onUsageChanged, pendingNextWeekTopic, plan, platform]);
+  }, [onUsageChanged, pendingNextWeekTopic, plan, platform, showErrorToast]);
 
   const runGenerateNextWeekGoalBased = useCallback(async (input: { topic: string; postsPerWeek: number; postingMode: SocialPostingMode; preferredWeekdays?: SocialWeekday[]; audience?: string; followersCount?: number | null; goal?: string; tone?: string; formatPreference?: string }) => {
     if (!plan) return;
     setWorking("next-week");
-    setError(null);
-    setLimitError(null);
     try {
       const data = await generateNextWeekSocialPlan({
         planId: plan.id,
@@ -223,12 +219,11 @@ export default function SocialGrowthPlanner({ platform, onUsageChanged }: { plat
       onUsageChanged?.();
     } catch (err) {
       const message = err instanceof Error ? err.message : "We could not generate the next plan. Please try again.";
-      if (message.toLowerCase().includes("limit")) setLimitError(message);
-      else setError(message);
+      showErrorToast(message, "Could not generate next week");
     } finally {
       setWorking(null);
     }
-  }, [onUsageChanged, plan, platform]);
+  }, [onUsageChanged, plan, platform, showErrorToast]);
 
   if (loading) {
     return (
@@ -241,18 +236,6 @@ export default function SocialGrowthPlanner({ platform, onUsageChanged }: { plat
 
   return (
     <div className="space-y-6">
-      {limitError ? (
-        <PanelCardSoft className="border-amber-400/25 bg-amber-500/10 p-4 text-sm text-amber-100">
-          {limitError}
-        </PanelCardSoft>
-      ) : null}
-
-      {error ? (
-        <PanelCardSoft className="border-red-400/25 bg-red-500/10 p-4 text-sm text-red-100">
-          {error}
-        </PanelCardSoft>
-      ) : null}
-
       {!plan ? (
         <SocialPlanSetup platform={platform} generating={working === "generate"} onGenerate={handleGenerate} />
       ) : (
