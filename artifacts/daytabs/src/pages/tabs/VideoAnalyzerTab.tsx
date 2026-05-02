@@ -69,6 +69,7 @@ const PROGRESS_STEPS = [
 const TERMINAL_STATUSES = new Set(["complete", "successful", "success", "error", "failed", "cancelled"]);
 const HISTORY_BADGE_STATUSES = new Set(["complete", "successful", "success", "error", "failed", "cancelled"]);
 const RECOVERY_STORAGE_KEY = "daytabs:video-analyzer:pending-upload";
+const VIDEO_ANALYSIS_LANDING_INTENT_KEY = "pendingVideoAnalysisIntent";
 
 interface PendingUploadRecovery {
   startedAt: number;
@@ -2692,7 +2693,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
   const { toast } = useToast();
 
   const [file, setFile] = useState<File | null>(null);
-  const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>([]);
+  const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>(["youtube_long"]);
   const [selectedModules, setSelectedModules] = useState<string[]>(["quality", "editing"]);
   const [activeResultTab, setActiveResultTab] = useState<string>("overview");
   const [showPlanModal, setShowPlanModal] = useState(false);
@@ -2709,6 +2710,8 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
   const [historyBootstrapped, setHistoryBootstrapped] = useState(false);
   const [recoveryBootstrapped, setRecoveryBootstrapped] = useState(false);
   const [fileDurationSec, setFileDurationSec] = useState<number | null>(null);
+  const [landingReminder, setLandingReminder] = useState<null | { fileName: string }>(null);
+  const [landingIntentApplied, setLandingIntentApplied] = useState(false);
 
   const { uploadAsync: uploadVideo, isPending: isUploading, uploadInfo, cancelUpload } = useVideoUpload();
   const { data: pollData } = useAnalysisPolling(jobId);
@@ -2905,6 +2908,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
     setJobId(null);
     setShowUploadForm(true);
     setFileDurationSec(null);
+    setLandingReminder(null);
 
     // If the plan hasn't loaded yet, accept the file optimistically, server will enforce limits
     if (planLoading) { setFile(f); return; }
@@ -2989,6 +2993,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
         file,
         options: {
           mode: "video-analyzer",
+          platforms: selectedPlatforms.length ? selectedPlatforms : ["youtube_long"],
           modules: selectedModules,
           recoveryId: recovery.recoveryId,
           durationSeconds: fileDurationSec ?? undefined,
@@ -3181,6 +3186,43 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
   const showHistoryLanding = !hasResults && !showAnalyzing && !isError && hasHistory && !showUploadForm;
   const isBootstrapping = planLoading || !historyBootstrapped || !recoveryBootstrapped;
 
+  useEffect(() => {
+    if (landingIntentApplied) return;
+    const intent = localStorage.getItem(VIDEO_ANALYSIS_LANDING_INTENT_KEY);
+    if (!intent) {
+      setLandingIntentApplied(true);
+      return;
+    }
+    const fileName = localStorage.getItem("pendingVideoAnalysisFileName") ?? "";
+    const platform = localStorage.getItem("pendingVideoAnalysisPlatform") ?? "";
+    const modulesRaw = localStorage.getItem("pendingVideoAnalysisModules") ?? "";
+    const parsedModules = (() => {
+      try {
+        const maybe = JSON.parse(modulesRaw);
+        return Array.isArray(maybe) ? maybe.map(String) : [];
+      } catch {
+        return [];
+      }
+    })();
+    if (platform === "youtube_long" || platform === "youtube_shorts") {
+      setSelectedPlatforms([platform]);
+    }
+    if (parsedModules.length) {
+      setSelectedModules(parsedModules);
+    }
+    if (fileName.trim()) {
+      setLandingReminder({ fileName: fileName.trim() });
+    }
+    setShowUploadForm(true);
+
+    localStorage.removeItem(VIDEO_ANALYSIS_LANDING_INTENT_KEY);
+    localStorage.removeItem("pendingVideoAnalysisFileName");
+    localStorage.removeItem("pendingVideoAnalysisPlatform");
+    localStorage.removeItem("pendingVideoAnalysisModules");
+    localStorage.removeItem("postSignupRedirect");
+    setLandingIntentApplied(true);
+  }, [landingIntentApplied]);
+
   if (isBootstrapping) return <VideoAnalyzerLoadingState />;
 
   return (
@@ -3253,6 +3295,27 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
 
           <div className="grid lg:grid-cols-3 gap-5">
             <div className="lg:col-span-2 space-y-5">
+              {landingReminder ? (
+                <PanelCardSoft className="border border-violet-400/20 bg-violet-500/10 px-4 py-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-100/70">Ready to analyze your video</p>
+                      <p className="mt-2 text-sm text-white/80">
+                        You selected <span className="font-semibold text-white">{landingReminder.fileName}</span> before signing up. Upload it again here to start your analysis.
+                      </p>
+                      <p className="mt-1 text-xs text-white/55">Your video is not stored from the landing page.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setLandingReminder(null)}
+                      className="rounded-xl border border-white/10 bg-white/[0.03] p-2 text-white/70 hover:bg-white/[0.06] hover:text-white"
+                      aria-label="Dismiss reminder"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                </PanelCardSoft>
+              ) : null}
               <UploadZone
                 onFile={handleFileSelected}
                 currentFile={file}
@@ -3270,6 +3333,25 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
             </div>
 
             <PanelCard className="space-y-4 self-start p-4">
+              <p className="text-xs text-white/40 uppercase tracking-wider flex items-center gap-2">
+                <Film className="w-3.5 h-3.5" />Platform type
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                {PLATFORMS.map((p) => {
+                  const active = (selectedPlatforms[0] ?? "youtube_long") === p.id;
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => setSelectedPlatforms([p.id])}
+                      className={`rounded-xl border px-3 py-2 text-xs font-semibold transition-all ${active ? "border-violet-400/30 bg-violet-500/10 text-violet-100" : "border-white/10 bg-white/[0.03] text-white/60 hover:bg-white/[0.06] hover:text-white"}`}
+                    >
+                      {p.label}
+                    </button>
+                  );
+                })}
+              </div>
+
               <p className="text-xs text-white/40 uppercase tracking-wider flex items-center gap-2">
                 <Wand2 className="w-3.5 h-3.5" />Analysis modules
               </p>

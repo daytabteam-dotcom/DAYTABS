@@ -21,6 +21,7 @@ import ContentPlannerFeaturePage from "@/pages/ContentPlannerFeaturePage";
 import LinkedinContentPlannerFeaturePage from "@/pages/LinkedinContentPlannerFeaturePage";
 import TiktokContentPlannerFeaturePage from "@/pages/TiktokContentPlannerFeaturePage";
 import InstagramContentPlannerFeaturePage from "@/pages/InstagramContentPlannerFeaturePage";
+import VideoAnalysisFeaturePage from "@/pages/VideoAnalysisFeaturePage";
 import FeaturesSlugPage from "@/pages/FeaturesSlugPage";
 import { LandingI18nProvider } from "@/lib/i18n";
 
@@ -45,6 +46,7 @@ function Router() {
       <Route path="/features/linkedin-content-planner" component={LinkedinContentPlannerFeaturePage} />
       <Route path="/features/tiktok-content-planner" component={TiktokContentPlannerFeaturePage} />
       <Route path="/features/instagram-content-planner" component={InstagramContentPlannerFeaturePage} />
+      <Route path="/features/video-analysis" component={VideoAnalysisFeaturePage} />
       <Route path="/features/:slug" component={FeaturesSlugPage} />
       <Route path="/blog" component={BlogIndexPage} />
       <Route path="/blog/:slug" component={BlogPostPage} />
