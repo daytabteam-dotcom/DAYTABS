@@ -3,7 +3,7 @@ FROM node:24-slim
 RUN apt-get update && apt-get install -y ffmpeg postgresql-client yt-dlp \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/*
-RUN npm install -g pnpm
+RUN npm install -g pnpm@10
 
 WORKDIR /app
 
