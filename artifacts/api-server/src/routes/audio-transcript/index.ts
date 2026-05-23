@@ -225,12 +225,51 @@ router.post("/projects/:projectId/translate", async (req, res) => {
     costCredits: 0,
   });
 
-  // Avoid long-running HTTP requests (browser/proxy timeouts). Start the job and return immediately.
+  const sourceLanguage = project.detectedLanguage ?? project.sourceLanguage ?? "auto";
+  const totalChars = (segments as Array<{ text?: unknown }>).reduce((acc, s) => acc + (typeof s?.text === "string" ? s.text.length : 0), 0);
+  const SYNC_MAX_CHARS = Number(process.env.AUDIO_TRANSLATION_SYNC_MAX_CHARS ?? "60000");
+  const shouldSync = Number.isFinite(SYNC_MAX_CHARS) ? totalChars < SYNC_MAX_CHARS : totalChars < 60000;
+
+  if (shouldSync) {
+    try {
+      await updateAudioTranscriptJob(req.auth!.user_id, job.id, { status: "processing" });
+      await updateTranslationRow(req.auth!.user_id, translation.id, { status: "translating", errorMessage: null });
+
+      const result = await translateTranscriptSegmentsBatched({
+        segments: segments as any,
+        sourceLanguage,
+        targetLanguage,
+      });
+
+      const updated = await updateTranslationRow(req.auth!.user_id, translation.id, {
+        status: "completed",
+        translatedFullText: result.translatedFullText,
+        translatedSegments: result.translatedSegments,
+        errorMessage: null,
+      });
+
+      await updateAudioTranscriptJob(req.auth!.user_id, job.id, {
+        status: "completed",
+        output: { segments: result.translatedSegments.length, sync: true, totalChars },
+        errorMessage: null,
+      });
+
+      res.json({ translation: updated, job: { ...job, status: "completed" } });
+      return;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Translation failed";
+      await updateTranslationRow(req.auth!.user_id, translation.id, { status: "failed", errorMessage: msg });
+      await updateAudioTranscriptJob(req.auth!.user_id, job.id, { status: "failed", errorMessage: msg });
+      res.status(500).json({ error: msg });
+      return;
+    }
+  }
+
+  // Large transcripts: avoid long-running HTTP requests (browser/proxy timeouts). Start the job and return immediately.
   await updateAudioTranscriptJob(req.auth!.user_id, job.id, { status: "processing" });
   await updateTranslationRow(req.auth!.user_id, translation.id, { status: "translating", errorMessage: null });
 
   const userId = req.auth!.user_id;
-  const sourceLanguage = project.detectedLanguage ?? project.sourceLanguage ?? "auto";
   const translationId = translation.id;
   const jobId = job.id;
   const segs = segments as any;
@@ -253,7 +292,7 @@ router.post("/projects/:projectId/translate", async (req, res) => {
 
         await updateAudioTranscriptJob(userId, jobId, {
           status: "completed",
-          output: { segments: result.translatedSegments.length },
+          output: { segments: result.translatedSegments.length, sync: false, totalChars },
           errorMessage: null,
         });
       } catch (err) {

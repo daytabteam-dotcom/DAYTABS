@@ -71,31 +71,26 @@ function extractJsonObject(raw: string) {
   return text.slice(start);
 }
 
-export async function translateTranscriptSegments(input: {
+async function translateChunkCompact(input: {
   segments: TranscriptSegment[];
   sourceLanguage: string;
   targetLanguage: string;
+  model: string;
 }) {
-  const system =
-    "You translate subtitle segments. Preserve each segment's id, start_time, and end_time exactly. " +
-    "Translate text naturally (contextual, not robotic). Do not merge or delete segments. " +
-    "Return JSON only: { translated_segments: [{ id, start_time, end_time, translated_text }] }";
+  const system = `You are a professional subtitle translator.
+Translate each item from ${input.sourceLanguage} to ${input.targetLanguage}.
+Rules:
+- Preserve the id exactly.
+- Return JSON only in this shape: {"translations":[{"id":1,"tr":"..."}]}.
+- Do not include timestamps. Do not include original text.
+- Do not summarize. Translate naturally and contextually.`;
 
-  // Use compact keys to keep prompts cheaper.
-  const user =
-    `Translate from ${input.sourceLanguage} to ${input.targetLanguage}.\n\n` +
-    "Segments JSON (keys: id, s=start_time, e=end_time, t=text):\n" +
-    JSON.stringify(
-      input.segments.map((seg) => ({
-        id: seg.id,
-        s: seg.start_time,
-        e: seg.end_time,
-        t: seg.text,
-      })),
-    );
+  const user = JSON.stringify({
+    segments: input.segments.map((s) => ({ id: s.id, t: s.text })),
+  });
 
   const res = await openai.chat.completions.create({
-    model: process.env.AUDIO_TRANSLATION_MODEL ?? "gpt-4o-mini",
+    model: input.model,
     temperature: 0.2,
     messages: [
       { role: "system", content: system },
@@ -105,32 +100,14 @@ export async function translateTranscriptSegments(input: {
 
   const content = res.choices[0]?.message?.content ?? "";
   const parsed = JSON.parse(extractJsonObject(stripJsonFence(content))) as {
-    translated_segments: Array<{
-      id: number;
-      start_time: string;
-      end_time: string;
-      // tolerate older keys in case models echo them
-      s?: string;
-      e?: string;
-      original_text?: string;
-      translated_text: string;
-    }>;
+    translations?: Array<{ id: number; tr: string }>;
   };
 
-  const byId = new Map(input.segments.map((s) => [s.id, s]));
-  const translatedSegments: TranslatedSegment[] = (parsed.translated_segments ?? []).map((s) => {
-    const orig = byId.get(s.id);
-    return {
-      id: s.id,
-      start_time: s.start_time ?? s.s ?? orig?.start_time ?? "00:00:00.000",
-      end_time: s.end_time ?? s.e ?? orig?.end_time ?? "00:00:00.000",
-      original_text: orig?.text ?? (s.original_text ?? ""),
-      translated_text: s.translated_text,
-    };
-  });
-
-  const full = translatedSegments.map((s) => s.translated_text).join(" ").replace(/\s+/g, " ").trim();
-  return { translatedFullText: full, translatedSegments, raw: parsed };
+  const map = new Map<number, string>();
+  for (const t of parsed.translations ?? []) {
+    if (typeof t?.id === "number" && typeof t?.tr === "string") map.set(t.id, t.tr);
+  }
+  return { translationsById: map, raw: parsed };
 }
 
 export async function translateTranscriptSegmentsBatched(input: {
@@ -138,14 +115,32 @@ export async function translateTranscriptSegmentsBatched(input: {
   sourceLanguage: string;
   targetLanguage: string;
 }) {
-  const maxChars = Number(process.env.AUDIO_TRANSLATION_MAX_CHARS ?? "24000");
-  const maxSegments = Number(process.env.AUDIO_TRANSLATION_MAX_SEGMENTS ?? "80");
-  const concurrency = Number(process.env.AUDIO_TRANSLATION_CONCURRENCY ?? "3");
-  const chunks = chunkSegments(input.segments, Number.isFinite(maxChars) ? maxChars : 12000, Number.isFinite(maxSegments) ? maxSegments : 40);
+  const startedAt = Date.now();
+  const model = process.env.AUDIO_TRANSLATION_MODEL ?? "gpt-4o-mini";
+
+  const maxChars = Number(process.env.AUDIO_TRANSLATION_MAX_CHARS ?? "50000");
+  const maxSegments = Number(process.env.AUDIO_TRANSLATION_MAX_SEGMENTS ?? "180");
+  const concurrency = Number(process.env.AUDIO_TRANSLATION_CONCURRENCY ?? "5");
+
+  const effectiveMaxChars = Number.isFinite(maxChars) ? maxChars : 50000;
+  const effectiveMaxSegments = Number.isFinite(maxSegments) ? maxSegments : 180;
+  const chunks = chunkSegments(input.segments, effectiveMaxChars, effectiveMaxSegments);
 
   const safeConcurrency = Number.isFinite(concurrency) && concurrency > 0 ? Math.min(8, Math.floor(concurrency)) : 3;
 
-  type ChunkResult = { idx: number; translatedSegments: TranslatedSegment[] };
+  const totalChars = input.segments.reduce((acc, s) => acc + (s.text?.length ?? 0), 0);
+  // eslint-disable-next-line no-console
+  console.info("[audio-transcript] translation start", {
+    segments: input.segments.length,
+    sourceChars: totalChars,
+    chunks: chunks.length,
+    model,
+    concurrency: safeConcurrency,
+    maxChars: effectiveMaxChars,
+    maxSegments: effectiveMaxSegments,
+  });
+
+  type ChunkResult = { idx: number; translationsById: Map<number, string> };
   const results: ChunkResult[] = [];
   let nextIdx = 0;
 
@@ -155,19 +150,68 @@ export async function translateTranscriptSegmentsBatched(input: {
       nextIdx += 1;
       const chunk = chunks[idx];
       if (!chunk) return;
-      const res = await translateTranscriptSegments({
+
+      const t0 = Date.now();
+      const res = await translateChunkCompact({
         segments: chunk,
         sourceLanguage: input.sourceLanguage,
         targetLanguage: input.targetLanguage,
+        model,
       });
-      results.push({ idx, translatedSegments: res.translatedSegments });
+
+      const expectedIds = new Set(chunk.map((s) => s.id));
+      const missing = [...expectedIds].filter((id) => !res.translationsById.has(id));
+      if (missing.length) {
+        // Retry once with only missing ids (small & cheap) to improve completeness.
+        const retrySegments = chunk.filter((s) => missing.includes(s.id));
+        const retry = await translateChunkCompact({
+          segments: retrySegments,
+          sourceLanguage: input.sourceLanguage,
+          targetLanguage: input.targetLanguage,
+          model,
+        });
+        for (const [id, tr] of retry.translationsById.entries()) res.translationsById.set(id, tr);
+      }
+
+      // eslint-disable-next-line no-console
+      console.info("[audio-transcript] translation chunk done", {
+        idx,
+        segments: chunk.length,
+        chars: chunk.reduce((a, s) => a + (s.text?.length ?? 0), 0),
+        ms: Date.now() - t0,
+        missingAfterRetry: chunk.filter((s) => !res.translationsById.has(s.id)).length,
+      });
+
+      results.push({ idx, translationsById: res.translationsById });
     }
   }
 
   await Promise.all(Array.from({ length: Math.min(safeConcurrency, chunks.length) }, () => worker()));
 
+  // Stitch translations into a single map (later chunks win, but ids are unique anyway).
   results.sort((a, b) => a.idx - b.idx);
-  const stitched = results.flatMap((r) => r.translatedSegments);
-  const full = stitched.map((s) => s.translated_text).join(" ").replace(/\s+/g, " ").trim();
-  return { translatedFullText: full, translatedSegments: stitched };
+  const translationMap = new Map<number, string>();
+  for (const r of results) for (const [id, tr] of r.translationsById.entries()) translationMap.set(id, tr);
+
+  const translatedSegments: TranslatedSegment[] = input.segments.map((seg) => ({
+    id: seg.id,
+    start_time: seg.start_time,
+    end_time: seg.end_time,
+    original_text: seg.text,
+    translated_text: translationMap.get(seg.id) ?? "",
+  }));
+
+  const stillMissing = translatedSegments.filter((s) => !s.translated_text.trim()).length;
+  const full = translatedSegments.map((s) => s.translated_text).join(" ").replace(/\s+/g, " ").trim();
+
+  // eslint-disable-next-line no-console
+  console.info("[audio-transcript] translation done", {
+    segments: input.segments.length,
+    chunks: chunks.length,
+    model,
+    missing: stillMissing,
+    ms: Date.now() - startedAt,
+  });
+
+  return { translatedFullText: full, translatedSegments };
 }
