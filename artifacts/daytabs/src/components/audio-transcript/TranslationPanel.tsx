@@ -41,7 +41,7 @@ export function TranslationPanel({
         if (cancelled) return;
         onTranslated(res.translation);
         if (res.translation.status === "translating") {
-          window.setTimeout(poll, 1500);
+          window.setTimeout(poll, 2500);
         } else {
           setLoading(false);
           if (res.translation.status === "failed") setError(res.translation.errorMessage || "Translation failed");
@@ -98,7 +98,7 @@ export function TranslationPanel({
           <PanelSubtitle>Preserves timestamps and segment IDs.</PanelSubtitle>
         </div>
         <Button onClick={onTranslate} disabled={loading || project.status !== "completed"}>
-          {loading || latestForTarget?.status === "translating" ? "Translating…" : "Translate"}
+          {loading ? "Translating…" : "Translate"}
         </Button>
       </div>
 

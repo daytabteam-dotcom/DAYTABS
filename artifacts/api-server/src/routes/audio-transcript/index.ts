@@ -274,6 +274,7 @@ router.get("/translations/:translationId", async (req, res) => {
     res.status(403).json({ code: "STUDIO_REQUIRED", error: "Audio 2 Transcript is available on the Studio plan." });
     return;
   }
+  res.setHeader("Cache-Control", "no-store");
   const translationId = String(req.params.translationId || "");
   const translation = await getTranslation(req.auth!.user_id, translationId);
   if (!translation) {

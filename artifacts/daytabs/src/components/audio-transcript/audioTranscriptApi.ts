@@ -17,6 +17,8 @@ async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     ...init,
     signal: controller.signal,
+    // Avoid conditional requests (304) while polling job status.
+    ...(url.startsWith("/api/audio-transcript/") ? { cache: "no-store" as const } : {}),
     headers: {
       ...authHeaders(),
       ...(init?.headers ?? {}),

@@ -79,7 +79,7 @@ export async function translateTranscriptSegments(input: {
   const system =
     "You translate subtitle segments. Preserve each segment's id, start_time, and end_time exactly. " +
     "Translate text naturally (contextual, not robotic). Do not merge or delete segments. " +
-    "Return JSON only: { translated_full_text: string, translated_segments: [{ id, start_time, end_time, translated_text }] }";
+    "Return JSON only: { translated_segments: [{ id, start_time, end_time, translated_text }] }";
 
   // Use compact keys to keep prompts cheaper.
   const user =
@@ -105,7 +105,6 @@ export async function translateTranscriptSegments(input: {
 
   const content = res.choices[0]?.message?.content ?? "";
   const parsed = JSON.parse(extractJsonObject(stripJsonFence(content))) as {
-    translated_full_text: string;
     translated_segments: Array<{
       id: number;
       start_time: string;
@@ -130,7 +129,7 @@ export async function translateTranscriptSegments(input: {
     };
   });
 
-  const full = (parsed.translated_full_text ?? "").trim() || translatedSegments.map((s) => s.translated_text).join(" ").trim();
+  const full = translatedSegments.map((s) => s.translated_text).join(" ").replace(/\s+/g, " ").trim();
   return { translatedFullText: full, translatedSegments, raw: parsed };
 }
 
@@ -139,22 +138,36 @@ export async function translateTranscriptSegmentsBatched(input: {
   sourceLanguage: string;
   targetLanguage: string;
 }) {
-  const maxChars = Number(process.env.AUDIO_TRANSLATION_MAX_CHARS ?? "12000");
-  const maxSegments = Number(process.env.AUDIO_TRANSLATION_MAX_SEGMENTS ?? "40");
+  const maxChars = Number(process.env.AUDIO_TRANSLATION_MAX_CHARS ?? "24000");
+  const maxSegments = Number(process.env.AUDIO_TRANSLATION_MAX_SEGMENTS ?? "80");
+  const concurrency = Number(process.env.AUDIO_TRANSLATION_CONCURRENCY ?? "3");
   const chunks = chunkSegments(input.segments, Number.isFinite(maxChars) ? maxChars : 12000, Number.isFinite(maxSegments) ? maxSegments : 40);
 
-  const stitched: TranslatedSegment[] = [];
-  const texts: string[] = [];
-  for (const chunk of chunks) {
-    const res = await translateTranscriptSegments({
-      segments: chunk,
-      sourceLanguage: input.sourceLanguage,
-      targetLanguage: input.targetLanguage,
-    });
-    stitched.push(...res.translatedSegments);
-    texts.push(res.translatedFullText);
+  const safeConcurrency = Number.isFinite(concurrency) && concurrency > 0 ? Math.min(8, Math.floor(concurrency)) : 3;
+
+  type ChunkResult = { idx: number; translatedSegments: TranslatedSegment[] };
+  const results: ChunkResult[] = [];
+  let nextIdx = 0;
+
+  async function worker() {
+    for (;;) {
+      const idx = nextIdx;
+      nextIdx += 1;
+      const chunk = chunks[idx];
+      if (!chunk) return;
+      const res = await translateTranscriptSegments({
+        segments: chunk,
+        sourceLanguage: input.sourceLanguage,
+        targetLanguage: input.targetLanguage,
+      });
+      results.push({ idx, translatedSegments: res.translatedSegments });
+    }
   }
 
-  const full = texts.join(" ").replace(/\s+/g, " ").trim() || stitched.map((s) => s.translated_text).join(" ").trim();
+  await Promise.all(Array.from({ length: Math.min(safeConcurrency, chunks.length) }, () => worker()));
+
+  results.sort((a, b) => a.idx - b.idx);
+  const stitched = results.flatMap((r) => r.translatedSegments);
+  const full = stitched.map((s) => s.translated_text).join(" ").replace(/\s+/g, " ").trim();
   return { translatedFullText: full, translatedSegments: stitched };
 }
