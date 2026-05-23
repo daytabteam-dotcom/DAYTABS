@@ -136,11 +136,12 @@ export function PlanPickerModal({
   }, [onClose]);
 
   const getPriceId = (planKey: "creator" | "pro" | "studio") => {
+    // Studio is invite-only / internal testing. Do not allow self-serve checkout.
+    if (planKey === "studio") return "";
     const envPriceId = PADDLE_PRICES[planKey];
     if (envPriceId) return envPriceId;
     if (prices[planKey]?.id) return prices[planKey].id;
     if (planKey === "creator") return prices.premium?.id ?? "";
-    if (planKey === "studio") return prices.professional?.id ?? "";
     return "";
   };
 
@@ -148,6 +149,12 @@ export function PlanPickerModal({
     if (!user) {
       onClose();
       window.location.href = getPublicSiteUrl("/login/");
+      return;
+    }
+
+    if (planKey === "studio") {
+      onClose();
+      window.location.href = getPublicSiteUrl("/contact/");
       return;
     }
 
@@ -250,24 +257,35 @@ export function PlanPickerModal({
                       Current base plan
                     </div>
                   ) : (
-                    <button
-                      onClick={() => handleSelect(plan.key)}
-                      disabled={
-                        selectedPlan !== null ||
-                        !hasCheckout
-                      }
-                      className={`w-full py-2.5 text-sm font-semibold text-white rounded-lg transition-all cursor-pointer ${plan.ctaClass} disabled:opacity-40 disabled:cursor-not-allowed`}
-                      data-testid={`button-select-plan-${plan.key}`}
-                    >
-                      {selectedPlan === plan.key ? (
-                        <span className="inline-flex items-center justify-center gap-2">
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                          Opening...
-                        </span>
-                      ) : (
-                        "Upgrade"
-                      )}
-                    </button>
+                    plan.key === "studio" ? (
+                      <button
+                        onClick={() => handleSelect("studio")}
+                        disabled={selectedPlan !== null}
+                        className="w-full py-2.5 text-sm font-semibold text-white rounded-lg transition-all cursor-pointer border border-white/12 bg-white/5 hover:bg-white/8 disabled:opacity-40 disabled:cursor-not-allowed"
+                        data-testid="button-select-plan-studio"
+                      >
+                        Contact us
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handleSelect(plan.key)}
+                        disabled={
+                          selectedPlan !== null ||
+                          !hasCheckout
+                        }
+                        className={`w-full py-2.5 text-sm font-semibold text-white rounded-lg transition-all cursor-pointer ${plan.ctaClass} disabled:opacity-40 disabled:cursor-not-allowed`}
+                        data-testid={`button-select-plan-${plan.key}`}
+                      >
+                        {selectedPlan === plan.key ? (
+                          <span className="inline-flex items-center justify-center gap-2">
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            Opening...
+                          </span>
+                        ) : (
+                          "Upgrade"
+                        )}
+                      </button>
+                    )
                   )}
                 </div>
               );
