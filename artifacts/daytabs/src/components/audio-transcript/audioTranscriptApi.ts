@@ -57,11 +57,15 @@ export async function createAudioTranscriptProject(input: { title: string; sourc
 }
 
 export async function translateTranscript(projectId: string, target_language: string) {
-  return await jsonFetch<{ translation: AudioTranslation; cached?: boolean }>(`/api/audio-transcript/projects/${projectId}/translate`, {
+  return await jsonFetch<{ translation: AudioTranslation; job: { id: string; status: string }; cached?: boolean }>(`/api/audio-transcript/projects/${projectId}/translate`, {
     method: "POST",
     body: JSON.stringify({ target_language }),
     headers: { "Content-Type": "application/json" },
   });
+}
+
+export async function getTranslation(translationId: string) {
+  return await jsonFetch<{ translation: AudioTranslation }>(`/api/audio-transcript/translations/${translationId}`);
 }
 
 export async function deleteAudioTranscriptProject(projectId: string) {
@@ -69,4 +73,3 @@ export async function deleteAudioTranscriptProject(projectId: string) {
     method: "DELETE",
   });
 }
-

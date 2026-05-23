@@ -3,7 +3,7 @@ import multer from "multer";
 import { requireAuth } from "../../middlewares/auth";
 import { normalizePlan } from "../../lib/planLimits";
 import { transcribeAudio } from "../../aiProviders/openaiTranscription";
-import { translateTranscriptSegments } from "../../aiProviders/openaiTranslation";
+import { translateTranscriptSegmentsBatched } from "../../aiProviders/openaiTranslation";
 import { deleteUploadedAudioFile, storeUploadedAudio } from "../../services/audioTranscriptStorage";
 import {
   createAudioTranscriptJob,
@@ -225,30 +225,48 @@ router.post("/projects/:projectId/translate", async (req, res) => {
     costCredits: 0,
   });
 
-  try {
-    await updateAudioTranscriptJob(req.auth!.user_id, job.id, { status: "processing" });
-    await updateTranslationRow(req.auth!.user_id, translation.id, { status: "translating" });
+  // Avoid long-running HTTP requests (browser/proxy timeouts). Start the job and return immediately.
+  await updateAudioTranscriptJob(req.auth!.user_id, job.id, { status: "processing" });
+  await updateTranslationRow(req.auth!.user_id, translation.id, { status: "translating", errorMessage: null });
 
-    const result = await translateTranscriptSegments({
-      segments: segments as any,
-      sourceLanguage: project.detectedLanguage ?? project.sourceLanguage ?? "auto",
-      targetLanguage,
-    });
+  const userId = req.auth!.user_id;
+  const sourceLanguage = project.detectedLanguage ?? project.sourceLanguage ?? "auto";
+  const translationId = translation.id;
+  const jobId = job.id;
+  const segs = segments as any;
 
-    const updated = await updateTranslationRow(req.auth!.user_id, translation.id, {
-      status: "completed",
-      translatedFullText: result.translatedFullText,
-      translatedSegments: result.translatedSegments,
-      errorMessage: null,
-    });
+  setTimeout(() => {
+    void (async () => {
+      try {
+        const result = await translateTranscriptSegmentsBatched({
+          segments: segs,
+          sourceLanguage,
+          targetLanguage,
+        });
 
-    await updateAudioTranscriptJob(req.auth!.user_id, job.id, { status: "completed", output: { segments: result.translatedSegments.length }, errorMessage: null });
-    res.json({ translation: updated, job });
-  } catch (err) {
-    await updateTranslationRow(req.auth!.user_id, translation.id, { status: "failed", errorMessage: err instanceof Error ? err.message : "Translation failed" });
-    await updateAudioTranscriptJob(req.auth!.user_id, job.id, { status: "failed", errorMessage: err instanceof Error ? err.message : "Translation failed" });
-    res.status(500).json({ error: err instanceof Error ? err.message : "Translation failed" });
-  }
+        await updateTranslationRow(userId, translationId, {
+          status: "completed",
+          translatedFullText: result.translatedFullText,
+          translatedSegments: result.translatedSegments,
+          errorMessage: null,
+        });
+
+        await updateAudioTranscriptJob(userId, jobId, {
+          status: "completed",
+          output: { segments: result.translatedSegments.length },
+          errorMessage: null,
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Translation failed";
+        await updateTranslationRow(userId, translationId, { status: "failed", errorMessage: msg });
+        await updateAudioTranscriptJob(userId, jobId, { status: "failed", errorMessage: msg });
+        // eslint-disable-next-line no-console
+        console.error("[audio-transcript] translation job failed", { jobId, translationId, msg });
+      }
+    })();
+  }, 0);
+
+  res.status(202).json({ translation: { ...translation, status: "translating" }, job });
 });
 
 router.get("/translations/:translationId", async (req, res) => {
