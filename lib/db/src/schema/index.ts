@@ -6,3 +6,5 @@ export * from "./youtube";
 export * from "./tokenLogs";
 export * from "./blogs";
 export * from "./socialGrowth";
+export * from "./cineStudio";
+export * from "./audioTranscripts";

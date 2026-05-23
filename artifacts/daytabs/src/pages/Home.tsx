@@ -12,6 +12,8 @@ import {
   CalendarDays,
   Bell,
   Youtube,
+  Captions,
+  Film,
 } from "lucide-react";
 import VideoAnalyzerTab from "./tabs/VideoAnalyzerTab";
 import TeleprompterTab from "./tabs/TeleprompterTab";
@@ -39,24 +41,31 @@ import {
   PanelCardSoft,
 } from "@/components/panel-system";
 import { useDayTabsI18n } from "@/lib/i18n";
+import { AudioTranscriptPage } from "@/components/audio-transcript/AudioTranscriptPage";
+import { CineStudioPage } from "@/components/cine-studio/CineStudioPage";
 
-const TABS = [
+const ALL_TABS = [
   { id: "dashboard", icon: LayoutDashboard },
   { id: "video-analyzer", icon: Wand2 },
   { id: "growth-planner", icon: CalendarDays },
+  { id: "audio-transcript", icon: Captions },
+  { id: "cine-studio", icon: Film },
   { id: "youtube-audit", icon: Youtube },
   { id: "teleprompter", icon: MonitorPlay },
 ] as const;
 
-type TabId = (typeof TABS)[number]["id"];
-const NAV_TABS = TABS;
+type TabId = (typeof ALL_TABS)[number]["id"];
+
+function visibleTabs(isStudio: boolean) {
+  return isStudio ? ALL_TABS : ALL_TABS.filter((t) => t.id !== "cine-studio");
+}
 
 function getTabFromUrl(): TabId {
   const tab = new URLSearchParams(window.location.search).get("tab");
   if (tab === "content-planner") return "growth-planner";
   if (tab === "youtube-transcript") return "youtube-audit";
   if (tab === "script-planner") return "dashboard";
-  const match = TABS.find((item) => item.id === tab);
+  const match = ALL_TABS.find((item) => item.id === tab);
   return match?.id ?? "dashboard";
 }
 
@@ -510,18 +519,25 @@ export default function Home() {
   const [activeTabHasData, setActiveTabHasData] = useState(false);
   const [showPlanModal, setShowPlanModal] = useState(false);
   const exportFnRef = useRef<(() => Promise<void>) | null>(null);
+  const { plan } = usePlan();
+  const navTabs = visibleTabs(!!plan?.isStudio);
 
   useEffect(() => {
     updateTabUrl(activeTab, "replace");
 
     function handlePopState() {
-      doSwitch(getTabFromUrl(), "replace");
+      const next = getTabFromUrl();
+      if (next === "cine-studio" && !plan?.isStudio) {
+        doSwitch("dashboard", "replace");
+        return;
+      }
+      doSwitch(next, "replace");
     }
 
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [plan?.isStudio]);
 
   function handleTabClick(tabId: TabId) {
     if (tabId === activeTab) return;
@@ -585,7 +601,7 @@ export default function Home() {
       <div className="w-full border-b border-white/5 bg-background/25 backdrop-blur-md sticky top-16 z-40 sm:top-20">
         <div className={pageContainerClass}>
           <div className="flex items-center gap-2 overflow-x-auto scrollbar-none py-2.5 sm:py-3">
-            {NAV_TABS.map((tab) => {
+            {navTabs.map((tab) => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
               const tabCopy = copy.tabs[tab.id];
@@ -625,6 +641,16 @@ export default function Home() {
         {activeTab === "growth-planner" && (
           <ErrorBoundary name="GrowthPlanner">
             <GrowthPlannerPage />
+          </ErrorBoundary>
+        )}
+        {activeTab === "audio-transcript" && (
+          <ErrorBoundary name="AudioTranscript">
+            <AudioTranscriptPage />
+          </ErrorBoundary>
+        )}
+        {activeTab === "cine-studio" && plan?.isStudio && (
+          <ErrorBoundary name="CineStudio">
+            <CineStudioPage />
           </ErrorBoundary>
         )}
         {activeTab === "youtube-audit" && <YouTubeAuditTab />}

@@ -45,6 +45,8 @@ export type DayTabsCopy = {
     "video-analyzer": { label: string; desc: string };
     "script-planner": { label: string; desc: string };
     "growth-planner": { label: string; desc: string };
+    "audio-transcript": { label: string; desc: string };
+    "cine-studio": { label: string; desc: string };
     "youtube-audit": { label: string; desc: string };
     "youtube-transcript": { label: string; desc: string };
     teleprompter: { label: string; desc: string };
@@ -380,6 +382,8 @@ const baseCopy: DayTabsCopy = {
     "video-analyzer": { label: "Video Analyzer", desc: "Full Analysis" },
     "script-planner": { label: "Script Planner", desc: "AI Scripts" },
     "growth-planner": { label: "Content Planner", desc: "Planner" },
+    "audio-transcript": { label: "Audio 2 Transcript", desc: "Studio" },
+    "cine-studio": { label: "CineStudio", desc: "Studio" },
     "youtube-audit": { label: "YouTube Audit", desc: "Studio" },
     "youtube-transcript": { label: "YouTube Transcript", desc: "Studio" },
     teleprompter: { label: "Teleprompter", desc: "Read Live" },

@@ -132,6 +132,27 @@ export async function createR2UploadUrl(key: string, contentType: string) {
   };
 }
 
+export function r2PublicUrlForKey(key: string) {
+  const config = readR2Config();
+  return config.publicUrl ? `${config.publicUrl}/${key}` : null;
+}
+
+export async function putR2Object(input: { key: string; contentType: string; body: Buffer | Uint8Array }) {
+  const config = readR2Config();
+  await getR2Client().send(
+    new PutObjectCommand({
+      Bucket: config.bucket,
+      Key: input.key,
+      ContentType: input.contentType,
+      Body: input.body,
+    }),
+  );
+  return {
+    fileKey: input.key,
+    fileUrl: config.publicUrl ? `${config.publicUrl}/${input.key}` : undefined,
+  };
+}
+
 export async function createR2MultipartUpload(key: string, contentType: string) {
   const response = await getR2Client().send(
     new CreateMultipartUploadCommand({
