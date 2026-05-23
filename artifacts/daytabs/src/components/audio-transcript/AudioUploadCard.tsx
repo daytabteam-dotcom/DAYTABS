@@ -8,7 +8,7 @@ import type { AudioTranscriptProject } from "./types";
 import { AudioLines, UploadCloud } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const ALLOWED_EXT = /\.(mp3|wav|m4a|mp4|webm|ogg)$/i;
+const ALLOWED_EXT = /\.(mp3|wav|m4a|ogg)$/i;
 const MAX_MB = 200;
 
 export function AudioUploadCard({ onCreated }: { onCreated: (p: AudioTranscriptProject) => void }) {
@@ -48,7 +48,7 @@ export function AudioUploadCard({ onCreated }: { onCreated: (p: AudioTranscriptP
       return;
     }
     if (!ALLOWED_EXT.test(next.name)) {
-      setError("Unsupported file type. Upload mp3, wav, m4a, mp4, webm, or ogg.");
+      setError("Unsupported file type. Upload mp3, wav, m4a, or ogg.");
       setFile(null);
       return;
     }
@@ -111,7 +111,7 @@ export function AudioUploadCard({ onCreated }: { onCreated: (p: AudioTranscriptP
               {file ? "Ready to transcribe" : "Drag & drop audio"}
             </h3>
             <p className="mt-1 text-sm text-white/55">
-              {file ? `${file.name} · ${(file.size / (1024 * 1024)).toFixed(1)} MB` : "Upload mp3, wav, m4a, mp4, webm, ogg"}
+              {file ? `${file.name} · ${(file.size / (1024 * 1024)).toFixed(1)} MB` : "Upload mp3, wav, m4a, ogg"}
             </p>
 
             <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
@@ -134,7 +134,7 @@ export function AudioUploadCard({ onCreated }: { onCreated: (p: AudioTranscriptP
             <input
               ref={fileInputRef}
               type="file"
-              accept=".mp3,.wav,.m4a,.mp4,.webm,.ogg,audio/*,video/*"
+              accept=".mp3,.wav,.m4a,.ogg,audio/*"
               onChange={(e) => onPickFile(e.target.files?.[0] ?? null)}
               className="hidden"
             />
@@ -184,7 +184,7 @@ export function AudioUploadCard({ onCreated }: { onCreated: (p: AudioTranscriptP
                 {loading ? "Transcribing…" : "Generate Transcript"}
               </Button>
               <div className="mt-2 text-xs text-white/40">
-                Max file size: {MAX_MB}MB · Supported: mp3, wav, m4a, mp4, webm, ogg
+                Max file size: {MAX_MB}MB · Supported: mp3, wav, m4a, ogg
               </div>
             </div>
           </div>

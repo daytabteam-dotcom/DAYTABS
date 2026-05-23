@@ -35,7 +35,7 @@ const upload = multer({
   },
 });
 
-const ALLOWED_EXT = /\.(mp3|wav|m4a|mp4|webm|ogg)$/i;
+const ALLOWED_EXT = /\.(mp3|wav|m4a|ogg)$/i;
 const ALLOWED_MIME = new Set([
   "audio/mpeg",
   "audio/mp3",
@@ -43,11 +43,7 @@ const ALLOWED_MIME = new Set([
   "audio/x-wav",
   "audio/mp4",
   "audio/x-m4a",
-  "audio/webm",
   "audio/ogg",
-  "video/mp4",
-  "video/webm",
-  "application/ogg",
 ]);
 
 router.get("/projects", async (req, res) => {
@@ -92,7 +88,7 @@ router.post("/projects", upload.single("file"), async (req, res) => {
     return;
   }
   if (!ALLOWED_MIME.has(file.mimetype) && !ALLOWED_EXT.test(file.originalname)) {
-    res.status(400).json({ error: "Unsupported file type. Upload mp3, wav, m4a, mp4, webm, or ogg." });
+    res.status(400).json({ error: "Unsupported file type. Upload mp3, wav, m4a, or ogg." });
     return;
   }
 
@@ -284,4 +280,3 @@ router.delete("/projects/:projectId", async (req, res) => {
 });
 
 export default router;
-

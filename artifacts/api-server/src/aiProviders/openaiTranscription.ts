@@ -1,5 +1,11 @@
 import { toFile } from "openai/uploads";
 import { openai } from "../lib/openai";
+import fs from "fs/promises";
+import path from "path";
+import os from "os";
+import { randomUUID } from "crypto";
+import { execFile } from "child_process";
+import { promisify } from "util";
 
 export type TranscriptSegment = {
   id: number;
@@ -7,6 +13,8 @@ export type TranscriptSegment = {
   end_time: string; // HH:MM:SS.mmm
   text: string;
 };
+
+const execFileAsync = promisify(execFile);
 
 function pad(num: number, width = 2) {
   return String(num).padStart(width, "0");
@@ -62,7 +70,7 @@ export function detectLanguageIfAvailable(raw: unknown): string | null {
   return typeof lang === "string" && lang.trim() ? lang.trim() : null;
 }
 
-export async function transcribeAudio(input: {
+async function transcribeSingle(input: {
   audioBytes: Buffer;
   filename: string;
   sourceLanguage: string; // "auto" or ISO-ish; OpenAI expects language codes
@@ -93,3 +101,134 @@ export async function transcribeAudio(input: {
   };
 }
 
+function bumpSegments(segments: TranscriptSegment[], offsetSeconds: number, idOffset: number) {
+  if (!offsetSeconds && !idOffset) return segments;
+  const toSec = (ts: string) => {
+    const m = /^(\d+):(\d+):(\d+)(?:\.(\d+))?$/.exec(ts.trim());
+    if (!m) return 0;
+    const hh = Number(m[1] ?? 0);
+    const mm = Number(m[2] ?? 0);
+    const ss = Number(m[3] ?? 0);
+    const ms = Number((m[4] ?? "0").padEnd(3, "0").slice(0, 3));
+    return hh * 3600 + mm * 60 + ss + ms / 1000;
+  };
+  return segments.map((s) => {
+    const start = toSec(s.start_time) + offsetSeconds;
+    const end = toSec(s.end_time) + offsetSeconds;
+    return {
+      ...s,
+      id: s.id + idOffset,
+      start_time: secsToTimestamp(start),
+      end_time: secsToTimestamp(end),
+    };
+  });
+}
+
+/**
+ * Whisper file uploads can fail around ~25MB. This helper auto-chunks large audio by
+ * transcoding into low-bitrate mp3 segments and stitching timestamp offsets.
+ */
+export async function transcribeAudio(input: {
+  audioBytes: Buffer;
+  filename: string;
+  sourceLanguage: string;
+}) {
+  const MAX_OPENAI_BYTES = 24 * 1024 * 1024; // stay below 25MB-ish limit
+  if (input.audioBytes.byteLength <= MAX_OPENAI_BYTES) {
+    return await transcribeSingle(input);
+  }
+
+  const jobId = randomUUID();
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), `daytabs-a2t-${jobId}-`));
+  const inPath = path.join(tmpDir, "input");
+  const outPattern = path.join(tmpDir, "chunk-%03d.mp3");
+
+  try {
+    await fs.writeFile(inPath, input.audioBytes);
+
+    // Transcode and segment to keep chunk sizes small and consistent.
+    // - mono 16k
+    // - 64kbps mp3
+    // - 7min segments
+    await execFileAsync("ffmpeg", [
+      "-nostdin",
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-i",
+      inPath,
+      "-vn",
+      "-ac",
+      "1",
+      "-ar",
+      "16000",
+      "-c:a",
+      "libmp3lame",
+      "-b:a",
+      "64k",
+      "-f",
+      "segment",
+      "-segment_time",
+      "420",
+      "-reset_timestamps",
+      "1",
+      outPattern,
+    ], { timeout: 10 * 60 * 1000 });
+
+    const files = (await fs.readdir(tmpDir))
+      .filter((f) => f.startsWith("chunk-") && f.endsWith(".mp3"))
+      .sort()
+      .map((f) => path.join(tmpDir, f));
+
+    if (!files.length) {
+      return await transcribeSingle({ ...input, audioBytes: input.audioBytes, filename: input.filename });
+    }
+
+    let offsetSeconds = 0;
+    let idOffset = 0;
+    const stitchedSegments: TranscriptSegment[] = [];
+    const textParts: string[] = [];
+    let detectedLanguage: string | null = null;
+
+    for (const fp of files) {
+      const bytes = await fs.readFile(fp);
+      if (bytes.byteLength > MAX_OPENAI_BYTES) {
+        // As a final fallback, transcribe this chunk without timestamps.
+        const single = await transcribeSingle({ audioBytes: bytes.slice(0, MAX_OPENAI_BYTES), filename: path.basename(fp), sourceLanguage: input.sourceLanguage });
+        const bumped = bumpSegments(single.segments, offsetSeconds, idOffset);
+        stitchedSegments.push(...bumped);
+        textParts.push(single.fullText);
+        detectedLanguage = detectedLanguage ?? single.detectedLanguage;
+        idOffset = stitchedSegments.length;
+        offsetSeconds += 420;
+        continue;
+      }
+
+      const single = await transcribeSingle({ audioBytes: bytes, filename: path.basename(fp), sourceLanguage: input.sourceLanguage });
+      const bumped = bumpSegments(single.segments, offsetSeconds, idOffset);
+      stitchedSegments.push(...bumped);
+      textParts.push(single.fullText);
+      detectedLanguage = detectedLanguage ?? single.detectedLanguage;
+      idOffset = stitchedSegments.length;
+      // Better offset: use last segment end time in seconds if parseable; else fallback to 7min.
+      const approx = (() => {
+        const s = single.segments[single.segments.length - 1];
+        if (!s) return 420;
+        const m = /^(\d+):(\d+):(\d+)(?:\.(\d+))?$/.exec(s.end_time);
+        if (!m) return 420;
+        const hh = Number(m[1] ?? 0);
+        const mm = Number(m[2] ?? 0);
+        const ss = Number(m[3] ?? 0);
+        const ms = Number((m[4] ?? "0").padEnd(3, "0").slice(0, 3));
+        const sec = hh * 3600 + mm * 60 + ss + ms / 1000;
+        return sec > 0 ? sec : 420;
+      })();
+      offsetSeconds += approx;
+    }
+
+    const fullText = textParts.join(" ").replace(/\s+/g, " ").trim();
+    return { fullText, segments: stitchedSegments, detectedLanguage, raw: { chunked: true, chunks: files.length } };
+  } finally {
+    await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
