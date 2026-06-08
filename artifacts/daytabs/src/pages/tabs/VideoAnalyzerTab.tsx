@@ -285,6 +285,10 @@ function formatAnalysisDate(value: string | null) {
   }).format(date);
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function getHistoryStatusLabel(status: string) {
   if (status === "complete" || status === "successful" || status === "success") return "Successful";
   if (status === "cancelled") return "Cancelled";
@@ -335,37 +339,42 @@ function isSuccessfulAnalysis(status: string) {
 }
 
 function getHistoryVideoName(item: AnalysisHistoryItem) {
-  const result = item.result;
-  const options = result?.analysisOptions;
-  const originalName = options?.originalFileName ?? options?.fileName;
-  const publishTitle = result?.publish
-    ? Object.values(result.publish).find((entry) => entry?.titles?.length)?.titles?.[0]
+  const result = isPlainObject(item.result) ? item.result : {};
+  const options = isPlainObject(result.analysisOptions) ? result.analysisOptions : {};
+  const originalName = String(options.originalFileName ?? options.fileName ?? "").trim() || undefined;
+  const publishTitle = isPlainObject(result.publish)
+    ? Object.values(result.publish).find((entry) => isPlainObject(entry) && Array.isArray(entry.titles) && entry.titles.length > 0)?.titles?.[0]
     : undefined;
-  const name = result?.videoName ?? options?.videoName ?? publishTitle ?? originalName;
-  return (name ?? "Video analysis").replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim() || "Video analysis";
+  const name = String(result.videoName ?? options.videoName ?? publishTitle ?? originalName ?? "").trim();
+  return (name || "Video analysis").replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim() || "Video analysis";
 }
 
 function getHistoryTotalScore(item: AnalysisHistoryItem) {
-  const result = item.result;
-  const raw = result?.totalScore ?? result?.quality?.score ?? result?.quality?.overallScore ?? result?.quality?.overallVisualScore;
+  const result = isPlainObject(item.result) ? item.result : {};
+  const quality = isPlainObject(result.quality) ? result.quality : {};
+  const raw = result.totalScore ?? quality.score ?? quality.overallScore ?? quality.overallVisualScore;
   const score = Number(raw);
   return Number.isFinite(score) ? Math.max(0, Math.min(100, Math.round(score))) : null;
 }
 
 function getResultPlatforms(result: any): string[] {
-  const platforms = result?.analysisOptions?.platforms;
-  return Array.isArray(platforms) && platforms.length ? platforms : ["youtube_long"];
+  if (!isPlainObject(result)) return ["youtube_long"];
+  const options = isPlainObject(result.analysisOptions) ? result.analysisOptions : {};
+  const platforms = options.platforms;
+  return Array.isArray(platforms) && platforms.length ? platforms.map(String) : ["youtube_long"];
 }
 
 function getResultModules(result: any): string[] {
-  const modules = result?.analysisOptions?.modules;
-  if (Array.isArray(modules) && modules.length) return modules;
+  const safeResult = isPlainObject(result) ? result : {};
+  const options = isPlainObject(safeResult.analysisOptions) ? safeResult.analysisOptions : {};
+  const modules = options.modules;
+  if (Array.isArray(modules) && modules.length) return modules.map(String);
 
   const inferred = [
-    result?.quality ? "quality" : null,
-    result?.editing ? "editing" : null,
-    result?.publish ? "publish" : null,
-    result?.transcript ? "transcript" : null,
+    isPlainObject(safeResult.quality) ? "quality" : null,
+    isPlainObject(safeResult.editing) ? "editing" : null,
+    isPlainObject(safeResult.publish) ? "publish" : null,
+    isPlainObject(safeResult.transcript) ? "transcript" : null,
   ].filter((value): value is string => Boolean(value));
 
   return inferred.length ? inferred : ["quality", "editing"];
@@ -2766,12 +2775,16 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
       const res = await fetch("/api/analysis/history?limit=12", {
         headers: getAuthHeaders(),
       });
-      if (!res.ok) return;
+      if (!res.ok) {
+        setShowUploadForm(true);
+        return;
+      }
       const data = await res.json() as { analyses?: AnalysisHistoryItem[] };
       setAnalysisHistory(data.analyses ?? []);
       if ((data.analyses ?? []).length === 0) setShowUploadForm(true);
     } catch {
       // History is helpful but non-blocking; upload and polling remain the main path.
+      setShowUploadForm(true);
     } finally {
       setHistoryLoading(false);
       setHistoryBootstrapped(true);
