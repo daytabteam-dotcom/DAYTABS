@@ -289,6 +289,19 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function parseHistoryResult(raw: unknown): Record<string, unknown> | null {
+  if (isPlainObject(raw)) return raw;
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      return isPlainObject(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
 function getHistoryStatusLabel(status: string) {
   if (status === "complete" || status === "successful" || status === "success") return "Successful";
   if (status === "cancelled") return "Cancelled";
@@ -2714,6 +2727,7 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
   const [historyLoading, setHistoryLoading] = useState(true);
   const [historyResult, setHistoryResult] = useState<any | null>(null);
   const [openedHistoryJobId, setOpenedHistoryJobId] = useState<string | null>(null);
+  const [historyOpenError, setHistoryOpenError] = useState<string | null>(null);
   const [cancellingJobId, setCancellingJobId] = useState<string | null>(null);
   const [showUploadForm, setShowUploadForm] = useState(false);
   const [historyBootstrapped, setHistoryBootstrapped] = useState(false);
@@ -3062,12 +3076,25 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
     if (openedFileName) fileNameRef.current = openedFileName;
     setFile(null);
     setShowUploadForm(true);
+    setHistoryOpenError(null);
 
-    if (isSuccessfulAnalysis(item.status) && item.result) {
+    const normalizedResult = parseHistoryResult(item.result);
+    console.groupCollapsed("[VideoAnalyzer] Opening history item", item.jobId);
+    console.log("item", item);
+    console.log("normalizedResult", normalizedResult);
+    console.groupEnd();
+
+    if (isSuccessfulAnalysis(item.status) && normalizedResult) {
       clearPendingUploadRecovery();
       setJobId(null);
-      setHistoryResult(item.result);
+      setHistoryResult(normalizedResult);
       setOpenedHistoryJobId(item.jobId);
+    } else if (isSuccessfulAnalysis(item.status) && !normalizedResult) {
+      const message = "The saved report is malformed and cannot be opened. Check console for details.";
+      console.error("[VideoAnalyzer] Invalid saved report result for job", item.jobId, item.result);
+      setHistoryResult(null);
+      setOpenedHistoryJobId(null);
+      setHistoryOpenError(message);
     } else {
       setHistoryResult(null);
       setOpenedHistoryJobId(null);
@@ -3240,6 +3267,24 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
 
   return (
     <PanelPage className="space-y-8">
+      {historyOpenError ? (
+        <PanelCard className="border-red-500/20 bg-red-500/10 p-5">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-red-100">Saved report failed to open</p>
+              <p className="mt-2 text-sm text-red-200">{historyOpenError}</p>
+              <p className="mt-2 text-xs text-red-300">This may be caused by a legacy or malformed saved report payload.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setHistoryOpenError(null)}
+              className="rounded-lg border border-red-400/20 px-3 py-2 text-xs font-semibold text-red-100 hover:bg-red-500/15"
+            >
+              Dismiss
+            </button>
+          </div>
+        </PanelCard>
+      ) : null}
       {showPlanModal && <PlanPickerModal onClose={() => setShowPlanModal(false)} />}
       <UpgradeErrorModal error={limitError} onClose={() => setLimitError(null)} />
       {showLimitModal && (
