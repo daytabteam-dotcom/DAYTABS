@@ -2793,6 +2793,8 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
   const fileNameRef = useRef<string>("analysis");
   const completedJobSoundRef = useRef<string | null>(null);
   const queueUpgradeToastJobRef = useRef<string | null>(null);
+  const readyResultKeyRef = useRef<string | null>(null);
+  const usageRefreshJobRef = useRef<string | null>(null);
   const exportBaseName = (file?.name ?? fileNameRef.current ?? "analysis").replace(/\.[^.]+$/, "") || "analysis";
   const { ref: pdfExportRef, exportPdf, isExporting: isPdfExporting } = usePdfExport(`${exportBaseName}-daytabs-report.pdf`);
 
@@ -2908,19 +2910,34 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
   }, [jobId, toast]);
 
   useEffect(() => {
-    if (hasResults) {
+    if (!hasResults) {
+      readyResultKeyRef.current = null;
+      onRegisterExport(null);
+      return;
+    }
+
+    const resultKey = historyResult
+      ? `history:${openedHistoryJobId ?? "unknown"}`
+      : jobId
+        ? `job:${jobId}`
+        : "current";
+
+    if (readyResultKeyRef.current !== resultKey) {
+      readyResultKeyRef.current = resultKey;
       clearPendingUploadRecovery();
       onDataReady();
+    }
 
-      // Refresh plan usage so the Home page counter updates immediately
+    // Refresh usage/history only when a live analysis completes. Opening a saved
+    // report should not refetch auth/subscription/history in a loop.
+    if (!historyResult && jobId && isDone && results && usageRefreshJobRef.current !== jobId) {
+      usageRefreshJobRef.current = jobId;
       window.dispatchEvent(new CustomEvent("daytabs:plan-updated"));
       loadAnalysisHistory();
-
-      onRegisterExport(exportPdf);
-    } else {
-      onRegisterExport(null);
     }
-  }, [hasResults, displayedResults, selectedModules, onDataReady, onRegisterExport, loadAnalysisHistory, exportPdf]);
+
+    onRegisterExport(exportPdf);
+  }, [hasResults, historyResult, openedHistoryJobId, jobId, isDone, results, onDataReady, onRegisterExport, loadAnalysisHistory, exportPdf]);
 
   useEffect(() => {
     if (statusData?.status === "error") {
