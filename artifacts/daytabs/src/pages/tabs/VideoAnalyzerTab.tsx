@@ -303,6 +303,11 @@ function asPlainRecord(value: unknown): Record<string, unknown> {
   return isPlainObject(value) ? value : {};
 }
 
+function firstPlainRecordValue(value: unknown): Record<string, unknown> | null {
+  if (!isPlainObject(value)) return null;
+  return Object.values(value).find(isPlainObject) ?? null;
+}
+
 function parseHistoryResult(raw: unknown): Record<string, unknown> | null {
   if (isPlainObject(raw)) return raw;
   if (typeof raw === "string") {
@@ -499,7 +504,8 @@ function metricDisplayLabel(title: string, profile?: any) {
 function qualityIntro(profile?: any) {
   const formatProfile = getFormatProfile(profile);
   if (!formatProfile) return "Quality checks tuned to how clearly the viewer can read the most important parts of this video.";
-  return `This ${contentFormatLabel(formatProfile.contentFormat).toLowerCase()} video is being judged mainly on ${formatProfile.successFactors?.slice(0, 3).join(", ") || "clarity, pacing, and payoff"}.`;
+  const successFactors = asStringArray(formatProfile.successFactors);
+  return `This ${contentFormatLabel(formatProfile.contentFormat).toLowerCase()} video is being judged mainly on ${successFactors.slice(0, 3).join(", ") || "clarity, pacing, and payoff"}.`;
 }
 
 function editingIntro(profile?: any) {
@@ -952,8 +958,8 @@ function CreatorReportIntro({ results, profile, isPaid }: { results: any; profil
   const editingData = results?.editing ?? {};
   const topFixes = collectTopFixes(results);
   const strongest = strongestMetric(results?.quality, profile);
-  const publishData = results?.publish ? Object.values(results.publish)[0] as any : null;
-  const primaryPromise = publishData?.audiencePromise ?? editingData?.packagingAngle ?? formatProfile?.viewerIntent ?? "Clear outcome-driven packaging";
+  const publishData = firstPlainRecordValue(results?.publish);
+  const primaryPromise = String(publishData?.audiencePromise ?? editingData?.packagingAngle ?? formatProfile?.viewerIntent ?? "Clear outcome-driven packaging");
   const score = overallScoreFromResults(results);
   const verdict = scoreVerdict(score);
   const scoreDrivers = weakestMetrics(results, profile);
@@ -964,7 +970,8 @@ function CreatorReportIntro({ results, profile, isPaid }: { results: any; profil
   const hiddenTimelineMoments = isPaid ? [] : timelineMoments.slice(1);
   const visibleScoreDrivers = isPaid ? scoreDrivers : scoreDrivers.slice(0, 3);
   const hiddenScoreDrivers = isPaid ? [] : scoreDrivers.slice(3);
-  const hookInsight = editingData?.hooks?.[0]?.text ?? editingData?.rewrittenHook ?? editingData?.hookApproach ?? null;
+  const firstHook = asArray<any>(editingData?.hooks)[0];
+  const hookInsight = String(firstHook?.text ?? editingData?.rewrittenHook ?? editingData?.hookApproach ?? "Lead with the strongest payoff or most unresolved question first.");
   const scoreMeta = scoreColorMeta(score);
 
   return (
@@ -986,7 +993,7 @@ function CreatorReportIntro({ results, profile, isPaid }: { results: any; profil
             <div className="mt-5 grid gap-3 sm:grid-cols-3">
               {[
                 { label: "Fix first", value: visibleFixes[0]?.title ?? "Tighten the opening before publishing." },
-                { label: "Hook insight", value: hookInsight ?? "Lead with the strongest payoff or most unresolved question first." },
+                { label: "Hook insight", value: hookInsight },
                 { label: "Packaging promise", value: primaryPromise },
               ].map((item) => {
                 const meta = sectionVisualMeta(item.label);
@@ -1238,12 +1245,12 @@ function DecisionBar({ results, profile }: { results: any; profile?: any }) {
   if (!results) return null;
   const editingData = results?.editing ?? {};
   const qualityData = results?.quality ?? {};
-  const publishData = results?.publish ? Object.values(results.publish)[0] as any : null;
+  const publishData = firstPlainRecordValue(results?.publish);
   const score = overallScoreFromResults(results);
   const verdict = scoreVerdict(score);
   const topFixSummary = collectTopFixes(results)[0];
-  const topBlocker = topFixSummary?.title ?? qualityData?.topFix ?? editingData?.nowFixes?.[0] ?? "Review the detailed recommendations below.";
-  const topOpportunity = editingData?.packagingAngle ?? publishData?.audiencePromise ?? editingData?.editingStyle ?? "Tighten the first 10 seconds and sharpen the promise.";
+  const topBlocker = String(topFixSummary?.title ?? qualityData?.topFix ?? asStringArray(editingData?.nowFixes)[0] ?? "Review the detailed recommendations below.");
+  const topOpportunity = String(editingData?.packagingAngle ?? publishData?.audiencePromise ?? editingData?.editingStyle ?? "Tighten the first 10 seconds and sharpen the promise.");
   const actionLabel = score >= 85 ? "Publish after a quick pass" : score >= 60 ? "Fix the opening, then publish" : "Rework before publishing";
 
   return (
