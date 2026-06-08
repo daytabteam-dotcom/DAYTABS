@@ -289,6 +289,20 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function asArray<T = unknown>(value: unknown): T[] {
+  return Array.isArray(value) ? value as T[] : [];
+}
+
+function asStringArray(value: unknown): string[] {
+  return asArray(value)
+    .map((item) => String(item ?? "").trim())
+    .filter(Boolean);
+}
+
+function asPlainRecord(value: unknown): Record<string, unknown> {
+  return isPlainObject(value) ? value : {};
+}
+
 function parseHistoryResult(raw: unknown): Record<string, unknown> | null {
   if (isPlainObject(raw)) return raw;
   if (typeof raw === "string") {
@@ -352,19 +366,20 @@ function isSuccessfulAnalysis(status: string) {
 }
 
 function getHistoryVideoName(item: AnalysisHistoryItem) {
-  const result = isPlainObject(item.result) ? item.result : {};
-  const options = isPlainObject(result.analysisOptions) ? result.analysisOptions : {};
+  const result = asPlainRecord(parseHistoryResult(item.result) ?? item.result);
+  const options = asPlainRecord(result.analysisOptions);
   const originalName = String(options.originalFileName ?? options.fileName ?? "").trim() || undefined;
   const publishTitle = isPlainObject(result.publish)
-    ? Object.values(result.publish).find((entry) => isPlainObject(entry) && Array.isArray(entry.titles) && entry.titles.length > 0)?.titles?.[0]
+    ? Object.values(result.publish).find((entry) => isPlainObject(entry) && asStringArray(entry.titles).length > 0)
     : undefined;
-  const name = String(result.videoName ?? options.videoName ?? publishTitle ?? originalName ?? "").trim();
+  const publishTitleText = isPlainObject(publishTitle) ? asStringArray(publishTitle.titles)[0] : undefined;
+  const name = String(result.videoName ?? options.videoName ?? publishTitleText ?? originalName ?? "").trim();
   return (name || "Video analysis").replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim() || "Video analysis";
 }
 
 function getHistoryTotalScore(item: AnalysisHistoryItem) {
-  const result = isPlainObject(item.result) ? item.result : {};
-  const quality = isPlainObject(result.quality) ? result.quality : {};
+  const result = asPlainRecord(parseHistoryResult(item.result) ?? item.result);
+  const quality = asPlainRecord(result.quality);
   const raw = result.totalScore ?? quality.score ?? quality.overallScore ?? quality.overallVisualScore;
   const score = Number(raw);
   return Number.isFinite(score) ? Math.max(0, Math.min(100, Math.round(score))) : null;
@@ -373,15 +388,15 @@ function getHistoryTotalScore(item: AnalysisHistoryItem) {
 function getResultPlatforms(result: any): string[] {
   if (!isPlainObject(result)) return ["youtube_long"];
   const options = isPlainObject(result.analysisOptions) ? result.analysisOptions : {};
-  const platforms = options.platforms;
-  return Array.isArray(platforms) && platforms.length ? platforms.map(String) : ["youtube_long"];
+  const platforms = asStringArray(options.platforms);
+  return platforms.length ? platforms : ["youtube_long"];
 }
 
 function getResultModules(result: any): string[] {
   const safeResult = isPlainObject(result) ? result : {};
   const options = isPlainObject(safeResult.analysisOptions) ? safeResult.analysisOptions : {};
-  const modules = options.modules;
-  if (Array.isArray(modules) && modules.length) return modules.map(String);
+  const modules = asStringArray(options.modules);
+  if (modules.length) return modules;
 
   const inferred = [
     isPlainObject(safeResult.quality) ? "quality" : null,
@@ -521,6 +536,8 @@ function AnalysisModeCard({ profile }: { profile: any }) {
   if (!profile) return null;
   const speechPct = Math.round((Number(profile.speechRatio ?? 0) || 0) * 100);
   const formatProfile = getFormatProfile(profile);
+  const successFactors = asStringArray(formatProfile?.successFactors);
+  const ignoredSignals = asStringArray(formatProfile?.ignoredSignals);
   return (
     <PanelCard className="p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -550,23 +567,23 @@ function AnalysisModeCard({ profile }: { profile: any }) {
           <span>{profile.totalWords ?? 0} detected words</span>
         </div>
       </div>
-      {formatProfile?.successFactors?.length ? (
+      {successFactors.length ? (
         <div className="mt-4 grid gap-4 md:grid-cols-2">
           <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
             <p className="text-[11px] uppercase tracking-[0.16em] text-white/40">What matters most</p>
             <div className="mt-2 flex flex-wrap gap-2">
-              {formatProfile.successFactors.map((factor: string) => (
+              {successFactors.map((factor) => (
                 <span key={factor} className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2.5 py-1 text-xs text-emerald-100">
                   {factor}
                 </span>
               ))}
             </div>
           </div>
-          {formatProfile.ignoredSignals?.length ? (
+          {ignoredSignals.length ? (
             <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
               <p className="text-[11px] uppercase tracking-[0.16em] text-white/40">Signals we downplayed</p>
               <div className="mt-2 flex flex-wrap gap-2">
-                {formatProfile.ignoredSignals.map((signal: string) => (
+                {ignoredSignals.map((signal) => (
                   <span key={signal} className="rounded-full border border-white/10 bg-black/20 px-2.5 py-1 text-xs text-white/60">
                     {signal}
                   </span>
@@ -1349,7 +1366,7 @@ function shouldSurfaceMetric(metric: any) {
 function FillerCard({ metric }: { metric: any }) {
   if (!metric) return null;
   const numVal = metric.numeric ?? 0;
-  const words: string[] = metric.words ?? [];
+  const words = asStringArray(metric.words);
   const tone = metricToneMeta(metric.level === "high" ? 30 : metric.level === "medium" ? 60 : 85);
   return (
     <div className={`h-full rounded-2xl p-4 border transition-all md:col-span-2 xl:col-span-3 ${tone.card}`}>
@@ -1379,8 +1396,8 @@ function FillerCard({ metric }: { metric: any }) {
 
 function RetentionForecastCard({ data }: { data: any }) {
   if (!data) return null;
-  const moments = Array.isArray(data.dropOffMoments) ? data.dropOffMoments : [];
-  const points = Array.isArray(data.retentionCurvePoints) ? data.retentionCurvePoints : [];
+  const moments = asArray<any>(data.dropOffMoments);
+  const points = asArray<any>(data.retentionCurvePoints);
   const grade = data.retentionGrade ?? "C";
   const gradeClass = grade === "A" ? "text-green-400 border-green-400/20 bg-green-400/5"
     : grade === "B" ? "text-blue-400 border-blue-400/20 bg-blue-400/5"
@@ -1630,13 +1647,14 @@ function QualityPanel({ data, isPaid, profile }: { data: any; isPaid: boolean; p
 
 function EditingPanel({ data, isPaid, profile }: { data: any; isPaid: boolean; profile?: any }) {
   if (!data) return <p className="text-white/40 text-sm">No editing data.</p>;
-  const hooks = data.hooks ?? [];
-  const suggestions = data.editingSuggestions ?? [];
+  const hooks = asArray<any>(data.hooks);
+  const suggestions = asStringArray(data.editingSuggestions);
   const firstSuggestion = suggestions[0];
   const extraSuggestions = suggestions.slice(1);
-  const nowFixes: string[] = data.nowFixes ?? [];
-  const nextVideoFixes: string[] = data.nextVideoFixes ?? [];
-  const editorNotes: string[] = data.editorNotes ?? [];
+  const nowFixes = asStringArray(data.nowFixes);
+  const nextVideoFixes = asStringArray(data.nextVideoFixes);
+  const editorNotes = asStringArray(data.editorNotes);
+  const removeSections = asArray<any>(data.removeSections);
 
   return (
     <div className="space-y-6">
@@ -1797,11 +1815,11 @@ function EditingPanel({ data, isPaid, profile }: { data: any; isPaid: boolean; p
             </div>
           )}
 
-          {data.removeSections?.length > 0 && (
+          {removeSections.length > 0 && (
             <div>
               <h3 className="text-sm font-semibold text-white/60 uppercase tracking-wider mb-3 flex items-center gap-2"><XCircle className="w-4 h-4 text-red-400" />Sections to Cut</h3>
               <div className="space-y-2">
-                {data.removeSections.slice(0, 8).map((s: any, i: number) => (
+                {removeSections.slice(0, 8).map((s: any, i: number) => (
                   <div key={i} className="flex items-start gap-3 p-3 rounded-xl bg-red-400/5 border border-red-400/15">
                     {(s.start || s.end) && <span className="text-xs font-mono text-red-400 mt-0.5 min-w-[80px]">{s.start} → {s.end}</span>}
                     <p className="text-sm text-white/70">{s.reason ?? s.description ?? s}</p>
@@ -1846,7 +1864,8 @@ function EditingPanel({ data, isPaid, profile }: { data: any; isPaid: boolean; p
 function PublishPanel({ data, platforms, isPaid, subtitleFile, videoFileName, profile }: { data: any; platforms: string[]; isPaid: boolean; subtitleFile?: { content: string; format: string; language: string }; videoFileName?: string; profile?: any }) {
   const [activePlatform, setActivePlatform] = useState<string>("");
   const [copiedSection, setCopiedSection] = useState<string | null>(null);
-  const publishKeys = data ? Object.keys(data) : [];
+  const publishData = asPlainRecord(data);
+  const publishKeys = Object.keys(publishData);
 
   useEffect(() => {
     if (!publishKeys.length) {
@@ -1859,9 +1878,9 @@ function PublishPanel({ data, platforms, isPaid, subtitleFile, videoFileName, pr
     }
   }, [activePlatform, platforms, publishKeys]);
 
-  if (!data || publishKeys.length === 0) return <p className="text-white/40 text-sm">No publish data.</p>;
+  if (publishKeys.length === 0) return <p className="text-white/40 text-sm">No publish data.</p>;
 
-  const pData = data[activePlatform];
+  const pData = asPlainRecord(publishData[activePlatform]);
   const platformLabel = PLATFORMS.find(p => p.id === activePlatform)?.label ?? activePlatform;
   const isYouTube = activePlatform === "youtube_long" || activePlatform === "youtube_shorts";
   const showSubtitleFile = isYouTube && profile?.hasMeaningfulSpeech !== false;
@@ -1873,16 +1892,21 @@ function PublishPanel({ data, platforms, isPaid, subtitleFile, videoFileName, pr
     });
   }
 
-  const titles: string[] = pData?.titles ?? [];
+  const titles = asStringArray(pData.titles);
   const firstTitle = titles[0];
   const priorityTitles = titles.slice(0, 3);
   const extraTitles = titles.slice(3);
-  const hashtags: Array<{ tag: string; effect?: string }> = pData?.hashtags ?? [];
+  const hashtags = asArray<{ tag?: string; effect?: string }>(pData.hashtags);
   const visibleTagCount = isPaid ? 15 : 8;
   const firstTags = hashtags.slice(0, visibleTagCount);
   const extraTags = hashtags.slice(visibleTagCount);
 
-  const titleStrategies: string[] = pData?.titleStrategies ?? ["Curiosity gap", "How-to", "Number-based", "Problem/solution", "Bold claim"];
+  const titleStrategies = asStringArray(pData.titleStrategies);
+  const safeTitleStrategies = titleStrategies.length ? titleStrategies : ["Curiosity gap", "How-to", "Number-based", "Problem/solution", "Bold claim"];
+  const timestamps = asArray<{ time?: string; label?: string }>(pData.timestamps);
+  const audiencePromise = String(pData.audiencePromise ?? "").trim();
+  const packagingStrategy = String(pData.packagingStrategy ?? "").trim();
+  const algorithmFit = String(pData.algorithmFit ?? "").trim();
 
   return (
     <div className="space-y-4">
@@ -1892,24 +1916,24 @@ function PublishPanel({ data, platforms, isPaid, subtitleFile, videoFileName, pr
       <LimitedSpeechNotice profile={profile}>
         Publish copy was generated from the visual premise and any sparse speech that was detected, so treat these titles and descriptions as packaging drafts rather than transcript-driven summaries.
       </LimitedSpeechNotice>
-      {(pData?.algorithmFit || pData?.packagingStrategy || pData?.audiencePromise) && (
+      {(algorithmFit || packagingStrategy || audiencePromise) && (
         <div className="grid gap-3 md:grid-cols-3">
-          {pData?.audiencePromise && (
+          {audiencePromise && (
             <div className="rounded-2xl border border-emerald-400/20 bg-emerald-500/6 p-4">
               <p className="text-xs uppercase tracking-wider text-emerald-100/70 flex items-center gap-2"><Target className="h-4 w-4 text-emerald-300" />Promise The Viewer Buys</p>
-              <p className="mt-2 text-sm text-white/70">{pData.audiencePromise}</p>
+              <p className="mt-2 text-sm text-white/70">{audiencePromise}</p>
             </div>
           )}
-          {pData?.packagingStrategy && (
+          {packagingStrategy && (
             <div className="rounded-2xl border border-sky-400/20 bg-sky-500/6 p-4">
               <p className="text-xs uppercase tracking-wider text-sky-100/70 flex items-center gap-2"><PenTool className="h-4 w-4 text-sky-300" />Angle To Lean Into</p>
-              <p className="mt-2 text-sm text-white/70">{pData.packagingStrategy}</p>
+              <p className="mt-2 text-sm text-white/70">{packagingStrategy}</p>
             </div>
           )}
-          {pData?.algorithmFit && (
+          {algorithmFit && (
             <div className="rounded-2xl border border-amber-400/20 bg-amber-500/6 p-4">
               <p className="text-xs uppercase tracking-wider text-amber-100/70 flex items-center gap-2"><Rocket className="h-4 w-4 text-amber-300" />Why This Should Get Clicked</p>
-              <p className="mt-2 text-sm text-white/70">{pData.algorithmFit}</p>
+              <p className="mt-2 text-sm text-white/70">{algorithmFit}</p>
             </div>
           )}
         </div>
@@ -1979,8 +2003,8 @@ function PublishPanel({ data, platforms, isPaid, subtitleFile, videoFileName, pr
                     onClick={() => copyText(title, `title-${index}`)}
                     className="rounded-xl border border-white/10 bg-black/10 p-4 text-left transition-all hover:border-emerald-400/25 hover:bg-emerald-500/8"
                   >
-                    {titleStrategies[index] && (
-                      <p className="text-[10px] text-primary/50 uppercase tracking-wider mb-1">{titleStrategies[index]}</p>
+                    {safeTitleStrategies[index] && (
+                      <p className="text-[10px] text-primary/50 uppercase tracking-wider mb-1">{safeTitleStrategies[index]}</p>
                     )}
                     <p className="text-sm text-white/80 leading-relaxed">{title}</p>
                   </button>
@@ -1992,7 +2016,7 @@ function PublishPanel({ data, platforms, isPaid, subtitleFile, videoFileName, pr
                     {extraTitles.map((t: string, i: number) => (
                       <div key={i} className="flex items-start gap-2">
                         <div className="flex-1">
-                          {titleStrategies[i + 3] && <p className="text-[10px] text-primary/50 uppercase tracking-wider mb-0.5">{titleStrategies[i + 3]}</p>}
+                          {safeTitleStrategies[i + 3] && <p className="text-[10px] text-primary/50 uppercase tracking-wider mb-0.5">{safeTitleStrategies[i + 3]}</p>}
                           <p className="text-sm text-white/80">{t}</p>
                         </div>
                       </div>
@@ -2041,30 +2065,30 @@ function PublishPanel({ data, platforms, isPaid, subtitleFile, videoFileName, pr
                   <div className="flex items-center justify-between mb-2">
                     <p className="text-xs text-amber-100/70 uppercase tracking-wider flex items-center gap-1.5"><FileText className="w-3.5 h-3.5" />Description</p>
                     {isPaid && (
-                      <button onClick={() => copyText(pData.description, "desc")} className="text-white/30 hover:text-white/60 transition-colors">
+                      <button onClick={() => copyText(String(pData.description ?? ""), "desc")} className="text-white/30 hover:text-white/60 transition-colors">
                         {copiedSection === "desc" ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
                       </button>
                     )}
                   </div>
                   {isPaid ? (
-                    <p className="text-sm text-white/70 whitespace-pre-line leading-relaxed">{pData.description}</p>
+                    <p className="text-sm text-white/70 whitespace-pre-line leading-relaxed">{String(pData.description)}</p>
                   ) : (
                     <>
                       <p className="text-sm text-white/70 leading-relaxed">
-                        {pData.description.split(/[.!?]/).slice(0, 2).join(". ") + "."}
+                        {String(pData.description).split(/[.!?]/).slice(0, 2).join(". ") + "."}
                       </p>
                       <BlurSection blur feature="full-description" label="Get the full description with chapters, links section, and CTA, 150-400 words">
-                        <p className="text-sm text-white/70 whitespace-pre-line leading-relaxed mt-2">{pData.description}</p>
+                        <p className="text-sm text-white/70 whitespace-pre-line leading-relaxed mt-2">{String(pData.description)}</p>
                       </BlurSection>
                     </>
                   )}
                 </div>
 
-                {pData.timestamps?.length > 0 && (
+                {timestamps.length > 0 && (
                   <div className="rounded-2xl bg-violet-500/6 border border-violet-400/20 p-4">
                     <p className="text-xs text-violet-100/70 uppercase tracking-wider mb-3 flex items-center gap-1.5"><Clock3 className="w-3.5 h-3.5" />Chapter Timestamps</p>
                     <div className="space-y-1.5">
-                      {pData.timestamps.map((ts: { time: string; label: string }, i: number) => (
+                      {timestamps.map((ts, i) => (
                         <div key={i} className="flex items-center gap-3">
                           <span className="text-xs font-mono text-primary/70 min-w-[48px]">{ts.time}</span>
                           <span className="text-xs text-white/50">{ts.label}</span>
@@ -2128,8 +2152,8 @@ const FILLER_WORDS_RX = /\b(um+|uh+|er+|ah+|hmm+|like|you know|basically|literal
 
 function TranscriptPanel({ data, isPaid, profile }: { data: any; isPaid: boolean; profile?: any }) {
   const [copied, setCopied] = useState(false);
-  const segments: Array<{ start: number; end: number; text: string }> = data?.segments ?? [];
-  const fullText: string = data?.fullText ?? "";
+  const segments = asArray<{ start?: number; end?: number; text?: string }>(data?.segments);
+  const fullText = String(data?.fullText ?? "");
 
   if (!segments.length && !fullText) {
     return <p className="text-white/40 text-sm">No transcript available.</p>;
@@ -2155,7 +2179,7 @@ function TranscriptPanel({ data, isPaid, profile }: { data: any; isPaid: boolean
   }
 
   let lastStampAt = -30;
-  const fullCopyText = segments.map(s => `[${fmtSec(s.start)}] ${s.text}`).join("\n");
+  const fullCopyText = segments.map(s => `[${fmtSec(Number(s.start ?? 0))}] ${String(s.text ?? "")}`).join("\n");
 
   return (
     <div className="space-y-4">
@@ -2184,14 +2208,15 @@ function TranscriptPanel({ data, isPaid, profile }: { data: any; isPaid: boolean
       ) : (
       <div className="p-4 rounded-xl bg-background/60 border border-white/8 space-y-3 max-h-[500px] overflow-y-auto">
         {visibleSegments.map((seg, i) => {
-          const showStamp = seg.start - lastStampAt >= 30;
-          if (showStamp) lastStampAt = seg.start;
+          const start = Number(seg.start ?? 0);
+          const showStamp = start - lastStampAt >= 30;
+          if (showStamp) lastStampAt = start;
           return (
             <div key={i}>
               {showStamp && (
-                <p className="text-xs font-mono text-primary/50 mb-1 sticky top-0 bg-background/80">{fmtSec(seg.start)}</p>
+                <p className="text-xs font-mono text-primary/50 mb-1 sticky top-0 bg-background/80">{fmtSec(start)}</p>
               )}
-              <p className="text-sm text-white/70 leading-relaxed">{highlightFillers(seg.text)}</p>
+              <p className="text-sm text-white/70 leading-relaxed">{highlightFillers(String(seg.text ?? ""))}</p>
             </div>
           );
         })}
@@ -2615,9 +2640,12 @@ function AnalysisHistoryCards({
   return (
     <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-3">
       {items.map((item) => {
-        const options = item.result?.analysisOptions;
-        const modules = options?.modules?.length ? options.modules : ["quality", "editing"];
-        const platforms = options?.platforms?.length ? options.platforms : [item.platform ?? "youtube_long"];
+        const result = asPlainRecord(parseHistoryResult(item.result) ?? item.result);
+        const options = asPlainRecord(result.analysisOptions);
+        const optionModules = asStringArray(options.modules);
+        const optionPlatforms = asStringArray(options.platforms);
+        const modules = optionModules.length ? optionModules : ["quality", "editing"];
+        const platforms = optionPlatforms.length ? optionPlatforms : [item.platform ?? "youtube_long"];
         const active = activeJobId === item.jobId;
         const inProgress = isHistoryInProgress(item.status);
         const totalScore = getHistoryTotalScore(item);
@@ -3069,16 +3097,19 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
   }
 
   function handleOpenHistoryItem(item: AnalysisHistoryItem) {
-    const options = item.result?.analysisOptions;
-    const openedFileName = options?.originalFileName ?? options?.fileName ?? options?.videoName ?? item.result?.videoName;
-    if (options?.platforms?.length) setSelectedPlatforms(options.platforms);
-    if (options?.modules?.length) setSelectedModules(options.modules);
-    if (openedFileName) fileNameRef.current = openedFileName;
+    const normalizedResult = parseHistoryResult(item.result);
+    const result = asPlainRecord(normalizedResult ?? item.result);
+    const options = asPlainRecord(result.analysisOptions);
+    const optionPlatforms = asStringArray(options.platforms);
+    const optionModules = asStringArray(options.modules);
+    const openedFileName = options.originalFileName ?? options.fileName ?? options.videoName ?? result.videoName;
+    if (optionPlatforms.length) setSelectedPlatforms(optionPlatforms);
+    if (optionModules.length) setSelectedModules(optionModules);
+    if (openedFileName) fileNameRef.current = String(openedFileName);
     setFile(null);
     setShowUploadForm(true);
     setHistoryOpenError(null);
 
-    const normalizedResult = parseHistoryResult(item.result);
     console.groupCollapsed("[VideoAnalyzer] Opening history item", item.jobId);
     console.log("item", item);
     console.log("normalizedResult", normalizedResult);
@@ -3103,8 +3134,8 @@ export default function VideoAnalyzerTab({ onDataReady, onDataReset, onRegisterE
         startedAt: item.createdAt ? new Date(item.createdAt).getTime() : Date.now(),
         recoveryId: createUploadRecoveryId(),
         jobId: item.jobId,
-        platforms: options?.platforms?.length ? options.platforms : [item.platform ?? "youtube_long"],
-        modules: options?.modules?.length ? options.modules : ["quality", "editing"],
+        platforms: optionPlatforms.length ? optionPlatforms : [item.platform ?? "youtube_long"],
+        modules: optionModules.length ? optionModules : ["quality", "editing"],
       });
     }
 
