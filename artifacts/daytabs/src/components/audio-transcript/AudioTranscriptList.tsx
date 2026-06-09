@@ -1,25 +1,23 @@
 import React from "react";
 import { PanelCard, PanelCardSoft, PanelEyebrow, PanelSubtitle, PanelTitle } from "@/components/panel-system";
-import type { AudioTranscriptProject, AudioTranslation } from "./types";
+import type { AudioTranscriptProject } from "./types";
 import { TranscriptCard } from "./TranscriptCard";
 import { Captions } from "lucide-react";
 
 export function AudioTranscriptList({
   projects,
-  translationsByProject,
   onOpen,
   onDelete,
 }: {
   projects: AudioTranscriptProject[];
-  translationsByProject: Record<string, AudioTranslation[]>;
   onOpen: (projectId: string) => void;
   onDelete: (projectId: string) => void;
 }) {
   return (
-    <PanelCard className="p-6">
+      <PanelCard className="p-6">
       <PanelEyebrow>Saved</PanelEyebrow>
       <PanelTitle className="text-2xl">Transcripts</PanelTitle>
-      <PanelSubtitle>Every upload is saved as a card with transcripts and translations.</PanelSubtitle>
+      <PanelSubtitle>Every upload is saved as a card with transcript exports.</PanelSubtitle>
 
       <div className="mt-5 grid gap-3 md:grid-cols-2">
         {projects.length === 0 ? (
@@ -30,7 +28,7 @@ export function AudioTranscriptList({
               </div>
               <div className="mt-4 text-lg font-semibold text-white/85">No transcripts yet</div>
               <div className="mt-1 max-w-md text-sm text-white/55">
-                Upload an audio file to generate a timestamped transcript. Then translate and export subtitles.
+                Upload an audio file to generate a timestamped transcript and export subtitles.
               </div>
             </div>
           </PanelCardSoft>
@@ -39,7 +37,6 @@ export function AudioTranscriptList({
             <TranscriptCard
               key={p.id}
               project={p}
-              translations={translationsByProject[p.id] ?? []}
               onOpen={() => onOpen(p.id)}
               onDelete={() => onDelete(p.id)}
             />

@@ -2,7 +2,7 @@ import React from "react";
 import { PanelCardSoft } from "@/components/panel-system";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import type { AudioTranscriptProject, AudioTranslation } from "./types";
+import type { AudioTranscriptProject } from "./types";
 import { AudioLines } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -16,16 +16,13 @@ function dateLabel(iso: string) {
 
 export function TranscriptCard({
   project,
-  translations,
   onOpen,
   onDelete,
 }: {
   project: AudioTranscriptProject;
-  translations: AudioTranslation[];
   onOpen: () => void;
   onDelete: () => void;
 }) {
-  const completedTranslations = translations.filter((t) => t.status === "completed").map((t) => t.targetLanguage);
   const statusTone =
     project.status === "completed" ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-200"
       : project.status === "failed" ? "border-red-500/20 bg-red-500/10 text-red-200"
@@ -78,11 +75,6 @@ export function TranscriptCard({
             {project.detectedLanguage ? (
               <Badge className="border border-white/10 bg-white/[0.04] text-white/75">
                 detected: {project.detectedLanguage}
-              </Badge>
-            ) : null}
-            {completedTranslations.length ? (
-              <Badge className="border border-white/10 bg-white/[0.04] text-white/75">
-                {completedTranslations.length} translation{completedTranslations.length === 1 ? "" : "s"}
               </Badge>
             ) : null}
           </div>

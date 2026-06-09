@@ -1,4 +1,4 @@
-import { db, audioTranscriptJobsTable, audioTranscriptProjectsTable, audioTranslationsTable } from "@workspace/db";
+import { db, audioTranscriptJobsTable, audioTranscriptProjectsTable } from "@workspace/db";
 import { and, desc, eq } from "drizzle-orm";
 import type { TranscriptSegment } from "../aiProviders/openaiTranscription";
 
@@ -59,7 +59,7 @@ export async function listAudioTranscriptProjects(userId: number) {
 export async function createAudioTranscriptJob(input: {
   userId: number;
   transcriptProjectId: string;
-  jobType: "transcription" | "translation";
+  jobType: "transcription";
   status: "queued" | "processing" | "completed" | "failed";
   inputPayload: unknown;
   costCredits?: number;
@@ -97,60 +97,7 @@ export async function getAudioTranscriptJob(userId: number, jobId: string) {
   return row ?? null;
 }
 
-export async function listTranslationsForProject(userId: number, transcriptProjectId: string) {
-  return await db.select().from(audioTranslationsTable).where(and(eq(audioTranslationsTable.userId, userId), eq(audioTranslationsTable.transcriptProjectId, transcriptProjectId))).orderBy(desc(audioTranslationsTable.updatedAt));
-}
-
-export async function getTranslation(userId: number, translationId: string) {
-  const [row] = await db.select().from(audioTranslationsTable).where(and(eq(audioTranslationsTable.id, translationId), eq(audioTranslationsTable.userId, userId))).limit(1);
-  return row ?? null;
-}
-
-export async function getTranslationByTarget(userId: number, transcriptProjectId: string, targetLanguage: string) {
-  const [row] = await db.select().from(audioTranslationsTable).where(and(
-    eq(audioTranslationsTable.userId, userId),
-    eq(audioTranslationsTable.transcriptProjectId, transcriptProjectId),
-    eq(audioTranslationsTable.targetLanguage, targetLanguage),
-  )).limit(1);
-  return row ?? null;
-}
-
-export async function createTranslationRow(input: {
-  userId: number;
-  transcriptProjectId: string;
-  sourceLanguage: string;
-  targetLanguage: string;
-}) {
-  const [row] = await db.insert(audioTranslationsTable).values({
-    userId: input.userId,
-    transcriptProjectId: input.transcriptProjectId,
-    sourceLanguage: input.sourceLanguage,
-    targetLanguage: input.targetLanguage,
-    status: "translating",
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  }).returning();
-  return row!;
-}
-
-export async function updateTranslationRow(userId: number, translationId: string, patch: Partial<{
-  status: string;
-  translatedFullText: string | null;
-  translatedSegments: unknown;
-  errorMessage: string | null;
-}>) {
-  const [row] = await db.update(audioTranslationsTable).set({
-    status: patch.status,
-    translatedFullText: patch.translatedFullText ?? undefined,
-    translatedSegments: patch.translatedSegments as never,
-    errorMessage: patch.errorMessage ?? undefined,
-    updatedAt: new Date(),
-  }).where(and(eq(audioTranslationsTable.id, translationId), eq(audioTranslationsTable.userId, userId))).returning();
-  return row ?? null;
-}
-
 export async function deleteAudioTranscriptProject(userId: number, projectId: string) {
   const [row] = await db.delete(audioTranscriptProjectsTable).where(and(eq(audioTranscriptProjectsTable.id, projectId), eq(audioTranscriptProjectsTable.userId, userId))).returning();
   return row ?? null;
 }
-

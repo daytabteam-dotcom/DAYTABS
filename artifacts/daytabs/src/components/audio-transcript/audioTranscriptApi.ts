@@ -1,5 +1,5 @@
 import { DAYTABS_LOCALE_STORAGE_KEY } from "@/lib/i18n";
-import type { AudioTranscriptProject, AudioTranslation } from "./types";
+import type { AudioTranscriptProject } from "./types";
 
 function authHeaders(): HeadersInit {
   const token = localStorage.getItem("daytabs_token");
@@ -34,7 +34,7 @@ export async function listAudioTranscriptProjects() {
 }
 
 export async function getAudioTranscriptProjectDetail(projectId: string) {
-  return await jsonFetch<{ project: AudioTranscriptProject; translations: AudioTranslation[] }>(`/api/audio-transcript/projects/${projectId}`);
+  return await jsonFetch<{ project: AudioTranscriptProject }>(`/api/audio-transcript/projects/${projectId}`);
 }
 
 export async function createAudioTranscriptProject(input: { title: string; source_language: string; file: File }) {
@@ -56,18 +56,6 @@ export async function createAudioTranscriptProject(input: { title: string; sourc
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((data as { error?: string }).error || "Upload failed");
   return data as { project: AudioTranscriptProject; job: { id: string } };
-}
-
-export async function translateTranscript(projectId: string, target_language: string) {
-  return await jsonFetch<{ translation: AudioTranslation; job: { id: string; status: string }; cached?: boolean }>(`/api/audio-transcript/projects/${projectId}/translate`, {
-    method: "POST",
-    body: JSON.stringify({ target_language }),
-    headers: { "Content-Type": "application/json" },
-  });
-}
-
-export async function getTranslation(translationId: string) {
-  return await jsonFetch<{ translation: AudioTranslation }>(`/api/audio-transcript/translations/${translationId}`);
 }
 
 export async function deleteAudioTranscriptProject(projectId: string) {

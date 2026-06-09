@@ -166,96 +166,6 @@ async function runStartupMigrations() {
       )
     `);
 
-    // ─── CineStudio tables (idempotent) ─────────────────────────────────────
-    await db.execute(sql`
-      CREATE TABLE IF NOT EXISTS cine_projects (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        title TEXT NOT NULL,
-        description TEXT,
-        style_id UUID,
-        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
-      )
-    `);
-    await db.execute(sql`ALTER TABLE cine_projects ADD COLUMN IF NOT EXISTS style_id UUID`);
-    await db.execute(sql`
-      CREATE TABLE IF NOT EXISTS cine_characters (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        project_id UUID NOT NULL REFERENCES cine_projects(id) ON DELETE CASCADE,
-        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        name TEXT NOT NULL,
-        base_prompt TEXT NOT NULL,
-        identity_prompt TEXT,
-        style_preset TEXT NOT NULL,
-        style_id UUID,
-        locked_identity BOOLEAN NOT NULL DEFAULT FALSE,
-        reference_image_url TEXT,
-        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
-      )
-    `);
-    await db.execute(sql`ALTER TABLE cine_characters ADD COLUMN IF NOT EXISTS style_id UUID`);
-    await db.execute(sql`
-      CREATE TABLE IF NOT EXISTS cine_assets (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        project_id UUID NOT NULL REFERENCES cine_projects(id) ON DELETE CASCADE,
-        character_id UUID REFERENCES cine_characters(id) ON DELETE SET NULL,
-        style_id UUID,
-        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        type TEXT NOT NULL,
-        category TEXT NOT NULL,
-        url TEXT NOT NULL,
-        prompt TEXT NOT NULL,
-        provider TEXT NOT NULL,
-        metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-        created_at TIMESTAMP NOT NULL DEFAULT NOW()
-      )
-    `);
-    await db.execute(sql`ALTER TABLE cine_assets ADD COLUMN IF NOT EXISTS style_id UUID`);
-    await db.execute(sql`
-      CREATE TABLE IF NOT EXISTS cine_jobs (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        project_id UUID NOT NULL REFERENCES cine_projects(id) ON DELETE CASCADE,
-        character_id UUID REFERENCES cine_characters(id) ON DELETE SET NULL,
-        provider TEXT NOT NULL,
-        job_type TEXT NOT NULL,
-        status TEXT NOT NULL,
-        input JSONB NOT NULL DEFAULT '{}'::jsonb,
-        output JSONB,
-        error_message TEXT,
-        cost_credits INTEGER NOT NULL DEFAULT 0,
-        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
-      )
-    `);
-    await db.execute(sql`
-      CREATE TABLE IF NOT EXISTS credits (
-        user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-        remaining_credits INTEGER NOT NULL DEFAULT 0,
-        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
-      )
-    `);
-
-    await db.execute(sql`
-      CREATE TABLE IF NOT EXISTS cine_styles (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        name TEXT NOT NULL,
-        description TEXT,
-        style_prompt TEXT NOT NULL,
-        negative_prompt TEXT,
-        color_palette JSONB,
-        mood_keywords JSONB,
-        texture_keywords JSONB,
-        lighting_keywords JSONB,
-        reference_image_url TEXT,
-        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
-      )
-    `);
-
     // ─── Audio 2 Transcript tables (idempotent) ────────────────────────────
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS audio_transcript_projects (
@@ -272,21 +182,6 @@ async function runStartupMigrations() {
         full_transcript TEXT,
         transcript_segments JSONB,
         audio_deleted BOOLEAN NOT NULL DEFAULT FALSE,
-        error_message TEXT,
-        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
-      )
-    `);
-    await db.execute(sql`
-      CREATE TABLE IF NOT EXISTS audio_translations (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        transcript_project_id UUID NOT NULL REFERENCES audio_transcript_projects(id) ON DELETE CASCADE,
-        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        source_language TEXT,
-        target_language TEXT NOT NULL,
-        translated_full_text TEXT,
-        translated_segments JSONB,
-        status TEXT NOT NULL,
         error_message TEXT,
         created_at TIMESTAMP NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()

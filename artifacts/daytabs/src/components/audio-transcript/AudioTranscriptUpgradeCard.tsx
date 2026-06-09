@@ -21,7 +21,7 @@ export function AudioTranscriptUpgradeCard() {
               </div>
             </div>
             <PanelSubtitle className="mt-0">
-              Upload audio, get accurate timestamped transcripts, and translate into multiple languages.
+              Upload audio and get accurate timestamped transcripts with export tools.
             </PanelSubtitle>
           </div>
           <div className="w-full md:w-[260px]">
@@ -35,4 +35,3 @@ export function AudioTranscriptUpgradeCard() {
     </>
   );
 }
-

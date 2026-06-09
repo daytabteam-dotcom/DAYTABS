@@ -6,7 +6,7 @@ import { AudioUploadCard } from "./AudioUploadCard";
 import { AudioTranscriptList } from "./AudioTranscriptList";
 import { AudioTranscriptDetail } from "./AudioTranscriptDetail";
 import { deleteAudioTranscriptProject, getAudioTranscriptProjectDetail, listAudioTranscriptProjects } from "./audioTranscriptApi";
-import type { AudioTranscriptProject, AudioTranslation } from "./types";
+import type { AudioTranscriptProject } from "./types";
 import { Badge } from "@/components/ui/badge";
 import { Captions } from "lucide-react";
 
@@ -19,9 +19,8 @@ function hoursLabel(secondsTotal: number) {
 export function AudioTranscriptPage() {
   const { plan, loading } = usePlan();
   const [projects, setProjects] = useState<AudioTranscriptProject[]>([]);
-  const [translationsByProject, setTranslationsByProject] = useState<Record<string, AudioTranslation[]>>({});
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
-  const [activeDetail, setActiveDetail] = useState<{ project: AudioTranscriptProject; translations: AudioTranslation[] } | null>(null);
+  const [activeDetail, setActiveDetail] = useState<AudioTranscriptProject | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function refreshList() {
@@ -39,8 +38,7 @@ export function AudioTranscriptPage() {
     setActiveProjectId(projectId);
     try {
       const res = await getAudioTranscriptProjectDetail(projectId);
-      setActiveDetail({ project: res.project, translations: res.translations ?? [] });
-      setTranslationsByProject((prev) => ({ ...prev, [projectId]: res.translations ?? [] }));
+      setActiveDetail(res.project);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load transcript");
     }
@@ -63,7 +61,7 @@ export function AudioTranscriptPage() {
     refreshList();
   }, [plan?.isStudio]);
 
-  const active = useMemo(() => (activeDetail && activeProjectId === activeDetail.project.id ? activeDetail : null), [activeDetail, activeProjectId]);
+  const active = useMemo(() => (activeDetail && activeProjectId === activeDetail.id ? activeDetail : null), [activeDetail, activeProjectId]);
   const stats = useMemo(() => {
     const transcripts = projects.length;
     const langs = new Set<string>();
@@ -107,7 +105,7 @@ export function AudioTranscriptPage() {
                   </div>
                 </div>
                 <PanelSubtitle className="max-w-2xl">
-                  Turn audio into accurate transcripts and multilingual subtitles—timestamped, searchable, exportable.
+                  Turn audio into accurate timestamped transcripts that are searchable and exportable.
                 </PanelSubtitle>
               </div>
               <div className="flex flex-wrap items-center justify-end gap-2">
@@ -122,12 +120,11 @@ export function AudioTranscriptPage() {
                 </Badge>
               </div>
             </PanelHeader>
-            <div className="mt-6 grid gap-2 sm:grid-cols-4">
+            <div className="mt-6 grid gap-2 sm:grid-cols-3">
               {[
                 { n: "1", label: "Upload" },
                 { n: "2", label: "Transcribe" },
-                { n: "3", label: "Translate" },
-                { n: "4", label: "Export" },
+                { n: "3", label: "Export" },
               ].map((s) => (
                 <PanelCardSoft key={s.n} className="p-3">
                   <div className="flex items-center gap-3">
@@ -148,26 +145,17 @@ export function AudioTranscriptPage() {
           />
           <AudioTranscriptList
             projects={projects}
-            translationsByProject={translationsByProject}
             onOpen={openDetail}
             onDelete={onDelete}
           />
         </>
       ) : (
         <AudioTranscriptDetail
-          project={active.project}
-          translations={active.translations}
+          project={active}
           onBack={() => {
             setActiveDetail(null);
             setActiveProjectId(null);
             refreshList();
-          }}
-          onTranslationSaved={(t) => {
-            setActiveDetail((cur) => {
-              if (!cur) return cur;
-              const next = [...(cur.translations ?? []).filter((x) => x.id !== t.id), t];
-              return { ...cur, translations: next };
-            });
           }}
         />
       )}

@@ -17,32 +17,9 @@ export type AudioTranscriptProject = {
   updatedAt: string;
 };
 
-export type AudioTranslation = {
-  id: string;
-  transcriptProjectId: string;
-  userId: number;
-  sourceLanguage: string | null;
-  targetLanguage: string;
-  translatedFullText: string | null;
-  translatedSegments: unknown;
-  status: "translating" | "completed" | "failed" | string;
-  errorMessage: string | null;
-  createdAt: string;
-  updatedAt: string;
-};
-
 export type TranscriptSegment = {
   id: number;
   start_time: string;
   end_time: string;
   text: string;
 };
-
-export type TranslatedSegment = {
-  id: number;
-  start_time: string;
-  end_time: string;
-  original_text: string;
-  translated_text: string;
-};
-

@@ -12,7 +12,6 @@ import uploadRouter from "./upload/index";
 import youtubeRouter from "./youtube/index";
 import adminRouter from "./admin/index";
 import blogsRouter from "./blogs/index";
-import cineStudioRouter from "./cine-studio/index";
 import audioTranscriptRouter from "./audio-transcript/index";
 
 const router: IRouter = Router();
@@ -28,7 +27,6 @@ router.use("/growth-planner", growthPlannerRouter);
 router.use("/social-growth", socialGrowthRouter);
 router.use("/youtube", youtubeRouter);
 router.use("/blogs", blogsRouter);
-router.use("/cine-studio", cineStudioRouter);
 router.use("/audio-transcript", audioTranscriptRouter);
 router.use("/user", userRouter);
 router.use("/admin", adminRouter);
